@@ -9,11 +9,12 @@ from __future__ import annotations
 import py_compile
 from pathlib import Path
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
 from streamsnow.cli import app
-from streamsnow.config import CONFIG_FILENAME, Config, load_config
+from streamsnow.config import CONFIG_FILENAME, Config, ConfigError, load_config
 from streamsnow.policy import SchemaPolicy
 from streamsnow.scaffolder import scaffold
 from streamsnow.tools.check_schema_refs import check_paths, find_denied_refs
@@ -185,6 +186,27 @@ def test_generated_snowflake_yml_parses_both_runtimes(tmp_path):
     scaffold(Config.from_dict(wdata), tmp_path / "w", "app-w")
     wyml = yaml.safe_load((tmp_path / "w/apps/app-w/snowflake.yml").read_text())
     assert "runtime_name" not in wyml["entities"]["app_w"]
+
+
+def test_git_repository_config_scaffolds_git_deploy_workflow(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data["deploy"] = {
+        "source": "git-repository",
+        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "api_integration_name": "GITHUB_API_INTEGRATION",
+        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+    }
+    scaffold(Config.from_dict(data), tmp_path, "g-app")
+    deploy = (tmp_path / ".github/workflows/deploy.yml").read_text()
+    assert "snow git fetch" in deploy
+    assert "stage copy" not in deploy
+
+
+def test_brand_injection_rejected(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data["brand"] = {"theme": {"primary": '#fff"; evil'}}
+    with pytest.raises(ConfigError):
+        scaffold(Config.from_dict(data), tmp_path, "b-app")
 
 
 def test_doctor_fails_loudly_on_malformed_config(tmp_path, monkeypatch):

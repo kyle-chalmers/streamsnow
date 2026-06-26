@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from streamsnow.config import Config
@@ -27,10 +28,10 @@ def _cfg(**overrides) -> Config:
 
 def test_stage_copy_container_create_sql():
     cfg = _cfg()  # example is container + stage-copy
-    sql = generate_create_sql(cfg, "sales-overview", sha="abc123")
+    sql = generate_create_sql(cfg, "sales-overview", sha="abc1234")
     assert "CREATE OR REPLACE STREAMLIT DATA_APPS.BI_APPS.SALES_OVERVIEW" in sql
     assert (
-        "FROM '@DATA_APPS.BI_APPS.STREAMLIT_CODE_STAGE/commits/abc123/apps/sales-overview/'" in sql
+        "FROM '@DATA_APPS.BI_APPS.STREAMLIT_CODE_STAGE/commits/abc1234/apps/sales-overview/'" in sql
     )
     assert "QUERY_WAREHOUSE = STREAMLIT_WH" in sql
     assert "RUNTIME_NAME = 'SYSTEM$ST_CONTAINER_RUNTIME_PY3_11'" in sql
@@ -47,7 +48,7 @@ def test_warehouse_create_sql_has_no_runtime_alter():
     data["runtime"] = "warehouse"
     data["snowflake"]["objects"]["compute_pool"] = ""
     data["snowflake"]["objects"]["external_access_integration"] = ""
-    sql = generate_create_sql(Config.from_dict(data), "ops", sha="def456")
+    sql = generate_create_sql(Config.from_dict(data), "ops", sha="def4567")
     assert "RUNTIME_NAME" not in sql
     assert "COMPUTE_POOL" not in sql
     assert "ADD LIVE VERSION FROM LAST" in sql
@@ -89,3 +90,11 @@ def test_setup_sql_per_source():
 
 def test_stage_path():
     assert stage_path(_cfg()) == "@DATA_APPS.BI_APPS.STREAMLIT_CODE_STAGE"
+
+
+def test_deploy_rejects_injection_slug_and_sha():
+    cfg = _cfg()
+    with pytest.raises(ValueError):
+        generate_create_sql(cfg, "bad slug;", sha="abc1234")
+    with pytest.raises(ValueError):
+        generate_create_sql(cfg, "ok-slug", sha="; DROP TABLE x")

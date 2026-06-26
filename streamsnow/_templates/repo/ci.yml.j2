@@ -27,5 +27,9 @@ jobs:
           uv tool install streamsnow
       - name: Lint
         run: ruff check apps/
-      - name: Schema-refs guardrail (block denied schemas)
-        run: streamsnow check schema-refs apps
+      - name: Governance gate (validate every app)
+        run: |
+          for d in apps/*/; do
+            [ -d "$d" ] || continue
+            streamsnow validate-app "$(basename "$d")"
+          done

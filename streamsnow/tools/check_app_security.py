@@ -106,6 +106,45 @@ def _scan_python(path: Path) -> list[dict]:
                         "detail": f"{fn.value.id}.{fn.attr}",
                     }
                 )
+            # Inspect the SQL argument of a .query()/.sql() call: a string literal
+            # with a write verb is write-SQL; a .format()/% build is dynamic-SQL.
+            if isinstance(fn, ast.Attribute) and fn.attr in {"query", "sql"} and node.args:
+                arg = node.args[0]
+                if (
+                    isinstance(arg, ast.Constant)
+                    and isinstance(arg.value, str)
+                    and WRITE_SQL.search(arg.value)
+                ):
+                    findings.append(
+                        {
+                            "file": str(path),
+                            "line": node.lineno,
+                            "kind": "write-sql",
+                            "detail": "write verb in query()",
+                        }
+                    )
+                elif (
+                    isinstance(arg, ast.Call)
+                    and isinstance(arg.func, ast.Attribute)
+                    and arg.func.attr == "format"
+                ):
+                    findings.append(
+                        {
+                            "file": str(path),
+                            "line": node.lineno,
+                            "kind": "dynamic-sql",
+                            "detail": ".format() SQL",
+                        }
+                    )
+                elif isinstance(arg, ast.BinOp) and isinstance(arg.op, ast.Mod):
+                    findings.append(
+                        {
+                            "file": str(path),
+                            "line": node.lineno,
+                            "kind": "dynamic-sql",
+                            "detail": "%-built SQL",
+                        }
+                    )
         # dynamic SQL: f-string / % / .format containing a SQL verb passed to a query call
         elif isinstance(node, ast.JoinedStr):
             text = "".join(

@@ -17,9 +17,26 @@ they are rendered into SQL directly (the config layer is the injection gate).
 This module is pure (no DB calls); the CLI / generated deploy workflow runs it.
 """
 
-from __future__ import annotations
+import re
 
 from .config import Config
+
+# slug + sha reach SQL/object names — validate at the boundary (defense in depth
+# alongside the config-layer gate), so a hostile value can't inject.
+_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+_SHA_RE = re.compile(r"^(?:[0-9a-fA-F]{7,64}|<sha>)$")
+
+
+def _safe_slug(slug: str) -> str:
+    if not _SLUG_RE.match(slug):
+        raise ValueError(f"invalid app slug {slug!r} (expected kebab-case [a-z][a-z0-9-]*)")
+    return slug
+
+
+def _safe_sha(sha: str) -> str:
+    if not _SHA_RE.match(sha):
+        raise ValueError(f"invalid commit sha {sha!r} (expected 7-64 hex chars)")
+    return sha
 
 
 def _title(slug: str) -> str:
@@ -28,7 +45,7 @@ def _title(slug: str) -> str:
 
 def streamlit_fqn(cfg: Config, slug: str) -> str:
     o = cfg.snowflake.objects
-    return f"{o.app_database}.{o.app_schema}.{slug.replace('-', '_').upper()}"
+    return f"{o.app_database}.{o.app_schema}.{_safe_slug(slug).replace('-', '_').upper()}"
 
 
 def stage_path(cfg: Config) -> str:
@@ -39,7 +56,9 @@ def stage_path(cfg: Config) -> str:
 
 def _from_clause(cfg: Config, slug: str, sha: str) -> str:
     o = cfg.snowflake.objects
+    slug = _safe_slug(slug)
     if cfg.deploy.source == "stage-copy":
+        _safe_sha(sha)
         stage = f"{o.stage_database}.{o.stage_schema}.{o.stage_name}"
         return f"FROM '@{stage}/commits/{sha}/apps/{slug}/'"
     repo = cfg.deploy.git_repository_fqn
