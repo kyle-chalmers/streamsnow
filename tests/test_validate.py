@@ -10,6 +10,7 @@ from streamsnow.config import Config
 from streamsnow.policy import SchemaPolicy
 from streamsnow.scaffolder import scaffold
 from streamsnow.tools import check_app_security, check_bind_predicates, check_caching
+from streamsnow.tools.check_schema_refs import find_denied_refs
 from streamsnow.tools.validate_app import validate_app
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -75,6 +76,45 @@ def test_validate_app_passes_on_scaffold(tmp_path):
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/good-app", policy, cfg.runtime)
     assert res["ok"], res["checks"]
+
+
+def test_security_flags_python_write_sql_and_format_sql(tmp_path):
+    w = _write(
+        tmp_path / "w.py",
+        "import streamlit as st\ndef f():\n    return st.connection('x').query('DELETE FROM analytics.t')\n",
+    )
+    assert any(x["kind"] == "write-sql" for x in check_app_security.scan_paths([w])["findings"])
+    d = _write(
+        tmp_path / "d.py", "def f(c, t):\n    return c.query('SELECT * FROM {}'.format(t))\n"
+    )
+    assert any(x["kind"] == "dynamic-sql" for x in check_app_security.scan_paths([d])["findings"])
+
+
+def test_schema_refs_use_statement_and_read_exceptions():
+    from streamsnow.policy import SchemaPolicy as SP
+
+    policy = SP(database="DB", schema_allow=("ANALYTICS",), schema_deny=("RAW",))
+    assert find_denied_refs("USE SCHEMA RAW;", policy)
+    assert find_denied_refs("use schema raw", policy)
+    exc = SP(
+        database="DB",
+        schema_allow=("ANALYTICS",),
+        schema_deny=("RAW",),
+        read_exceptions=("DB.RAW.SANCTIONED",),
+    )
+    assert not find_denied_refs("SELECT * FROM DB.RAW.SANCTIONED", exc)
+    assert find_denied_refs("SELECT * FROM DB.RAW.OTHER", exc)
+
+
+def test_validate_app_fails_on_invalid_manifest(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "m-app")
+    (tmp_path / "apps/m-app/snowflake.yml").write_text("entities: [oops\n")  # invalid YAML
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    res = validate_app(tmp_path / "apps/m-app", policy, cfg.runtime)
+    by_name = {c["name"]: c["ok"] for c in res["checks"]}
+    assert by_name["manifest"] is False
+    assert res["ok"] is False
 
 
 def test_validate_app_fails_on_violations(tmp_path):

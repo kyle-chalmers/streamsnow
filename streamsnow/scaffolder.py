@@ -11,17 +11,45 @@ and ``streamsnow new`` (add another app).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
-from .config import Config
+from .config import Config, ConfigError
 
 TEMPLATES_DIR = Path(__file__).parent / "_templates"
 
 _DEFAULT_CHART_SEQUENCE = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#06B6D4"]
+_HEX = re.compile(r"^#[0-9A-Fa-f]{3,8}$")
+_FONT = re.compile(r"^[A-Za-z0-9 ,'\-]+$")  # font-family list, no quotes/newlines/braces
+
+
+def _hex(value: str, field: str) -> str:
+    if not isinstance(value, str) or not _HEX.match(value):
+        raise ConfigError(f"brand {field} = {value!r} must be a hex color like '#3B82F6'.")
+    return value
+
+
+def _validate_brand(brand: dict, theme: dict) -> dict:
+    """Resolve + validate the brand block. Brand values render into generated
+    Python/TOML, so colors must be hex and the font a safe family string."""
+    font = brand.get("font", "Inter, sans-serif")
+    if not isinstance(font, str) or not _FONT.match(font):
+        raise ConfigError(f"brand.font = {font!r} must be a plain font-family string.")
+    seq = brand.get("chart_sequence") or _DEFAULT_CHART_SEQUENCE
+    return {
+        "primary": _hex(theme.get("primary", "#3B82F6"), "theme.primary"),
+        "background": _hex(theme.get("background", "#FFFFFF"), "theme.background"),
+        "text_color": _hex(theme.get("text_color", "#1F2937"), "theme.text_color"),
+        "secondary_background": _hex(
+            theme.get("secondary_background", "#F3F4F6"), "theme.secondary_background"
+        ),
+        "font": font,
+        "chart_sequence": [_hex(c, "chart_sequence[]") for c in seq],
+    }
 
 
 @dataclass(frozen=True)
@@ -38,7 +66,16 @@ RENDER_MAP: tuple[RenderItem, ...] = (
     RenderItem("repo/gitignore.j2", ".gitignore"),
     RenderItem("repo/pre-commit-config.yaml.j2", ".pre-commit-config.yaml"),
     RenderItem("repo/ci.yml.j2", ".github/workflows/checks.yml"),
-    RenderItem("repo/deploy.yml.j2", ".github/workflows/deploy.yml"),
+    RenderItem(
+        "repo/deploy.yml.j2",
+        ".github/workflows/deploy.yml",
+        lambda c: c.deploy.source == "stage-copy",
+    ),
+    RenderItem(
+        "repo/deploy.git.yml.j2",
+        ".github/workflows/deploy.yml",
+        lambda c: c.deploy.source == "git-repository",
+    ),
     RenderItem("repo/README.md.j2", "README.md"),
     RenderItem("app/streamlit_app.py.j2", "apps/{slug}/streamlit_app.py"),
     RenderItem("app/AGENTS.md.j2", "apps/{slug}/AGENTS.md"),
@@ -97,14 +134,7 @@ def build_context(cfg: Config, app_slug: str) -> dict:
         "schema_deny": list(cfg.governance.schema_deny),
         "read_exceptions": list(cfg.governance.read_exceptions),
         "cache_ttl": int((cfg.raw or {}).get("cache_ttl", 1800)),
-        "brand": {
-            "primary": theme.get("primary", "#3B82F6"),
-            "background": theme.get("background", "#FFFFFF"),
-            "text_color": theme.get("text_color", "#1F2937"),
-            "secondary_background": theme.get("secondary_background", "#F3F4F6"),
-            "font": brand.get("font", "Inter, sans-serif"),
-            "chart_sequence": brand.get("chart_sequence") or _DEFAULT_CHART_SEQUENCE,
-        },
+        "brand": _validate_brand(brand, theme),
     }
 
 

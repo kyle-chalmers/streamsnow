@@ -30,32 +30,44 @@ def _strip_sql_comments(text: str) -> str:
     return "\n".join(line.split("--", 1)[0] for line in text.splitlines())
 
 
+_DOTTED = re.compile(
+    r"\b([A-Za-z_][A-Za-z0-9_$]*)\.([A-Za-z_][A-Za-z0-9_$]*)(?:\.([A-Za-z_][A-Za-z0-9_$]*))?"
+)
+# USE SCHEMA RAW / USE DATABASE.RAW / USE RAW
+_USE = re.compile(
+    r"\bUSE\s+(?:SCHEMA\s+|DATABASE\s+)?([A-Za-z_][A-Za-z0-9_$]*)(?:\.([A-Za-z_][A-Za-z0-9_$]*))?",
+    re.IGNORECASE,
+)
+
+
 def find_denied_refs(text: str, policy: SchemaPolicy) -> list[tuple[int, str]]:
-    """Return (line_number, schema) for each denied schema reference."""
+    """Return sorted, de-duped (line_number, schema) for each denied reference."""
     if not policy.schema_deny:
         return []
     scanned = _strip_sql_comments(text)
-    # Match WORD.WORD (optionally DB.SCHEMA.OBJECT) and test the schema position.
-    pattern = re.compile(
-        r"\b([A-Za-z_][A-Za-z0-9_$]*)\.([A-Za-z_][A-Za-z0-9_$]*)(?:\.([A-Za-z_][A-Za-z0-9_$]*))?"
-    )
     denied = {d.upper() for d in policy.schema_deny}
-    hits: list[tuple[int, str]] = []
+    # Sanctioned exact-FQN direct reads bypass the denylist.
+    read_exc = {e.upper() for e in policy.read_exceptions}
+    hits: set[tuple[int, str]] = set()
     for i, line in enumerate(scanned.splitlines(), start=1):
         # Normalize quoted identifiers ("BI"."BRIDGE") and whitespace around
         # dots (DB . BRIDGE . T) so they can't slip past the matcher.
         norm = re.sub(r"\s*\.\s*", ".", line.replace('"', ""))
-        for m in pattern.finditer(norm):
+        for m in _DOTTED.finditer(norm):
+            if m.group(0).upper() in read_exc:
+                continue  # sanctioned exact-FQN read
             first, second, third = m.group(1), m.group(2), m.group(3)
-            # DB.SCHEMA.OBJECT -> schema is `second`. For the 2-part form
-            # (DB.SCHEMA or SCHEMA.OBJECT) we can't tell which token is the
-            # schema, so test both against the denylist.
-            candidates = {second} if third else {first, second}
-            for candidate in candidates:
+            # 3-part -> schema is `second`; 2-part is ambiguous, test both.
+            for candidate in {second} if third else {first, second}:
                 if candidate.upper() in denied:
-                    hits.append((i, candidate))
+                    hits.add((i, candidate))
                     break
-    return hits
+        # USE SCHEMA <denied> — not a dotted ref, would otherwise slip past.
+        for m in _USE.finditer(norm):
+            schema_tok = m.group(2) or m.group(1)
+            if schema_tok and schema_tok.upper() in denied:
+                hits.add((i, schema_tok))
+    return sorted(hits)
 
 
 def check_paths(paths: list[Path], policy: SchemaPolicy) -> dict:

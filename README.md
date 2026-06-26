@@ -14,9 +14,11 @@
 
 ---
 
-> **Status: early / under active construction.** The plan and architecture are
-> set; the CLI and Claude Code plugin are being built out phase by phase. APIs
-> and layout may move until the first tagged release.
+> **Status: alpha, functional.** The CLI (configure / init / new / validate-app /
+> preview / check / deploy-sql / deploy-setup) and the Claude Code plugin (14
+> skills + shared recipes) are implemented and CI-green for both runtimes and
+> both deploy sources. Not yet published to PyPI; APIs may still shift before the
+> first tagged release.
 
 ## What it is
 

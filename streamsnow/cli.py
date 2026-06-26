@@ -383,7 +383,8 @@ def doctor() -> None:
     for tool, hint in (
         ("git", "install git"),
         ("uv", "https://docs.astral.sh/uv/"),
-        ("snow", "pip install snowflake-cli"),
+        ("snow", "uv tool install snowflake-cli-labs (for preview/deploy)"),
+        ("streamlit", "uv pip install streamlit (in your app environment, for preview)"),
     ):
         if shutil.which(tool):
             console.print(f"[green]✓[/] {tool} found")
@@ -424,6 +425,26 @@ def deploy_setup(
     print(generate_setup_sql(cfg))
 
 
+@app.command(name="config-get")
+def config_get(
+    key: str = typer.Argument(..., help="Dotted config path, e.g. deploy.git_repository_fqn."),
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+) -> None:
+    """Print a single config value by dotted path (used by the deploy workflow)."""
+    try:
+        cfg = load_config(Path(config) if config else None)
+    except ConfigError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    cur: object = cfg.raw
+    for part in key.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            _err(f"no config key {key!r}")
+            raise typer.Exit(2)
+        cur = cur[part]
+    print(cur)
+
+
 @app.command(name="stage-path")
 def stage_path_cmd(
     config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
@@ -451,10 +472,14 @@ def deploy_sql(
     """Emit the CREATE OR REPLACE STREAMLIT SQL for one app (used by the deploy workflow)."""
     try:
         cfg = load_config(Path(config) if config else None)
+        sql = generate_refresh_sql(cfg, slug) if refresh else generate_create_sql(cfg, slug, sha)
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
-    print(generate_refresh_sql(cfg, slug) if refresh else generate_create_sql(cfg, slug, sha))
+    except ValueError as exc:  # invalid slug / sha
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    print(sql)
 
 
 @app.command()

@@ -47,6 +47,30 @@ def _detect_runtime(app_dir: Path, default: str) -> str:
     return default
 
 
+def _check_manifest(app_dir: Path) -> list[str]:
+    """Return manifest problems (empty == valid snowflake.yml)."""
+    yml = app_dir / "snowflake.yml"
+    if not yml.is_file():
+        return ["snowflake.yml missing"]
+    try:
+        data = yaml.safe_load(yml.read_text()) or {}
+    except yaml.YAMLError as exc:
+        return [f"snowflake.yml is invalid YAML: {exc}"]
+    entities = data.get("entities") or {}
+    if not entities:
+        return ["snowflake.yml has no entities"]
+    problems: list[str] = []
+    for name, ent in entities.items():
+        if not isinstance(ent, dict):
+            problems.append(f"{name}: not a mapping")
+            continue
+        if ent.get("main_file") != "streamlit_app.py":
+            problems.append(f"{name}: main_file must be 'streamlit_app.py'")
+        if not ent.get("query_warehouse"):
+            problems.append(f"{name}: missing query_warehouse")
+    return problems
+
+
 def validate_app(app_dir: Path, policy: SchemaPolicy, default_runtime: str) -> dict:
     checks: list[dict] = []
 
@@ -56,6 +80,9 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, default_runtime: str) -> d
     )
     missing = [f for f in required if not (app_dir / f).exists()]
     checks.append({"name": "required-files", "ok": not missing, "findings": missing})
+
+    manifest_problems = _check_manifest(app_dir)
+    checks.append({"name": "manifest", "ok": not manifest_problems, "findings": manifest_problems})
 
     checks.append(
         {

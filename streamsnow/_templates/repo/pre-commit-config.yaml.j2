@@ -15,10 +15,28 @@ repos:
 
   - repo: local
     hooks:
-      # Requires the `streamsnow` package on PATH (pip/uv install streamsnow).
+      # All four require the `streamsnow` package on PATH (uv/pip install streamsnow).
       - id: streamsnow-schema-refs
         name: streamsnow check schema-refs (block denied schemas)
         entry: streamsnow check schema-refs
         language: system
         files: ^apps/.*\.(py|sql)$
+        pass_filenames: true
+      - id: streamsnow-security
+        name: streamsnow check security (no egress/exec/write-SQL)
+        entry: streamsnow check security
+        language: system
+        files: ^apps/.*\.(py|sql)$
+        pass_filenames: true
+      - id: streamsnow-bind-predicates
+        name: streamsnow check bind-predicates (Go-driver trap)
+        entry: streamsnow check bind-predicates
+        language: system
+        files: ^apps/.*\.(py|sql)$
+        pass_filenames: true
+      - id: streamsnow-caching
+        name: streamsnow check caching (@st.cache_data ttl required)
+        entry: streamsnow check caching
+        language: system
+        files: ^apps/.*\.py$
         pass_filenames: true
