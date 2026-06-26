@@ -1,0 +1,12 @@
+# Container-runtime dependencies (PyPI via external access integration).
+# PEP 440 specifiers — NOT conda wildcards. Do not add a separate python pin here.
+[project]
+name = "{{ app_slug }}"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "streamlit==1.50.0",
+    "pandas>=2,<3",
+    "plotly>=5,<6",
+    "snowflake-snowpark-python",
+]

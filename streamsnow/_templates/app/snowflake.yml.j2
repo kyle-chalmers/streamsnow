@@ -1,0 +1,29 @@
+definition_version: 2
+entities:
+  {{ app_slug | replace('-', '_') }}:
+    type: streamlit
+    identifier:
+      name: {{ app_slug | replace('-', '_') | upper }}
+      database: {{ app_database }}
+      schema: {{ app_schema }}
+    main_file: streamlit_app.py
+    query_warehouse: {{ default_warehouse }}
+    title: "{{ app_title }}"
+{% if runtime == 'container' %}
+    runtime_name: {{ runtime_name }}
+    compute_pool: {{ compute_pool }}
+    external_access_integrations:
+      - {{ external_access_integration }}
+{% endif %}
+    artifacts:
+      - streamlit_app.py
+      - pages/
+      - queries/
+      - branding.py
+      - sql_loader.py
+      - .streamlit/config.toml
+{% if runtime == 'container' %}
+      - pyproject.toml
+{% else %}
+      - environment.yml
+{% endif %}

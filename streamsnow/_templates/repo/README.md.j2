@@ -1,0 +1,33 @@
+# {{ project_name }}
+
+Streamlit-in-Snowflake apps, scaffolded and governed with
+[StreamSnow](https://github.com/kyle-chalmers/streamsnow).
+
+- **Runtime:** {{ runtime }}
+- **Deploy source:** {{ deploy_source }}
+- **Data:** queries `{{ gov_database }}` (schemas: {{ schema_allow | join(', ') }})
+
+## Apps
+
+| App | Path |
+|-----|------|
+| {{ app_title }} | `apps/{{ app_slug }}/` |
+
+## Local development
+
+```bash
+uv venv --python 3.11
+uv pip install streamsnow
+cp apps/{{ app_slug }}/.streamlit/secrets.toml.example apps/{{ app_slug }}/.streamlit/secrets.toml
+# edit secrets.toml with your Snowflake connection, then:
+streamlit run apps/{{ app_slug }}/streamlit_app.py
+```
+
+## Add an app
+
+```bash
+streamsnow new <domain> <function>
+```
+
+Governance rules (data access, caching, SQL layout, deploy) live in [`AGENTS.md`](AGENTS.md).
+Configuration is in [`streamsnow.config.yaml`](streamsnow.config.yaml).

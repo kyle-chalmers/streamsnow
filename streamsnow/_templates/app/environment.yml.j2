@@ -1,0 +1,11 @@
+# Warehouse-runtime dependencies (Snowflake Anaconda channel).
+# LANDMINE: never pin `python` here — the channel has no exact python==3.11
+# build, so the deploy fails. The runtime supplies Python; list only added deps.
+name: sf_env
+channels:
+  - snowflake
+dependencies:
+  - streamlit=1.50.0
+  - pandas
+  - plotly
+  - snowflake-snowpark-python

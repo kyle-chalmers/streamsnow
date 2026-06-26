@@ -1,0 +1,57 @@
+# streamsnow.config.yaml — single source of truth for your StreamSnow repo.
+# Copy to `streamsnow.config.yaml` and edit, or run `streamsnow init` to generate.
+# SECRETS NEVER GO HERE (Snowflake key/PAT, etc. live in CI secrets / secrets.toml).
+
+schema_version: 1
+
+# container = cheaper, full PyPI, modern Streamlit (default).
+# warehouse = legacy: instant start, Anaconda channel, no compute pool/EAI.
+runtime: container
+
+project:
+  name: "Acme Dashboards"
+  slug: "acme-dashboards"
+
+snowflake:
+  account: "ab12345.us-east-1"        # LOCATOR only — NOT the full hostname
+  connection_name: "acme"             # name of your `snow` CLI connection
+
+  objects:
+    # Where the deployed STREAMLIT objects live:
+    app_database: "DATA_APPS"
+    app_schema: "BI_APPS"
+    # Internal stage for stage-copy deploys (CI pushes app source here):
+    stage_database: "DATA_APPS"
+    stage_schema: "BI_APPS"
+    stage_name: "STREAMLIT_CODE_STAGE"
+    # Warehouse the apps query with:
+    default_warehouse: "STREAMLIT_WH"
+    allowed_warehouses: ["STREAMLIT_WH"]
+    # Container-runtime only (omit/blank for warehouse runtime):
+    compute_pool: "STREAMLIT_POOL"
+    external_access_integration: "PYPI_ACCESS_INTEGRATION"
+
+  roles:
+    ci_role: "STREAMLIT_CI_ROLE"       # deploy/owner role used by CI
+    viewer_role: "STREAMLIT_APP_ROLE"  # role granted USAGE on each app; preview role
+
+governance:
+  database: "ANALYTICS_DB"             # the BI database your apps query
+  schema_allow: ["ANALYTICS", "REPORTING"]
+  schema_deny: ["RAW", "STAGING", "BRIDGE"]
+  read_exceptions: []                  # sanctioned direct reads, e.g. "DATA_STORE.SOME_VIEW"
+
+deploy:
+  source: "stage-copy"                 # stage-copy (default) | git-repository
+  # git-repository only:
+  # git_repository_fqn: "DATA_APPS.BI_APPS.STREAMLIT_REPO"
+  # git_branch: "main"
+  # api_integration_name: "GITHUB_API_INTEGRATION"
+  # secret_name: "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET"
+  # github_auth_mode: "pat"            # pat | github-app
+
+brand:                                 # optional — neutral defaults if omitted
+  theme:
+    primary: "#3B82F6"
+    background: "#FFFFFF"
+  chart_sequence: ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"]

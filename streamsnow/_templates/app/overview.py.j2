@@ -1,0 +1,48 @@
+"""Overview page for {{ app_title }}. Scaffolded by StreamSnow ({{ runtime }} runtime).
+
+Replace the example metric with your real KPIs and repoint the query at a real
+table in an allowed schema ({{ schema_allow | join(', ') }}).
+"""
+
+import plotly.express as px
+import streamlit as st
+
+from branding import BRAND_CHART_COLORS, branded_metric
+from sql_loader import load_sql
+
+
+@st.cache_data(ttl={{ cache_ttl }})
+def load_example(start_date: str, end_date: str):
+    """Example cached loader. Wire to real filters once YOUR_TABLE is replaced."""
+    sql = load_sql("example_metric")
+{% if runtime == 'container' %}
+    conn = st.connection("snowflake")
+    return conn.query(sql, params=[start_date, end_date], ttl=0)
+{% else %}
+    try:
+        from snowflake.snowpark.context import get_active_session
+
+        session = get_active_session()
+    except Exception:
+        session = st.connection("snowflake").session()
+    return session.sql(sql, params=[start_date, end_date]).to_pandas()
+{% endif %}
+
+
+st.title("{{ app_title }}")
+st.caption("Starter page scaffolded by StreamSnow. Replace the example with your data.")
+
+st.subheader("Example metric")
+st.caption("Demonstrates branded_metric and a Plotly chart using your brand colors.")
+branded_metric("Rows", "1,234", delta="+5.3%")
+
+fig = px.bar(
+    x=["alpha", "beta", "gamma"],
+    y=[3, 1, 2],
+    labels={"x": "category", "y": "count"},
+    color_discrete_sequence=BRAND_CHART_COLORS,
+)
+st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+st.caption("Sources: {{ gov_database }}.{{ schema_allow[0] if schema_allow else 'ANALYTICS' }} (example)")

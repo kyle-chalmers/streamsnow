@@ -1,0 +1,18 @@
+# Pre-commit hooks for {{ project_name }}. Install with: pre-commit install
+# Requires: pip/uv install streamsnow (provides the `streamsnow` CLI).
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.9
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: streamsnow-schema-refs
+        name: streamsnow check schema-refs (block denied schemas)
+        entry: streamsnow check schema-refs
+        language: system
+        files: ^apps/.*\.(py|sql)$
+        pass_filenames: true

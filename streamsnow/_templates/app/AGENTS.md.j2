@@ -1,0 +1,15 @@
+# {{ app_title }}
+
+App-specific context. Inherits the repo rulebook in the top-level `AGENTS.md`.
+
+- **Runtime:** {{ runtime }} · **Query warehouse:** `{{ default_warehouse }}`
+- **Data sources:** `{{ gov_database }}` (schemas: {{ schema_allow | join(', ') }})
+- **Caching strategy:** default TTL {{ cache_ttl }}s. Note any per-query deviations here with a reason.
+
+## Pages
+
+- **Overview** (`pages/overview.py`) — starter page; replace the example metric with your real KPIs.
+
+## Queries
+
+- `queries/example_metric.sql` — placeholder; repoint `YOUR_TABLE` at a real object in an allowed schema.
