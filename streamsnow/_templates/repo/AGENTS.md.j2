@@ -6,14 +6,14 @@ truth: `streamsnow.config.yaml`.
 
 ## Data access rules
 
-- Query **only** the `{{ gov_database }}` database, and **only** these schemas: {{ schema_allow | join(', ') }}.
-- **Never** reference these schemas in committed app code: {{ schema_deny | join(', ') }}.
+- Query the `{{ gov_database }}` database. Allowed schemas (convention): {{ schema_allow | join(', ') }}.
+- **Never** reference these schemas in committed app code: {{ schema_deny | join(', ') }}. This denylist is **auto-enforced**.
 {% if read_exceptions %}
 - Sanctioned direct-read exceptions (named columns only): {{ read_exceptions | join(', ') }}.
 {% endif %}
 - Don't hardcode table names you haven't verified. Discover via `INFORMATION_SCHEMA` during investigation; reference concrete objects in committed SQL.
 
-The `check schema-refs` guardrail (pre-commit + CI) enforces the denylist from config — it will block a PR that references a denied schema.
+The `check schema-refs` guardrail (pre-commit + the generated CI workflow) enforces the denylist from config — it blocks a commit/PR that references a denied schema. The allowlist above is a documented convention, not auto-enforced (avoids false positives on system schemas like `INFORMATION_SCHEMA`).
 
 ## Runtime: {{ runtime }}
 
@@ -39,7 +39,7 @@ CI pushes `apps/` to a SHA-versioned internal stage (`{{ stage_database }}.{{ st
 {% else %}
 Snowflake's `GIT REPOSITORY` pulls app source on `snow git fetch`; deploy runs `CREATE STREAMLIT ... FROM '@<repo>/branches/{{ "{" }}branch}/apps/<slug>/'` (new) or the `ABORT → PULL → COMMIT → ADD LIVE VERSION FROM LAST` refresh (existing). Requires Snowflake→GitHub network reachability.
 {% endif %}
-STREAMLIT objects are created in `{{ app_database }}.{{ app_schema }}`. Deploy only via CI — never `snow streamlit deploy` locally.
+STREAMLIT objects are created in `{{ app_database }}.{{ app_schema }}`. Deploy through CI on merge to `main` — never `snow streamlit deploy` locally. (Wire the deploy workflow + your Snowflake CI credentials per the deploy docs; the generated CI workflow covers lint + schema-refs today.)
 
 ## Number formatting
 

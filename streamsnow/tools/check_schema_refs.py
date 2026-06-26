@@ -42,7 +42,10 @@ def find_denied_refs(text: str, policy: SchemaPolicy) -> list[tuple[int, str]]:
     denied = {d.upper() for d in policy.schema_deny}
     hits: list[tuple[int, str]] = []
     for i, line in enumerate(scanned.splitlines(), start=1):
-        for m in pattern.finditer(line):
+        # Normalize quoted identifiers ("BI"."BRIDGE") and whitespace around
+        # dots (DB . BRIDGE . T) so they can't slip past the matcher.
+        norm = re.sub(r"\s*\.\s*", ".", line.replace('"', ""))
+        for m in pattern.finditer(norm):
             first, second, third = m.group(1), m.group(2), m.group(3)
             # DB.SCHEMA.OBJECT -> schema is `second`. For the 2-part form
             # (DB.SCHEMA or SCHEMA.OBJECT) we can't tell which token is the

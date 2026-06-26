@@ -15,10 +15,11 @@ BRAND_COLORS = {
     "background": "{{ brand.background }}",
     "text": "{{ brand.text_color }}",
 }
-BRAND_CHART_COLORS = [{% for c in brand.chart_sequence %}"{{ c }}", {% endfor %}]
+BRAND_CHART_COLORS = [{{ brand.chart_sequence | map('tojson') | join(", ") }}]
 
-# Register the Plotly template once. Guard against re-registration: the
-# container runtime shares one Python process across all viewers.
+# Register the Plotly template once. Guard against re-registration AND the
+# default-set side effect: the container runtime shares one Python process
+# across all viewers, so module-import mutations must be idempotent.
 if "streamsnow_brand" not in pio.templates:
     pio.templates["streamsnow_brand"] = go.layout.Template(
         layout=dict(
@@ -28,7 +29,7 @@ if "streamsnow_brand" not in pio.templates:
             plot_bgcolor="{{ brand.background }}",
         )
     )
-pio.templates.default = "streamsnow_brand"
+    pio.templates.default = "streamsnow_brand"
 BRAND_PLOTLY_TEMPLATE = "streamsnow_brand"
 
 

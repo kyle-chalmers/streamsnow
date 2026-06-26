@@ -15,13 +15,23 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import typer
 import yaml
 from rich.console import Console
 
 from . import __version__
-from .config import CONFIG_FILENAME, Config, ConfigError, load_config
+from .config import (
+    CONFIG_FILENAME,
+    DEPLOY_SOURCES,
+    GITHUB_AUTH_MODES,
+    RUNTIMES,
+    Config,
+    ConfigError,
+    find_config,
+    load_config,
+)
 from .scaffolder import APP_ITEMS, REPO_ITEMS, scaffold
 from .tools.check_schema_refs import main as _schema_refs_main
 
@@ -70,7 +80,7 @@ def main(
     """StreamSnow — Streamlit-in-Snowflake apps, governed, with Claude Code."""
 
 
-def _pf(prefill: dict | None, dotted: str, fallback):
+def _pf(prefill: dict | None, dotted: str, fallback) -> Any:
     """Pull a default from an existing config dict (for idempotent re-config)."""
     cur: object = prefill or {}
     for key in dotted.split("."):
@@ -78,6 +88,42 @@ def _pf(prefill: dict | None, dotted: str, fallback):
             return fallback
         cur = cur.get(key)
     return cur if cur not in (None, "") else fallback
+
+
+def _prompt_choice(label: str, choices: tuple[str, ...], default: str) -> str:
+    """Prompt until the answer is one of ``choices`` (no end-of-wizard dead-end)."""
+    while True:
+        val = typer.prompt(f"{label} ({'/'.join(choices)})", default=default)
+        if val in choices:
+            return val
+        console.print(f"[yellow]'{val}' must be one of {', '.join(choices)} — try again.[/]")
+
+
+def _prompt_deploy(prefill: dict | None) -> dict:
+    """Prompt for deploy config, including the dependent git-repository fields."""
+    source = _prompt_choice(
+        "Deploy source", DEPLOY_SOURCES, _pf(prefill, "deploy.source", "stage-copy")
+    )
+    deploy: dict = {"source": source}
+    if source == "git-repository":
+        p = typer.prompt
+        deploy["git_repository_fqn"] = p(
+            "Git repository FQN (DB.SCHEMA.NAME)",
+            default=_pf(prefill, "deploy.git_repository_fqn", "DATA_APPS.BI_APPS.STREAMLIT_REPO"),
+        )
+        deploy["git_branch"] = p("Git branch", default=_pf(prefill, "deploy.git_branch", "main"))
+        deploy["api_integration_name"] = p(
+            "API integration name",
+            default=_pf(prefill, "deploy.api_integration_name", "GITHUB_API_INTEGRATION"),
+        )
+        deploy["secret_name"] = p(
+            "Secret FQN (DB.SCHEMA.NAME)",
+            default=_pf(prefill, "deploy.secret_name", "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET"),
+        )
+        deploy["github_auth_mode"] = _prompt_choice(
+            "GitHub auth mode", GITHUB_AUTH_MODES, _pf(prefill, "deploy.github_auth_mode", "pat")
+        )
+    return deploy
 
 
 def _prompt_config(prefill: dict | None = None) -> dict:
@@ -93,7 +139,7 @@ def _prompt_config(prefill: dict | None = None) -> dict:
     p = typer.prompt
     allow_default = ",".join(_pf(prefill, "governance.schema_allow", ["ANALYTICS", "REPORTING"]))
     deny_default = ",".join(_pf(prefill, "governance.schema_deny", ["RAW", "STAGING"]))
-    runtime = p("Runtime (container/warehouse)", default=_pf(prefill, "runtime", "container"))
+    runtime = _prompt_choice("Runtime", RUNTIMES, _pf(prefill, "runtime", "container"))
     name = p("Project name", default=_pf(prefill, "project.name", "My Dashboards"))
     slug = p("Project slug (kebab-case)", default=_pf(prefill, "project.slug", "my-dashboards"))
     account = p(
@@ -160,12 +206,7 @@ def _prompt_config(prefill: dict | None = None) -> dict:
             "schema_allow": [s.strip() for s in allow.split(",") if s.strip()],
             "schema_deny": [s.strip() for s in deny.split(",") if s.strip()],
         },
-        "deploy": {
-            "source": p(
-                "Deploy source (stage-copy/git-repository)",
-                default=_pf(prefill, "deploy.source", "stage-copy"),
-            )
-        },
+        "deploy": _prompt_deploy(prefill),
     }
 
 
@@ -345,12 +386,19 @@ def doctor() -> None:
             console.print(f"[yellow]∘[/] {tool} not found — {hint}")
             if tool in {"git", "uv"}:
                 ok = False
-    # Config + schema-version drift check, when run inside a StreamSnow repo.
-    try:
-        cfg = load_config()
-        console.print(f"[green]✓[/] streamsnow.config.yaml valid (schema v{cfg.schema_version})")
-    except ConfigError:
-        console.print("[yellow]∘[/] no streamsnow.config.yaml here (run 'streamsnow init')")
+    # Config check, when run inside a StreamSnow repo. Distinguish a missing
+    # config (fine — just not configured here) from a malformed one (a real
+    # error that must not be masked).
+    cfg_path = find_config()
+    if cfg_path is None:
+        console.print("[yellow]∘[/] no streamsnow.config.yaml here (run 'streamsnow configure')")
+    else:
+        try:
+            cfg = load_config(cfg_path)
+            console.print(f"[green]✓[/] {cfg_path.name} valid (schema v{cfg.schema_version})")
+        except ConfigError as exc:
+            console.print(f"[red]✗[/] {cfg_path} is invalid: {exc}")
+            ok = False
     raise typer.Exit(code=0 if ok else 1)
 
 

@@ -8,9 +8,17 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -18,7 +26,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Sync project (creates .venv with dev extras)
-        run: uv sync --extra dev --python 3.11
+        run: uv sync --extra dev --python ${{ matrix.python-version }}
 
       - name: Ruff lint
         run: uv run ruff check .
@@ -28,3 +36,27 @@ jobs:
 
       - name: Pytest
         run: uv run pytest -q
+
+  wheel-smoke:
+    # Build the wheel and run `streamsnow init` from the INSTALLED artifact, so
+    # a packaging regression (e.g. templates excluded from the wheel) fails CI
+    # rather than shipping a broken install.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Build wheel
+        run: uv build --wheel
+      - name: Install wheel into a clean venv
+        run: |
+          uv venv --python 3.11 /tmp/wheelenv
+          uv pip install --python /tmp/wheelenv dist/*.whl
+      - name: Smoke — init from the built wheel ships templates
+        run: |
+          /tmp/wheelenv/bin/streamsnow --version
+          /tmp/wheelenv/bin/streamsnow init \
+            --config streamsnow.config.example.yaml --dir /tmp/wheel-init --app smoke-app
+          test -f /tmp/wheel-init/apps/smoke-app/streamlit_app.py
+          test -f /tmp/wheel-init/AGENTS.md
+          /tmp/wheelenv/bin/streamsnow check schema-refs /tmp/wheel-init/apps

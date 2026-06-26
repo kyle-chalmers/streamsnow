@@ -11,10 +11,13 @@ Two requirements are load-bearing (flagged by the cross-agent review):
    value fails fast with a clear message instead of corrupting a generated
    artifact downstream.
 
-2. **Safe rendering.** Config values flow into generated SQL, YAML, and shell.
-   Identifiers are validated to a safe charset (and quoted via ``quote_ident``)
-   rather than interpolated raw — closing the injection vector the review found
-   in the source repo's ``bootstrap.py`` (raw f-string SQL).
+2. **Safe rendering.** Config values flow into generated SQL, YAML, TOML, and
+   shell. Every value is validated to a safe charset up front — identifiers via
+   ``validate_identifier`` / ``validate_fqn``, names/accounts via
+   ``validate_name`` / ``normalize_account``, versions via ``validate_pyver`` —
+   so a hostile value (quotes, semicolons, shell metacharacters, newlines) is
+   rejected before it can reach a template. ``quote_ident`` / ``quote_sql_literal``
+   are available for defensive quoting where a value must be embedded dynamically.
 """
 
 from __future__ import annotations
@@ -86,6 +89,24 @@ def validate_choice(value: str, choices: tuple[str, ...], field_name: str) -> st
     return value
 
 
+def validate_name(value: str, field_name: str) -> str:
+    """Validate a CLI/connection-style name (letters, digits, dot, dash, underscore).
+
+    Used for values that flow into shell (the `snow connection add` hint) and
+    config files but aren't Snowflake identifiers.
+    """
+    if not isinstance(value, str) or not re.match(r"^[A-Za-z0-9._-]+$", value):
+        raise ConfigError(f"{field_name!r} = {value!r} must match [A-Za-z0-9._-]+.")
+    return value
+
+
+def validate_pyver(value: str, field_name: str) -> str:
+    """Validate a Python version like '3.11'."""
+    if not isinstance(value, str) or not re.match(r"^3\.\d{1,2}$", value):
+        raise ConfigError(f"{field_name!r} = {value!r} must look like '3.11'.")
+    return value
+
+
 def quote_ident(name: str) -> str:
     """Render a Snowflake identifier safely. Inputs are already validated to the
     safe charset, so this is normally a no-op; quotes defensively otherwise."""
@@ -110,6 +131,14 @@ def normalize_account(account: str) -> str:
     a = re.sub(r"\.snowflakecomputing\.com.*$", "", a, flags=re.IGNORECASE)
     if not a:
         raise ConfigError("snowflake.account is empty after normalization.")
+    # Account locators are letters/digits/dot/dash/underscore (org-account or
+    # legacy region forms). Reject anything else — this value flows into the
+    # `snow connection add --account` shell hint and secrets.toml.
+    if not re.match(r"^[A-Za-z0-9._-]+$", a):
+        raise ConfigError(
+            f"snowflake.account {account!r} normalizes to {a!r}, which is not a "
+            "valid account locator (expected [A-Za-z0-9._-]+, e.g. ab12345.us-east-1)."
+        )
     return a
 
 
@@ -192,8 +221,13 @@ class SnowflakeObjects:
                 if d.get("external_access_integration")
                 else ""
             ),
-            runtime_name=str(d.get("runtime_name", "SYSTEM$ST_CONTAINER_RUNTIME_PY3_11")),
-            container_python=str(d.get("container_python", "3.11")),
+            runtime_name=validate_identifier(
+                str(d.get("runtime_name", "SYSTEM$ST_CONTAINER_RUNTIME_PY3_11")),
+                "snowflake.objects.runtime_name",
+            ),
+            container_python=validate_pyver(
+                str(d.get("container_python", "3.11")), "snowflake.objects.container_python"
+            ),
         )
 
 
@@ -225,7 +259,9 @@ class SnowflakeCfg:
     def from_dict(cls, d: dict) -> SnowflakeCfg:
         return cls(
             account=normalize_account(str(_require(d, "account", "snowflake"))),
-            connection_name=str(_require(d, "connection_name", "snowflake")),
+            connection_name=validate_name(
+                str(_require(d, "connection_name", "snowflake")), "snowflake.connection_name"
+            ),
             objects=SnowflakeObjects.from_dict(dict(_require(d, "objects", "snowflake"))),
             roles=SnowflakeRoles.from_dict(dict(_require(d, "roles", "snowflake"))),
         )
@@ -241,15 +277,25 @@ class GovernanceCfg:
     @classmethod
     def from_dict(cls, d: dict) -> GovernanceCfg:
         vi = validate_identifier
+        schema_allow = tuple(
+            vi(str(s), "governance.schema_allow[]") for s in (d.get("schema_allow") or [])
+        )
+        if not schema_allow:
+            raise ConfigError(
+                "governance.schema_allow must list at least one allowed schema "
+                "(it is what your apps query and what the scaffold templates target)."
+            )
         return cls(
             database=vi(str(_require(d, "database", "governance")), "governance.database"),
-            schema_allow=tuple(
-                vi(str(s), "governance.schema_allow[]") for s in (d.get("schema_allow") or [])
-            ),
+            schema_allow=schema_allow,
             schema_deny=tuple(
                 vi(str(s), "governance.schema_deny[]") for s in (d.get("schema_deny") or [])
             ),
-            read_exceptions=tuple(str(s) for s in (d.get("read_exceptions") or [])),
+            # read_exceptions are FQNs (DB.SCHEMA.OBJECT) for sanctioned direct reads.
+            read_exceptions=tuple(
+                validate_fqn(str(s), "governance.read_exceptions[]")
+                for s in (d.get("read_exceptions") or [])
+            ),
         )
 
 

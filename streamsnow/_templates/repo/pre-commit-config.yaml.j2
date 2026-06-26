@@ -8,8 +8,14 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+
   - repo: local
     hooks:
+      # Requires the `streamsnow` package on PATH (pip/uv install streamsnow).
       - id: streamsnow-schema-refs
         name: streamsnow check schema-refs (block denied schemas)
         entry: streamsnow check schema-refs

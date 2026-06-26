@@ -141,3 +141,54 @@ def test_quote_helpers():
     assert quote_ident("ANALYTICS") == "ANALYTICS"
     assert quote_ident('weird"name') == '"weird""name"'
     assert quote_sql_literal("O'Brien") == "'O''Brien'"
+
+
+@pytest.mark.parametrize(
+    "path,bad",
+    [
+        (("snowflake", "account"), 'foo"; DROP'),
+        (("snowflake", "connection_name"), "bad name;"),
+        (("snowflake", "objects", "default_warehouse"), "WH; DROP"),
+        (("snowflake", "roles", "ci_role"), "ROLE'"),
+        (("snowflake", "objects", "runtime_name"), "bad runtime!"),
+        (("snowflake", "objects", "container_python"), "3.11; rm -rf"),
+    ],
+)
+def test_injection_rejected_across_all_rendered_fields(path, bad):
+    d = _base()
+    node = d
+    for k in path[:-1]:
+        node = node[k]
+    node[path[-1]] = bad
+    with pytest.raises(ConfigError):
+        Config.from_dict(d)
+
+
+def test_empty_schema_allow_rejected():
+    d = _base()
+    d["governance"]["schema_allow"] = []
+    with pytest.raises(ConfigError):
+        Config.from_dict(d)
+
+
+def test_read_exceptions_must_be_fqn():
+    d = _base()
+    d["governance"]["read_exceptions"] = ["not a fqn!"]
+    with pytest.raises(ConfigError):
+        Config.from_dict(d)
+
+
+def test_account_trailing_junk_after_hostname_is_stripped():
+    # Everything after the snowflakecomputing.com host is dropped, yielding a
+    # clean locator — metacharacters there do not survive normalization.
+    assert (
+        normalize_account("https://ab12345.us-east-1.snowflakecomputing.com/$(whoami)")
+        == "ab12345.us-east-1"
+    )
+
+
+def test_bare_account_with_metacharacters_rejected():
+    d = _base()
+    d["snowflake"]["account"] = "ab123$(whoami)"
+    with pytest.raises(ConfigError):
+        Config.from_dict(d)

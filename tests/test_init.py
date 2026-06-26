@@ -152,3 +152,44 @@ def test_init_reuses_existing_config_for_multiple_apps(tmp_path):
     )
     assert (tmp_path / "apps/first-app/streamlit_app.py").is_file()
     assert (tmp_path / "apps/second-app/streamlit_app.py").is_file()
+
+
+def test_schema_refs_catches_quoted_and_whitespaced_refs():
+    policy = SchemaPolicy(database="DB", schema_allow=("ANALYTICS",), schema_deny=("BRIDGE",))
+    assert find_denied_refs('FROM "BI"."BRIDGE"."T"', policy)  # quoted identifiers
+    assert find_denied_refs("FROM BI . BRIDGE . T", policy)  # whitespace around dots
+    assert not find_denied_refs("FROM BI.ANALYTICS.T", policy)
+
+
+def test_generated_repo_ships_ci_workflow(tmp_path):
+    runner.invoke(
+        app, ["init", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path), "--app", "x-y"]
+    )
+    assert (tmp_path / ".github/workflows/checks.yml").is_file()
+
+
+def test_generated_snowflake_yml_parses_both_runtimes(tmp_path):
+    base = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    # container
+    scaffold(Config.from_dict(base), tmp_path / "c", "app-c")
+    cyml = yaml.safe_load((tmp_path / "c/apps/app-c/snowflake.yml").read_text())
+    entity = cyml["entities"]["app_c"]
+    assert entity["runtime_name"]
+    assert entity["compute_pool"]
+    # warehouse
+    wdata = dict(base)
+    wdata["runtime"] = "warehouse"
+    wdata["snowflake"]["objects"] = dict(base["snowflake"]["objects"])
+    wdata["snowflake"]["objects"]["compute_pool"] = ""
+    wdata["snowflake"]["objects"]["external_access_integration"] = ""
+    scaffold(Config.from_dict(wdata), tmp_path / "w", "app-w")
+    wyml = yaml.safe_load((tmp_path / "w/apps/app-w/snowflake.yml").read_text())
+    assert "runtime_name" not in wyml["entities"]["app_w"]
+
+
+def test_doctor_fails_loudly_on_malformed_config(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / CONFIG_FILENAME).write_text("runtime: container\n")  # missing required sections
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code != 0
+    assert "invalid" in result.output.lower()

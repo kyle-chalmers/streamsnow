@@ -56,32 +56,47 @@ StreamSnow treats two axes as first-class, configurable options:
 ## Quickstart (target experience)
 
 ```bash
-# 1. Scaffold a governed monorepo + run the setup wizard
-uvx streamsnow init
+# 0. Check your machine has the prerequisites (Python 3.11+, uv, git, snow CLI)
+uvx streamsnow doctor
 
-# 2. Add the Claude Code plugin
-#    (inside Claude Code)
+# 1. Configure your Snowflake environment + scaffold a governed repo with a starter app
+uvx streamsnow init          # runs the config wizard, then scaffolds
+#    (or split it: `streamsnow configure` to set up streamsnow.config.yaml first,
+#     then `streamsnow init` to scaffold)
+
+# 2. Connect to Snowflake + create local preview secrets
+snow connection add --connection-name <name> --account <locator> \
+  --user <you> --authenticator externalbrowser   # init prints the exact command
+cp apps/<slug>/.streamlit/secrets.toml.example apps/<slug>/.streamlit/secrets.toml
+
+# 3. Add the Claude Code plugin (inside Claude Code)
 /plugin marketplace add kyle-chalmers/streamsnow
 /plugin install streamsnow@streamsnow
 
-# 3. Build, preview, validate, ship
+# 4. Build, preview, validate, ship
 streamsnow new marketing campaign-dashboard   # or /new-app
+streamlit run apps/marketing-campaign-dashboard/streamlit_app.py
 #    /preview-app  ->  /validate-app  ->  /ship-app
 ```
 
 ## How it's organized
 
 ```
-.claude-plugin/   Claude Code plugin manifest + marketplace
-skills/           model-invocable skills (the playbook)
-agents/           reviewer subagents
-hooks/            Claude Code hooks (load governance, gates)
-streamsnow/       the PyPI package — CLI + config + policy + the validation tools
-templates/        Copier template for scaffolding new apps (container + warehouse)
-scaffold/         files `init` writes into a new user repo (CI, pre-commit, AGENTS.md, branding)
-docs/             setup + usage guides
-examples/         a runnable reference app
+streamsnow/            the PyPI package — CLI, config, policy, scaffolder, tools
+  ├── cli.py           configure / init / new / doctor / check
+  ├── config.py        typed + validated streamsnow.config.yaml model
+  ├── policy.py        schema allow/deny single source of truth
+  ├── scaffolder.py    renders a governed repo from config
+  ├── _templates/      the Jinja scaffold templates (repo/ + app/)
+  └── tools/           governance checks (e.g. check_schema_refs)
+.claude-plugin/        Claude Code plugin manifest + marketplace
+skills/  agents/  hooks/   Claude Code plugin surface (filled out in upcoming phases)
+docs/  examples/            guides + reference app (in progress)
 ```
+
+> Active scaffolding lives in `streamsnow/` (templates under `streamsnow/_templates/`).
+> The `skills/`, `agents/`, `hooks/`, `docs/`, and `examples/` directories are
+> placeholders being populated phase by phase.
 
 The `streamsnow` Python package is the **single source of truth** for tool
 logic: the CLI, the Claude Code plugin, pre-commit, and CI all call the same

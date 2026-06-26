@@ -5,3 +5,4 @@ backgroundColor = "{{ brand.background }}"
 secondaryBackgroundColor = "{{ brand.secondary_background }}"
 textColor = "{{ brand.text_color }}"
 font = "sans serif"
+chartCategoricalColors = [{{ brand.chart_sequence | map('tojson') | join(", ") }}]

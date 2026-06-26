@@ -1,12 +1,12 @@
 -- Query: example_metric
 -- Feeds: Overview page (example metric + trend)
--- Schemas: {{ gov_database }}.{{ schema_allow[0] if schema_allow else 'ANALYTICS' }}
+-- Schemas: {{ gov_database }}.{{ schema_allow[0] }}
 -- Params: :1 start_date, :2 end_date
 SELECT
     metric_date          AS dt,
     COUNT(*)             AS n,
     SUM(amount)          AS total
-FROM {{ gov_database }}.{{ schema_allow[0] if schema_allow else 'ANALYTICS' }}.YOUR_TABLE  -- TODO: replace YOUR_TABLE
+FROM {{ gov_database }}.{{ schema_allow[0] }}.YOUR_TABLE  -- TODO: replace YOUR_TABLE
 WHERE metric_date BETWEEN :1 AND :2
 GROUP BY metric_date
 ORDER BY metric_date
