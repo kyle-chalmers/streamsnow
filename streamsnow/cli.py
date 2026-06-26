@@ -33,7 +33,7 @@ from .config import (
     load_config,
 )
 from .deploy import generate_create_sql, generate_refresh_sql, generate_setup_sql, stage_path
-from .scaffolder import APP_ITEMS, REPO_ITEMS, scaffold
+from .scaffolder import APP_ITEMS, GOVERNANCE_ITEMS, REPO_ITEMS, render_item, scaffold
 from .tools.check_app_security import main as _security_main
 from .tools.check_bind_predicates import main as _bind_main
 from .tools.check_caching import main as _caching_main
@@ -51,7 +51,6 @@ app.add_typer(check_app, name="check")
 console = Console()
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
-_NOT_YET = "[yellow]not yet implemented[/] — lands in {phase}."
 
 
 def _err(msg: str) -> None:
@@ -483,9 +482,41 @@ def deploy_sql(
 
 
 @app.command()
-def update() -> None:
-    """Re-vendor templates/tools and bump the Claude Code plugin (Phase 4)."""
-    console.print("streamsnow update: " + _NOT_YET.format(phase="Phase 4"))
+def update(
+    directory: Path = typer.Option(Path("."), "--dir", help="Repo root."),
+    apply: bool = typer.Option(False, "--apply", help="Write changes (default: dry-run)."),
+) -> None:
+    """Re-render governance files (AGENTS.md, hooks, CI, deploy) from your current
+    config + installed StreamSnow templates. README and .gitignore are left alone.
+    Dry-run by default; pass --apply to write."""
+    target = directory.resolve()
+    try:
+        cfg = load_config(target / CONFIG_FILENAME)
+    except ConfigError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+
+    changed: list[str] = []
+    for item in GOVERNANCE_ITEMS:
+        if not item.when(cfg):
+            continue
+        out = target / item.output
+        new = render_item(cfg, item, cfg.project.slug)
+        old = out.read_text() if out.exists() else None
+        if new != old:
+            changed.append(item.output)
+            if apply:
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_text(new)
+
+    if not changed:
+        console.print("[green]✓[/] governance files already up to date")
+    elif apply:
+        console.print(f"[green]✓[/] updated {len(changed)} file(s): {', '.join(changed)}")
+    else:
+        console.print(
+            "Would update:\n  " + "\n  ".join(changed) + "\n\nRe-run with --apply to write."
+        )
 
 
 def _run_check(main_fn, paths: list[str] | None, output_format: str) -> None:
