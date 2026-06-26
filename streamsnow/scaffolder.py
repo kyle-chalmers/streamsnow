@@ -55,8 +55,10 @@ RENDER_MAP: tuple[RenderItem, ...] = (
     RenderItem("app/overview.py.j2", "apps/{slug}/pages/overview.py"),
 )
 
-# Just the app subset (for `streamsnow new`).
+# Just the app subset (for `streamsnow new` and additional apps).
 APP_ITEMS = tuple(i for i in RENDER_MAP if i.output.startswith("apps/{slug}/"))
+# Repo-level files (rendered once per repo; idempotent on re-init).
+REPO_ITEMS = tuple(i for i in RENDER_MAP if not i.output.startswith("apps/{slug}/"))
 
 
 def _title_from_slug(slug: str) -> str:
@@ -121,10 +123,14 @@ def scaffold(
     *,
     items: tuple[RenderItem, ...] = RENDER_MAP,
     force: bool = False,
+    skip_existing: bool = False,
 ) -> list[Path]:
     """Render ``items`` into ``target``. Returns the list of written paths.
 
-    Raises FileExistsError if an output exists and ``force`` is False.
+    For an existing output: overwrite if ``force``; skip (idempotent) if
+    ``skip_existing``; otherwise raise FileExistsError. ``skip_existing`` is how
+    re-running ``init`` leaves already-present repo-level files untouched while
+    still guarding per-app files.
     """
     env = _env()
     ctx = build_context(cfg, app_slug)
@@ -134,6 +140,8 @@ def scaffold(
             continue
         out = target / item.output.format(slug=app_slug)
         if out.exists() and not force:
+            if skip_existing:
+                continue
             raise FileExistsError(f"{out} already exists (use --force to overwrite)")
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(env.get_template(item.template).render(**ctx))

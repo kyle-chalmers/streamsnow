@@ -119,5 +119,36 @@ def test_schema_refs_guardrail_blocks_denied_schema():
 def test_init_refuses_to_clobber_without_force(tmp_path):
     args = ["init", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path), "--app", "a-b"]
     assert runner.invoke(app, args).exit_code == 0
-    # second run without --force should fail (config already exists)
+    # second run with --config (import) onto an existing config should refuse
     assert runner.invoke(app, args).exit_code != 0
+
+
+def test_configure_writes_config_without_scaffolding(tmp_path):
+    result = runner.invoke(
+        app, ["configure", "--dir", str(tmp_path), "--config", str(EXAMPLE_CONFIG)]
+    )
+    assert result.exit_code == 0, result.output
+    cfg = load_config(tmp_path / CONFIG_FILENAME)
+    assert cfg.snowflake.connection_name == "acme"
+    # configure sets up the environment only — it does NOT scaffold apps
+    assert not (tmp_path / "apps").exists()
+    # and it surfaces the one-time connection command
+    assert "snow connection add" in result.output
+
+
+def test_init_reuses_existing_config_for_multiple_apps(tmp_path):
+    # 1) configure the Snowflake environment once
+    assert (
+        runner.invoke(
+            app, ["configure", "--dir", str(tmp_path), "--config", str(EXAMPLE_CONFIG)]
+        ).exit_code
+        == 0
+    )
+    # 2) init reuses that config (no --config) and scaffolds the first app
+    assert runner.invoke(app, ["init", "--dir", str(tmp_path), "--app", "first-app"]).exit_code == 0
+    # 3) init again reuses the same config and adds a second app (no clobber error)
+    assert (
+        runner.invoke(app, ["init", "--dir", str(tmp_path), "--app", "second-app"]).exit_code == 0
+    )
+    assert (tmp_path / "apps/first-app/streamlit_app.py").is_file()
+    assert (tmp_path / "apps/second-app/streamlit_app.py").is_file()

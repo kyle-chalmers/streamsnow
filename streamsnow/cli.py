@@ -1,6 +1,7 @@
 """StreamSnow command-line interface.
 
-streamsnow init           Setup wizard + scaffold a governed repo + starter app
+streamsnow configure      Set up / update streamsnow.config.yaml for your Snowflake env
+streamsnow init           Configure + scaffold a governed repo + starter app
 streamsnow new            Scaffold another app in an existing StreamSnow repo
 streamsnow doctor         Check the local environment for prerequisites
 streamsnow check ...      Run a governance check (e.g. schema-refs)
@@ -21,7 +22,7 @@ from rich.console import Console
 
 from . import __version__
 from .config import CONFIG_FILENAME, Config, ConfigError, load_config
-from .scaffolder import APP_ITEMS, scaffold
+from .scaffolder import APP_ITEMS, REPO_ITEMS, scaffold
 from .tools.check_schema_refs import main as _schema_refs_main
 
 app = typer.Typer(
@@ -69,37 +70,80 @@ def main(
     """StreamSnow — Streamlit-in-Snowflake apps, governed, with Claude Code."""
 
 
-def _prompt_config() -> dict:
-    """Interactive setup wizard. Returns a config dict (validated by caller)."""
+def _pf(prefill: dict | None, dotted: str, fallback):
+    """Pull a default from an existing config dict (for idempotent re-config)."""
+    cur: object = prefill or {}
+    for key in dotted.split("."):
+        if not isinstance(cur, dict):
+            return fallback
+        cur = cur.get(key)
+    return cur if cur not in (None, "") else fallback
+
+
+def _prompt_config(prefill: dict | None = None) -> dict:
+    """Interactive setup wizard. Returns a config dict (validated by caller).
+
+    When ``prefill`` is supplied (an existing config being updated), its values
+    become the prompt defaults — so re-running ``configure`` is an edit, not a
+    restart.
+    """
     console.print(
         "[bold]StreamSnow setup[/] — answer a few questions (Enter accepts the default).\n"
     )
     p = typer.prompt
-    runtime = p("Runtime (container/warehouse)", default="container")
-    name = p("Project name", default="My Dashboards")
-    slug = p("Project slug (kebab-case)", default="my-dashboards")
-    account = p("Snowflake account locator (no .snowflakecomputing.com)")
-    connection = p("snow CLI connection name", default=slug)
-    app_db = p("Database for deployed STREAMLIT objects", default="DATA_APPS")
-    app_schema = p("Schema for deployed STREAMLIT objects", default="BI_APPS")
-    warehouse = p("Query warehouse", default="STREAMLIT_WH")
-    ci_role = p("CI deploy role", default="STREAMLIT_CI_ROLE")
-    viewer_role = p("App viewer role", default="STREAMLIT_APP_ROLE")
-    gov_db = p("BI database your apps query", default="ANALYTICS_DB")
-    allow = p("Allowed schemas (comma-separated)", default="ANALYTICS,REPORTING")
-    deny = p("Denied schemas (comma-separated)", default="RAW,STAGING")
+    allow_default = ",".join(_pf(prefill, "governance.schema_allow", ["ANALYTICS", "REPORTING"]))
+    deny_default = ",".join(_pf(prefill, "governance.schema_deny", ["RAW", "STAGING"]))
+    runtime = p("Runtime (container/warehouse)", default=_pf(prefill, "runtime", "container"))
+    name = p("Project name", default=_pf(prefill, "project.name", "My Dashboards"))
+    slug = p("Project slug (kebab-case)", default=_pf(prefill, "project.slug", "my-dashboards"))
+    account = p(
+        "Snowflake account locator (no .snowflakecomputing.com)",
+        default=_pf(prefill, "snowflake.account", None),
+    )
+    connection = p(
+        "snow CLI connection name", default=_pf(prefill, "snowflake.connection_name", slug)
+    )
+    app_db = p(
+        "Database for deployed STREAMLIT objects",
+        default=_pf(prefill, "snowflake.objects.app_database", "DATA_APPS"),
+    )
+    app_schema = p(
+        "Schema for deployed STREAMLIT objects",
+        default=_pf(prefill, "snowflake.objects.app_schema", "BI_APPS"),
+    )
+    warehouse = p(
+        "Query warehouse",
+        default=_pf(prefill, "snowflake.objects.default_warehouse", "STREAMLIT_WH"),
+    )
+    ci_role = p(
+        "CI deploy role", default=_pf(prefill, "snowflake.roles.ci_role", "STREAMLIT_CI_ROLE")
+    )
+    viewer_role = p(
+        "App viewer role", default=_pf(prefill, "snowflake.roles.viewer_role", "STREAMLIT_APP_ROLE")
+    )
+    gov_db = p(
+        "BI database your apps query", default=_pf(prefill, "governance.database", "ANALYTICS_DB")
+    )
+    allow = p("Allowed schemas (comma-separated)", default=allow_default)
+    deny = p("Denied schemas (comma-separated)", default=deny_default)
     objects: dict = {
         "app_database": app_db,
         "app_schema": app_schema,
-        "stage_database": app_db,
-        "stage_schema": app_schema,
+        "stage_database": _pf(prefill, "snowflake.objects.stage_database", app_db),
+        "stage_schema": _pf(prefill, "snowflake.objects.stage_schema", app_schema),
         "default_warehouse": warehouse,
         "allowed_warehouses": [warehouse],
     }
     if runtime == "container":
-        objects["compute_pool"] = p("Compute pool (container)", default="STREAMLIT_POOL")
+        objects["compute_pool"] = p(
+            "Compute pool (container)",
+            default=_pf(prefill, "snowflake.objects.compute_pool", "STREAMLIT_POOL"),
+        )
         objects["external_access_integration"] = p(
-            "External access integration (container)", default="PYPI_ACCESS_INTEGRATION"
+            "External access integration (container)",
+            default=_pf(
+                prefill, "snowflake.objects.external_access_integration", "PYPI_ACCESS_INTEGRATION"
+            ),
         )
     return {
         "schema_version": 1,
@@ -116,57 +160,132 @@ def _prompt_config() -> dict:
             "schema_allow": [s.strip() for s in allow.split(",") if s.strip()],
             "schema_deny": [s.strip() for s in deny.split(",") if s.strip()],
         },
-        "deploy": {"source": p("Deploy source (stage-copy/git-repository)", default="stage-copy")},
+        "deploy": {
+            "source": p(
+                "Deploy source (stage-copy/git-repository)",
+                default=_pf(prefill, "deploy.source", "stage-copy"),
+            )
+        },
     }
+
+
+def _resolve_config(config: Path | None, prefill: dict | None) -> tuple[Config, str]:
+    """Return (validated Config, YAML text to persist). Raises ConfigError."""
+    if config is not None:
+        return load_config(config), Path(config).read_text()
+    cfg_dict = _prompt_config(prefill)
+    return Config.from_dict(cfg_dict), yaml.safe_dump(cfg_dict, sort_keys=False)
+
+
+def _read_prefill(cfg_out: Path) -> dict | None:
+    if not cfg_out.exists():
+        return None
+    try:
+        return yaml.safe_load(cfg_out.read_text())
+    except yaml.YAMLError:
+        return None
+
+
+def _connection_hint(cfg: Config) -> str:
+    return (
+        f"snow connection add --connection-name {cfg.snowflake.connection_name} "
+        f"--account {cfg.snowflake.account} --user <your_user> "
+        f"--authenticator externalbrowser "
+        f"--warehouse {cfg.snowflake.objects.default_warehouse} "
+        f"--role {cfg.snowflake.roles.viewer_role}"
+    )
+
+
+@app.command()
+def configure(
+    directory: Path = typer.Option(Path("."), "--dir", help="Repo directory."),
+    config: Path = typer.Option(None, "--config", help="Import an existing config file."),
+) -> None:
+    """Set up (or update) streamsnow.config.yaml for your Snowflake environment.
+
+    Run after `streamsnow doctor`/onboard (machine setup) and before/around
+    building apps. Idempotent: re-running prefills from the current config, so
+    it's an edit rather than a restart. Writes no secrets.
+    """
+    target = directory.resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    cfg_out = target / CONFIG_FILENAME
+    prefill = _read_prefill(cfg_out) if config is None else None
+    if prefill is not None:
+        console.print(
+            f"[dim]updating existing {CONFIG_FILENAME} (Enter keeps the current value)[/]"
+        )
+    try:
+        cfg, text = _resolve_config(config, prefill)
+    except ConfigError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    cfg_out.write_text(text)
+    console.print(f"[green]✓[/] wrote {cfg_out}")
+    console.print(
+        "\nConnect your machine to Snowflake (one-time):\n"
+        f"  {_connection_hint(cfg)}\n"
+        "\nThen, per app, create local preview secrets (gitignored):\n"
+        "  cp apps/<slug>/.streamlit/secrets.toml.example apps/<slug>/.streamlit/secrets.toml"
+    )
 
 
 @app.command()
 def init(
-    config: Path = typer.Option(
-        None, "--config", help="Use an existing config file instead of prompting."
-    ),
+    config: Path = typer.Option(None, "--config", help="Import an existing config file."),
     directory: Path = typer.Option(Path("."), "--dir", help="Target directory to scaffold into."),
     app_slug: str = typer.Option(
         "example-dashboard", "--app", help="Starter app slug (kebab-case)."
     ),
-    force: bool = typer.Option(False, "--force", help="Overwrite existing files."),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing scaffold files."),
+    reconfigure: bool = typer.Option(
+        False, "--reconfigure", help="Re-run the config wizard even if a config already exists."
+    ),
 ) -> None:
-    """Set up a governed Streamlit-in-Snowflake repo with a starter app."""
+    """Set up a governed repo with a starter app: configure + scaffold.
+
+    Reuses an existing streamsnow.config.yaml unless --reconfigure/--config is
+    given, so re-running init to add the scaffold is safe.
+    """
     _validate_slug(app_slug)
     target = directory.resolve()
     target.mkdir(parents=True, exist_ok=True)
+    cfg_out = target / CONFIG_FILENAME
 
     try:
-        if config is not None:
-            cfg = load_config(config)  # validate
-            config_text = Path(config).read_text()
+        if cfg_out.exists() and config is None and not reconfigure:
+            cfg = load_config(cfg_out)
+            console.print(f"[dim]using existing {CONFIG_FILENAME}[/]")
         else:
-            cfg_dict = _prompt_config()
-            cfg = Config.from_dict(cfg_dict)  # validate
-            config_text = yaml.safe_dump(cfg_dict, sort_keys=False)
+            if cfg_out.exists() and not force and not reconfigure:
+                _err(f"{cfg_out} already exists (use --reconfigure to edit, or --force).")
+                raise typer.Exit(2)
+            cfg, text = _resolve_config(config, _read_prefill(cfg_out) if reconfigure else None)
+            cfg_out.write_text(text)
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
 
-    cfg_out = target / CONFIG_FILENAME
-    if cfg_out.exists() and not force:
-        _err(f"{cfg_out} already exists (use --force).")
-        raise typer.Exit(2)
-    cfg_out.write_text(config_text)
-
     try:
-        written = scaffold(cfg, target, app_slug, force=force)
+        # Repo-level files are idempotent (skipped if already present); per-app
+        # files are guarded so re-scaffolding the same app needs --force.
+        repo_written = scaffold(
+            cfg, target, app_slug, items=REPO_ITEMS, force=force, skip_existing=True
+        )
+        app_written = scaffold(cfg, target, app_slug, items=APP_ITEMS, force=force)
     except FileExistsError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
 
-    console.print(f"[green]✓[/] scaffolded {len(written) + 1} files into {target}")
+    written = repo_written + app_written
+    console.print(f"[green]✓[/] scaffolded {len(written)} files into {target}")
     console.print(
         f"\nNext:\n"
-        f"  1. cp apps/{app_slug}/.streamlit/secrets.toml.example apps/{app_slug}/.streamlit/secrets.toml  (then edit)\n"
-        f"  2. uv pip install streamsnow && pre-commit install\n"
-        f"  3. streamlit run apps/{app_slug}/streamlit_app.py\n"
-        f"  4. /plugin marketplace add kyle-chalmers/streamsnow  (in Claude Code)"
+        f"  1. streamsnow configure   (if you haven't set your Snowflake env yet)\n"
+        f"  2. cp apps/{app_slug}/.streamlit/secrets.toml.example apps/{app_slug}/.streamlit/secrets.toml\n"
+        f"  3. uv pip install streamsnow && pre-commit install\n"
+        f"  4. streamlit run apps/{app_slug}/streamlit_app.py\n"
+        f"  5. /plugin marketplace add kyle-chalmers/streamsnow  (in Claude Code)"
     )
 
 
