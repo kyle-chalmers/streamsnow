@@ -98,6 +98,8 @@ RENDER_MAP: tuple[RenderItem, ...] = (
 APP_ITEMS = tuple(i for i in RENDER_MAP if i.output.startswith("apps/{slug}/"))
 # Repo-level files (rendered once per repo; idempotent on re-init).
 REPO_ITEMS = tuple(i for i in RENDER_MAP if not i.output.startswith("apps/{slug}/"))
+# Governance files re-rendered by `streamsnow update` (README/.gitignore are user-owned).
+GOVERNANCE_ITEMS = tuple(i for i in REPO_ITEMS if i.output not in ("README.md", ".gitignore"))
 
 
 def _title_from_slug(slug: str) -> str:
@@ -179,3 +181,8 @@ def scaffold(
         out.write_text(env.get_template(item.template).render(**ctx))
         written.append(out)
     return written
+
+
+def render_item(cfg: Config, item: RenderItem, app_slug: str) -> str:
+    """Render a single RenderItem to text (used by ``streamsnow update``)."""
+    return _env().get_template(item.template).render(**build_context(cfg, app_slug))

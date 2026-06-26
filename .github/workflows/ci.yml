@@ -37,6 +37,15 @@ jobs:
       - name: Pytest
         run: uv run pytest -q
 
+  privacy-gate:
+    # Pre-publish gate: fail if any proprietary/internal term or secret leaks
+    # into the OSS tree (the automated half; human review in RELEASING.md).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run --python 3.11 python -m streamsnow.tools.check_export_clean .
+
   wheel-smoke:
     # Build the wheel and run `streamsnow init` from the INSTALLED artifact, so
     # a packaging regression (e.g. templates excluded from the wheel) fails CI
