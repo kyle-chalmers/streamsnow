@@ -32,8 +32,13 @@ from .config import (
     find_config,
     load_config,
 )
+from .deploy import generate_create_sql, generate_refresh_sql, generate_setup_sql, stage_path
 from .scaffolder import APP_ITEMS, REPO_ITEMS, scaffold
+from .tools.check_app_security import main as _security_main
+from .tools.check_bind_predicates import main as _bind_main
+from .tools.check_caching import main as _caching_main
 from .tools.check_schema_refs import main as _schema_refs_main
+from .tools.validate_app import main as _validate_app_main
 
 app = typer.Typer(
     name="streamsnow",
@@ -403,15 +408,130 @@ def doctor() -> None:
 
 
 @app.command(name="deploy-setup")
-def deploy_setup() -> None:
-    """Emit the one-time Snowflake DDL for your configured deploy source (Phase 2/3)."""
-    console.print("streamsnow deploy-setup: " + _NOT_YET.format(phase="Phase 2/3"))
+def deploy_setup(
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+) -> None:
+    """Emit the one-time Snowflake DDL for your configured deploy source.
+
+    Pipe to `snow sql --stdin` (with an admin/CI role) to create the stage (or
+    the API integration + secret + git repository). Review before running.
+    """
+    try:
+        cfg = load_config(Path(config) if config else None)
+    except ConfigError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    print(generate_setup_sql(cfg))
+
+
+@app.command(name="stage-path")
+def stage_path_cmd(
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+) -> None:
+    """Print the stage-copy base path (@DB.SCHEMA.STAGE) — used by the deploy workflow."""
+    try:
+        cfg = load_config(Path(config) if config else None)
+    except ConfigError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    print(stage_path(cfg))
+
+
+@app.command(name="deploy-sql")
+def deploy_sql(
+    slug: str = typer.Argument(..., help="App slug to deploy."),
+    sha: str = typer.Option("<sha>", "--sha", help="Commit SHA (stage-copy path embeds it)."),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        help="git-repository: emit the ABORT/PULL/COMMIT refresh for an existing app.",
+    ),
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+) -> None:
+    """Emit the CREATE OR REPLACE STREAMLIT SQL for one app (used by the deploy workflow)."""
+    try:
+        cfg = load_config(Path(config) if config else None)
+    except ConfigError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    print(generate_refresh_sql(cfg, slug) if refresh else generate_create_sql(cfg, slug, sha))
 
 
 @app.command()
 def update() -> None:
     """Re-vendor templates/tools and bump the Claude Code plugin (Phase 4)."""
     console.print("streamsnow update: " + _NOT_YET.format(phase="Phase 4"))
+
+
+def _run_check(main_fn, paths: list[str] | None, output_format: str) -> None:
+    raise typer.Exit(code=main_fn(list(paths or ["apps"]) + ["--format", output_format]))
+
+
+@check_app.command("security")
+def check_security_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Block egress / code-exec / write-SQL / dynamic-SQL in app code."""
+    _run_check(_security_main, paths, output_format)
+
+
+@check_app.command("caching")
+def check_caching_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Require @st.cache_data(ttl=...) on data-fetching functions."""
+    _run_check(_caching_main, paths, output_format)
+
+
+@check_app.command("bind-predicates")
+def check_bind_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Block the `:N IS NULL OR` Go-driver bind-predicate trap."""
+    _run_check(_bind_main, paths, output_format)
+
+
+@app.command("validate-app")
+def validate_app_cmd(
+    slug: str = typer.Argument(..., help="App slug (directory under apps/)."),
+    directory: Path = typer.Option(Path("."), "--dir", help="Repo root."),
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """PASS/FAIL preflight for one app — the deterministic ship gate."""
+    argv = [slug, "--dir", str(directory), "--format", output_format]
+    if config is not None:
+        argv += ["--config", str(config)]
+    raise typer.Exit(code=_validate_app_main(argv))
+
+
+@app.command()
+def preview(
+    slug: str = typer.Argument(..., help="App slug to run locally."),
+    directory: Path = typer.Option(Path("."), "--dir", help="Repo root."),
+    port: int = typer.Option(8501, "--port"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the command without launching."),
+) -> None:
+    """Run an app locally against live Snowflake (reads .streamlit/secrets.toml)."""
+    app_py = directory / "apps" / slug / "streamlit_app.py"
+    if not app_py.is_file():
+        _err(f"no entrypoint at {app_py}")
+        raise typer.Exit(2)
+    cmd = ["streamlit", "run", str(app_py), "--server.port", str(port)]
+    if dry_run:
+        console.print(" ".join(cmd))
+        return
+    if not shutil.which("streamlit"):
+        _err(
+            "streamlit not found — install it in this app's environment (uv pip install streamlit)."
+        )
+        raise typer.Exit(2)
+    import subprocess
+
+    raise typer.Exit(code=subprocess.call(cmd))
 
 
 if __name__ == "__main__":  # pragma: no cover
