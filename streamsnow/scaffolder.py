@@ -38,6 +38,7 @@ RENDER_MAP: tuple[RenderItem, ...] = (
     RenderItem("repo/gitignore.j2", ".gitignore"),
     RenderItem("repo/pre-commit-config.yaml.j2", ".pre-commit-config.yaml"),
     RenderItem("repo/ci.yml.j2", ".github/workflows/checks.yml"),
+    RenderItem("repo/deploy.yml.j2", ".github/workflows/deploy.yml"),
     RenderItem("repo/README.md.j2", "README.md"),
     RenderItem("app/streamlit_app.py.j2", "apps/{slug}/streamlit_app.py"),
     RenderItem("app/AGENTS.md.j2", "apps/{slug}/AGENTS.md"),

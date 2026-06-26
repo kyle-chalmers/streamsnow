@@ -1,4 +1,15 @@
 {
-  "//": "StreamSnow Claude Code hooks. A SessionStart hook that loads governance context is added in Phase 2 (token-budgeted — see project plan). Empty until then.",
-  "hooks": {}
+  "//": "StreamSnow Claude Code hooks. SessionStart emits a one-line skill pointer, guarded to fire only inside a StreamSnow repo (see hooks/session_start.sh).",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.sh\""
+          }
+        ]
+      }
+    ]
+  }
 }
