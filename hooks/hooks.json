@@ -1,0 +1,4 @@
+{
+  "//": "StreamSnow Claude Code hooks. A SessionStart hook that loads governance context is added in Phase 2 (token-budgeted — see project plan). Empty until then.",
+  "hooks": {}
+}

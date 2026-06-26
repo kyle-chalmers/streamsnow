@@ -1,0 +1,12 @@
+{
+  "name": "streamsnow",
+  "owner": { "name": "Kyle Chalmers" },
+  "description": "StreamSnow — build, govern, and ship Streamlit-in-Snowflake apps with Claude Code.",
+  "plugins": [
+    {
+      "name": "streamsnow",
+      "source": "./",
+      "description": "Scaffolding, data-governance guardrails, local preview, validation, review, and deploy for Streamlit-in-Snowflake apps."
+    }
+  ]
+}

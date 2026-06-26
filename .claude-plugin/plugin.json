@@ -1,0 +1,12 @@
+{
+  "name": "streamsnow",
+  "displayName": "StreamSnow",
+  "version": "0.0.1",
+  "description": "Build, govern, and ship Streamlit-in-Snowflake apps with Claude Code: scaffolding, data-governance guardrails, local preview, validation, review, and deploy.",
+  "author": { "name": "Kyle Chalmers" },
+  "homepage": "https://github.com/kyle-chalmers/streamsnow",
+  "repository": "https://github.com/kyle-chalmers/streamsnow",
+  "license": "MIT",
+  "keywords": ["snowflake", "streamlit", "dashboards", "governance", "scaffolding"],
+  "hooks": "./hooks/hooks.json"
+}
