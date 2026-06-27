@@ -67,10 +67,11 @@ def _detect_runtime(app_dir: Path, default: str) -> str:
     if yml.is_file():
         try:
             data = yaml.safe_load(yml.read_text()) or {}
-            for entity in (data.get("entities") or {}).values():
-                if isinstance(entity, dict) and entity.get("runtime_name"):
-                    return "container"
-            if data.get("entities") or {}:
+            entities = data.get("entities")
+            if isinstance(entities, dict) and entities:
+                for entity in entities.values():
+                    if isinstance(entity, dict) and entity.get("runtime_name"):
+                        return "container"
                 return "warehouse"
         except yaml.YAMLError:
             pass
@@ -112,9 +113,9 @@ def _check_manifest(app_dir: Path, cfg: Config) -> list[str]:
     if data.get("definition_version") != 2:
         problems.append(f"definition_version must be 2, got {data.get('definition_version')!r}")
 
-    entities = data.get("entities") or {}
-    if not entities:
-        return [*problems, "snowflake.yml has no entities"]
+    entities = data.get("entities")
+    if not isinstance(entities, dict) or not entities:
+        return [*problems, "snowflake.yml has no entities (must be a mapping)"]
 
     allowed_warehouses = set(cfg.snowflake.objects.allowed_warehouses)
     expected_runtime = cfg.snowflake.objects.runtime_name
@@ -142,6 +143,10 @@ def _check_manifest(app_dir: Path, cfg: Config) -> list[str]:
         identifier = ent.get("identifier")
         if not isinstance(identifier, dict) or not identifier:
             problems.append(f"{name}: missing 'identifier' mapping")
+        else:
+            for key in ("name", "database", "schema"):
+                if not identifier.get(key):
+                    problems.append(f"{name}: identifier.{key} is required")
 
         # Runtime-mode rules (mirrors validate_yaml._validate_mode_fields).
         if ent.get("runtime_name"):  # container mode
