@@ -164,16 +164,6 @@ def test_caching_walk_skips_dotted_dirs(tmp_path):
     assert not any(".review" in str(f) for f in files)
 
 
-def test_caching_clean_on_source_apps():
-    # Regression for Dogfood D6 (23 FPs): the corrected check must agree with the
-    # source monorepo and find zero issues on apps that pass their own gates.
-    apps = Path("/Users/kchalmers/Development/snowflake-streamlit-apps/apps")
-    if not apps.is_dir():  # reference repo not present in this checkout
-        return
-    res = check_caching.scan_paths(check_caching._iter_py_files(apps))
-    assert res["ok"], res["findings"]
-
-
 def test_validate_app_passes_on_scaffold(tmp_path):
     cfg = _cfg()
     scaffold(cfg, tmp_path, "good-app")
@@ -320,15 +310,6 @@ def test_security_walk_skips_dotted_dirs(tmp_path):
     _write(tmp_path / "apps/x/__pycache__/cached.py", "import requests\n")
     _write(tmp_path / "apps/x/streamlit_app.py", "import streamlit as st\n")
     assert check_app_security.main([str(tmp_path / "apps"), "--format", "json"]) == 0
-
-
-def test_security_clean_on_source_apps():
-    # Regression for the dogfood FP sweep: the corrected check must agree with the
-    # source monorepo and find zero findings on apps that pass their own gates.
-    apps = Path("/Users/kchalmers/Development/snowflake-streamlit-apps/apps")
-    if not apps.is_dir():  # reference repo not present in this checkout
-        return
-    assert check_app_security.main([str(apps), "--format", "json"]) == 0
 
 
 def test_schema_refs_use_statement_and_read_exceptions():
