@@ -151,13 +151,15 @@ def _collect_query_arg_ids(tree: ast.AST) -> set[int]:
 def _find_denied_refs_py(text: str, denied: set[str], read_exc: set[str]) -> set[tuple[int, str]]:
     """AST scan: only SQL-looking string literals (excluding docstrings) are checked.
 
-    Falls back to a text scan if the source can't be parsed (e.g. partial file),
-    so malformed code never silently bypasses the gate.
+    Unparseable Python is skipped (returns nothing): a file with a syntax error
+    can't run as an app anyway, and a text fallback would reintroduce the
+    docstring/prose false positives this AST scan exists to avoid (ruff/CI catch
+    the syntax error separately).
     """
     try:
         tree = ast.parse(text)
     except SyntaxError:
-        return _scan_text(_strip_sql_comments(text), denied, read_exc)
+        return set()
 
     docstring_ids = _collect_docstring_ids(tree)
     query_arg_ids = _collect_query_arg_ids(tree)
