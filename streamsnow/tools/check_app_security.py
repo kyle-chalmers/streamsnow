@@ -166,6 +166,7 @@ SQL_METHODS: frozenset[str] = frozenset({"sql", "query"})
 # Narrow waiver for the Snowflake-internal Cortex Analyst REST endpoint used by
 # container-runtime Streamlit apps. General ``requests`` imports remain banned.
 SNOWFLAKE_CORTEX_REST_WAIVER = "snowflake-cortex-rest"
+SNOWFLAKE_CORTEX_ANALYST_ENDPOINT = "/api/v2/cortex/analyst/message"
 
 _LEADING_KEYWORD_RE = re.compile(r"^\s*([A-Za-z_]+)")
 
@@ -335,8 +336,6 @@ def _scan_imports(tree: ast.AST, lines: list[str]) -> list[dict]:
             for alias in node.names:
                 if not _module_is_egress(alias.name):
                     continue
-                if _is_waived(lines, node.lineno, end, "egress"):
-                    continue
                 # Narrow Snowflake Cortex Analyst REST exception: a bare
                 # ``import requests  # snowflake-cortex-rest`` is sanctioned.
                 if (
@@ -356,8 +355,6 @@ def _scan_imports(tree: ast.AST, lines: list[str]) -> list[dict]:
         elif isinstance(node, ast.ImportFrom):
             mod = node.module or ""
             if mod and _module_is_egress(mod):
-                if _is_waived(lines, node.lineno, end, "egress"):
-                    continue
                 findings.append(
                     {
                         "file": "",
@@ -369,7 +366,7 @@ def _scan_imports(tree: ast.AST, lines: list[str]) -> list[dict]:
     return findings
 
 
-def _scan_exec_calls(tree: ast.AST, lines: list[str]) -> list[dict]:
+def _scan_exec_calls(tree: ast.AST) -> list[dict]:
     findings: list[dict] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -385,9 +382,6 @@ def _scan_exec_calls(tree: ast.AST, lines: list[str]) -> list[dict]:
                 if dotted in EXEC_DOTTED or root in EXEC_DOTTED_ROOTS:
                     detail = dotted
         if detail is None:
-            continue
-        end = getattr(node, "end_lineno", None) or node.lineno
-        if _is_waived(lines, node.lineno, end, "code-exec"):
             continue
         findings.append({"file": "", "line": node.lineno, "kind": "code-exec", "detail": detail})
     return findings
@@ -438,9 +432,6 @@ def _scan_sql_calls(tree: ast.AST, lines: list[str]) -> list[dict]:
                 }
             )
         elif isinstance(sql_arg, ast.Constant) and isinstance(sql_arg.value, str):
-            end = getattr(node, "end_lineno", None) or node.lineno
-            if _is_waived(lines, node.lineno, end, "write-sql"):
-                continue
             for _, kw in _scan_sql_text(sql_arg.value):
                 findings.append(
                     {
@@ -451,6 +442,101 @@ def _scan_sql_calls(tree: ast.AST, lines: list[str]) -> list[dict]:
                     }
                 )
     return findings
+
+
+def _literal_strings(tree: ast.AST) -> list[tuple[int, str]]:
+    return [
+        (getattr(n, "lineno", 1), n.value)
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    ]
+
+
+def _assigned_string(tree: ast.AST, name: str) -> str | None:
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            return node.value.value
+    return None
+
+
+def _assigned_name_refs(tree: ast.AST, name: str) -> set[str]:
+    refs: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == name for t in node.targets
+        ):
+            for child in ast.walk(node.value):
+                if isinstance(child, ast.Name):
+                    refs.add(child.id)
+    return refs
+
+
+def _has_cortex_rest_import_waiver(tree: ast.AST, lines: list[str]) -> bool:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Import):
+            continue
+        end = getattr(node, "end_lineno", node.lineno) or node.lineno
+        if not _line_has_token(lines, node.lineno, end, SNOWFLAKE_CORTEX_REST_WAIVER):
+            continue
+        if any(a.name == "requests" and a.asname is None for a in node.names):
+            return True
+    return False
+
+
+def _scan_cortex_rest(tree: ast.AST, lines: list[str]) -> list[dict]:
+    """Validate the narrow Snowflake Cortex Analyst REST exception.
+
+    A ``# snowflake-cortex-rest`` waiver on a ``requests`` import allows egress
+    ONLY in the exact container-runtime shape (endpoint = the Cortex Analyst path,
+    URL built from SNOWFLAKE_HOST + that endpoint, token read from
+    /snowflake/session/token, and a single ``requests.post(CORTEX_ANALYST_URL)``).
+    Any deviation — an external URL literal, a non-post call, a different target —
+    is flagged, so the waiver can't be abused to exfiltrate data. Ported from the
+    source monorepo's check_app_security.py.
+    """
+    if not _has_cortex_rest_import_waiver(tree, lines):
+        return []
+
+    out: list[dict] = []
+
+    def add(line: int, detail: str) -> None:
+        out.append({"file": "", "line": line, "kind": "snowflake-cortex-rest", "detail": detail})
+
+    if _assigned_string(tree, "CORTEX_ANALYST_ENDPOINT") != SNOWFLAKE_CORTEX_ANALYST_ENDPOINT:
+        add(1, "CORTEX_ANALYST_ENDPOINT must be /api/v2/cortex/analyst/message")
+    if not {"SNOWFLAKE_HOST", "CORTEX_ANALYST_ENDPOINT"}.issubset(
+        _assigned_name_refs(tree, "CORTEX_ANALYST_URL")
+    ):
+        add(1, "CORTEX_ANALYST_URL must be built from SNOWFLAKE_HOST + CORTEX_ANALYST_ENDPOINT")
+    literals = _literal_strings(tree)
+    if not any(v == "/snowflake/session/token" for _, v in literals):
+        add(1, "session token must be read from /snowflake/session/token")
+    for lineno, v in literals:
+        if v.startswith(("http://", "https://")) and v != "https://":
+            add(lineno, f"external URL literal is not allowed: {v}")
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        dotted = _dotted_name(node.func)
+        if dotted is None or not dotted.startswith("requests."):
+            continue
+        if dotted != "requests.post":
+            add(node.lineno, f"{dotted}(...) is not allowed; use requests.post(...)")
+            continue
+        url_arg: ast.expr | None = node.args[0] if node.args else None
+        for kw in node.keywords:
+            if kw.arg == "url":
+                url_arg = kw.value
+                break
+        if not (isinstance(url_arg, ast.Name) and url_arg.id == "CORTEX_ANALYST_URL"):
+            add(node.lineno, "requests.post URL must be CORTEX_ANALYST_URL")
+    return out
 
 
 def _scan_python(path: Path) -> list[dict]:
@@ -465,8 +551,9 @@ def _scan_python(path: Path) -> list[dict]:
     lines = source.splitlines()
     findings: list[dict] = []
     findings.extend(_scan_imports(tree, lines))
-    findings.extend(_scan_exec_calls(tree, lines))
+    findings.extend(_scan_exec_calls(tree))
     findings.extend(_scan_sql_calls(tree, lines))
+    findings.extend(_scan_cortex_rest(tree, lines))
     for f in findings:
         f["file"] = str(path)
     return findings
