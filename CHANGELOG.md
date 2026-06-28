@@ -3,9 +3,9 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
-## [Unreleased]
+## [0.1.0] - 2026-06-27
 
-Initial implementation.
+Initial release.
 
 ### CLI (`streamsnow`)
 - `configure` / `init` / `new` — set up the Snowflake environment and scaffold a
