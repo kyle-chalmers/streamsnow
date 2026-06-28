@@ -2,6 +2,14 @@
 <h1 align="center">StreamSnow ❄️</h1>
 
 <p align="center">
+  <a href="https://github.com/kyle-chalmers/streamsnow/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kyle-chalmers/streamsnow/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://pypi.org/project/streamsnow/"><img alt="PyPI" src="https://img.shields.io/pypi/v/streamsnow.svg"></a>
+  <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-blue">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-d97757">
+</p>
+
+<p align="center">
   <strong>An open-source toolkit for building, governing, and shipping
   Streamlit-in-Snowflake apps with Claude Code.</strong>
 </p>
