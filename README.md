@@ -25,8 +25,8 @@
 > **Status: alpha, functional.** The CLI (configure / init / new / validate-app /
 > preview / check / deploy-sql / deploy-setup) and the Claude Code plugin (14
 > skills + shared recipes) are implemented and CI-green for both runtimes and
-> both deploy sources. Not yet published to PyPI; APIs may still shift before the
-> first tagged release.
+> both deploy sources. Published on PyPI as **v0.1.0**
+> (`uvx streamsnow` / `pip install streamsnow`); APIs may still evolve toward 1.0.
 
 ## What it is
 
