@@ -26,6 +26,10 @@ All notable changes to StreamSnow are recorded here. This project follows
   `query_tag="adhoc"`) no longer trips the generic-executor guard.
 
 ### Added
+- Documentation guides: `docs/getting-started.md` (try the example with no
+  Snowflake, then set up a governed repo), `docs/data-discovery.md` (find tables
+  and wire governed queries), and `docs/deploying.md` (the end-to-end deploy
+  story for both deploy sources). Linked from the README.
 - Runnable example app at `examples/sample-dashboard/` — a StreamSnow-shaped
   Streamlit dashboard wired to deterministic sample data, so it renders with
   `streamlit run` and **no Snowflake connection**. Mirrors the `streamsnow init`
