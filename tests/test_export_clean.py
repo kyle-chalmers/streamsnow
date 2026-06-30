@@ -11,10 +11,10 @@ def test_clean_tree_passes(tmp_path):
 
 
 def test_detects_proprietary_term(tmp_path):
-    (tmp_path / "b.md").write_text("This references  internal systems.")
+    (tmp_path / "b.md").write_text("This job reads from loanpro.")
     res = scan_tree(tmp_path)
     assert not res["ok"]
-    assert any("" in f["match"] for f in res["findings"])
+    assert any("loanpro" in f["match"] for f in res["findings"])
 
 
 def test_detects_ticket_prefix_and_personal_path(tmp_path):
