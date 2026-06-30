@@ -46,7 +46,7 @@ On `--resume` (or noticing §11 already exists), read `Current phase` and jump t
 
 ## Decision guidance
 
-- **Runtime: warehouse vs. container.** The scaffold sets a runtime in the app's `snowflake.yml`. Default to **warehouse runtime** — it's simplest, uses the warehouse from `snowflake.objects`, and is right for query-and-render dashboards. Choose **container runtime** only when the app needs heavier compute, long-lived processes, or libraries that don't fit the warehouse Streamlit environment. Switching later means a re-deploy, so decide before CHECKPOINT 1.
+- **Runtime: container vs. warehouse.** The scaffold sets a runtime in the app's `snowflake.yml`; the repo's configured default lives in `streamsnow.config.yaml`. **Container** is the modern default for most new apps — full PyPI deps, modern Streamlit, and `st.connection("snowflake")` behaves the same locally and deployed (so preview catches grant gaps); it needs a compute pool + external-access integration. Choose **warehouse** (legacy) when you want instant cold start, Anaconda-channel deps, and no compute-pool cost. Follow the repo default unless the spec says otherwise; switching later means a re-deploy, so decide before CHECKPOINT 1.
 - **Scaffold via CLI vs. `/new-app`.** `streamsnow new` is the bare scaffold; `/new-app` is the guided wrapper that also reads the staged spec and carries the runtime preference forward. Prefer `/new-app` inside this pipeline; reach for `streamsnow new` only for a quick throwaway.
 - **`/auto-review-app` vs. manual review.** Use `/auto-review-app` for the hands-off fix loop. Drop to `/review-app` + `/apply-review` when you want to inspect each finding before it's applied (apply-review commits each fix separately).
 

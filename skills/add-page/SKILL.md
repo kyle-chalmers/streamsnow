@@ -48,20 +48,20 @@ Scaffold one new page into an existing app so its charts, KPIs, filters, and que
 
 The loader's connection pattern depends on the app's runtime (set in `snowflake.yml` / `streamsnow.config.yaml`):
 
-- **Warehouse runtime** (default for most apps): use the active Snowpark session.
-  ```python
-  from snowflake.snowpark.context import get_active_session
-  session = get_active_session()
-  # inside a loader:
-  return session.sql(sql, params=[start_date, end_date]).to_pandas()
-  ```
-- **Container runtime**: use the Streamlit connection, and disable its internal cache so the outer `@st.cache_data` is the single source of truth.
+- **Container runtime** (the default for newly scaffolded apps): use the Streamlit connection, and disable its internal cache so the outer `@st.cache_data` is the single source of truth.
   ```python
   conn = st.connection("snowflake")
   # inside a loader:
   return conn.query(sql, params=[start_date, end_date], ttl=0)
   ```
   The `ttl=0` matters: without it you get double caching and confusing staleness.
+- **Warehouse runtime** (legacy): use the active Snowpark session.
+  ```python
+  from snowflake.snowpark.context import get_active_session
+  session = get_active_session()
+  # inside a loader:
+  return session.sql(sql, params=[start_date, end_date]).to_pandas()
+  ```
 
 Match whatever pattern the app's existing pages already use — don't mix the two within one app.
 

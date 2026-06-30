@@ -62,8 +62,9 @@ git config user.email "<email>"
 
 You do not choose a runtime here — it lives in `streamsnow.config.yaml` and is set during `streamsnow configure`. But know the distinction so you can answer the user:
 
-- **Warehouse runtime** is the default and needs nothing extra locally — `streamsnow preview` runs the app against a Snowflake virtual warehouse defined in `snowflake.objects` with the role from `snowflake.roles`.
-- **Container runtime** (Snowpark Container Services) only matters at deploy time and is also config-driven. It does **not** change local onboarding: the same Python/uv/git prereqs apply. If the user asks, point them at `streamsnow configure` to set or change the runtime, not at any manual edit.
+- **Container runtime** is the modern default (set in `streamsnow.config.yaml`). It only matters at deploy time (Snowpark Container Services, compute pool + external-access integration) and is config-driven — it does **not** change local onboarding: the same Python/uv/git prereqs apply, and `streamsnow preview` uses `st.connection("snowflake")`.
+- **Warehouse runtime** (legacy) needs nothing extra at deploy time — `streamsnow preview` runs the app against a Snowflake virtual warehouse defined in `snowflake.objects` with the role from `snowflake.roles`.
+- Either way the user doesn't edit this by hand: point them at `streamsnow configure` to set or change the runtime.
 
 ## Gotchas and edge cases
 
