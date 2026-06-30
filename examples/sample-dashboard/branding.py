@@ -44,12 +44,13 @@ def branded_metric(
 ) -> None:
     """A metric card with a brand-colored left border.
 
-    ``label`` / ``value`` / ``delta`` are HTML-escaped before interpolation: the
-    card is rendered with ``unsafe_allow_html=True``, and in a real app these are
-    database-derived strings, so escaping prevents stored values from injecting
-    markup into the viewer's page.
+    ``label`` / ``value`` / ``delta`` / ``border_color`` are HTML-escaped before
+    interpolation: the card is rendered with ``unsafe_allow_html=True``, and in a
+    real app these can be database-derived strings (e.g. a per-tenant brand color),
+    so escaping prevents a stored value from breaking out of the attribute and
+    injecting markup into the viewer's page.
     """
-    color = border_color or BRAND_COLORS["primary"]
+    color = html.escape(border_color or BRAND_COLORS["primary"])
     label, value = html.escape(label), html.escape(value)
     delta_html = (
         f'<div style="font-size:0.8rem;color:#6b7280;">{html.escape(delta)}</div>' if delta else ""

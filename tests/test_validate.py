@@ -769,6 +769,19 @@ def test_manifest_container_pyproject_noncanonical_dep_name_ok(tmp_path):
     assert by_name["manifest"]["ok"] is True, by_name["manifest"]["findings"]
 
 
+def test_manifest_container_pyproject_malformed_python_fails(tmp_path):
+    # A requires-python packaging can't parse is not a valid pin -> fail closed.
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "pmal-app")
+    (tmp_path / "apps/pmal-app/pyproject.toml").write_text(
+        '[project]\nname = "pmal-app"\nrequires-python = "not-a-version"\n'
+        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n'
+    )
+    by_name, _ = _manifest(tmp_path / "apps/pmal-app")
+    assert by_name["manifest"]["ok"] is False
+    assert any("requires-python" in p for p in by_name["manifest"]["findings"])
+
+
 def test_manifest_container_pyproject_invalid_toml_fails(tmp_path):
     cfg = _cfg()
     scaffold(cfg, tmp_path, "ppt-app")

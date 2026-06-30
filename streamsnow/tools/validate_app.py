@@ -65,8 +65,6 @@ _REQUIRED_APP_DEPS = (
 # Leading distribution name of a dependency spec ("streamlit==1.50.0" -> "streamlit",
 # conda "streamlit=1.50.0" -> "streamlit"). Canonicalized by _dep_name.
 _DEP_NAME_RE = re.compile(r"^([A-Za-z0-9_.\-]+)")
-# Any "X.Y" version token inside a PEP 440 specifier (">=3.11,<3.12" -> 3.11, 3.12).
-_PYVER_RE = re.compile(r"(\d+\.\d+)")
 
 
 def _dep_name(spec: str) -> str | None:
@@ -84,18 +82,19 @@ def _dep_name(spec: str) -> str | None:
 def _requires_python_allows(spec: str, version: str) -> bool:
     """True if a ``requires-python`` specifier admits ``version`` (e.g. '3.11').
 
-    Uses PEP 440 specifier semantics when ``packaging`` is available, so '>=3.10'
-    correctly *allows* 3.11 while '<3.11' / '==3.10.*' correctly do not. Falls back
-    to a token-presence heuristic only if the specifier cannot be parsed (or
-    packaging is absent) — the heuristic is lossy at range boundaries, which is
-    exactly why the parsed path is preferred.
+    Uses PEP 440 specifier semantics (``packaging.SpecifierSet``), so '>=3.10'
+    correctly *allows* 3.11 while '<3.11' / '==3.10.*' correctly do not — a naive
+    token match gets both boundaries wrong, so it is intentionally NOT used as a
+    fallback. ``packaging`` is a declared dependency; if it is somehow absent we
+    cannot evaluate the specifier, so we assume it is fine (fail open) rather than
+    emit a wrong finding. A malformed specifier fails closed (not a valid pin).
     """
-    if SpecifierSet is not None:
-        try:
-            return SpecifierSet(spec).contains(version)
-        except InvalidSpecifier:
-            pass
-    return version in _PYVER_RE.findall(spec)
+    if SpecifierSet is None:  # pragma: no cover - packaging is a hard dependency
+        return True
+    try:
+        return SpecifierSet(spec).contains(version)
+    except InvalidSpecifier:
+        return False
 
 
 def _walk_app_files(app_dir: Path) -> list[Path]:
