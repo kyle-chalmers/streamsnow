@@ -100,17 +100,26 @@ streamsnow/            the PyPI package — CLI, config, policy, scaffolder, too
   ├── _templates/      the Jinja scaffold templates (repo/ + app/)
   └── tools/           governance checks (e.g. check_schema_refs)
 .claude-plugin/        Claude Code plugin manifest + marketplace
-skills/  agents/  hooks/   Claude Code plugin surface (filled out in upcoming phases)
-docs/  examples/            guides + reference app (in progress)
+skills/  agents/  hooks/   Claude Code plugin surface (skills + SessionStart hook)
+docs/  examples/            guides + a runnable no-Snowflake example app
 ```
 
 > Active scaffolding lives in `streamsnow/` (templates under `streamsnow/_templates/`).
-> The `skills/`, `agents/`, `hooks/`, `docs/`, and `examples/` directories are
-> placeholders being populated phase by phase.
 
 The `streamsnow` Python package is the **single source of truth** for tool
 logic: the CLI, the Claude Code plugin, pre-commit, and CI all call the same
 code — one implementation, many consumers.
+
+## Documentation
+
+- **[Getting started](docs/getting-started.md)** — run the example with no
+  Snowflake, then scaffold and preview your own governed app.
+- **[Data discovery](docs/data-discovery.md)** — find tables and wire queries
+  inside the schema-access guardrails.
+- **[Deploying](docs/deploying.md)** — ship apps to Snowflake on merge, for both
+  deploy sources.
+- **[Deploy setup](docs/deploy-setup.md)** — the one-time Snowflake objects and
+  CI secrets the pipeline needs.
 
 ## License
 
