@@ -52,8 +52,8 @@ A reference that violates the policy fails the gate before it can merge.
   are narrow and pre-aggregated for dashboard query shapes; raw/analytics views
   are wide and heavy. Don't join three wide views for three columns.
 - **Explicit column lists, never `SELECT *`.** Schema changes break `SELECT *`
-  silently; explicit lists fail loudly. `validate-app` flags `SELECT *` in app
-  code.
+  silently; explicit lists fail loudly. (This is a habit StreamSnow's checks
+  don't enforce — adopt it anyway.)
 - **Filter in SQL, not in Python.** Streamlit has a ~32 MB WebSocket message
   limit — push filters into `WHERE` so the returned DataFrame stays small.
 - **Cache every loader, and key it on its filters.** Decorate data loaders with
