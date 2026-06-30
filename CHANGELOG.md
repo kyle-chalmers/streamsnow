@@ -20,6 +20,10 @@ All notable changes to StreamSnow are recorded here. This project follows
   `query_tag="adhoc"`) no longer trips the generic-executor guard.
 
 ### Added
+- Runnable example app at `examples/sample-dashboard/` — a StreamSnow-shaped
+  Streamlit dashboard wired to deterministic sample data, so it renders with
+  `streamlit run` and **no Snowflake connection**. Mirrors the `streamsnow init`
+  structure (st.navigation entrypoint, branding, `@st.cache_data` loaders).
 - `packaging` runtime dependency (PEP 440 version-specifier parsing in
   `validate-app`).
 
