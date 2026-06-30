@@ -39,7 +39,7 @@ streamlit run examples/sample-dashboard/streamlit_app.py
 Or, with uv and no install step:
 
 ```bash
-uvx --with streamlit --with pandas --with plotly \
+uvx --with pandas --with plotly \
   streamlit run examples/sample-dashboard/streamlit_app.py
 ```
 
@@ -122,9 +122,9 @@ streamsnow validate-app marketing-campaign-dashboard   # PASS/FAIL ship gate
 ```
 
 `validate-app` is the deterministic gate: required files, manifest contents,
-naming, and the governance checks (`schema-refs`, `app-security`,
-`bind-predicates`, `caching`). Any **FAIL** must be fixed before shipping. Run
-an individual check while iterating with, e.g.,
+naming, and the governance checks (`schema-refs`, `security`, `bind-predicates`,
+`caching` — the same names you pass to `streamsnow check`). Any **FAIL** must be
+fixed before shipping. Run an individual check while iterating with, e.g.,
 `streamsnow check caching apps/<slug>`.
 
 ### 5. (Optional) Claude Code plugin
