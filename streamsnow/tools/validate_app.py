@@ -29,6 +29,7 @@ except ImportError:  # pragma: no cover
         """PEP 503 name normalization fallback (packaging.utils.canonicalize_name)."""
         return re.sub(r"[-_.]+", "-", name).lower()
 
+
 from ..config import Config, ConfigError, load_config
 from ..policy import SchemaPolicy
 from . import check_app_security, check_bind_predicates, check_caching, check_schema_refs
@@ -57,7 +58,10 @@ _CONTAINER_ONLY = ("runtime_name", "compute_pool", "external_access_integrations
 # runtime. Stored in PEP 503 canonical form so a manifest that spells the package
 # differently but equivalently (underscores, dots, case) still matches.
 # (Ported from the source monorepo's tools/validate_yaml.REQUIRED_DEPS.)
-_REQUIRED_APP_DEPS = (canonicalize_name("streamlit"), canonicalize_name("snowflake-snowpark-python"))
+_REQUIRED_APP_DEPS = (
+    canonicalize_name("streamlit"),
+    canonicalize_name("snowflake-snowpark-python"),
+)
 # Leading distribution name of a dependency spec ("streamlit==1.50.0" -> "streamlit",
 # conda "streamlit=1.50.0" -> "streamlit"). Canonicalized by _dep_name.
 _DEP_NAME_RE = re.compile(r"^([A-Za-z0-9_.\-]+)")

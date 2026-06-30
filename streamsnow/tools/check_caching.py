@@ -101,9 +101,7 @@ def _iter_scope(scope: ast.AST):
     """
     for child in ast.iter_child_nodes(scope):
         yield child
-        if not isinstance(
-            child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
-        ):
+        if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
             yield from _iter_scope(child)
 
 
