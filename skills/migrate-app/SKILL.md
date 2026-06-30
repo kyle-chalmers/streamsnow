@@ -5,21 +5,21 @@ description: Port an external Streamlit app into a StreamSnow repo in two steps 
 
 # migrate-app
 
-Bring an external Streamlit app into the repo, then conform it to StreamSnow conventions until the deterministic gate passes. Two commits: the unmodified lift, then the conform diff — each reviewable on its own.
+Bring an external Streamlit app into the repo, then conform it to StreamSnow conventions until the deterministic gate passes. Two commits: the lift (relocate the files, scrub only ship blockers), then the convention-conform diff — each reviewable on its own.
 
 ## Why two steps
 
-Mixing the file move and the convention rewrite into one diff makes review impossible — you can't tell a behavior change from a layout change. Land the verbatim port first (it should run identically to the source), then layer conventions on top. If the conformed app misbehaves, you can bisect against the known-good lift.
+Mixing the file move and the convention rewrite into one diff makes review impossible — you can't tell a behavior change from a layout change. Land the port first (files relocated, only ship blockers scrubbed — it should still run essentially as it did at the source), then layer conventions on top. If the conformed app misbehaves, you can bisect against the known-good lift.
 
 ## Step 1 — lift-and-shift (get it in the tree)
 
 1. Confirm prereqs: `streamsnow doctor`. If anything fails, send the user to /onboard before continuing.
 2. Settle the `<slug>` with the user — `<domain>-<function>`, kebab-case (e.g. `marketing-campaign-dashboard`). Confirm the source path of the external app and that nothing under `apps/<slug>/` already exists (don't clobber a sibling).
-3. Copy the source into `apps/<slug>/` verbatim. Rename the entrypoint to `streamlit_app.py` (the filename is not configurable). Copy supporting modules, `pages/`, and image assets too, preserving relative import paths. Do NOT refactor — this step only moves files.
+3. Copy the source into `apps/<slug>/`. The one structural change in this step is renaming the entrypoint to `streamlit_app.py` (the filename is not configurable); copy supporting modules, `pages/`, and image assets too, preserving relative import paths. Do NOT refactor or apply repo conventions yet — beyond the rename and the blocker scrub in step 4, this step just relocates files.
 4. Scrub blockers the port can't ship with, but keep it minimal:
    - **Secrets in code.** Move any hardcoded credentials out of `.py` into `.streamlit/secrets.toml` (gitignored). Never read or commit an existing source secrets file — note its presence and have the user copy values by hand.
    - **Denied-schema references.** Re-point any reference to a schema outside the config allowlist (`governance.schema_allow` in `streamsnow.config.yaml`) to the governed equivalents (e.g. ANALYTICS / REPORTING). `streamsnow check schema-refs apps/<slug>` flags these.
-5. Commit the unmodified lift: a single commit so reviewers see "the port" as one changeset.
+5. Commit the lift: a single commit so reviewers see "the port" as one changeset, distinct from the convention rewrite that follows.
 
 ## Step 2 — conform (make it a StreamSnow app)
 
