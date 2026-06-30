@@ -6,6 +6,12 @@ All notable changes to StreamSnow are recorded here. This project follows
 ## [Unreleased]
 
 ### Fixed
+- The scaffolded `branded_metric` now HTML-escapes its label/value/delta before
+  rendering with `unsafe_allow_html=True`, so a database-derived value cannot
+  inject markup into the viewer's page (hardening applied to the template and the
+  example). Dependency-name matching is PEP 503-normalized, so a manifest that
+  spells a package with underscores/dots (`snowflake_snowpark_python`) is no
+  longer reported as missing.
 - `validate-app` now validates the **contents** of the sibling dependency
   manifest, not just its presence: container apps must declare a
   `requires-python` that admits the container runtime's Python (PEP 440

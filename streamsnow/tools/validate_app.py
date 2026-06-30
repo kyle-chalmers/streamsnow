@@ -20,9 +20,14 @@ import yaml
 
 try:  # packaging is a declared dependency; stay defensive if it is somehow absent.
     from packaging.specifiers import InvalidSpecifier, SpecifierSet
+    from packaging.utils import canonicalize_name
 except ImportError:  # pragma: no cover
     SpecifierSet = None  # type: ignore[assignment]
     InvalidSpecifier = Exception  # type: ignore[assignment,misc]
+
+    def canonicalize_name(name: str) -> str:
+        """PEP 503 name normalization fallback (packaging.utils.canonicalize_name)."""
+        return re.sub(r"[-_.]+", "-", name).lower()
 
 from ..config import Config, ConfigError, load_config
 from ..policy import SchemaPolicy
@@ -49,18 +54,27 @@ _KEEP_DOTTED = frozenset({".streamlit"})
 _CONTAINER_ONLY = ("runtime_name", "compute_pool", "external_access_integrations")
 
 # Every Snowflake Streamlit app needs these in its dependency manifest, in either
-# runtime. (Ported from the source monorepo's tools/validate_yaml.REQUIRED_DEPS.)
-_REQUIRED_APP_DEPS = ("streamlit", "snowflake-snowpark-python")
+# runtime. Stored in PEP 503 canonical form so a manifest that spells the package
+# differently but equivalently (underscores, dots, case) still matches.
+# (Ported from the source monorepo's tools/validate_yaml.REQUIRED_DEPS.)
+_REQUIRED_APP_DEPS = (canonicalize_name("streamlit"), canonicalize_name("snowflake-snowpark-python"))
 # Leading distribution name of a dependency spec ("streamlit==1.50.0" -> "streamlit",
-# conda "streamlit=1.50.0" -> "streamlit"). Case-folded by the caller.
+# conda "streamlit=1.50.0" -> "streamlit"). Canonicalized by _dep_name.
 _DEP_NAME_RE = re.compile(r"^([A-Za-z0-9_.\-]+)")
 # Any "X.Y" version token inside a PEP 440 specifier (">=3.11,<3.12" -> 3.11, 3.12).
 _PYVER_RE = re.compile(r"(\d+\.\d+)")
 
 
 def _dep_name(spec: str) -> str | None:
+    """Return the PEP 503 canonical distribution name from a dependency spec.
+
+    "streamlit==1.50.0" / "streamlit>=1.50" -> "streamlit"; the equivalent forms
+    "snowflake_snowpark_python", "Snowflake.Snowpark.Python" all normalize to
+    "snowflake-snowpark-python", so a valid manifest is never reported as missing
+    a required package over a spelling difference.
+    """
     match = _DEP_NAME_RE.match(spec.strip())
-    return match.group(1).lower() if match else None
+    return canonicalize_name(match.group(1)) if match else None
 
 
 def _requires_python_allows(spec: str, version: str) -> bool:

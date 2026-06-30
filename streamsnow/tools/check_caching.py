@@ -94,18 +94,33 @@ def _is_builder_call(value: ast.AST) -> bool:
     return False
 
 
+def _iter_scope(scope: ast.AST):
+    """Yield descendants of ``scope`` without crossing into a nested function,
+    lambda, or class body — those introduce their own variable scope, so an
+    assignment to ``sql`` inside a nested ``def`` must not affect the outer one.
+    """
+    for child in ast.iter_child_nodes(scope):
+        yield child
+        if not isinstance(
+            child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+        ):
+            yield from _iter_scope(child)
+
+
 def _named_locals(fn: ast.AST) -> set[str]:
-    """Local names assigned (within ``fn``) from a named-query source.
+    """Local names assigned (within ``fn``'s own scope) from a named-query source.
 
     Catches the canonical loader idiom ``sql = load_sql("x"); conn.query(sql)`` —
     the SQL is named even though it reaches the fetch call through a variable. A
     name assigned from anything that is NOT a string literal / load_sql /
     render_sql is *poisoned* and excluded, so a runtime-built statement
-    (``sql = sanitize(x)``) never counts as named.
+    (``sql = sanitize(x)``) never counts as named. Nested function/class scopes
+    are not descended into, so an inner rebinding of the same name can't poison
+    the outer loader's local.
     """
     named: set[str] = set()
     poisoned: set[str] = set()
-    for node in ast.walk(fn):
+    for node in _iter_scope(fn):
         if isinstance(node, ast.Assign):
             value = node.value
             is_named = (
