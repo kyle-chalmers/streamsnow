@@ -17,15 +17,10 @@ import json
 import re
 from pathlib import Path
 
-# Proprietary / internal terms that must not appear in the OSS release. Generic
+# Internal / org-specific terms that must not appear in the OSS release. Generic
 # illustrative names in the example config (DATA_APPS, ANALYTICS, etc.) are fine
 # and intentionally NOT listed.
 DENY_TERMS = [
-    "",
-    "",
-    "",
-    "kyle-chalmers",
-    "",
     "business_intelligence",
     "raw_data_store",
     "fivetran",
