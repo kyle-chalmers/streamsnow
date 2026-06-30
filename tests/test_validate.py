@@ -252,6 +252,22 @@ def test_caching_skips_runtime_built_sql_local(tmp_path):
     assert check_caching.scan_paths([ex])["ok"]
 
 
+def test_caching_named_local_not_poisoned_by_nested_scope(tmp_path):
+    # A nested function that rebinds the same name from a non-named source lives
+    # in its own scope and must NOT poison the outer loader's named local — else
+    # a real uncached named loader would slip through.
+    bad = _write(
+        tmp_path / "nest.py",
+        "import streamlit as st\nfrom sql_loader import load_sql\n"
+        "def load_metric():\n    sql = load_sql('m')\n"
+        "    def _fmt(x):\n        sql = str(x)\n        return sql\n"
+        "    return st.connection('snowflake').query(sql)\n",
+    )
+    res = check_caching.scan_paths([bad])
+    assert not res["ok"]
+    assert {f["func"] for f in res["findings"]} == {"load_metric"}
+
+
 def test_caching_walk_skips_dotted_dirs(tmp_path):
     # The file walk must skip .review/, .git/, etc. and only scan real app files.
     _write(
@@ -740,6 +756,19 @@ def test_manifest_container_pyproject_missing_name_fails(tmp_path):
     assert any("name" in p for p in by_name["manifest"]["findings"])
 
 
+def test_manifest_container_pyproject_noncanonical_dep_name_ok(tmp_path):
+    # PEP 503: 'snowflake_snowpark_python' (underscores) is equivalent to the
+    # canonical hyphenated name and must NOT be reported as a missing package.
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "puc-app")
+    (tmp_path / "apps/puc-app/pyproject.toml").write_text(
+        '[project]\nname = "puc-app"\nrequires-python = ">=3.11,<3.12"\n'
+        'dependencies = ["Streamlit==1.50.0", "snowflake_snowpark_python"]\n'
+    )
+    by_name, _ = _manifest(tmp_path / "apps/puc-app")
+    assert by_name["manifest"]["ok"] is True, by_name["manifest"]["findings"]
+
+
 def test_manifest_container_pyproject_invalid_toml_fails(tmp_path):
     cfg = _cfg()
     scaffold(cfg, tmp_path, "ppt-app")
@@ -785,6 +814,20 @@ def test_manifest_warehouse_env_yml_operator_deps_pass(tmp_path):
     )
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/wop-app", policy, cfg)
+    by_name = {c["name"]: c for c in res["checks"]}
+    assert by_name["manifest"]["ok"] is True, by_name["manifest"]["findings"]
+
+
+def test_manifest_warehouse_env_yml_noncanonical_dep_name_ok(tmp_path):
+    # PEP 503 normalization applies to conda deps too.
+    cfg = _warehouse_cfg()
+    scaffold(cfg, tmp_path, "wuc-app")
+    (tmp_path / "apps/wuc-app/environment.yml").write_text(
+        "name: sf_env\nchannels:\n  - snowflake\ndependencies:\n"
+        "  - streamlit=1.50.0\n  - snowflake_snowpark_python\n"
+    )
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    res = validate_app(tmp_path / "apps/wuc-app", policy, cfg)
     by_name = {c["name"]: c for c in res["checks"]}
     assert by_name["manifest"]["ok"] is True, by_name["manifest"]["findings"]
 

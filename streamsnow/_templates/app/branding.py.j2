@@ -4,6 +4,8 @@ Each app ships its own local copy (deploy runtimes can't import a shared module)
 Import locally: ``from branding import apply_branding, branded_metric``.
 """
 
+import html
+
 import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
@@ -39,9 +41,15 @@ def apply_branding() -> None:
 
 
 def branded_metric(label: str, value: str, delta: str | None = None, border_color: str | None = None) -> None:
-    """A metric card with a brand-colored left border."""
+    """A metric card with a brand-colored left border.
+
+    label/value/delta are HTML-escaped before interpolation — the card uses
+    unsafe_allow_html=True, so escaping stops a database-derived value from
+    injecting markup into the viewer's page.
+    """
     color = border_color or BRAND_COLORS["primary"]
-    delta_html = f'<div style="font-size:0.8rem;color:#6b7280;">{delta}</div>' if delta else ""
+    label, value = html.escape(label), html.escape(value)
+    delta_html = f'<div style="font-size:0.8rem;color:#6b7280;">{html.escape(delta)}</div>' if delta else ""
     st.markdown(
         f'<div style="border-left:4px solid {color};padding:0.25rem 0.75rem;margin:0.25rem 0;">'
         f'<div style="font-size:0.8rem;color:#6b7280;">{label}</div>'
