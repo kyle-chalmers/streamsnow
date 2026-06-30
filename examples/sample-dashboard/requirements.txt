@@ -1,0 +1,6 @@
+# Local demo only — run with `streamlit run examples/sample-dashboard/streamlit_app.py`.
+# A real StreamSnow app declares deps in pyproject.toml (container) or
+# environment.yml (warehouse); this file just makes the demo pip-installable.
+streamlit>=1.40
+pandas>=2,<3
+plotly>=5,<6

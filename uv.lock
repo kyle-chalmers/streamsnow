@@ -370,6 +370,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "jinja2" },
+    { name = "packaging" },
     { name = "pyyaml" },
     { name = "rich" },
     { name = "typer" },
@@ -385,6 +386,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "packaging", specifier = ">=21" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pyyaml", specifier = ">=6" },

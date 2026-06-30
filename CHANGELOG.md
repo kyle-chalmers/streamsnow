@@ -3,6 +3,36 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [Unreleased]
+
+### Fixed
+- The scaffolded `branded_metric` now HTML-escapes its label/value/delta before
+  rendering with `unsafe_allow_html=True`, so a database-derived value cannot
+  inject markup into the viewer's page (hardening applied to the template and the
+  example). Dependency-name matching is PEP 503-normalized, so a manifest that
+  spells a package with underscores/dots (`snowflake_snowpark_python`) is no
+  longer reported as missing.
+- `validate-app` now validates the **contents** of the sibling dependency
+  manifest, not just its presence: container apps must declare a
+  `requires-python` that admits the container runtime's Python (PEP 440
+  specifier semantics, so `>=3.10` is accepted and `<3.11` / `==3.10.*` are
+  correctly rejected) plus `streamlit` + `snowflake-snowpark-python`; warehouse
+  apps must declare those deps in `environment.yml` and must not pin `python`.
+- `check caching` now flags two patterns it previously missed: a public loader
+  that hands a **named query through a local variable**
+  (`sql = load_sql("x"); conn.query(sql)`) and one that **delegates** a named
+  query to a private fetch helper (including transitive helper chains). Only the
+  SQL-bearing argument is inspected, so an unrelated string keyword (e.g.
+  `query_tag="adhoc"`) no longer trips the generic-executor guard.
+
+### Added
+- Runnable example app at `examples/sample-dashboard/` — a StreamSnow-shaped
+  Streamlit dashboard wired to deterministic sample data, so it renders with
+  `streamlit run` and **no Snowflake connection**. Mirrors the `streamsnow init`
+  structure (st.navigation entrypoint, branding, `@st.cache_data` loaders).
+- `packaging` runtime dependency (PEP 440 version-specifier parsing in
+  `validate-app`).
+
 ## [0.1.0] - 2026-06-27
 
 Initial release.
