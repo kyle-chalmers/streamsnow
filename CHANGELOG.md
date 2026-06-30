@@ -3,7 +3,7 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
-## [Unreleased]
+## [0.2.0] - 2026-06-30
 
 ### Fixed
 - The scaffolded `branded_metric` now HTML-escapes its label/value/delta before
