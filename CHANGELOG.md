@@ -3,6 +3,26 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [Unreleased]
+
+### Fixed
+- `validate-app` now validates the **contents** of the sibling dependency
+  manifest, not just its presence: container apps must declare a
+  `requires-python` that admits the container runtime's Python (PEP 440
+  specifier semantics, so `>=3.10` is accepted and `<3.11` / `==3.10.*` are
+  correctly rejected) plus `streamlit` + `snowflake-snowpark-python`; warehouse
+  apps must declare those deps in `environment.yml` and must not pin `python`.
+- `check caching` now flags two patterns it previously missed: a public loader
+  that hands a **named query through a local variable**
+  (`sql = load_sql("x"); conn.query(sql)`) and one that **delegates** a named
+  query to a private fetch helper (including transitive helper chains). Only the
+  SQL-bearing argument is inspected, so an unrelated string keyword (e.g.
+  `query_tag="adhoc"`) no longer trips the generic-executor guard.
+
+### Added
+- `packaging` runtime dependency (PEP 440 version-specifier parsing in
+  `validate-app`).
+
 ## [0.1.0] - 2026-06-27
 
 Initial release.

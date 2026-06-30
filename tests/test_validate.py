@@ -153,6 +153,105 @@ def test_caching_skips_generic_sql_executor(tmp_path):
     assert check_caching.scan_paths([ex])["ok"]
 
 
+def test_caching_flags_delegated_named_fetch_to_private_helper(tmp_path):
+    # A public loader that hands a NAMED query to a private fetch helper must be
+    # cached. The helper is private (never flagged on its own), so without the
+    # delegation rule the cache requirement vanishes into the gap between them.
+    bad = _write(
+        tmp_path / "deld.py",
+        "import streamlit as st\nfrom sql_loader import load_sql\n"
+        "def _run_query(sql):\n    return st.connection('snowflake').query(sql)\n"
+        "def load_metric():\n    return _run_query(load_sql('example_metric'))\n",
+    )
+    res = check_caching.scan_paths([bad])
+    assert not res["ok"]
+    # The PUBLIC caller is flagged — never the private helper.
+    assert {f["func"] for f in res["findings"]} == {"load_metric"}
+
+
+def test_caching_clean_when_delegated_loader_is_cached(tmp_path):
+    ok = _write(
+        tmp_path / "delok.py",
+        "import streamlit as st\n"
+        "def _run_query(sql):\n    return st.connection('snowflake').query(sql)\n"
+        "@st.cache_data(ttl=1800)\ndef load_metric():\n    return _run_query('SELECT 1')\n",
+    )
+    assert check_caching.scan_paths([ok])["ok"]
+
+
+def test_caching_skips_delegated_runtime_value(tmp_path):
+    # Handing a private fetch helper a runtime value (a parameter), not a named
+    # query, is the generic-executor pattern: the cache belongs on whoever builds
+    # the named query, so the delegating function is not flagged.
+    ex = _write(
+        tmp_path / "delrt.py",
+        "import streamlit as st\n"
+        "def _run_query(sql):\n    return st.connection('snowflake').query(sql)\n"
+        "def run(statement):\n    return _run_query(statement)\n",
+    )
+    assert check_caching.scan_paths([ex])["ok"]
+
+
+def test_caching_skips_delegated_string_kwarg_that_is_not_sql(tmp_path):
+    # A generic executor that tags its delegated call with an unrelated string
+    # kwarg (query_tag="adhoc") must NOT be mistaken for a named-query load — only
+    # the SQL-bearing argument counts.
+    ex = _write(
+        tmp_path / "tag.py",
+        "import streamlit as st\n"
+        "def _run_query(sql, query_tag=None):\n"
+        "    return st.connection('snowflake').query(sql)\n"
+        "def run(statement):\n    return _run_query(statement, query_tag='adhoc')\n",
+    )
+    assert check_caching.scan_paths([ex])["ok"]
+
+
+def test_caching_flags_nested_delegation_chain(tmp_path):
+    # public -> _run_query -> _execute (which calls .query). The intermediate
+    # helper must be recognized transitively so the public loader is flagged.
+    bad = _write(
+        tmp_path / "chain.py",
+        "import streamlit as st\nfrom sql_loader import load_sql\n"
+        "def _execute(sql):\n    return st.connection('snowflake').query(sql).to_pandas()\n"
+        "def _run_query(sql):\n    return _execute(sql)\n"
+        "def load_products():\n    return _run_query(load_sql('products'))\n",
+    )
+    res = check_caching.scan_paths([bad])
+    assert not res["ok"]
+    assert {f["func"] for f in res["findings"]} == {"load_products"}
+
+
+def test_caching_flags_named_query_via_local_variable(tmp_path):
+    # The canonical loader idiom: sql assigned from load_sql(), then fetched.
+    # Uncached -> must be flagged even though the .query() arg is a variable.
+    bad = _write(
+        tmp_path / "locvar.py",
+        "import streamlit as st\nfrom sql_loader import load_sql\n"
+        "def load_metric():\n    sql = load_sql('m')\n"
+        "    return st.connection('snowflake').query(sql)\n",
+    )
+    assert not check_caching.scan_paths([bad])["ok"]
+    ok = _write(
+        tmp_path / "locvarok.py",
+        "import streamlit as st\nfrom sql_loader import load_sql\n"
+        "@st.cache_data(ttl=1800)\ndef load_metric():\n    sql = load_sql('m')\n"
+        "    return st.connection('snowflake').query(sql)\n",
+    )
+    assert check_caching.scan_paths([ok])["ok"]
+
+
+def test_caching_skips_runtime_built_sql_local(tmp_path):
+    # A local assigned from a non-named source (sanitize) is a runtime statement;
+    # the generic-executor guarantee must hold even with local-variable taint.
+    ex = _write(
+        tmp_path / "rtloc.py",
+        "import streamlit as st\ndef _sanitize(x):\n    return x\n"
+        "def run(user_input):\n    sql = _sanitize(user_input)\n"
+        "    return st.connection('snowflake').query(sql)\n",
+    )
+    assert check_caching.scan_paths([ex])["ok"]
+
+
 def test_caching_walk_skips_dotted_dirs(tmp_path):
     # The file walk must skip .review/, .git/, etc. and only scan real app files.
     _write(
@@ -235,7 +334,7 @@ def test_security_plus_concat_sql_flagged_p4(tmp_path):
 
 
 def test_noqa_only_waives_dynamic_sql(tmp_path):
-    # `# noqa: dynamic-sql` is the ONE sanctioned waiver (server-controlled
+    # The `noqa: dynamic-sql` pragma is the ONE sanctioned waiver (server-controlled
     # metadata commands). It must NOT be generalizable to silence egress /
     # code-exec / write-sql — those would be self-service security bypasses.
     ok = _write(
@@ -562,6 +661,132 @@ def test_manifest_query_warehouse_must_be_allowed(tmp_path):
     by_name, _ = _manifest(tmp_path / "apps/qw-app")
     assert by_name["manifest"]["ok"] is False
     assert any("query_warehouse" in p for p in by_name["manifest"]["findings"])
+
+
+def _warehouse_cfg() -> Config:
+    """Example config flipped to warehouse runtime (drops container-only fields)."""
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data["runtime"] = "warehouse"
+    data["snowflake"]["objects"] = dict(data["snowflake"]["objects"])
+    data["snowflake"]["objects"]["compute_pool"] = ""
+    data["snowflake"]["objects"]["external_access_integration"] = ""
+    return Config.from_dict(data)
+
+
+def test_manifest_container_pyproject_missing_required_dep_fails(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "pp-app")
+    # Valid TOML, valid python, but missing snowflake-snowpark-python.
+    (tmp_path / "apps/pp-app/pyproject.toml").write_text(
+        '[project]\nname = "pp-app"\nrequires-python = ">=3.11,<3.12"\n'
+        'dependencies = ["streamlit==1.50.0"]\n'
+    )
+    by_name, res = _manifest(tmp_path / "apps/pp-app")
+    assert by_name["manifest"]["ok"] is False
+    assert any("snowflake-snowpark-python" in p for p in by_name["manifest"]["findings"])
+    assert res["ok"] is False
+
+
+def test_manifest_container_pyproject_wrong_python_fails(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "ppy-app")
+    # Pinned to 3.10 only — does not allow the container's 3.11.
+    (tmp_path / "apps/ppy-app/pyproject.toml").write_text(
+        '[project]\nname = "ppy-app"\nrequires-python = "==3.10.*"\n'
+        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n'
+    )
+    by_name, _ = _manifest(tmp_path / "apps/ppy-app")
+    assert by_name["manifest"]["ok"] is False
+    assert any("requires-python" in p for p in by_name["manifest"]["findings"])
+
+
+def test_manifest_container_pyproject_broad_python_passes(tmp_path):
+    # PEP 440 semantics: '>=3.10' ALLOWS 3.11, so it must NOT be flagged. The old
+    # naive token match wrongly rejected it (3.11 token absent from the string).
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "pbroad-app")
+    (tmp_path / "apps/pbroad-app/pyproject.toml").write_text(
+        '[project]\nname = "pbroad-app"\nrequires-python = ">=3.10"\n'
+        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n'
+    )
+    by_name, _ = _manifest(tmp_path / "apps/pbroad-app")
+    assert by_name["manifest"]["ok"] is True, by_name["manifest"]["findings"]
+
+
+def test_manifest_container_pyproject_excludes_311_fails(tmp_path):
+    # '>=3.10,<3.11' contains the token '3.11' but does NOT allow Python 3.11. The
+    # old naive token match wrongly passed it; PEP 440 semantics catch it.
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "pex-app")
+    (tmp_path / "apps/pex-app/pyproject.toml").write_text(
+        '[project]\nname = "pex-app"\nrequires-python = ">=3.10,<3.11"\n'
+        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n'
+    )
+    by_name, _ = _manifest(tmp_path / "apps/pex-app")
+    assert by_name["manifest"]["ok"] is False
+    assert any("requires-python" in p for p in by_name["manifest"]["findings"])
+
+
+def test_manifest_container_pyproject_missing_name_fails(tmp_path):
+    # Source parity: [project].name is required.
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "pnm-app")
+    (tmp_path / "apps/pnm-app/pyproject.toml").write_text(
+        '[project]\nrequires-python = ">=3.11,<3.12"\n'
+        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n'
+    )
+    by_name, _ = _manifest(tmp_path / "apps/pnm-app")
+    assert by_name["manifest"]["ok"] is False
+    assert any("name" in p for p in by_name["manifest"]["findings"])
+
+
+def test_manifest_container_pyproject_invalid_toml_fails(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "ppt-app")
+    (tmp_path / "apps/ppt-app/pyproject.toml").write_text("[project\nname = nope\n")
+    by_name, _ = _manifest(tmp_path / "apps/ppt-app")
+    assert by_name["manifest"]["ok"] is False
+    assert any("invalid TOML" in p for p in by_name["manifest"]["findings"])
+
+
+def test_validate_app_passes_on_warehouse_scaffold(tmp_path):
+    # The warehouse scaffold's environment.yml must satisfy the content validation.
+    cfg = _warehouse_cfg()
+    scaffold(cfg, tmp_path, "wh-ok-app")
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    res = validate_app(tmp_path / "apps/wh-ok-app", policy, cfg)
+    assert res["ok"], res["checks"]
+
+
+def test_manifest_warehouse_env_yml_missing_dep_fails(tmp_path):
+    cfg = _warehouse_cfg()
+    scaffold(cfg, tmp_path, "wdep-app")
+    env = tmp_path / "apps/wdep-app/environment.yml"
+    edata = yaml.safe_load(env.read_text())
+    edata["dependencies"] = [
+        d for d in edata["dependencies"] if not str(d).startswith("snowflake-snowpark-python")
+    ]
+    env.write_text(yaml.safe_dump(edata))
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    res = validate_app(tmp_path / "apps/wdep-app", policy, cfg)
+    by_name = {c["name"]: c for c in res["checks"]}
+    assert by_name["manifest"]["ok"] is False
+    assert any("snowflake-snowpark-python" in p for p in by_name["manifest"]["findings"])
+
+
+def test_manifest_warehouse_env_yml_operator_deps_pass(tmp_path):
+    # Conda deps with operators ('streamlit>=1.50') must be recognized — a naive
+    # split on '=' reads 'streamlit>' and would wrongly report streamlit missing.
+    cfg = _warehouse_cfg()
+    scaffold(cfg, tmp_path, "wop-app")
+    (tmp_path / "apps/wop-app/environment.yml").write_text(
+        "name: sf_env\nchannels:\n  - snowflake\ndependencies:\n"
+        "  - streamlit>=1.50\n  - snowflake-snowpark-python\n  - pandas\n"
+    )
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    res = validate_app(tmp_path / "apps/wop-app", policy, cfg)
+    by_name = {c["name"]: c for c in res["checks"]}
+    assert by_name["manifest"]["ok"] is True, by_name["manifest"]["findings"]
 
 
 def test_format_finding_renders_dicts_readably():
