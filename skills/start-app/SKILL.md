@@ -72,7 +72,7 @@ On `--resume` (or noticing §11 already exists), read `Current phase` and jump t
 - **Never auto-merge by default.** Any auto-merge option on `/ship-app` is opt-in and respects branch protection.
 - **Never overwrite state.** §11 is append-mostly — only mutate the row that changed; preserve the Sessions log. If §11 is malformed, pause and ask before rewriting.
 - **Don't claim a phase succeeded without its structural check.** Each step verifies (file exists / gate passes / PR opened). If the check fails, stop.
-- **Runs the CLI, hands off the sub-skills.** This skill runs the deterministic `streamsnow` CLI steps (`doctor`, `new`, `preview`, `validate-app`) and read-only verification (`ls`, `test`, `grep`) itself. It does **not** silently invoke the interactive sub-skills — `/refine-requirements`, `/add-page`, `/review-app`, `/apply-review`, `/ship-app` — it tells the user to run those, keeping a human in the loop at every judgment point and checkpoint.
+- **Runs the CLI, hands off the interactive steps.** This skill runs the deterministic `streamsnow` CLI steps (`doctor`, `new`, `validate-app`) and read-only verification (`ls`, `test`, `grep`) itself. It does **not** run the interactive steps — `/refine-requirements`, `/add-page`, the preview (`/preview-app` / `streamsnow preview`, which the user opens in a browser for CP2), `/review-app`, `/apply-review`, `/ship-app` — it tells the user to run those, keeping a human in the loop at every judgment point and checkpoint.
 
 ## Out of scope
 
