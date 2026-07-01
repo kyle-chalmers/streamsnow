@@ -34,10 +34,10 @@ Run the deterministic PASS/FAIL gate on one app and report exactly what fails an
 
 ## Detect runtime mode first (it changes "required files")
 
-Before reasoning about file/layout failures, determine the app's runtime from its `snowflake.objects` / app manifest in config:
+Before reasoning about file/layout failures, determine the app's runtime the way the gate does — from the app's own `apps/<slug>/snowflake.yml` (the config's top-level `runtime` is only the fallback default):
 
-- **Container runtime** — the manifest declares a container runtime. Its dependency manifest is the project file the scaffold generated for container apps.
-- **Warehouse runtime** — no container runtime declared. Its dependency manifest is the warehouse environment file.
+- **Container runtime** — `snowflake.yml` declares a `runtime_name`. Its dependency manifest is `pyproject.toml` (PyPI deps).
+- **Warehouse runtime** — no `runtime_name` in `snowflake.yml`. Its dependency manifest is `environment.yml` (Snowflake Anaconda channel).
 
 The two modes expect *different* dependency manifests, and the file check fails if the wrong one is present (or both). If a file/layout check fails, first confirm you're checking against the mode the manifest actually declares — a common false alarm is judging a container app against warehouse expectations. When unsure how a fresh app should be laid out, compare against a freshly scaffolded one from /new-app or /start-app rather than guessing.
 
