@@ -47,13 +47,13 @@ For each governance-legal object:
 
 ## Output
 
-11. Emit findings in the **same Markdown schema as /review-app** so /apply-review and /auto-review-app consume them unchanged. One bullet per finding, severity-prefixed `BLOCK` / `FLAG` / `NICE`, each citing `apps/<slug>/<file>` (or the fully-qualified object) plus a one-line fix. Group by severity. Write the report under `apps/<slug>/.review/` (gitignored) and surface a short summary.
+11. Emit findings in the **same Markdown schema as /review-app** so /apply-review and /auto-review-app consume them unchanged. One bullet per finding, severity-prefixed `BLOCK` / `FLAG` / `NICE-TO-HAVE`, each citing `apps/<slug>/<file>` (or the fully-qualified object) plus a one-line fix. Group by severity. Write the report under `apps/<slug>/.review/` (gitignored) and surface a short summary.
 
 ### Severity rubric
 
 - **BLOCK** — a surface-vs-source mismatch that produces *wrong numbers* or a runtime error: a selected/filtered/joined column the object doesn't emit, a join key that doesn't exist, or a missing governance-required filter that materially changes counts. Also: any reference to a `schema_deny` object.
 - **FLAG** — measurable cost or coordination risk: deep view chain (≥3), ignored soft-delete column, pruning trap, missing date/partition filter, an object several apps read (shared-materialization opportunity), or a heavy recomputed aggregation.
-- **NICE** — stylistic or cross-cutting: `SELECT *` in a view body, DDL hygiene, a single-app object with healthy shape — note only.
+- **NICE-TO-HAVE** — stylistic or cross-cutting: `SELECT *` in a view body, DDL hygiene, a single-app object with healthy shape — note only.
 
 ## Gotchas & edge cases
 
@@ -69,7 +69,7 @@ For each governance-legal object:
 - **`snow connection list` / `streamsnow doctor` shows no connection** → `streamsnow configure` to set `snowflake.connection_name`, then `snow connection add`. Re-run preflight.
 - **A query you expected to be legal is blocked by `check schema-refs`** → it resolves to `governance.schema_deny`. That's the intended block; surface it and stop tracing that object. If the schema *should* be allowed, that's a `streamsnow.config.yaml` governance change, not something this skill works around.
 - **`INFORMATION_SCHEMA.COLUMNS` returns 0 rows for an object the code references** → wrong database/schema casing, an object that was renamed/dropped, or the role can't see it. Confirm with a `SELECT 1 FROM <fqn> WHERE 1=0` resolve check before concluding it's missing.
-- **Findings don't flow into /apply-review** → the schema drifted. Match /review-app exactly: `BLOCK`/`FLAG`/`NICE` prefixes, one bullet per finding, a real `apps/<slug>/<file>` or object citation, and an explicit column list on any `SELECT *` fix.
+- **Findings don't flow into /apply-review** → the schema drifted. Match /review-app exactly: `BLOCK`/`FLAG`/`NICE-TO-HAVE` prefixes, one bullet per finding, a real `apps/<slug>/<file>` or object citation, and an explicit column list on any `SELECT *` fix.
 
 ## Hand-offs
 
@@ -80,4 +80,4 @@ For each governance-legal object:
 
 ## Done when
 
-Every governance-legal object the app queries has been traced upstream/downstream and column-verified against live Snowflake via bounded read-only `snow sql`, denied-schema references are flagged as BLOCKs without being queried, and the findings are written in the BLOCK/FLAG/NICE schema that /apply-review consumes.
+Every governance-legal object the app queries has been traced upstream/downstream and column-verified against live Snowflake via bounded read-only `snow sql`, denied-schema references are flagged as BLOCKs without being queried, and the findings are written in the BLOCK/FLAG/NICE-TO-HAVE schema that /apply-review consumes.

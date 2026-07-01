@@ -47,7 +47,7 @@ Both runtimes come from `snowflake.objects`/`snowflake.roles` in `streamsnow.con
 The loop ends on whichever comes first:
 
 - **Clean** — a full cycle produces zero auto-fixable findings. The healthy outcome.
-- **Plateau** — only judgment-required / NICE items remain (nothing mechanical left to apply). Hand the punch list to the user.
+- **Plateau** — only judgment-required / NICE-TO-HAVE items remain (nothing mechanical left to apply). Hand the punch list to the user.
 - **No convergence** — the same finding keeps reappearing after a "fix." Stop, do not keep cycling, and surface that finding for human eyes (the fix recipe is likely wrong for this case, or the finding is really a Bucket B in disguise).
 
 ## Gotchas and edge cases

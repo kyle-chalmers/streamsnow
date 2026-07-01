@@ -64,7 +64,7 @@ Open with a comment naming the source query and its upstream object(s). Then thr
 ## Hand-offs
 
 - /review-app and /deep-dive-data run this bootstrap automatically when they detect a gap; invoke /sql-review directly to fill the gap in isolation.
-- Lineage findings here feed /deep-dive-data's live-DB tracing — the qualitative judgment lives there, not in this generator. If a probe surfaces a real correctness concern, route it to /deep-dive-data, which emits `BLOCK`/`FLAG`/`NICE` findings that /apply-review and /auto-review-app consume.
+- Lineage findings here feed /deep-dive-data's live-DB tracing — the qualitative judgment lives there, not in this generator. If a probe surfaces a real correctness concern, route it to /deep-dive-data, which emits `BLOCK`/`FLAG`/`NICE-TO-HAVE` findings that /apply-review and /auto-review-app consume.
 - /validate-app (`streamsnow validate-app <slug>`) remains the only deterministic ship gate; a populated `sql_review/` supports a review but does not replace that gate.
 
 ## Done when

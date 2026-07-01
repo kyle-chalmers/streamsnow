@@ -1,6 +1,6 @@
 ---
 name: apply-review
-description: Apply the latest /review-app or /deep-dive-data findings to a StreamSnow app — auto-fix mechanical BLOCK/FLAG findings as atomic per-finding commits and walk judgment-required + NICE items interactively. Use when the user says "apply the review", "fix the findings", "auto-fix review", or after /review-app returns BLOCK/FLAG findings.
+description: Apply the latest /review-app or /deep-dive-data findings to a StreamSnow app — auto-fix mechanical BLOCK/FLAG findings as atomic per-finding commits and walk judgment-required + NICE-TO-HAVE items interactively. Use when the user says "apply the review", "fix the findings", "auto-fix review", or after /review-app returns BLOCK/FLAG findings.
 ---
 
 # apply-review
@@ -11,7 +11,7 @@ Turn the latest qualitative review findings for an app into atomic, per-finding 
 
 ## Buckets
 
-Every BLOCK / FLAG / NICE finding sorts into exactly one bucket. The bucket decides whether you touch code without asking.
+Every BLOCK / FLAG / NICE-TO-HAVE finding sorts into exactly one bucket. The bucket decides whether you touch code without asking.
 
 - **A — mechanical:** unambiguous, auto-applied without asking. The fix is invariant across apps and a regex/AST-level edit suffices. Examples: missing `@st.cache_data(ttl=…)` on a data-fetch function; `SELECT *` → named columns **when the column list is inlined in the finding**; a denied-schema reference swapped to the allowed `REPORTING`/`ANALYTICS` equivalent named in the finding; missing `use_container_width=True`; Altair *import* → Plotly import; the `:N IS NULL OR` bind-predicate trap rewritten to the parameterized form.
 - **B — judgment:** needs a human call. Examples: which TTL value (300 vs 1800 vs 86400); which view/table to read from; a wide-view → narrow-view join rewrite; an Altair `alt.Chart(...)` spec translated to Plotly; wrapping a multi-widget page in `st.form`; container thread-safety guards. Walked interactively, one at a time.
