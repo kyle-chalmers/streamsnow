@@ -3,6 +3,19 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [Unreleased]
+
+### Added
+- `docs/distribution.md` — how StreamSnow ships (PyPI CLI + Claude Code plugin)
+  and the recorded decision **not** to add a separate `cp -r` copyable kit
+  (`streamsnow init` is the config-driven "better `cp -r`").
+
+### Changed
+- Thickened the 14 Claude Code plugin skills toward the source's depth — concrete
+  steps, runtime/decision guidance, gotchas, per-check lint commands,
+  troubleshooting, and cross-references — kept generic and config-driven. (Plugin
+  content served from the repo; not part of the PyPI wheel.)
+
 ## [0.2.0] - 2026-06-30
 
 ### Fixed

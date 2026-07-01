@@ -120,6 +120,8 @@ code — one implementation, many consumers.
   deploy sources.
 - **[Deploy setup](docs/deploy-setup.md)** — the one-time Snowflake objects and
   CI secrets the pipeline needs.
+- **[Distribution](docs/distribution.md)** — how StreamSnow ships (PyPI CLI +
+  plugin) and why there's no separate copy-paste kit.
 
 ## License
 
