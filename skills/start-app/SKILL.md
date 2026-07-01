@@ -42,7 +42,7 @@ On every state-changing transition, update §11 surgically (via `Edit`, not a fu
 - Append a `Sessions` line (audit trail — never rewrite past entries).
 - Refresh the `Resume hint` with the next concrete command.
 
-On `--resume` (or noticing §11 already exists), read `Current phase` and jump to the matching step: `scaffold`→CP1, `build`→the `/add-page` loop at the first pending page, `preview`→CP2, `verify`→Step 8, `ship`→Step 10, `done`→report already shipped. If §11 is missing on an older spec, append it with `Current phase: unknown` and ask the user where they are.
+On `--resume` (or noticing §11 already exists), read `Current phase` and jump to the matching step: `spec`→Step 2 (requirements), `scaffold`→CP1, `build`→the `/add-page` loop at the first pending page, `preview`→CP2, `verify`→Step 8, `ship`→Step 10, `done`→report already shipped. If §11 is missing on an older spec, append it with `Current phase: unknown` and ask the user where they are.
 
 ## Decision guidance
 
