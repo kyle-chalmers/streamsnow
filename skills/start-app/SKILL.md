@@ -5,13 +5,13 @@ description: The front door — build a Streamlit-in-Snowflake app from idea to 
 
 # /start-app
 
-One command owns the app lifecycle: **spec → scaffold → build → preview → check → ship**. It reads
-`apps/<slug>/REQUIREMENTS.md` §11 to resume an interrupted build, tells the user the exact next
-command at each judgment point, and never skips a checkpoint.
+One command owns the app lifecycle: **spec → scaffold → build → preview → verify → ship → done**.
+It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume an interrupted build, tells the user the exact
+next command at each judgment point, and never skips a checkpoint.
 
-> **Wizard, not a runner.** This skill runs the deterministic `streamsnow` CLI steps and read-only
-> checks itself; for interactive steps (preview click-through, review, ship) it names the exact
-> command, ends its turn, and waits. The win is "less to remember", not "less to type".
+> **Wizard, not a runner.** It runs the deterministic `streamsnow` CLI steps and read-only checks
+> itself; for interactive steps (preview click-through, review, ship) it names the exact command,
+> ends its turn, and waits. The win is "less to remember", not "less to type".
 
 ## Modes
 
@@ -60,22 +60,21 @@ command at each judgment point, and never skips a checkpoint.
 9. Run `streamsnow validate-app <slug>` — the pass/fail check that must be clean before shipping.
    Fix and re-run on any FAIL (`/validate-app` explains each one).
 10. Tell the user to run `/review-app <slug>` (add `--auto` for the hands-off fix loop) until clean.
-11. **CP3:** validation passes, review is clean, user is ready → hand off to `/ship-app <slug>`.
-    A first deploy may need one-time admin DDL from `streamsnow deploy-setup` — surface it, don't run it.
+11. **CP3:** validation passes, review is clean, user is ready → hand off to `/ship-app <slug>`
+    (a first deploy may need one-time admin DDL from `streamsnow deploy-setup` — surface, don't run).
 
 ## State — §11 Build Progress
 
-§11 lives inside `apps/<slug>/REQUIREMENTS.md`: a `Current phase` line
-(`spec → scaffold → build → preview → verify → ship → done`) plus an append-only `Sessions` log
-whose last line always names the next command. Update it via `Edit` on every phase transition —
-never rewrite past session lines. On resume, read `Current phase` and jump to the matching phase.
+§11 lives inside `apps/<slug>/REQUIREMENTS.md`: a `Current phase` line (the lifecycle above) plus
+an append-only `Sessions` log whose last line always names the next command. Update it via `Edit`
+on every phase transition — never rewrite past session lines. On resume, read `Current phase` and
+jump to the matching phase; `done` or `in-production (backfilled)` means the app is live — new
+§4 pages route to the build phase, anything else to `/feedback-app` or `/review-app`.
 
 ## Out of scope
 
-Porting an external app → `/migrate-app`. Acting on user feedback about a live app →
-`/feedback-app`. Review depth beyond the gate → `/review-app`; live lineage → `/audit-lineage`.
+Porting an external app → `/migrate-app`; feedback on a live app → `/feedback-app`; review depth → `/review-app`; live lineage → `/audit-lineage`.
 
 ## Done when
 
-`/ship-app` opened the PR, `streamsnow validate-app <slug>` passes, review is clean, and §11 reads
-`Current phase: done`.
+The PR is open, `streamsnow validate-app <slug>` passes, and §11 reads `Current phase: done`.

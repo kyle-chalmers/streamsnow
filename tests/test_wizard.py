@@ -52,6 +52,42 @@ def test_wizard_prefill_survives_for_unasked_values(monkeypatch):
     assert cfg_dict["governance"]["schema_deny"] == ["SECRET_SCHEMA"]
 
 
+def test_wizard_preserves_hand_edited_keys_it_never_asks_about(monkeypatch):
+    # Keys Config supports but the wizard doesn't build — a rewrite must not drop them.
+    prefill = {
+        "project": {"agents_md_char_limit": 20000},
+        "snowflake": {
+            "objects": {"stage_name": "MY_STAGE", "container_python": "3.11"},
+        },
+        "governance": {"read_exceptions": ["ANALYTICS_DB.RAW.SANCTIONED_VIEW"]},
+    }
+    cfg_dict, _ = _run_wizard(monkeypatch, prefill=prefill)
+    assert cfg_dict["project"]["agents_md_char_limit"] == 20000
+    assert cfg_dict["snowflake"]["objects"]["stage_name"] == "MY_STAGE"
+    assert cfg_dict["snowflake"]["objects"]["container_python"] == "3.11"
+    assert cfg_dict["governance"]["read_exceptions"] == ["ANALYTICS_DB.RAW.SANCTIONED_VIEW"]
+    text = _render_config_yaml(cfg_dict)
+    assert yaml.safe_load(text) == cfg_dict
+    Config.from_dict(cfg_dict)
+
+
+def test_rendered_yaml_survives_values_longer_than_yaml_wrap_width(monkeypatch):
+    # PyYAML wraps flow lists at ~80 cols by default; the renderer must not truncate.
+    prefill = {
+        "snowflake": {
+            "objects": {"allowed_warehouses": [f"REPORTING_WAREHOUSE_{i:02d}" for i in range(8)]}
+        }
+    }
+    cfg_dict, _ = _run_wizard(monkeypatch, prefill=prefill)
+    text = _render_config_yaml(cfg_dict)
+    assert yaml.safe_load(text) == cfg_dict
+
+
+def test_slugify_directory_starting_with_digits(monkeypatch):
+    cfg_dict, _ = _run_wizard(monkeypatch, directory=Path("2024-reports"))
+    assert cfg_dict["project"]["slug"] == "reports"
+
+
 def test_rendered_yaml_round_trips_and_carries_comments(monkeypatch):
     cfg_dict, _ = _run_wizard(monkeypatch)
     text = _render_config_yaml(cfg_dict)

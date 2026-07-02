@@ -106,7 +106,24 @@ def _prompt_choice(label: str, choices: tuple[str, ...], default: str) -> str:
 def _slugify(name: str) -> str:
     """Kebab-case a directory name into a usable project slug."""
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    slug = re.sub(r"^[^a-z]+", "", slug)  # slugs must start with a letter ("2024-reports")
     return slug if _SLUG_RE.match(slug) else "my-dashboards"
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """New dict: ``override`` wins, nested dicts merge, ``base``-only keys survive.
+
+    This is what makes re-running ``configure`` an edit rather than a restart:
+    hand-edited keys the wizard doesn't ask about (``read_exceptions``,
+    ``stage_name``, ``container_python``, …) carry into the rewritten file.
+    """
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -> dict:
@@ -116,8 +133,9 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
     the governed database, the allowed schemas, and the deploy source.
     Everything else is written as a commented default in the config file (the
     file is the editing surface). When ``prefill`` is supplied (an existing
-    config being updated), its values become the defaults everywhere — so
-    re-running ``configure`` is an edit, not a restart.
+    config being updated), its values become the defaults everywhere — and the
+    result is deep-merged over the prefill so hand-edited keys the wizard
+    doesn't ask about survive the rewrite.
     """
     console.print(
         "[bold]StreamSnow setup[/] — 5 questions (Enter accepts the default);\n"
@@ -174,7 +192,7 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
             prefill, "deploy.secret_name", f"{app_db}.{app_schema}.GITHUB_PAT_SECRET"
         )
         deploy["github_auth_mode"] = _pf(prefill, "deploy.github_auth_mode", GITHUB_AUTH_MODES[0])
-    return {
+    answers = {
         "schema_version": 1,
         "runtime": runtime,
         "project": {"name": name, "slug": slug},
@@ -194,6 +212,7 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
         },
         "deploy": deploy,
     }
+    return _deep_merge(prefill or {}, answers)
 
 
 # Inline "when to change this" comments for the values the wizard defaults
@@ -217,17 +236,20 @@ _DEFAULT_COMMENTS: dict[str, str] = {
     "deploy.git_branch": "branch the deploy tracks",
     "deploy.api_integration_name": "TODO: confirm before first deploy",
     "deploy.secret_name": "TODO: confirm before first deploy",
-    "deploy.github_auth_mode": "pat or installation",
+    "deploy.github_auth_mode": "pat or github-app",
 }
 
 
 def _yaml_scalar(value: Any) -> str:
     """One YAML-safe scalar/flow value on a single line.
 
-    ``safe_dump`` of a bare scalar appends a ``...`` document-end marker on a
-    second line — keep only the value line.
+    ``width=inf`` stops PyYAML line-wrapping long flow lists (wrapping would
+    truncate at the ``partition``); ``safe_dump`` of a bare scalar appends a
+    ``...`` document-end marker on a second line — keep only the value line.
     """
-    return yaml.safe_dump(value, default_flow_style=True, sort_keys=False).partition("\n")[0]
+    return yaml.safe_dump(
+        value, default_flow_style=True, sort_keys=False, allow_unicode=True, width=float("inf")
+    ).partition("\n")[0]
 
 
 def _render_config_yaml(cfg_dict: dict) -> str:
@@ -253,7 +275,11 @@ def _render_config_yaml(cfg_dict: dict) -> str:
         return lines
 
     text = "\n".join(walk(cfg_dict, "", 0)) + "\n"
-    if yaml.safe_load(text) != cfg_dict:  # pragma: no cover - defensive
+    try:
+        round_trip = yaml.safe_load(text)
+    except yaml.YAMLError:  # pragma: no cover - defensive
+        round_trip = None
+    if round_trip != cfg_dict:  # pragma: no cover - defensive
         return yaml.safe_dump(cfg_dict, sort_keys=False)
     return text
 

@@ -51,7 +51,7 @@ All reviewers are read-only: they critique source, they do not edit it. Any live
 [SEVERITY] (dimension) finding — file:line — one-line fix
 ```
 
-`SEVERITY` ∈ `BLOCK | FLAG | NICE-TO-HAVE`. Each line carries an attribution tag the merge step adds: `(Claude)`, `(Agy)`, `(Codex)`.
+`SEVERITY` ∈ `BLOCK | FLAG | NICE-TO-HAVE` — the internal names for what user-facing summaries print as critical / should-fix / nice-to-have. Each line carries an attribution tag the merge step adds: `(Claude)`, `(Agy)`, `(Codex)`.
 
 ## Merge + consensus
 

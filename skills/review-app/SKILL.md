@@ -39,8 +39,8 @@ can't catch.
 6. **Fan out the 5 reviewers in parallel** (single message, multiple Task calls) — SQL, data, UI,
    runtime, docs — each with a self-contained brief per [dimensions.md](dimensions.md), the runtime
    mode, governance excerpts, a ≤600-word cap, `[file:line]` citations, and a severity on every
-   finding. Optional cross-agent reviewers ride along only when configured — see
-   [_shared/cross-agent-review.md](../_shared/cross-agent-review.md).
+   finding. Optional cross-agent reviewers ride along only when configured (force-skip with
+   `--no-cross-agent`) — see [_shared/cross-agent-review.md](../_shared/cross-agent-review.md).
 7. **Merge:** collapse duplicate citations (`also flagged by …`), sort by severity. Severity means:
    **critical** (BLOCK) — a violated governance rule or confirmed breakage; **should-fix** (FLAG) —
    real but not ship-stopping; **nice-to-have** — polish. When unsure, downgrade — over-blocking

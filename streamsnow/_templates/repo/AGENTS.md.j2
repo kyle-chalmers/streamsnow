@@ -20,7 +20,7 @@ The `check schema-refs` guardrail (pre-commit + the generated CI workflow) enfor
 {% if runtime == 'container' %}
 Container runtime (`{{ runtime_name }}`, Python {{ container_python }}). Dependencies in `pyproject.toml` (PyPI via the `{{ external_access_integration }}` external access integration). Connect with `st.connection("snowflake")` — works identically locally and deployed.
 {% else %}
-Warehouse runtime (legacy). Dependencies in `environment.yml` (Snowflake Anaconda channel — **never pin `python`**). Connect with `get_active_session()` wrapped in a try/except `st.connection` fallback for local dev.
+Warehouse runtime. Dependencies in `environment.yml` (Snowflake Anaconda channel — **never pin `python`**). Connect with `get_active_session()` wrapped in a try/except `st.connection` fallback for local dev.
 {% endif %}
 Query warehouse: `{{ default_warehouse }}`. Deployed apps run with caller's-rights as `{{ viewer_role }}`.
 

@@ -23,7 +23,7 @@ skills that predate the plugin. If that's you, the table below is your starting 
 | `apply-review` | `/review-app --fix` | Same A/B/C bucketing, atomic commits |
 | `auto-review-app` | `/review-app --auto` | Same convergence loop |
 | `sql-review` | `/review-app --sql` | Same paste-and-runnable companions + lineage README |
-| `deep-dive-data` | **`/audit-lineage`** | Renamed; same bounded read-only tracing. Warehouse-specific rules (e.g. LMS-schema conventions, a BRIDGE-layer deploy note) stay local |
+| `deep-dive-data` | **`/audit-lineage`** | Renamed; same bounded read-only tracing. Warehouse-specific rules (e.g. a source-system schema helper, an intermediate-layer deploy note) stay local |
 | `feedback-app` | **`/feedback-app`** | Upstreamed in v0.3 — classification buckets, per-item commits, follow-up review |
 | `preview-app` | **`/preview-app`** | Unchanged surface |
 | `validate-app` | **`/validate-app`** | The plugin's gate is `streamsnow validate-app`; a local `--pr` checklist variant is an *extends*, keep it if you use it |
@@ -46,8 +46,8 @@ encodes *your* organization:
   that it matches your brand book.
 - **Tracker integration** — a specific Jira/Asana project, cloud ID, or parent-epic convention for
   spec ingestion and issue filing.
-- **Warehouse-specific data rules** — named schemas' semantics (an LMS schema helper, a bridge
-  layer's deploy ownership), soft-delete flag conventions beyond the generic patterns
+- **Warehouse-specific data rules** — named schemas' semantics (a source-system schema helper, an
+  intermediate layer's deploy ownership), soft-delete flag conventions beyond the generic patterns
   `/audit-lineage` already flags.
 - **Company governance values** — your real database/schema/role names live in
   `streamsnow.config.yaml`, never in skills.
