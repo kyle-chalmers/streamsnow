@@ -19,7 +19,7 @@ New to this stack? Each step says what it does and what you should see.
 | **uv** (recommended) | Fast Python/dependency manager; runs `streamsnow` with no install via `uvx` | `uv --version` |
 | **git** | Version control | `git --version` |
 | **Snowflake CLI (`snow`)** | Local preview against live Snowflake + deploy (Path B only) | `snow --version` |
-| **Claude Code** *(optional)* | Drives the StreamSnow plugin skills (`/new-app`, `/validate-app`, …) | — |
+| **Claude Code** *(optional)* | Drives the StreamSnow plugin skills (`/start-app`, `/validate-app`, …) | — |
 
 Install uv with `brew install uv` (macOS) or see [astral.sh/uv](https://docs.astral.sh/uv/).
 The container runtime supports **Python 3.11 only**, so apps pin `>=3.11,<3.12`.
@@ -136,8 +136,8 @@ Inside Claude Code:
 /plugin install streamsnow@streamsnow
 ```
 
-This adds the skills that wrap the CLI — `/new-app`, `/preview-app`,
-`/validate-app`, `/ship-app`, `/start-app`, and more — plus a SessionStart hook
+This adds the skills that wrap the CLI — `/start-app` (the front door),
+`/preview-app`, `/validate-app`, `/review-app`, `/ship-app`, and more — plus a SessionStart hook
 scoped to StreamSnow repos.
 
 ## The config file

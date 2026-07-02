@@ -29,3 +29,6 @@ streamsnow.config.local.yaml
 # Scratch
 /tmp/
 *.log
+
+# AI friend review reports (local-only)
+/.ai-friend-review/

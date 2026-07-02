@@ -53,6 +53,7 @@ _SKIP_DIRS = {
     "__pycache__",
     ".ruff_cache",
     ".pytest_cache",
+    ".ai-friend-review",  # local, gitignored multi-AI review reports (contain abs paths)
 }
 # This scanner + its test legitimately contain the deny terms.
 _SKIP_FILES = {"check_export_clean.py", "test_export_clean.py"}
