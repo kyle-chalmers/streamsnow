@@ -13,8 +13,8 @@ source of truth behind both.
 
 2. **Claude Code plugin** (`/plugin marketplace add kyle-chalmers/streamsnow`).
    The skills, subagent, and SessionStart hook that make Claude Code a domain
-   expert for this stack (`/new-app`, `/preview-app`, `/validate-app`,
-   `/ship-app`, `/start-app`, …). Served straight from the public repo — no
+   expert for this stack (`/start-app`, `/preview-app`, `/validate-app`,
+   `/review-app`, `/ship-app`, …). Served straight from the public repo — no
    publish step, and no install beyond adding the marketplace.
 
 The `streamsnow` package is the **one implementation, many consumers** core: the

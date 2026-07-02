@@ -1,6 +1,6 @@
 # cross-agent-review
 
-Purpose: fan one qualitative review prompt to external AI CLIs (`agy`, `codex`) **in parallel** with Claude subagents, then merge all findings into one attributed list. This is a contract that /review-app and /deep-dive-data read and follow — not an invocable skill. It never blocks: `streamsnow validate-app` is the only deterministic PASS/FAIL gate; everything here is judgment that a human decides on.
+Purpose: fan one qualitative review prompt to external AI CLIs (`agy`, `codex`) **in parallel** with Claude subagents, then merge all findings into one attributed list. This is a contract that /review-app and /audit-lineage read and follow — not an invocable skill. It never blocks: `streamsnow validate-app` is the only deterministic PASS/FAIL gate; everything here is judgment that a human decides on.
 
 ## When it runs
 
@@ -43,7 +43,7 @@ Build **one** review prompt string (the caller supplies it — the same prompt i
 
 Give each external CLI a generous wall-clock budget (180s shown). On timeout or non-zero exit, drop that reviewer's output, note `<cli> review skipped (timeout/error)`, and continue — partial coverage beats a stalled review.
 
-All reviewers are read-only: they critique source, they do not edit it. Any live-DB lineage step stays inside /deep-dive-data and uses `snow sql` (read-only, bounded) — never delegated to an external CLI.
+All reviewers are read-only: they critique source, they do not edit it. Any live-DB lineage step stays inside /audit-lineage and uses `snow sql` (read-only, bounded) — never delegated to an external CLI.
 
 ## Finding format (every reviewer emits this)
 
@@ -51,17 +51,17 @@ All reviewers are read-only: they critique source, they do not edit it. Any live
 [SEVERITY] (dimension) finding — file:line — one-line fix
 ```
 
-`SEVERITY` ∈ `BLOCK | FLAG | NICE-TO-HAVE`. Each line carries an attribution tag the merge step adds: `(Claude)`, `(Agy)`, `(Codex)`.
+`SEVERITY` ∈ `BLOCK | FLAG | NICE-TO-HAVE` — the internal names for what user-facing summaries print as critical / should-fix / nice-to-have. Each line carries an attribution tag the merge step adds: `(Claude)`, `(Agy)`, `(Codex)`.
 
 ## Merge + consensus
 
 1. Collect every reviewer's findings; tag each with its source.
 2. Group near-duplicates (same file:line + same concern). When ≥2 distinct sources raise one issue, collapse to a single line and append `(also flagged by <sources>)` — consensus is a strong signal, surface it.
 3. Order by severity: `BLOCK` → `FLAG` → `NICE-TO-HAVE`. Preserve attribution on every line.
-4. Hand the merged list back to the caller **unchanged in shape**, so /apply-review consumes it identically whether it came from one agent or four.
+4. Hand the merged list back to the caller **unchanged in shape**, so /review-app --fix consumes it identically whether it came from one agent or four.
 
 ## Contract for callers
 
-- /review-app and /deep-dive-data call this recipe, supply the prompt + dimensions, and receive one merged finding list.
-- The merged list is qualitative only — it advises, it never gates a ship. Mechanical auto-fixes flow on to /apply-review; judgment items go to the user.
+- /review-app and /audit-lineage call this recipe, supply the prompt + dimensions, and receive one merged finding list.
+- The merged list is qualitative only — it advises, it never gates a ship. Mechanical auto-fixes flow on to /review-app --fix; judgment items go to the user.
 - Output schema is stable across reviewer count so downstream skills need no special-casing for the cross-agent case.

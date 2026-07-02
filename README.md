@@ -23,10 +23,10 @@
 ---
 
 > **Status: alpha, functional.** The CLI (configure / init / new / validate-app /
-> preview / check / deploy-sql / deploy-setup) and the Claude Code plugin (14
-> skills + shared recipes) are implemented and CI-green for both runtimes and
-> both deploy sources. Published on PyPI as **v0.1.0**
-> (`uvx streamsnow` / `pip install streamsnow`); APIs may still evolve toward 1.0.
+> preview / check / deploy-sql / deploy-setup) and the Claude Code plugin (8
+> skills + shared recipes, with deprecated aliases for the pre-0.3 names) are
+> implemented and CI-green for both runtimes and both deploy sources. Published
+> on PyPI (`uvx streamsnow` / `pip install streamsnow`); APIs may still evolve toward 1.0.
 
 ## What it is
 
@@ -37,8 +37,8 @@ StreamSnow is a **hybrid** of two things that work together:
    tools, CI, pre-commit hooks, and branding your repo needs.
 2. **A Claude Code plugin** (marketplace) — ships the skills, subagents, and
    hooks that turn Claude Code into a domain expert for this stack:
-   `/new-app`, `/preview-app`, `/validate-app`, `/ship-app`, `/start-app`, and
-   more.
+   `/start-app` (the front door), `/preview-app`, `/validate-app`,
+   `/review-app`, `/ship-app`, and more.
 
 Think **a Claude Code skill pack fused with an installable system + setup**.
 The CLI gives you the substrate; the plugin gives Claude the playbook. A single
@@ -60,7 +60,7 @@ StreamSnow treats two axes as first-class, configurable options:
 
 | Axis | Options |
 |------|---------|
-| **Runtime** | **Container** (default — cheaper, full PyPI, modern Streamlit) or **Warehouse** (legacy — instant start, Anaconda channel) |
+| **Runtime** | **Container** (default — full PyPI, local preview matches deploy) or **Warehouse** (instant start, Anaconda channel, no compute-pool cost) |
 | **Deploy source** | **Stage-copy** (default — CI uploads to an internal stage) or **Snowflake `GIT REPOSITORY`** (Snowflake pulls from your Git repo) |
 
 ## Quickstart (target experience)
@@ -84,10 +84,30 @@ cp apps/<slug>/.streamlit/secrets.toml.example apps/<slug>/.streamlit/secrets.to
 /plugin install streamsnow@streamsnow
 
 # 4. Build, preview, validate, ship
-streamsnow new marketing campaign-dashboard   # or /new-app
+streamsnow new marketing campaign-dashboard   # or let /start-app drive the whole flow
 streamlit run apps/marketing-campaign-dashboard/streamlit_app.py
-#    /preview-app  ->  /validate-app  ->  /ship-app
+#    /start-app  ->  /preview-app  ->  /validate-app  ->  /review-app  ->  /ship-app
 ```
+
+## The skills
+
+One front door plus focused verbs — each skill's `SKILL.md` stays under 80
+lines, with depth in per-skill reference files:
+
+| Skill | What it does |
+|---|---|
+| `/start-app` | The front door: spec (incl. backfill from existing source) → scaffold → build pages → ship, with checkpoints. Also `--setup` (machine + repo) and `adopt` (existing repos — maps, doesn't scaffold, writes `MIGRATION.md`) |
+| `/preview-app` | Run an app locally against live Snowflake |
+| `/validate-app` | The pass/fail check that must be clean before shipping |
+| `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean, `--sql` writes audit companions |
+| `/audit-lineage` | Live-warehouse column + lineage verification (read-only, bounded) |
+| `/feedback-app` | Turn user feedback into classified, atomic-commit fixes |
+| `/ship-app` | Validate-gated stage → commit → push → PR → watch CI |
+| `/migrate-app` | Port an external Streamlit app in (lift, then conform) |
+
+Pre-0.3 names (`/new-app`, `/refine-requirements`, `/add-page`, `/onboard`,
+`/auto-review-app`, `/sql-review`, `/apply-review`, `/deep-dive-data`) still
+work as deprecated aliases and will be removed in the next major release.
 
 ## How it's organized
 
@@ -122,6 +142,8 @@ code — one implementation, many consumers.
   CI secrets the pipeline needs.
 - **[Distribution](docs/distribution.md)** — how StreamSnow ships (PyPI CLI +
   plugin) and why there's no separate copy-paste kit.
+- **[Migrating a consumer repo](docs/migrating-a-consumer-repo.md)** — bring a
+  repo with home-grown skills onto the plugin (skill map + incremental path).
 
 ## License
 
