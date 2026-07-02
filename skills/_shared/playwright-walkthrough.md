@@ -2,7 +2,7 @@
 
 Purpose: drive a browser smoke walk of every page in a running StreamSnow app, capturing a screenshot and console errors per page, with the `Data as of:` caption (or app-loaded state) as the success sentinel. This is a recipe other skills read and follow — not an invocable skill.
 
-Consumed by: /validate-app (`--ui`), /review-app, /auto-review-app, /preview-app (`--smoke`).
+Consumed by: /validate-app (`--ui`), /review-app (incl. `--auto`), /feedback-app, /preview-app (`--smoke`).
 
 ## Preconditions
 
@@ -34,7 +34,7 @@ Write `apps/<slug>/.review/walkthrough-<ts>/report.md` (gitignored) and return a
 
 - Per page: `ok` | `console-errors` | `render-error` | `empty` | `timeout`, plus screenshot path.
 - Aggregate: pages walked, pages with issues, total console errors.
-- Any finding here is **advisory/qualitative** — it informs /review-app and /auto-review-app judgment; it does NOT override `streamsnow validate-app`, which remains the deterministic PASS/FAIL ship gate. A walkthrough issue never flips validate to FAIL on its own.
+- Any finding here is **advisory/qualitative** — it informs /review-app judgment; it does NOT override `streamsnow validate-app`, which remains the deterministic PASS/FAIL ship gate. A walkthrough issue never flips validate to FAIL on its own.
 
 ## Notes
 

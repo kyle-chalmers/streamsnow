@@ -5,16 +5,75 @@ All notable changes to StreamSnow are recorded here. This project follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-02
+
+The UX release: **14 skills → 8**, one front door, ≤5-question setup, plain language on every
+user-facing surface. Engine changes are minimal — the CLI checks, scaffolder, deploy generators,
+hooks, and templates carry over (one exception: the `configure` wizard slimmed down); this is a
+surface-area consolidation, applying the design system shipped in Ticketwright v2.0.
+
+### Changed — the rename map (v0.2 → v0.3)
+| v0.2 | v0.3 |
+|---|---|
+| `start-app` + `new-app` + `refine-requirements` + `add-page` + `onboard` | **`start-app`** (the front door — owns spec → scaffold → build → ship; `--spec` for the requirements phase incl. **backfill from existing source**, `--setup` for machine + repo setup, `adopt` for existing repos) |
+| `review-app` + `apply-review` + `auto-review-app` + `sql-review` | **`review-app`** (`--fix` applies findings as atomic commits, `--auto` loops review→fix to convergence, `--sql` writes the audit companions) |
+| `deep-dive-data` | **`audit-lineage`** |
+| — | **`feedback-app`** (new — upstreamed from production use: classify user feedback into BUG / POLISH / UX / NEW-FEATURE / CROSS-CUTTING, apply as atomic per-item commits, follow-up review) |
+| `preview-app`, `validate-app`, `ship-app`, `migrate-app` | unchanged names, refreshed surfaces |
+
+All 8 retired names still work as deprecated alias stubs (`commands/`); they will be removed in
+the next major release.
+
 ### Added
+- **Adopt mode** (`skills/start-app/adopt.md`) — `/start-app adopt` on a repo that already has
+  Streamlit apps maps onto the observed layout instead of scaffolding over it, classifies custom
+  commands/skills as shadows / extends / unrelated against the plugin's skills, and writes a
+  `MIGRATION.md` checklist. An existing `AGENTS.md` is never overwritten (renders to
+  `AGENTS.streamsnow.md` for manual merge).
+- **≤5-question `streamsnow configure`** — down from ~14 prompts. Asks only runtime, account
+  locator, governed database, allowed schemas, and deploy source; everything else (project
+  identity derived from the directory name, roles, warehouse, schema names, container objects,
+  git-repository deploy fields) is written as an **inline-commented default** in
+  `streamsnow.config.yaml` — the file is the editing surface, and re-running `configure` prefills
+  from it so hand edits survive. Guarded by a new `tests/test_wizard.py` contract test.
+- **Spec backfill** (`/start-app --spec <slug>` on an app with existing code) — reverse-engineers
+  `REQUIREMENTS.md` from `st.Page` declarations, chart/KPI/filter calls, SQL header blocks, cache
+  decorators, and `snowflake.yml`, marking anything uncertain `(inferred)` for §10 review.
+  Upstreamed from proven production use.
+- **`skills/_shared/runtime-decision.md`** — the container-vs-warehouse decision in one place,
+  neutrally framed (both runtimes are legitimate; the repo default wins absent a concrete reason),
+  with the detection rule, trade-off table, and the manifest/connection checklist. Skills now link
+  to it instead of re-explaining the choice (previously restated in 5+ skills).
+- `docs/migrating-a-consumer-repo.md` — map a repo's home-grown skills to the plugin surface
+  (worked example: a 16-skill production repo), what stays local (branding parity, tracker
+  integration, warehouse-specific rules), and the incremental adoption path.
+
+### Changed (language & structure)
+- **SKILL.md ≤80 lines, depth in reference files** — every skill's front page is now a scannable
+  contract (modes, steps, boundaries), with detail split into per-skill reference files
+  (`start-app/{spec,scaffold,pages,setup,adopt}.md`,
+  `review-app/{dimensions,fixes,auto-loop,sql-companions}.md`, `audit-lineage/tracing.md`,
+  `feedback-app/classification.md`, `validate-app/fixing-checks.md`).
+- **Plain language on user surfaces** — skill descriptions lead with the trigger use-case;
+  "deterministic PASS/FAIL ship gate" reads "the pass/fail check that must be clean before
+  shipping"; report summaries print critical / should-fix / nice-to-have; "legacy" dropped from
+  warehouse-runtime framing. Contributor-facing terms (bucket mechanics, check internals) stay in
+  reference files.
+- **Graceful degradation instead of hard failure** — missing config: review runs static-only and
+  says which findings go unverified; missing Snowflake connection: lineage/companion rows are
+  marked unverified with the exact enabler named; missing Playwright MCP: walkthroughs skip
+  silently. Skills name the enabler instead of refusing.
+- **§11 Build Progress simplified** — `Current phase` plus an append-only Sessions log whose last
+  line names the next command. The per-page status table is gone (page state is visible in the
+  tree and git); existing specs keep working, the table just stops being maintained.
+- `hooks/session_start.sh` discovery line, README, and docs updated to the 8-skill surface.
+
+### Carried from the previous Unreleased
 - `docs/distribution.md` — how StreamSnow ships (PyPI CLI + Claude Code plugin)
   and the recorded decision **not** to add a separate `cp -r` copyable kit
   (`streamsnow init` is the config-driven "better `cp -r`").
-
-### Changed
-- Thickened the 14 Claude Code plugin skills toward the source's depth — concrete
-  steps, runtime/decision guidance, gotchas, per-check lint commands,
-  troubleshooting, and cross-references — kept generic and config-driven. (Plugin
-  content served from the repo; not part of the PyPI wheel.)
+- Thickened the plugin skills toward the source's depth — that content now lives in the v0.3
+  reference files rather than monolithic SKILL.mds.
 
 ## [0.2.0] - 2026-06-30
 

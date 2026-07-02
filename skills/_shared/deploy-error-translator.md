@@ -11,7 +11,7 @@ Purpose: map a failing Snowflake deploy (from the generated `deploy.yml` run or 
 - The failing step's log (e.g. `gh run view <run-id> --log-failed`, or `snow` stderr).
 - Config names so messages name the right objects, not placeholders. Read from `streamsnow.config.yaml`:
   - `snowflake.roles.ci_role` (deploy/CI role) · `snowflake.objects.stage_database/stage_schema/stage_name` (code stage; or `streamsnow stage-path`) · `snowflake.objects.compute_pool` · `snowflake.objects.external_access_integration` · `deploy.git_repository_fqn` (if Git-backed).
-  - Substitute these into the fixes below as `<ROLE>`, `<STAGE>`, `<POOL>`, `<EAI>`, `<GIT_REPO>`. If a key is absent, say so and point at /onboard `streamsnow deploy-setup` for the one-time DDL.
+  - Substitute these into the fixes below as `<ROLE>`, `<STAGE>`, `<POOL>`, `<EAI>`, `<GIT_REPO>`. If a key is absent, say so and point at `streamsnow deploy-setup` (see /start-app --setup) for the one-time DDL.
 
 ## Translate the error
 
@@ -44,5 +44,5 @@ Shipped anyway? <yes if object created and only Verify failed; else no>.
 ## Contract for callers
 
 - /ship-app's post-merge monitor calls this on a failed deploy run, passes the failed-step log + config-resolved names, and relays the block to the user.
-- This recipe is **read-only**: it reads logs and config, proposes DDL/config changes, and points at `streamsnow deploy-setup` and /onboard. It never runs `snow` DDL, never deploys, never edits config — the account owner applies infra fixes per-invocation.
+- This recipe is **read-only**: it reads logs and config, proposes DDL/config changes, and points at `streamsnow deploy-setup` and /start-app --setup. It never runs `snow` DDL, never deploys, never edits config — the account owner applies infra fixes per-invocation.
 - Reporting the failed-step name and the shipped-anyway distinction is mandatory: a deploy can be `conclusion: failure` while the STREAMLIT was successfully created (Verify flaked), and that tells the user whether to re-run or to fix infra.

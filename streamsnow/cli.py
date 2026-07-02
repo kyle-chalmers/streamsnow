@@ -103,123 +103,169 @@ def _prompt_choice(label: str, choices: tuple[str, ...], default: str) -> str:
         console.print(f"[yellow]'{val}' must be one of {', '.join(choices)} — try again.[/]")
 
 
-def _prompt_deploy(prefill: dict | None) -> dict:
-    """Prompt for deploy config, including the dependent git-repository fields."""
-    source = _prompt_choice(
-        "Deploy source", DEPLOY_SOURCES, _pf(prefill, "deploy.source", "stage-copy")
-    )
-    deploy: dict = {"source": source}
-    if source == "git-repository":
-        p = typer.prompt
-        deploy["git_repository_fqn"] = p(
-            "Git repository FQN (DB.SCHEMA.NAME)",
-            default=_pf(prefill, "deploy.git_repository_fqn", "DATA_APPS.BI_APPS.STREAMLIT_REPO"),
-        )
-        deploy["git_branch"] = p("Git branch", default=_pf(prefill, "deploy.git_branch", "main"))
-        deploy["api_integration_name"] = p(
-            "API integration name",
-            default=_pf(prefill, "deploy.api_integration_name", "GITHUB_API_INTEGRATION"),
-        )
-        deploy["secret_name"] = p(
-            "Secret FQN (DB.SCHEMA.NAME)",
-            default=_pf(prefill, "deploy.secret_name", "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET"),
-        )
-        deploy["github_auth_mode"] = _prompt_choice(
-            "GitHub auth mode", GITHUB_AUTH_MODES, _pf(prefill, "deploy.github_auth_mode", "pat")
-        )
-    return deploy
+def _slugify(name: str) -> str:
+    """Kebab-case a directory name into a usable project slug."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return slug if _SLUG_RE.match(slug) else "my-dashboards"
 
 
-def _prompt_config(prefill: dict | None = None) -> dict:
-    """Interactive setup wizard. Returns a config dict (validated by caller).
+def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -> dict:
+    """Interactive setup wizard: detect first, ask at most 5 questions.
 
-    When ``prefill`` is supplied (an existing config being updated), its values
-    become the prompt defaults — so re-running ``configure`` is an edit, not a
-    restart.
+    Only the values nothing can detect or default are asked — runtime, account,
+    the governed database, the allowed schemas, and the deploy source.
+    Everything else is written as a commented default in the config file (the
+    file is the editing surface). When ``prefill`` is supplied (an existing
+    config being updated), its values become the defaults everywhere — so
+    re-running ``configure`` is an edit, not a restart.
     """
     console.print(
-        "[bold]StreamSnow setup[/] — answer a few questions (Enter accepts the default).\n"
+        "[bold]StreamSnow setup[/] — 5 questions (Enter accepts the default);\n"
+        "everything else is written as an editable, commented default.\n"
     )
     p = typer.prompt
-    allow_default = ",".join(_pf(prefill, "governance.schema_allow", ["ANALYTICS", "REPORTING"]))
-    deny_default = ",".join(_pf(prefill, "governance.schema_deny", ["RAW", "STAGING"]))
+    # Detected / defaulted (never asked; prefill wins so hand-edits survive).
+    dir_slug = _slugify(directory.name) if directory is not None else "my-dashboards"
+    slug = _pf(prefill, "project.slug", dir_slug)
+    name = _pf(prefill, "project.name", slug.replace("-", " ").title())
+    # The five questions.
     runtime = _prompt_choice("Runtime", RUNTIMES, _pf(prefill, "runtime", "container"))
-    name = p("Project name", default=_pf(prefill, "project.name", "My Dashboards"))
-    slug = p("Project slug (kebab-case)", default=_pf(prefill, "project.slug", "my-dashboards"))
     account = p(
         "Snowflake account locator (no .snowflakecomputing.com)",
         default=_pf(prefill, "snowflake.account", None),
     )
-    connection = p(
-        "snow CLI connection name", default=_pf(prefill, "snowflake.connection_name", slug)
-    )
-    app_db = p(
-        "Database for deployed STREAMLIT objects",
-        default=_pf(prefill, "snowflake.objects.app_database", "DATA_APPS"),
-    )
-    app_schema = p(
-        "Schema for deployed STREAMLIT objects",
-        default=_pf(prefill, "snowflake.objects.app_schema", "BI_APPS"),
-    )
-    warehouse = p(
-        "Query warehouse",
-        default=_pf(prefill, "snowflake.objects.default_warehouse", "STREAMLIT_WH"),
-    )
-    ci_role = p(
-        "CI deploy role", default=_pf(prefill, "snowflake.roles.ci_role", "STREAMLIT_CI_ROLE")
-    )
-    viewer_role = p(
-        "App viewer role", default=_pf(prefill, "snowflake.roles.viewer_role", "STREAMLIT_APP_ROLE")
-    )
     gov_db = p(
-        "BI database your apps query", default=_pf(prefill, "governance.database", "ANALYTICS_DB")
+        "Database your apps query", default=_pf(prefill, "governance.database", "ANALYTICS_DB")
     )
-    allow = p("Allowed schemas (comma-separated)", default=allow_default)
-    deny = p("Denied schemas (comma-separated)", default=deny_default)
+    allow = p(
+        "Schemas apps may query (comma-separated)",
+        default=",".join(_pf(prefill, "governance.schema_allow", ["ANALYTICS", "REPORTING"])),
+    )
+    source = _prompt_choice(
+        "Deploy source", DEPLOY_SOURCES, _pf(prefill, "deploy.source", "stage-copy")
+    )
+    # Everything below ships as a commented default in the written file.
+    app_db = _pf(prefill, "snowflake.objects.app_database", "DATA_APPS")
+    app_schema = _pf(prefill, "snowflake.objects.app_schema", "BI_APPS")
+    warehouse = _pf(prefill, "snowflake.objects.default_warehouse", "STREAMLIT_WH")
     objects: dict = {
         "app_database": app_db,
         "app_schema": app_schema,
         "stage_database": _pf(prefill, "snowflake.objects.stage_database", app_db),
         "stage_schema": _pf(prefill, "snowflake.objects.stage_schema", app_schema),
         "default_warehouse": warehouse,
-        "allowed_warehouses": [warehouse],
+        "allowed_warehouses": _pf(prefill, "snowflake.objects.allowed_warehouses", [warehouse]),
     }
     if runtime == "container":
-        objects["compute_pool"] = p(
-            "Compute pool (container)",
-            default=_pf(prefill, "snowflake.objects.compute_pool", "STREAMLIT_POOL"),
+        objects["compute_pool"] = _pf(prefill, "snowflake.objects.compute_pool", "STREAMLIT_POOL")
+        objects["external_access_integration"] = _pf(
+            prefill, "snowflake.objects.external_access_integration", "PYPI_ACCESS_INTEGRATION"
         )
-        objects["external_access_integration"] = p(
-            "External access integration (container)",
-            default=_pf(
-                prefill, "snowflake.objects.external_access_integration", "PYPI_ACCESS_INTEGRATION"
-            ),
+    deploy: dict = {"source": source}
+    if source == "git-repository":
+        deploy["git_repository_fqn"] = _pf(
+            prefill, "deploy.git_repository_fqn", f"{app_db}.{app_schema}.STREAMLIT_REPO"
         )
+        deploy["git_branch"] = _pf(prefill, "deploy.git_branch", "main")
+        deploy["api_integration_name"] = _pf(
+            prefill, "deploy.api_integration_name", "GITHUB_API_INTEGRATION"
+        )
+        deploy["secret_name"] = _pf(
+            prefill, "deploy.secret_name", f"{app_db}.{app_schema}.GITHUB_PAT_SECRET"
+        )
+        deploy["github_auth_mode"] = _pf(prefill, "deploy.github_auth_mode", GITHUB_AUTH_MODES[0])
     return {
         "schema_version": 1,
         "runtime": runtime,
         "project": {"name": name, "slug": slug},
         "snowflake": {
             "account": account,
-            "connection_name": connection,
+            "connection_name": _pf(prefill, "snowflake.connection_name", slug),
             "objects": objects,
-            "roles": {"ci_role": ci_role, "viewer_role": viewer_role},
+            "roles": {
+                "ci_role": _pf(prefill, "snowflake.roles.ci_role", "STREAMLIT_CI_ROLE"),
+                "viewer_role": _pf(prefill, "snowflake.roles.viewer_role", "STREAMLIT_APP_ROLE"),
+            },
         },
         "governance": {
             "database": gov_db,
             "schema_allow": [s.strip() for s in allow.split(",") if s.strip()],
-            "schema_deny": [s.strip() for s in deny.split(",") if s.strip()],
+            "schema_deny": _pf(prefill, "governance.schema_deny", ["RAW", "STAGING"]),
         },
-        "deploy": _prompt_deploy(prefill),
+        "deploy": deploy,
     }
 
 
-def _resolve_config(config: Path | None, prefill: dict | None) -> tuple[Config, str]:
+# Inline "when to change this" comments for the values the wizard defaults
+# rather than asks. Rendered next to the value in the written YAML.
+_DEFAULT_COMMENTS: dict[str, str] = {
+    "project.name": "display name — edit freely",
+    "project.slug": "derived from the directory name",
+    "snowflake.connection_name": "snow CLI connection to create/use",
+    "snowflake.objects.app_database": "where deployed STREAMLIT objects live",
+    "snowflake.objects.app_schema": "schema for deployed STREAMLIT objects",
+    "snowflake.objects.stage_database": "stage-copy deploys stage code here",
+    "snowflake.objects.stage_schema": "schema for the deploy stage",
+    "snowflake.objects.default_warehouse": "warehouse apps query with",
+    "snowflake.objects.allowed_warehouses": "warehouses apps may use",
+    "snowflake.objects.compute_pool": "container runtime only",
+    "snowflake.objects.external_access_integration": "container: PyPI access during image build",
+    "snowflake.roles.ci_role": "role the CI deploy runs as",
+    "snowflake.roles.viewer_role": "role viewers (and local preview) use",
+    "governance.schema_deny": "schemas apps must never query",
+    "deploy.git_repository_fqn": "TODO: confirm before first deploy",
+    "deploy.git_branch": "branch the deploy tracks",
+    "deploy.api_integration_name": "TODO: confirm before first deploy",
+    "deploy.secret_name": "TODO: confirm before first deploy",
+    "deploy.github_auth_mode": "pat or installation",
+}
+
+
+def _yaml_scalar(value: Any) -> str:
+    """One YAML-safe scalar/flow value on a single line.
+
+    ``safe_dump`` of a bare scalar appends a ``...`` document-end marker on a
+    second line — keep only the value line.
+    """
+    return yaml.safe_dump(value, default_flow_style=True, sort_keys=False).partition("\n")[0]
+
+
+def _render_config_yaml(cfg_dict: dict) -> str:
+    """Render config YAML with inline comments on the defaulted values.
+
+    Comments make the file self-documenting: `configure` asks 5 questions and
+    the rest is edited here. Falls back to plain YAML if the commented render
+    ever fails to round-trip (defensive — comments must never corrupt config).
+    """
+
+    def walk(node: dict, path: str, indent: int) -> list[str]:
+        lines: list[str] = []
+        pad = "  " * indent
+        for key, value in node.items():
+            dotted = f"{path}.{key}" if path else key
+            if isinstance(value, dict):
+                lines.append(f"{pad}{key}:")
+                lines.extend(walk(value, dotted, indent + 1))
+            else:
+                comment = _DEFAULT_COMMENTS.get(dotted)
+                suffix = f"  # {comment}" if comment else ""
+                lines.append(f"{pad}{key}: {_yaml_scalar(value)}{suffix}")
+        return lines
+
+    text = "\n".join(walk(cfg_dict, "", 0)) + "\n"
+    if yaml.safe_load(text) != cfg_dict:  # pragma: no cover - defensive
+        return yaml.safe_dump(cfg_dict, sort_keys=False)
+    return text
+
+
+def _resolve_config(
+    config: Path | None, prefill: dict | None, directory: Path | None = None
+) -> tuple[Config, str]:
     """Return (validated Config, YAML text to persist). Raises ConfigError."""
     if config is not None:
         return load_config(config), Path(config).read_text()
-    cfg_dict = _prompt_config(prefill)
-    return Config.from_dict(cfg_dict), yaml.safe_dump(cfg_dict, sort_keys=False)
+    cfg_dict = _prompt_config(prefill, directory)
+    return Config.from_dict(cfg_dict), _render_config_yaml(cfg_dict)
 
 
 def _read_prefill(cfg_out: Path) -> dict | None:
@@ -248,7 +294,7 @@ def configure(
 ) -> None:
     """Set up (or update) streamsnow.config.yaml for your Snowflake environment.
 
-    Run after `streamsnow doctor`/onboard (machine setup) and before/around
+    Run after `streamsnow doctor` (machine setup) and before/around
     building apps. Idempotent: re-running prefills from the current config, so
     it's an edit rather than a restart. Writes no secrets.
     """
@@ -261,7 +307,7 @@ def configure(
             f"[dim]updating existing {CONFIG_FILENAME} (Enter keeps the current value)[/]"
         )
     try:
-        cfg, text = _resolve_config(config, prefill)
+        cfg, text = _resolve_config(config, prefill, target)
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
@@ -305,7 +351,9 @@ def init(
             if cfg_out.exists() and not force and not reconfigure:
                 _err(f"{cfg_out} already exists (use --reconfigure to edit, or --force).")
                 raise typer.Exit(2)
-            cfg, text = _resolve_config(config, _read_prefill(cfg_out) if reconfigure else None)
+            cfg, text = _resolve_config(
+                config, _read_prefill(cfg_out) if reconfigure else None, target
+            )
             cfg_out.write_text(text)
     except ConfigError as exc:
         _err(str(exc))
