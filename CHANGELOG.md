@@ -36,6 +36,9 @@ the next major release.
   git-repository deploy fields) is written as an **inline-commented default** in
   `streamsnow.config.yaml` — the file is the editing surface, and re-running `configure` prefills
   from it so hand edits survive. Guarded by a new `tests/test_wizard.py` contract test.
+- **Plugin-surface contract test** (`tests/test_plugin_surface.py`) — CI now asserts the 8-skill
+  surface, the ≤80-line SKILL.md cap, the 8 alias stubs pointing at their replacements, no retired
+  name referenced as live inside `skills/`, and every relative markdown link resolving.
 - **Spec backfill** (`/start-app --spec <slug>` on an app with existing code) — reverse-engineers
   `REQUIREMENTS.md` from `st.Page` declarations, chart/KPI/filter calls, SQL header blocks, cache
   decorators, and `snowflake.yml`, marking anything uncertain `(inferred)` for §10 review.
