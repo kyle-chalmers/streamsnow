@@ -109,6 +109,21 @@ Pre-0.3 names (`/new-app`, `/refine-requirements`, `/add-page`, `/onboard`,
 `/auto-review-app`, `/sql-review`, `/apply-review`, `/deep-dive-data`) still
 work as deprecated aliases and will be removed in the next major release.
 
+## Hooks, in full
+
+Trust demands transparency: this plugin runs hooks, so here is every one of them. All are
+stdlib-only, make **no network calls**, never write outside the repo, and fail open — a hook
+error never blocks your session; the guard only ever *adds* a confirmation.
+
+| Event | Script | What it does |
+|---|---|---|
+| PreToolUse (Bash) | `hooks/deploy_safety.py` | Pauses before destructive Streamlit/SQL commands (`snow streamlit deploy/drop`, `CREATE OR REPLACE / DROP / ALTER STREAMLIT`, stage `REMOVE`, destructive SQL incl. `-f` files / stdin) — `/ship-app` is the sanctioned deploy path |
+| SessionStart | `hooks/session_start.sh` | One-line skills banner inside a StreamSnow repo, and announces the guard is active |
+
+Both hooks are repo-gated on `streamsnow.config.yaml` — zero cost in unrelated repos — and
+declare explicit timeouts so a hung hook can never stall a session. To turn them off, disable
+the plugin (`claude plugin disable streamsnow`).
+
 ## How it's organized
 
 ```

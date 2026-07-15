@@ -1,6 +1,8 @@
 ---
 name: preview-app
 description: Run an app locally against live Snowflake so the user can see it in the browser, wiring up secrets.toml first if missing. Use when the user says "preview my app", "run my app", "let me see it in the browser", or after /start-app scaffolds an app.
+argument-hint: "<slug>"
+allowed-tools: [Bash, Read, Write, Edit]
 ---
 
 # /preview-app

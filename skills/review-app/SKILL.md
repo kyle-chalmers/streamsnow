@@ -1,6 +1,8 @@
 ---
 name: review-app
 description: Review an app the way a senior reviewer would — parallel reviewers across SQL, data, UI, runtime, and docs — then optionally apply the fixes. Use when the user says "review this app", "audit my dashboard", "fix the findings", "auto-fix until clean", or after validation passes. Flags — --fix applies findings as atomic commits, --auto loops review→fix until clean, --sql writes the paste-and-runnable SQL companions.
+argument-hint: "<slug> [--fix | --auto | --sql]"
+allowed-tools: [Bash, Read, Edit, Glob, Grep, Task]
 ---
 
 # /review-app
