@@ -18,7 +18,9 @@ HOOK = REPO_ROOT / "hooks" / "deploy_safety.py"
 
 
 def _run_guard(command: str, project_dir: Path) -> str:
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(project_dir)})
+    payload = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(project_dir)}
+    )
     proc = subprocess.run(
         [sys.executable, str(HOOK)],
         input=payload,
@@ -44,14 +46,21 @@ def test_guard_asks_on_streamlit_deploy(tmp_path):
 
 
 def test_guard_asks_on_create_or_replace_streamlit(tmp_path):
-    assert _asks(_run_guard(
-        'snow sql -q "CREATE OR REPLACE STREAMLIT my_app ROOT_LOCATION = @stage"', _project(tmp_path)
-    ))
+    assert _asks(
+        _run_guard(
+            'snow sql -q "CREATE OR REPLACE STREAMLIT my_app ROOT_LOCATION = @stage"',
+            _project(tmp_path),
+        )
+    )
 
 
 def test_guard_asks_on_drop_and_alter_streamlit(tmp_path):
     assert _asks(_run_guard('snow sql -q "DROP STREAMLIT my_app"', _project(tmp_path)))
-    assert _asks(_run_guard('snow sql -q "ALTER STREAMLIT my_app ADD LIVE VERSION FROM LAST"', _project(tmp_path)))
+    assert _asks(
+        _run_guard(
+            'snow sql -q "ALTER STREAMLIT my_app ADD LIVE VERSION FROM LAST"', _project(tmp_path)
+        )
+    )
 
 
 def test_guard_asks_on_stage_remove(tmp_path):
@@ -64,13 +73,17 @@ def test_guard_asks_on_destructive_sql(tmp_path):
 
 def test_guard_asks_on_sql_hidden_in_file(tmp_path):
     project = _project(tmp_path)
-    (project / "deploy.sql").write_text("CREATE OR REPLACE STREAMLIT my_app ROOT_LOCATION = @stage;\n")
+    (project / "deploy.sql").write_text(
+        "CREATE OR REPLACE STREAMLIT my_app ROOT_LOCATION = @stage;\n"
+    )
     assert _asks(_run_guard("snow sql -f deploy.sql", project))
 
 
 def test_guard_defends_quote_and_path_evasion(tmp_path):
     assert _asks(_run_guard("sn'ow' streamlit deploy my_app", _project(tmp_path)))
-    assert _asks(_run_guard('/usr/local/bin/snow sql -q "DROP STREAMLIT my_app"', _project(tmp_path)))
+    assert _asks(
+        _run_guard('/usr/local/bin/snow sql -q "DROP STREAMLIT my_app"', _project(tmp_path))
+    )
 
 
 def test_guard_passes_read_only(tmp_path):
@@ -85,7 +98,9 @@ def test_guard_is_zero_cost_without_config(tmp_path):
 
 
 def test_guard_fails_open_on_garbage_stdin():
-    proc = subprocess.run([sys.executable, str(HOOK)], input="not json", capture_output=True, text=True)
+    proc = subprocess.run(
+        [sys.executable, str(HOOK)], input="not json", capture_output=True, text=True
+    )
     assert proc.returncode == 0 and proc.stdout.strip() == ""
 
 

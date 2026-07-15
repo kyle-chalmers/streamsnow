@@ -38,7 +38,17 @@ from pathlib import Path
 
 CONFIG_FILENAME = "streamsnow.config.yaml"
 
-WAREHOUSE_CLIS = ["snow", "snowsql", "bq", "dbsqlcli", "psql", "mysql", "sqlcmd", "duckdb", "redshift-data"]
+WAREHOUSE_CLIS = [
+    "snow",
+    "snowsql",
+    "bq",
+    "dbsqlcli",
+    "psql",
+    "mysql",
+    "sqlcmd",
+    "duckdb",
+    "redshift-data",
+]
 
 DESTRUCTIVE_SQL = re.compile(
     r"\b(CREATE\s+OR\s+REPLACE|CREATE|ALTER|DROP|DELETE|UPDATE|INSERT|TRUNCATE|MERGE|GRANT|REVOKE|REPLACE\s+INTO)\b",
@@ -49,18 +59,27 @@ DESTRUCTIVE_SQL = re.compile(
 # live here (no adapter indirection); tests/test_deploy_safety.py asserts each
 # one fires.
 STREAMLIT_DESTRUCTIVE: list[dict[str, str]] = [
-    {"pattern": r"snow\s+streamlit\s+deploy\b",
-     "reason": "`snow streamlit deploy` replaces the live app definition (CREATE OR REPLACE under the hood). The sanctioned path is /ship-app: validate first, confirm the target, then deploy."},
-    {"pattern": r"snow\s+streamlit\s+drop\b",
-     "reason": "`snow streamlit drop` removes a live app users may be viewing in Snowsight."},
-    {"pattern": r"\bCREATE\s+OR\s+REPLACE\s+STREAMLIT\b",
-     "reason": "`CREATE OR REPLACE STREAMLIT` overwrites the live app definition — the /ship-app gate exists for exactly this statement."},
-    {"pattern": r"\bDROP\s+STREAMLIT\b",
-     "reason": "`DROP STREAMLIT` removes a live app."},
-    {"pattern": r"\bALTER\s+STREAMLIT\b",
-     "reason": "`ALTER STREAMLIT` mutates a live app (including ADD LIVE VERSION / commit swaps that change what users see)."},
-    {"pattern": r"\bREMOVE\s+@|snow\s+stage\s+remove\b",
-     "reason": "Removing files from a stage can break the deployed app that serves from it."},
+    {
+        "pattern": r"snow\s+streamlit\s+deploy\b",
+        "reason": "`snow streamlit deploy` replaces the live app definition (CREATE OR REPLACE under the hood). The sanctioned path is /ship-app: validate first, confirm the target, then deploy.",
+    },
+    {
+        "pattern": r"snow\s+streamlit\s+drop\b",
+        "reason": "`snow streamlit drop` removes a live app users may be viewing in Snowsight.",
+    },
+    {
+        "pattern": r"\bCREATE\s+OR\s+REPLACE\s+STREAMLIT\b",
+        "reason": "`CREATE OR REPLACE STREAMLIT` overwrites the live app definition — the /ship-app gate exists for exactly this statement.",
+    },
+    {"pattern": r"\bDROP\s+STREAMLIT\b", "reason": "`DROP STREAMLIT` removes a live app."},
+    {
+        "pattern": r"\bALTER\s+STREAMLIT\b",
+        "reason": "`ALTER STREAMLIT` mutates a live app (including ADD LIVE VERSION / commit swaps that change what users see).",
+    },
+    {
+        "pattern": r"\bREMOVE\s+@|snow\s+stage\s+remove\b",
+        "reason": "Removing files from a stage can break the deployed app that serves from it.",
+    },
 ]
 
 # SQL can live in a file (-f/--file) or a stdin redirect (`psql db < deploy.sql`).
@@ -129,13 +148,17 @@ def referenced_sql(command: str, cwd: str) -> tuple[str, bool]:
 
 
 def emit_ask(reason: str) -> None:
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "ask",
-            "permissionDecisionReason": reason,
-        }
-    }))
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "ask",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+    )
 
 
 def main() -> int:
