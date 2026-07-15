@@ -1,6 +1,8 @@
 ---
 name: audit-lineage
 description: Check an app's numbers against the live warehouse — trace every Snowflake object it queries, verify the columns it expects actually exist, and map upstream lineage, using bounded read-only queries. Use when the user says "trace the data", "audit the lineage", "are these numbers right", "lineage for <slug>", or when a review finding hinges on what the live data returns.
+argument-hint: "<slug>"
+allowed-tools: [Bash, Read, Glob, Grep]
 ---
 
 # /audit-lineage
