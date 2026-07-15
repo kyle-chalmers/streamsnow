@@ -5,6 +5,52 @@ All notable changes to StreamSnow are recorded here. This project follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-15
+
+Safety + adoption release: the deploy-safety guard jobwright pioneered arrives in StreamSnow,
+plus a load-blocking manifest fix and the trust/discoverability hardening the whole plugin
+family shipped together.
+
+> **Upgrading an existing install:** hook additions do not reach installed copies via
+> autoUpdate (Claude Code pins the install path — see claude-code issue #52218). Reinstall:
+> `/plugin uninstall streamsnow` then `/plugin install streamsnow@streamsnow`, and relaunch.
+
+### Fixed
+- **Plugin failed to load on Claude Code ≥ 2.1.** `plugin.json` declared
+  `"hooks": "./hooks/hooks.json"`, but current Claude Code auto-loads that standard path, so
+  the manifest key pointed at an already-loaded file and aborted the whole plugin with
+  "Duplicate hooks file detected" — skills included. Exactly the bug jobwright fixed in its
+  v0.1.1; the key is removed and a regression test now keeps it out
+  (`tests/test_plugin_surface.py`).
+
+### Added
+- **Deploy-safety guard** (`hooks/deploy_safety.py`, PreToolUse) — ported from jobwright.
+  Pauses for confirmation before destructive Streamlit/SQL commands: `snow streamlit
+  deploy`/`drop`, `CREATE OR REPLACE / DROP / ALTER STREAMLIT`, stage `REMOVE`, and
+  destructive SQL through any warehouse CLI, including SQL hidden in `-f` files and stdin
+  redirects. Defends against shell-quote and full-path evasion; repo-gated on
+  `streamsnow.config.yaml`; stdlib-only; fail-open (only ever *adds* a confirmation).
+  The session banner now announces the guard — an invisible safety net reads as no safety net.
+- **Frontmatter parity with jobwright**: every skill now declares `argument-hint` and
+  `allowed-tools` (fewer permission prompts), and `/ship-app` + `/migrate-app` carry
+  `disable-model-invocation: true` — shipping and migrating are human decisions.
+- **System-evolution retro** at the end of `/ship-app` (ported from ticketwright's `/ship`
+  Phase C): when something went wrong, fix the layer — config, skill, check, or deploy path —
+  not just the instance.
+- **Hooks-in-full README section**: every hook, what it does, the stdlib-only/no-network/
+  fail-open guarantees, and how to disable — hook transparency is the trust bar for plugins
+  that run PreToolUse guards.
+- **Explicit hook timeouts** (SessionStart 5s, PreToolUse 10s) so a hung hook can never stall
+  a session, and a `plugin-validate` CI job (`claude plugin validate . --strict`).
+
+### Changed
+- The 80-line SKILL.md cap is now measured on the **body** (after frontmatter) — frontmatter
+  grew for parity and shouldn't force cutting instructions.
+
+### Deferred (noted for a future release)
+- Skill trigger evals (skill-creator description-tuning); submission to
+  `claude-plugins-community`; multi-harness install docs.
+
 ## [0.3.0] - 2026-07-02
 
 The UX release: **14 skills → 8**, one front door, ≤5-question setup, plain language on every

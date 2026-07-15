@@ -71,3 +71,12 @@ jobs:
           # Run the guardrail from inside the generated repo (config is discovered
           # from cwd) — proves the wheel ships templates AND the check works.
           cd /tmp/wheel-init && /tmp/wheelenv/bin/streamsnow check schema-refs apps
+
+  plugin-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Plugin + marketplace manifest validation (strict)
+        run: claude plugin validate . --strict

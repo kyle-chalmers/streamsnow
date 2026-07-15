@@ -1,12 +1,25 @@
 {
-  "//": "StreamSnow Claude Code hooks. SessionStart emits a one-line skill pointer, guarded to fire only inside a StreamSnow repo (see hooks/session_start.sh).",
+  "//": "StreamSnow Claude Code hooks. SessionStart emits a one-line skill pointer; PreToolUse pauses destructive Streamlit/SQL commands. Both are guarded to fire only inside a StreamSnow repo (repo-gated on streamsnow.config.yaml), stdlib-only, no network, and fail-open. Explicit timeouts so a hung hook can never stall a session.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/deploy_safety.py\"",
+            "timeout": 10
           }
         ]
       }

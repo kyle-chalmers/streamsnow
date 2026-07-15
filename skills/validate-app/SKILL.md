@@ -1,6 +1,8 @@
 ---
 name: validate-app
 description: The pass/fail check that must be clean before an app ships — runs `streamsnow validate-app <slug>` (files, schema references, security, bind parameters, caching) and explains how to fix anything that fails. Use when the user says "validate", "is this ready", "check my app", or before /ship-app.
+argument-hint: "<slug>"
+allowed-tools: [Bash, Read]
 ---
 
 # /validate-app

@@ -1,6 +1,8 @@
 ---
 name: feedback-app
 description: Turn a user's feedback on a live app into applied fixes — classify each point, update the spec where scope changes, and land one commit per item. Use when the user says "here's feedback on <app>", "users said the numbers look wrong", "the filter is confusing", "polish this dashboard", or pastes review notes/screenshots about an existing app.
+argument-hint: "<slug> <feedback>"
+allowed-tools: [Bash, Read, Edit, Glob, Grep]
 ---
 
 # /feedback-app
