@@ -5,6 +5,18 @@ All notable changes to StreamSnow are recorded here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+- **Scaffolded apps could crash-loop after a Snowflake base-image rollout.** The
+  container app template pinned `streamlit==1.50.0`. The container runtime's base
+  image launches Streamlit with CLI flags from its own bundled build (e.g.
+  `--server.unsafeMetricsUserAttributes`, added in Streamlit 1.59.0); a pin below
+  what the current image expects makes Streamlit reject the flag and crash-loop on
+  startup (service READY, app never serves). Bumped the container template pin to
+  `streamlit==1.59.2` and documented the base-image floor rule in both dependency
+  templates. The warehouse template pin is left as-is with a note that the floor is
+  container-only (Snowflake runs its own bundled Streamlit there; the conda pin is
+  cosmetic).
+
 ## [0.4.0] - 2026-07-15
 
 Safety + adoption release: the deploy-safety guard jobwright pioneered arrives in StreamSnow,

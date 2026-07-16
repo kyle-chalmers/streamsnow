@@ -1,6 +1,11 @@
 # Warehouse-runtime dependencies (Snowflake Anaconda channel).
 # LANDMINE: never pin `python` here — the channel has no exact python==3.11
 # build, so the deploy fails. The runtime supplies Python; list only added deps.
+#
+# Note: the container-runtime base-image floor (see pyproject.toml.j2) does NOT
+# apply to warehouse mode — Snowflake runs its own bundled Streamlit and this
+# conda pin is cosmetic. Keep it to a version the Anaconda channel actually
+# ships (do not blindly track the container pin, or the deploy 404s).
 name: sf_env
 channels:
   - snowflake
