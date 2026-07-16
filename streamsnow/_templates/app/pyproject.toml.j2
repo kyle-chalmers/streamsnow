@@ -1,11 +1,18 @@
 # Container-runtime dependencies (PyPI via external access integration).
 # PEP 440 specifiers — NOT conda wildcards. Do not add a separate python pin here.
+#
+# streamlit floor: the container base image launches Streamlit with CLI flags
+# from its own bundled build (e.g. --server.unsafeMetricsUserAttributes, added
+# in Streamlit 1.59.0). A pin BELOW what the current base image expects makes
+# Streamlit reject the flag and crash-loop on startup (service READY, app never
+# serves). Keep this at/above the image floor; bump when Snowflake advances the
+# base image.
 [project]
 name = "{{ app_slug }}"
 version = "0.1.0"
 requires-python = ">={{ container_python }},<3.{{ container_python.split('.')[1] | int + 1 }}"
 dependencies = [
-    "streamlit==1.50.0",
+    "streamlit==1.59.2",
     "pandas>=2,<3",
     "plotly>=5,<6",
     "snowflake-snowpark-python",
