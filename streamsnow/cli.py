@@ -35,6 +35,7 @@ from .config import (
 from .deploy import generate_create_sql, generate_refresh_sql, generate_setup_sql, stage_path
 from .scaffolder import APP_ITEMS, GOVERNANCE_ITEMS, REPO_ITEMS, render_item, scaffold
 from .tools.check_app_security import main as _security_main
+from .tools.check_artifacts import main as _artifacts_main
 from .tools.check_bind_predicates import main as _bind_main
 from .tools.check_caching import main as _caching_main
 from .tools.check_schema_refs import main as _schema_refs_main
@@ -642,6 +643,15 @@ def check_session_fallback_cmd(
 ) -> None:
     """Require broad try/except around get_active_session() calls."""
     _run_check(_session_fallback_main, paths, output_format)
+
+
+@check_app.command("artifacts")
+def check_artifacts_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Cross-check snowflake.yml artifacts against files on disk."""
+    _run_check(_artifacts_main, paths, output_format)
 
 
 @app.command("validate-app")

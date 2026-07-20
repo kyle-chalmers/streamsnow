@@ -52,3 +52,9 @@ repos:
         language: system
         files: ^apps/.*\.py$
         pass_filenames: true
+      - id: streamsnow-artifacts
+        name: streamsnow check artifacts (snowflake.yml matches disk)
+        entry: streamsnow check artifacts
+        language: system
+        files: ^apps/
+        pass_filenames: true

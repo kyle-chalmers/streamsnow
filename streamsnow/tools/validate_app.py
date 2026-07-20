@@ -34,6 +34,7 @@ from ..config import Config, ConfigError, load_config
 from ..policy import SchemaPolicy
 from . import (
     check_app_security,
+    check_artifacts,
     check_bind_predicates,
     check_caching,
     check_schema_refs,
@@ -350,6 +351,9 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     else:
         manifest_problems += _check_environment_yml(app_dir)
     checks.append({"name": "manifest", "ok": not manifest_problems, "findings": manifest_problems})
+
+    arts = check_artifacts.check_app(app_dir)
+    checks.append({"name": "artifacts", "ok": arts["ok"], "findings": arts["findings"]})
 
     checks.append(
         {

@@ -11,6 +11,7 @@ from streamsnow.policy import SchemaPolicy
 from streamsnow.scaffolder import scaffold
 from streamsnow.tools import (
     check_app_security,
+    check_artifacts,
     check_bind_predicates,
     check_caching,
     check_session_fallback,
@@ -1061,3 +1062,102 @@ def test_validate_app_includes_session_fallback_check(tmp_path):
     res = validate_app(tmp_path / "apps/sf-app", policy, cfg)
     by_name = {c["name"]: c for c in res["checks"]}
     assert by_name["session-fallback"]["ok"] is False
+
+
+# --------------------------------------------------------------------------- #
+# artifacts: snowflake.yml artifacts list vs files on disk                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_artifacts_scaffold_is_clean(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    assert check_artifacts.check_app(tmp_path / "apps/art-app")["ok"]
+
+
+def test_artifacts_flags_uncovered_new_file(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    # A new top-level helper module the manifest never learned about.
+    _write(app / "helpers.py", "X = 1\n")
+    res = check_artifacts.check_app(app)
+    assert not res["ok"]
+    assert any("helpers.py" in f["detail"] for f in res["findings"])
+
+
+def test_artifacts_directory_entry_covers_new_files(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    # queries/ and pages/ are directory entries in the scaffold manifest.
+    _write(app / "queries/new_metric.sql", "SELECT 1\n")
+    _write(app / "pages/trends.py", "import streamlit as st\n")
+    assert check_artifacts.check_app(app)["ok"]
+
+
+def test_artifacts_flags_stale_entry(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    (app / "branding.py").unlink()
+    res = check_artifacts.check_app(app)
+    assert not res["ok"]
+    assert any("branding.py" in f["detail"] and "stale" in f["detail"] for f in res["findings"])
+
+
+def test_artifacts_no_key_passes(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    yml = app / "snowflake.yml"
+    data = yaml.safe_load(yml.read_text())
+    for ent in data["entities"].values():
+        ent.pop("artifacts", None)
+    yml.write_text(yaml.safe_dump(data))
+    _write(app / "helpers.py", "X = 1\n")  # would fail if the list were present
+    assert check_artifacts.check_app(app)["ok"]
+
+
+def test_artifacts_markdown_and_secrets_not_demanded(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    # AGENTS.md is a required file but never an artifact; secrets stay local.
+    assert (app / "AGENTS.md").is_file()
+    assert (app / ".streamlit/secrets.toml.example").is_file()
+    assert check_artifacts.check_app(app)["ok"]
+
+
+def test_artifacts_glob_entry_supported(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    yml = app / "snowflake.yml"
+    data = yaml.safe_load(yml.read_text())
+    for ent in data["entities"].values():
+        if "artifacts" in ent:
+            ent["artifacts"] = [e for e in ent["artifacts"] if e != "queries/"] + ["queries/*.sql"]
+    yml.write_text(yaml.safe_dump(data))
+    _write(app / "queries/extra.sql", "SELECT 1\n")
+    assert check_artifacts.check_app(app)["ok"]
+
+
+def test_artifacts_scan_paths_maps_files_to_app_root(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    _write(app / "helpers.py", "X = 1\n")
+    # Pre-commit passes individual filenames; the scan must find the app root.
+    res = check_artifacts.scan_paths([app / "helpers.py"])
+    assert not res["ok"]
+
+
+def test_validate_app_includes_artifacts_check(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    _write(tmp_path / "apps/art-app/helpers.py", "X = 1\n")
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    res = validate_app(tmp_path / "apps/art-app", policy, cfg)
+    by_name = {c["name"]: c for c in res["checks"]}
+    assert by_name["artifacts"]["ok"] is False
