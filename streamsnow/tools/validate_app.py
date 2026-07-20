@@ -32,7 +32,13 @@ except ImportError:  # pragma: no cover
 
 from ..config import Config, ConfigError, load_config
 from ..policy import SchemaPolicy
-from . import check_app_security, check_bind_predicates, check_caching, check_schema_refs
+from . import (
+    check_app_security,
+    check_bind_predicates,
+    check_caching,
+    check_schema_refs,
+    check_sql_tokens,
+)
 
 _BASE_REQUIRED = (
     "streamlit_app.py",
@@ -359,6 +365,8 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     checks.append({"name": "app-security", "ok": sec["ok"], "findings": sec["findings"]})
     bind = check_bind_predicates.scan_paths(files)
     checks.append({"name": "bind-predicates", "ok": bind["ok"], "findings": bind["findings"]})
+    tokens = check_sql_tokens.scan_paths(files)
+    checks.append({"name": "sql-tokens", "ok": tokens["ok"], "findings": tokens["findings"]})
     cache = check_caching.scan_paths(files)
     checks.append({"name": "caching", "ok": cache["ok"], "findings": cache["findings"]})
 
