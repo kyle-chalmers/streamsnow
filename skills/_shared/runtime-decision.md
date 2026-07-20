@@ -42,6 +42,12 @@ match flips your whole understanding of the app.
 4. Record any deviation from the default in §9 with the reason. Switching later is a re-deploy plus a
    manifest + connection-pattern rewrite — decide before scaffolding, not after.
 
+For an already-deployed app, `snowflake.yml` only declares the *intended* runtime — the
+authoritative answer is live: `SHOW STREAMLITS` / `DESC STREAMLIT <fqn>`. Verify the actual runtime
+(and its Streamlit version) before diagnosing any feature-compatibility problem; container and
+warehouse run very different Streamlit builds, and a diagnosis made against the wrong runtime
+removes working features while fixing nothing.
+
 ## What follows from the choice (checklist)
 
 - **Manifest dialect.** Container → `pyproject.toml` with PEP 440 pins. Warehouse → `environment.yml`

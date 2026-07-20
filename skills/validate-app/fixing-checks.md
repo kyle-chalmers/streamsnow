@@ -25,6 +25,24 @@ uncached call (e.g. a connection heartbeat where a stale cached result would hid
 an exception to document in the app's `AGENTS.md`, not a reason to drop caching broadly. An app with
 no data fetches legitimately has nothing to cache.
 
+**artifacts.** `snowflake.yml`'s `artifacts:` list disagrees with the files on disk. Local dev reads
+disk while a manifest-driven deploy reads the list, so an uncovered file works locally and silently
+goes missing deployed; a stale entry breaks the deploy. Fix by adding the new file (or its parent
+`dir/` entry) to the list, or removing entries for deleted files — never by deleting a file that a
+page still imports. Removing the whole `artifacts:` key is valid only if your deploy provably uploads
+the entire app dir (StreamSnow's generated workflows do).
+
+**sql-tokens.** A `{TOKEN}` placeholder appears inside a SQL comment. `render_sql` substitutes
+tokens with comment-unaware `str.replace`, so the token's full SQL expansion lands inside the
+comment and multi-line expansions break out as live SQL (parse errors that only appear at render
+time). Fix by describing the token in prose (`-- agent filter applied here`), never by braces;
+`-- noqa: sql-token` only for a comment that genuinely must show the syntax.
+
+**session-fallback.** A `get_active_session()` call isn't wrapped in a broad `try/except`. The call
+raises during local `streamlit run` (it only works inside the deployed runtime), and a narrow
+`except ImportError` misses resolver-dependent failure types. Fix with the scaffold shape: call
+inside `try:`, `except Exception:` falling back to `st.connection("snowflake").session()`.
+
 **files / layout.** Compare against a freshly scaffolded app rather than guessing, and check the
 runtime first — container and warehouse expect different dependency manifests
 ([_shared/runtime-decision.md](../_shared/runtime-decision.md)).

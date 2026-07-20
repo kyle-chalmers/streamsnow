@@ -17,7 +17,9 @@ governed view may exist" as a question, not an assertion.
 Schema allowlist adherence (governed view vs. raw base table), column fidelity, cache-key
 correctness (filter params must be function arguments, not closure variables), TTL appropriateness
 vs. stated freshness needs, wide unfiltered DataFrames that risk the result-size ceiling. Static
-read only — live-DB tracing belongs to `/audit-lineage`.
+read only — live-DB tracing belongs to `/audit-lineage`. For the production failure modes behind
+these rules (owner's-rights grants, passthrough-view pushdown, `None` in `params=`, dynamic-table
+layering), consult [_shared/production-gotchas.md](../_shared/production-gotchas.md).
 
 ## UI / Streamlit patterns
 
