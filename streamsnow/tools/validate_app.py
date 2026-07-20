@@ -401,7 +401,9 @@ def _format_finding(f: object) -> str:
             loc = f"line {line}"
         # Prefer the most specific descriptor available.
         parts = [
-            str(f[k]) for k in ("kind", "func", "schema", "detail") if f.get(k) not in (None, "")
+            str(f[k])
+            for k in ("kind", "func", "schema", "token", "detail")
+            if f.get(k) not in (None, "")
         ]
         descriptor = " ".join(parts)
         if loc and descriptor:
