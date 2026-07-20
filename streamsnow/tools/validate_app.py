@@ -37,6 +37,7 @@ from . import (
     check_bind_predicates,
     check_caching,
     check_schema_refs,
+    check_session_fallback,
     check_sql_tokens,
 )
 
@@ -367,6 +368,10 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     checks.append({"name": "bind-predicates", "ok": bind["ok"], "findings": bind["findings"]})
     tokens = check_sql_tokens.scan_paths(files)
     checks.append({"name": "sql-tokens", "ok": tokens["ok"], "findings": tokens["findings"]})
+    session = check_session_fallback.scan_paths(files)
+    checks.append(
+        {"name": "session-fallback", "ok": session["ok"], "findings": session["findings"]}
+    )
     cache = check_caching.scan_paths(files)
     checks.append({"name": "caching", "ok": cache["ok"], "findings": cache["findings"]})
 

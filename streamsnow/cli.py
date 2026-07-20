@@ -38,6 +38,7 @@ from .tools.check_app_security import main as _security_main
 from .tools.check_bind_predicates import main as _bind_main
 from .tools.check_caching import main as _caching_main
 from .tools.check_schema_refs import main as _schema_refs_main
+from .tools.check_session_fallback import main as _session_fallback_main
 from .tools.check_sql_tokens import main as _sql_tokens_main
 from .tools.validate_app import main as _validate_app_main
 
@@ -632,6 +633,15 @@ def check_sql_tokens_cmd(
 ) -> None:
     """Flag {TOKEN} placeholders inside SQL comments (render_sql substitutes them)."""
     _run_check(_sql_tokens_main, paths, output_format)
+
+
+@check_app.command("session-fallback")
+def check_session_fallback_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Require broad try/except around get_active_session() calls."""
+    _run_check(_session_fallback_main, paths, output_format)
 
 
 @app.command("validate-app")

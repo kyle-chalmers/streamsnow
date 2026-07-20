@@ -13,6 +13,7 @@ from streamsnow.tools import (
     check_app_security,
     check_bind_predicates,
     check_caching,
+    check_session_fallback,
     check_sql_tokens,
 )
 from streamsnow.tools.check_schema_refs import find_denied_refs
@@ -940,3 +941,123 @@ def test_validate_app_includes_sql_tokens_check(tmp_path):
     res = validate_app(tmp_path / "apps/tok-app", policy, cfg)
     by_name = {c["name"]: c for c in res["checks"]}
     assert by_name["sql-tokens"]["ok"] is False
+
+
+# --------------------------------------------------------------------------- #
+# session-fallback: broad try/except around get_active_session()               #
+# --------------------------------------------------------------------------- #
+
+
+def test_session_fallback_accepts_scaffold_shape(tmp_path):
+    # The exact warehouse-scaffold pattern must pass verbatim.
+    p = _write(
+        tmp_path / "page.py",
+        "import streamlit as st\n"
+        "def load():\n"
+        "    try:\n"
+        "        from snowflake.snowpark.context import get_active_session\n"
+        "        session = get_active_session()\n"
+        "    except Exception:\n"
+        "        session = st.connection('snowflake').session()\n"
+        "    return session\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_flags_unwrapped_call(tmp_path):
+    p = _write(
+        tmp_path / "page.py",
+        "from snowflake.snowpark.context import get_active_session\n"
+        "session = get_active_session()\n",
+    )
+    res = check_session_fallback.scan_paths([p])
+    assert not res["ok"]
+    assert "unwrapped" in res["findings"][0]["detail"]
+
+
+def test_session_fallback_flags_narrow_except(tmp_path):
+    p = _write(
+        tmp_path / "page.py",
+        "import streamlit as st\n"
+        "try:\n"
+        "    from snowflake.snowpark.context import get_active_session\n"
+        "    session = get_active_session()\n"
+        "except ImportError:\n"
+        "    session = st.connection('snowflake').session()\n",
+    )
+    res = check_session_fallback.scan_paths([p])
+    assert not res["ok"]
+    assert "narrow" in res["findings"][0]["detail"]
+
+
+def test_session_fallback_accepts_exception_in_tuple(tmp_path):
+    p = _write(
+        tmp_path / "page.py",
+        "try:\n"
+        "    session = get_active_session()\n"
+        "except (ImportError, Exception):\n"
+        "    session = None\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_accepts_bare_except(tmp_path):
+    p = _write(
+        tmp_path / "page.py",
+        "try:\n    session = get_active_session()\nexcept:\n    session = None\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_call_in_handler_not_covered(tmp_path):
+    # A call inside the EXCEPT block is not protected by that try's handlers.
+    p = _write(
+        tmp_path / "page.py",
+        "try:\n    x = 1\nexcept Exception:\n    session = get_active_session()\n",
+    )
+    assert not check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_nested_function_inside_try(tmp_path):
+    # The try wraps a nested def — coverage follows AST containment.
+    p = _write(
+        tmp_path / "page.py",
+        "def outer():\n"
+        "    try:\n"
+        "        def inner():\n"
+        "            return get_active_session()\n"
+        "        return inner()\n"
+        "    except Exception:\n"
+        "        return None\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_noqa_waiver(tmp_path):
+    p = _write(
+        tmp_path / "page.py",
+        "session = get_active_session()  # noqa: session-fallback\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_container_scaffold_clean(tmp_path):
+    # Container pages use st.connection only — nothing to flag.
+    p = _write(
+        tmp_path / "page.py",
+        "import streamlit as st\nconn = st.connection('snowflake')\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_validate_app_includes_session_fallback_check(tmp_path):
+    cfg = _warehouse_cfg()
+    scaffold(cfg, tmp_path, "sf-app")
+    _write(
+        tmp_path / "apps/sf-app/pages/bad.py",
+        "from snowflake.snowpark.context import get_active_session\ns = get_active_session()\n",
+    )
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    res = validate_app(tmp_path / "apps/sf-app", policy, cfg)
+    by_name = {c["name"]: c for c in res["checks"]}
+    assert by_name["session-fallback"]["ok"] is False

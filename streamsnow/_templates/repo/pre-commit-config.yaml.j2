@@ -46,3 +46,9 @@ repos:
         language: system
         files: ^apps/.*\.sql$
         pass_filenames: true
+      - id: streamsnow-session-fallback
+        name: streamsnow check session-fallback (wrap get_active_session)
+        entry: streamsnow check session-fallback
+        language: system
+        files: ^apps/.*\.py$
+        pass_filenames: true
