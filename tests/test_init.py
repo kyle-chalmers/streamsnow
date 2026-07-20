@@ -215,3 +215,37 @@ def test_doctor_fails_loudly_on_malformed_config(tmp_path, monkeypatch):
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code != 0
     assert "invalid" in result.output.lower()
+
+
+def test_deploy_workflows_pin_verify_concurrency_and_dotfile_copy(tmp_path):
+    """Regression pins for production deploy lessons.
+
+    - concurrency serialization: concurrent CREATE OR REPLACE races version
+      pointers; cancel-in-progress would silently drop commits.
+    - dotfile copy: `snow stage copy --recursive` silently skips dotted dirs,
+      so .streamlit/config.toml needs its own copy — and secrets never ship.
+    - verify step: deploy success is not app health; verify-deploy must run.
+    """
+    # stage-copy variant
+    scaffold(Config.from_dict(yaml.safe_load(EXAMPLE_CONFIG.read_text())), tmp_path / "s", "s-app")
+    stage_deploy = (tmp_path / "s/.github/workflows/deploy.yml").read_text()
+    assert "group: deploy-snowflake" in stage_deploy
+    assert "cancel-in-progress: false" in stage_deploy
+    assert ".streamlit/config.toml" in stage_deploy  # explicit dotfile copy loop
+    assert "secrets.toml" not in stage_deploy  # secrets must never be staged
+    assert "streamsnow verify-deploy" in stage_deploy
+    assert '--sha "$GITHUB_SHA"' in stage_deploy
+
+    # git-repository variant
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data["deploy"] = {
+        "source": "git-repository",
+        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "api_integration_name": "GITHUB_API_INTEGRATION",
+        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+    }
+    scaffold(Config.from_dict(data), tmp_path / "g", "g-app")
+    git_deploy = (tmp_path / "g/.github/workflows/deploy.yml").read_text()
+    assert "group: deploy-snowflake" in git_deploy
+    assert "cancel-in-progress: false" in git_deploy
+    assert "streamsnow verify-deploy" in git_deploy

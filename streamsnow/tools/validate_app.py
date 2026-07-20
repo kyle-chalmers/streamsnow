@@ -1,7 +1,8 @@
 """Aggregate PASS/FAIL preflight for one app — the deterministic ship gate.
 
 Runs the governance checks (required files, naming, runtime-matched manifest,
-schema-refs, app-security, bind-predicates, caching) over ``apps/<slug>/`` and
+artifacts, schema-refs, app-security, bind-predicates, caching, sql-tokens,
+session-fallback) over ``apps/<slug>/`` and
 returns a single PASS/FAIL. No database, no network. This is what the
 ``/validate-app`` skill and ``streamsnow ship-app`` call as the hard gate.
 

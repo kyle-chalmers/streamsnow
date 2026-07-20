@@ -11,6 +11,7 @@ streamsnow update         Re-vendor templates/tools and bump the plugin
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import sys
@@ -556,6 +557,41 @@ def deploy_sql(
         _err(str(exc))
         raise typer.Exit(2) from exc
     print(sql)
+
+
+@app.command(name="verify-deploy")
+def verify_deploy_cmd(
+    slug: str = typer.Argument(..., help="App slug to verify."),
+    sha: str = typer.Option(None, "--sha", help="Expected commit SHA (stage-copy source check)."),
+    attempts: int = typer.Option(3, "--attempts", help="Retries for cold-start absorption."),
+    delay: float = typer.Option(20.0, "--delay", help="Seconds between retries."),
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Verify a deployed app actually serves: object exists, live version set,
+    version source matches the merge SHA, container logs show no crash loop."""
+    from .verify import verify_app
+
+    try:
+        cfg = load_config(Path(config) if config else None)
+    except ConfigError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    try:
+        result = verify_app(cfg, slug, sha=sha, attempts=attempts, delay=delay)
+    except ValueError as exc:  # invalid slug
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    if output_format == "json":
+        print(json.dumps(result, indent=2))
+    else:
+        for c in result["checks"]:
+            mark = "✓" if c["ok"] else "✗"
+            print(f"  {mark} {c['name']}")
+            for f in c["findings"]:
+                print(f"      - {f}")
+        print(f"\n{'PASS' if result['ok'] else 'FAIL'}: {result['app']}")
+    raise typer.Exit(code=0 if result["ok"] else 1)
 
 
 @app.command()
