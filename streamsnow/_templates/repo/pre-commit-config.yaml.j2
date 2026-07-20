@@ -15,7 +15,7 @@ repos:
 
   - repo: local
     hooks:
-      # All four require the `streamsnow` package on PATH (uv/pip install streamsnow).
+      # All hooks require the `streamsnow` package on PATH (uv/pip install streamsnow).
       - id: streamsnow-schema-refs
         name: streamsnow check schema-refs (block denied schemas)
         entry: streamsnow check schema-refs
@@ -39,4 +39,22 @@ repos:
         entry: streamsnow check caching
         language: system
         files: ^apps/.*\.py$
+        pass_filenames: true
+      - id: streamsnow-sql-tokens
+        name: streamsnow check sql-tokens (no {TOKEN} in SQL comments)
+        entry: streamsnow check sql-tokens
+        language: system
+        files: ^apps/.*\.sql$
+        pass_filenames: true
+      - id: streamsnow-session-fallback
+        name: streamsnow check session-fallback (wrap get_active_session)
+        entry: streamsnow check session-fallback
+        language: system
+        files: ^apps/.*\.py$
+        pass_filenames: true
+      - id: streamsnow-artifacts
+        name: streamsnow check artifacts (snowflake.yml matches disk)
+        entry: streamsnow check artifacts
+        language: system
+        files: ^apps/
         pass_filenames: true

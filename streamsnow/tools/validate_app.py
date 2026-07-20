@@ -1,7 +1,8 @@
 """Aggregate PASS/FAIL preflight for one app — the deterministic ship gate.
 
 Runs the governance checks (required files, naming, runtime-matched manifest,
-schema-refs, app-security, bind-predicates, caching) over ``apps/<slug>/`` and
+artifacts, schema-refs, app-security, bind-predicates, caching, sql-tokens,
+session-fallback) over ``apps/<slug>/`` and
 returns a single PASS/FAIL. No database, no network. This is what the
 ``/validate-app`` skill and ``streamsnow ship-app`` call as the hard gate.
 
@@ -32,7 +33,15 @@ except ImportError:  # pragma: no cover
 
 from ..config import Config, ConfigError, load_config
 from ..policy import SchemaPolicy
-from . import check_app_security, check_bind_predicates, check_caching, check_schema_refs
+from . import (
+    check_app_security,
+    check_artifacts,
+    check_bind_predicates,
+    check_caching,
+    check_schema_refs,
+    check_session_fallback,
+    check_sql_tokens,
+)
 
 _BASE_REQUIRED = (
     "streamlit_app.py",
@@ -344,6 +353,9 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
         manifest_problems += _check_environment_yml(app_dir)
     checks.append({"name": "manifest", "ok": not manifest_problems, "findings": manifest_problems})
 
+    arts = check_artifacts.check_app(app_dir)
+    checks.append({"name": "artifacts", "ok": arts["ok"], "findings": arts["findings"]})
+
     checks.append(
         {
             "name": "naming",
@@ -359,6 +371,12 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     checks.append({"name": "app-security", "ok": sec["ok"], "findings": sec["findings"]})
     bind = check_bind_predicates.scan_paths(files)
     checks.append({"name": "bind-predicates", "ok": bind["ok"], "findings": bind["findings"]})
+    tokens = check_sql_tokens.scan_paths(files)
+    checks.append({"name": "sql-tokens", "ok": tokens["ok"], "findings": tokens["findings"]})
+    session = check_session_fallback.scan_paths(files)
+    checks.append(
+        {"name": "session-fallback", "ok": session["ok"], "findings": session["findings"]}
+    )
     cache = check_caching.scan_paths(files)
     checks.append({"name": "caching", "ok": cache["ok"], "findings": cache["findings"]})
 
@@ -383,7 +401,9 @@ def _format_finding(f: object) -> str:
             loc = f"line {line}"
         # Prefer the most specific descriptor available.
         parts = [
-            str(f[k]) for k in ("kind", "func", "schema", "detail") if f.get(k) not in (None, "")
+            str(f[k])
+            for k in ("kind", "func", "schema", "token", "detail")
+            if f.get(k) not in (None, "")
         ]
         descriptor = " ".join(parts)
         if loc and descriptor:

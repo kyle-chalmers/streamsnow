@@ -55,6 +55,8 @@ it before the PR), or verify in Snowsight.
   `.snowflakecomputing.com` suffix — the connector appends it.
 - **SSO:** local runs usually need `authenticator = "externalbrowser"`; a non-interactive
   authenticator copied from CI won't prompt.
+- **A SQL edit that "has no effect":** hot-reload picks up `.py` changes but can serve cached
+  results of the old SQL text — fully restart the preview before concluding a query change failed.
 - **Don't run deploys locally** — `deploy-setup` / `deploy-sql` feed the CI workflow; preview is the
   only local-run path.
 

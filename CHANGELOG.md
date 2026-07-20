@@ -3,7 +3,54 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
-## [Unreleased]
+## [0.5.0] - 2026-07-19
+
+Production-lessons release: the guardrails a real Streamlit-in-Snowflake fleet
+accumulated — three new governance checks, post-deploy health verification, and
+a written catalog of the failure modes behind them.
+
+> **Upgrading a consumer repo:** run `streamsnow update --apply` to receive the
+> new pre-commit hooks, the deploy workflow's verify step, and the AGENTS.md
+> Production rules section. The `validate-app` gate tightens on upgrade —
+> previously-passing apps can newly fail `artifacts` / `sql-tokens` /
+> `session-fallback`; fixes are one-liners, see the validate-app skill's
+> `fixing-checks.md`. No plugin hook changes, so no reinstall dance this time.
+
+### Added
+- **`artifacts` check** — cross-checks `snowflake.yml`'s `artifacts:` list
+  against the files on disk. Local dev reads disk while a manifest-driven
+  deploy reads the list, so an uncovered new file works locally and silently
+  404s deployed; a stale entry breaks the deploy. (A recurring production
+  incident — twice in one fleet, months apart.)
+- **`sql-tokens` check** — flags `{TOKEN}` placeholders inside SQL comments.
+  `render_sql` substitutes tokens with comment-unaware `str.replace`, so a
+  documented token in a comment expands into live SQL and parse errors.
+- **`session-fallback` check** — requires a broad `try/except Exception`
+  around `get_active_session()` (it raises during local `streamlit run`;
+  narrow `except ImportError` misses resolver-dependent failure types).
+- **`streamsnow verify-deploy <slug> [--sha]`** — post-deploy health
+  verification, because "deploy succeeded" is not "app serves": object exists,
+  `live_version_location_uri` is set (NULL renders nothing in Snowsight),
+  version-source URI contains the merge SHA (stage-copy), and container
+  service logs show no crash-loop signature. Retries absorb container cold
+  start; the log scan is strictly fail-open. Both generated deploy workflows
+  gain a `Verify deploy health` step.
+- **`docs/production-lessons.md`** + **`skills/_shared/production-gotchas.md`**
+  — the full catalog and the condensed symptom→rule table: owner's-rights
+  grants, passthrough-view pushdown, dynamic-table role/layering rules,
+  out-of-band DDL audit trail, local SQL-cache restart, verify-runtime-before-
+  diagnosing, `None`-in-`params=`, retire-by-moving. Pointers wired into the
+  review-app, audit-lineage, preview-app, and validate-app skills.
+
+### Changed
+- Pre-commit template gains three hooks (`streamsnow-sql-tokens`,
+  `streamsnow-session-fallback`, `streamsnow-artifacts`).
+- AGENTS.md template gains a **Production rules** section and a correction:
+  deployed apps execute with **owner's rights** (the ci_role's grants), not
+  caller's rights as the viewer role.
+- Template regression tests now pin the deploy workflows' concurrency
+  serialization and the `.streamlit/config.toml` dotfile-copy loop (which
+  `snow stage copy --recursive` would otherwise silently skip).
 
 ### Fixed
 - **Scaffolded apps could crash-loop after a Snowflake base-image rollout.** The
