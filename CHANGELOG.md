@@ -3,7 +3,7 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
-## [0.5.0] - 2026-07-19
+## [0.5.0] - 2026-07-20
 
 Production-lessons release: the guardrails a real Streamlit-in-Snowflake fleet
 accumulated — three new governance checks, post-deploy health verification, and
