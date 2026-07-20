@@ -63,4 +63,17 @@ jobs:
             streamsnow deploy-sql "$slug" --refresh > "/tmp/ss-$slug-refresh.sql"
             snow sql -f "/tmp/ss-$slug-refresh.sql" || true
           done
+
+      # "Deploy succeeded" is not "app serves": a missing live version renders
+      # nothing in Snowsight, and a container app can crash-loop while its
+      # service reports healthy. (No --sha here: the git source pins freshness
+      # via fetch + PULL, not a SHA-versioned stage path.)
+      - name: Verify deploy health
+        if: steps.gate.outputs.go == 'true'
+        run: |
+          set -euo pipefail
+          for d in apps/*/; do
+            [ -d "$d" ] || continue
+            streamsnow verify-deploy "$(basename "$d")"
+          done
 {% endraw %}

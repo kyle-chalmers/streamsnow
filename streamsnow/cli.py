@@ -11,6 +11,7 @@ streamsnow update         Re-vendor templates/tools and bump the plugin
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import sys
@@ -35,9 +36,12 @@ from .config import (
 from .deploy import generate_create_sql, generate_refresh_sql, generate_setup_sql, stage_path
 from .scaffolder import APP_ITEMS, GOVERNANCE_ITEMS, REPO_ITEMS, render_item, scaffold
 from .tools.check_app_security import main as _security_main
+from .tools.check_artifacts import main as _artifacts_main
 from .tools.check_bind_predicates import main as _bind_main
 from .tools.check_caching import main as _caching_main
 from .tools.check_schema_refs import main as _schema_refs_main
+from .tools.check_session_fallback import main as _session_fallback_main
+from .tools.check_sql_tokens import main as _sql_tokens_main
 from .tools.validate_app import main as _validate_app_main
 
 app = typer.Typer(
@@ -555,6 +559,41 @@ def deploy_sql(
     print(sql)
 
 
+@app.command(name="verify-deploy")
+def verify_deploy_cmd(
+    slug: str = typer.Argument(..., help="App slug to verify."),
+    sha: str = typer.Option(None, "--sha", help="Expected commit SHA (stage-copy source check)."),
+    attempts: int = typer.Option(3, "--attempts", help="Retries for cold-start absorption."),
+    delay: float = typer.Option(20.0, "--delay", help="Seconds between retries."),
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Verify a deployed app actually serves: object exists, live version set,
+    version source matches the merge SHA, container logs show no crash loop."""
+    from .verify import verify_app
+
+    try:
+        cfg = load_config(Path(config) if config else None)
+    except ConfigError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    try:
+        result = verify_app(cfg, slug, sha=sha, attempts=attempts, delay=delay)
+    except ValueError as exc:  # invalid slug
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    if output_format == "json":
+        print(json.dumps(result, indent=2))
+    else:
+        for c in result["checks"]:
+            mark = "✓" if c["ok"] else "✗"
+            print(f"  {mark} {c['name']}")
+            for f in c["findings"]:
+                print(f"      - {f}")
+        print(f"\n{'PASS' if result['ok'] else 'FAIL'}: {result['app']}")
+    raise typer.Exit(code=0 if result["ok"] else 1)
+
+
 @app.command()
 def update(
     directory: Path = typer.Option(Path("."), "--dir", help="Repo root."),
@@ -622,6 +661,33 @@ def check_bind_cmd(
 ) -> None:
     """Block the `:N IS NULL OR` Go-driver bind-predicate trap."""
     _run_check(_bind_main, paths, output_format)
+
+
+@check_app.command("sql-tokens")
+def check_sql_tokens_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Flag {TOKEN} placeholders inside SQL comments (render_sql substitutes them)."""
+    _run_check(_sql_tokens_main, paths, output_format)
+
+
+@check_app.command("session-fallback")
+def check_session_fallback_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Require broad try/except around get_active_session() calls."""
+    _run_check(_session_fallback_main, paths, output_format)
+
+
+@check_app.command("artifacts")
+def check_artifacts_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Cross-check snowflake.yml artifacts against files on disk."""
+    _run_check(_artifacts_main, paths, output_format)
 
 
 @app.command("validate-app")

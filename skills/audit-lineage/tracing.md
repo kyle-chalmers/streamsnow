@@ -40,7 +40,13 @@ From the DDL plus the app's predicates:
 - **Materialization candidates:** a heavy aggregation or window function recomputed on every load,
   or an object several apps read, is better pre-computed in an allowed schema. Tailor to runtime —
   container apps can lean on app-side caching for some of this; warehouse apps benefit more from a
-  pre-aggregated / dynamic table. Proposals only, never applied DDL.
+  pre-aggregated / dynamic table. Proposals only, never applied DDL. Dynamic-table proposals must
+  respect the platform rules (refresh runs as the owner's primary role only; a DT can't read
+  DT-backed views) — see [_shared/production-gotchas.md](../_shared/production-gotchas.md).
+- **Grant reachability:** the deployed app reads with the **ci_role's** grants, not the previewer's.
+  For each traced source, note whether the ci_role can SELECT it (a source readable only by your
+  role is a deployed-app failure waiting to happen) and whether a schema-level future grant covers
+  new objects.
 
 ## Troubleshooting
 

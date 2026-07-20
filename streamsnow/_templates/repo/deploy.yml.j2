@@ -65,4 +65,15 @@ jobs:
             streamsnow deploy-sql "$slug" --sha "$GITHUB_SHA" > "/tmp/ss-$slug.sql"
             snow sql -f "/tmp/ss-$slug.sql"
           done
+
+      # "Deploy succeeded" is not "app serves": a missing live version renders
+      # nothing in Snowsight, a stale version-source URI serves old code, and a
+      # container app can crash-loop while its service reports healthy.
+      - name: Verify deploy health
+        if: steps.gate.outputs.go == 'true'
+        run: |
+          set -euo pipefail
+          for d in apps/*/; do
+            streamsnow verify-deploy "$(basename "$d")" --sha "$GITHUB_SHA"
+          done
 {% endraw %}

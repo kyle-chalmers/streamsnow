@@ -9,7 +9,14 @@ import yaml
 from streamsnow.config import Config
 from streamsnow.policy import SchemaPolicy
 from streamsnow.scaffolder import scaffold
-from streamsnow.tools import check_app_security, check_bind_predicates, check_caching
+from streamsnow.tools import (
+    check_app_security,
+    check_artifacts,
+    check_bind_predicates,
+    check_caching,
+    check_session_fallback,
+    check_sql_tokens,
+)
 from streamsnow.tools.check_schema_refs import find_denied_refs
 from streamsnow.tools.validate_app import validate_app
 
@@ -860,3 +867,297 @@ def test_format_finding_renders_dicts_readably():
     # No raw dict repr should ever leak through.
     rendered = _format_finding({"file": "f", "line": 1, "func": "load", "detail": "missing cache"})
     assert "{" not in rendered
+
+
+# --------------------------------------------------------------------------- #
+# sql-tokens: {TOKEN} placeholders inside SQL comments                         #
+# --------------------------------------------------------------------------- #
+
+
+def test_sql_tokens_flags_token_in_line_comment(tmp_path):
+    p = _write(
+        tmp_path / "q.sql",
+        "-- Filter applied: {AGENT_FILTER}\nSELECT 1 FROM t WHERE {AGENT_FILTER}\n",
+    )
+    res = check_sql_tokens.scan_paths([p])
+    assert not res["ok"]
+    # Only the comment occurrence is flagged; the live-SQL one on line 2 is the
+    # legitimate substitution site.
+    assert res["findings"] == [{"file": str(p), "line": 1, "token": "{AGENT_FILTER}"}]
+
+
+def test_sql_tokens_flags_token_in_block_comment(tmp_path):
+    p = _write(
+        tmp_path / "q.sql",
+        "/* This query uses\n   {DATE_FILTER} for pruning */\nSELECT 1\n",
+    )
+    res = check_sql_tokens.scan_paths([p])
+    assert not res["ok"]
+    assert res["findings"][0]["line"] == 2
+
+
+def test_sql_tokens_ignores_live_sql_and_string_literals(tmp_path):
+    p = _write(
+        tmp_path / "q.sql",
+        "SELECT 1 FROM t WHERE {STATUS_FILTER} AND note = '-- {NOT_A_COMMENT}'\n",
+    )
+    assert check_sql_tokens.scan_paths([p])["ok"]
+
+
+def test_sql_tokens_ignores_scaffold_header_convention(tmp_path):
+    # The scaffold's header block documents params braceless — must stay clean.
+    p = _write(
+        tmp_path / "q.sql",
+        "-- Query: example_metric\n-- Params: :1 start_date, :2 end_date\n"
+        "-- Tokens: STATUS_FILTER (braceless by convention)\nSELECT 1\n",
+    )
+    assert check_sql_tokens.scan_paths([p])["ok"]
+
+
+def test_sql_tokens_noqa_waiver(tmp_path):
+    p = _write(
+        tmp_path / "q.sql",
+        "-- Expands {AGENT_FILTER} here  -- noqa: sql-token\nSELECT 1\n",
+    )
+    assert check_sql_tokens.scan_paths([p])["ok"]
+
+
+def test_sql_tokens_lowercase_and_numeric_braces_not_flagged(tmp_path):
+    # RLIKE quantifiers ({2}) and lowercase jinja-ish braces are not render_sql tokens.
+    p = _write(
+        tmp_path / "q.sql",
+        "-- matches ^\\d{2}/\\d{2}$ and {not_a_token}\nSELECT 1\n",
+    )
+    assert check_sql_tokens.scan_paths([p])["ok"]
+
+
+def test_validate_app_includes_sql_tokens_check(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "tok-app")
+    _write(
+        tmp_path / "apps/tok-app/queries/bad.sql",
+        "-- Optional filter: {STATUS_FILTER}\nSELECT 1\n",
+    )
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    res = validate_app(tmp_path / "apps/tok-app", policy, cfg)
+    by_name = {c["name"]: c for c in res["checks"]}
+    assert by_name["sql-tokens"]["ok"] is False
+
+
+# --------------------------------------------------------------------------- #
+# session-fallback: broad try/except around get_active_session()               #
+# --------------------------------------------------------------------------- #
+
+
+def test_session_fallback_accepts_scaffold_shape(tmp_path):
+    # The exact warehouse-scaffold pattern must pass verbatim.
+    p = _write(
+        tmp_path / "page.py",
+        "import streamlit as st\n"
+        "def load():\n"
+        "    try:\n"
+        "        from snowflake.snowpark.context import get_active_session\n"
+        "        session = get_active_session()\n"
+        "    except Exception:\n"
+        "        session = st.connection('snowflake').session()\n"
+        "    return session\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_flags_unwrapped_call(tmp_path):
+    p = _write(
+        tmp_path / "page.py",
+        "from snowflake.snowpark.context import get_active_session\n"
+        "session = get_active_session()\n",
+    )
+    res = check_session_fallback.scan_paths([p])
+    assert not res["ok"]
+    assert "unwrapped" in res["findings"][0]["detail"]
+
+
+def test_session_fallback_flags_narrow_except(tmp_path):
+    p = _write(
+        tmp_path / "page.py",
+        "import streamlit as st\n"
+        "try:\n"
+        "    from snowflake.snowpark.context import get_active_session\n"
+        "    session = get_active_session()\n"
+        "except ImportError:\n"
+        "    session = st.connection('snowflake').session()\n",
+    )
+    res = check_session_fallback.scan_paths([p])
+    assert not res["ok"]
+    assert "narrow" in res["findings"][0]["detail"]
+
+
+def test_session_fallback_accepts_exception_in_tuple(tmp_path):
+    p = _write(
+        tmp_path / "page.py",
+        "try:\n"
+        "    session = get_active_session()\n"
+        "except (ImportError, Exception):\n"
+        "    session = None\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_accepts_bare_except(tmp_path):
+    p = _write(
+        tmp_path / "page.py",
+        "try:\n    session = get_active_session()\nexcept:\n    session = None\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_call_in_handler_not_covered(tmp_path):
+    # A call inside the EXCEPT block is not protected by that try's handlers.
+    p = _write(
+        tmp_path / "page.py",
+        "try:\n    x = 1\nexcept Exception:\n    session = get_active_session()\n",
+    )
+    assert not check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_nested_function_inside_try(tmp_path):
+    # The try wraps a nested def — coverage follows AST containment.
+    p = _write(
+        tmp_path / "page.py",
+        "def outer():\n"
+        "    try:\n"
+        "        def inner():\n"
+        "            return get_active_session()\n"
+        "        return inner()\n"
+        "    except Exception:\n"
+        "        return None\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_noqa_waiver(tmp_path):
+    p = _write(
+        tmp_path / "page.py",
+        "session = get_active_session()  # noqa: session-fallback\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_session_fallback_container_scaffold_clean(tmp_path):
+    # Container pages use st.connection only — nothing to flag.
+    p = _write(
+        tmp_path / "page.py",
+        "import streamlit as st\nconn = st.connection('snowflake')\n",
+    )
+    assert check_session_fallback.scan_paths([p])["ok"]
+
+
+def test_validate_app_includes_session_fallback_check(tmp_path):
+    cfg = _warehouse_cfg()
+    scaffold(cfg, tmp_path, "sf-app")
+    _write(
+        tmp_path / "apps/sf-app/pages/bad.py",
+        "from snowflake.snowpark.context import get_active_session\ns = get_active_session()\n",
+    )
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    res = validate_app(tmp_path / "apps/sf-app", policy, cfg)
+    by_name = {c["name"]: c for c in res["checks"]}
+    assert by_name["session-fallback"]["ok"] is False
+
+
+# --------------------------------------------------------------------------- #
+# artifacts: snowflake.yml artifacts list vs files on disk                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_artifacts_scaffold_is_clean(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    assert check_artifacts.check_app(tmp_path / "apps/art-app")["ok"]
+
+
+def test_artifacts_flags_uncovered_new_file(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    # A new top-level helper module the manifest never learned about.
+    _write(app / "helpers.py", "X = 1\n")
+    res = check_artifacts.check_app(app)
+    assert not res["ok"]
+    assert any("helpers.py" in f["detail"] for f in res["findings"])
+
+
+def test_artifacts_directory_entry_covers_new_files(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    # queries/ and pages/ are directory entries in the scaffold manifest.
+    _write(app / "queries/new_metric.sql", "SELECT 1\n")
+    _write(app / "pages/trends.py", "import streamlit as st\n")
+    assert check_artifacts.check_app(app)["ok"]
+
+
+def test_artifacts_flags_stale_entry(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    (app / "branding.py").unlink()
+    res = check_artifacts.check_app(app)
+    assert not res["ok"]
+    assert any("branding.py" in f["detail"] and "stale" in f["detail"] for f in res["findings"])
+
+
+def test_artifacts_no_key_passes(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    yml = app / "snowflake.yml"
+    data = yaml.safe_load(yml.read_text())
+    for ent in data["entities"].values():
+        ent.pop("artifacts", None)
+    yml.write_text(yaml.safe_dump(data))
+    _write(app / "helpers.py", "X = 1\n")  # would fail if the list were present
+    assert check_artifacts.check_app(app)["ok"]
+
+
+def test_artifacts_markdown_and_secrets_not_demanded(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    # AGENTS.md is a required file but never an artifact; secrets stay local.
+    assert (app / "AGENTS.md").is_file()
+    assert (app / ".streamlit/secrets.toml.example").is_file()
+    assert check_artifacts.check_app(app)["ok"]
+
+
+def test_artifacts_glob_entry_supported(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    yml = app / "snowflake.yml"
+    data = yaml.safe_load(yml.read_text())
+    for ent in data["entities"].values():
+        if "artifacts" in ent:
+            ent["artifacts"] = [e for e in ent["artifacts"] if e != "queries/"] + ["queries/*.sql"]
+    yml.write_text(yaml.safe_dump(data))
+    _write(app / "queries/extra.sql", "SELECT 1\n")
+    assert check_artifacts.check_app(app)["ok"]
+
+
+def test_artifacts_scan_paths_maps_files_to_app_root(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    app = tmp_path / "apps/art-app"
+    _write(app / "helpers.py", "X = 1\n")
+    # Pre-commit passes individual filenames; the scan must find the app root.
+    res = check_artifacts.scan_paths([app / "helpers.py"])
+    assert not res["ok"]
+
+
+def test_validate_app_includes_artifacts_check(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "art-app")
+    _write(tmp_path / "apps/art-app/helpers.py", "X = 1\n")
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    res = validate_app(tmp_path / "apps/art-app", policy, cfg)
+    by_name = {c["name"]: c for c in res["checks"]}
+    assert by_name["artifacts"]["ok"] is False

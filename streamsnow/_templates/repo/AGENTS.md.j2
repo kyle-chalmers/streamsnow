@@ -22,7 +22,7 @@ Container runtime (`{{ runtime_name }}`, Python {{ container_python }}). Depende
 {% else %}
 Warehouse runtime. Dependencies in `environment.yml` (Snowflake Anaconda channel — **never pin `python`**). Connect with `get_active_session()` wrapped in a try/except `st.connection` fallback for local dev.
 {% endif %}
-Query warehouse: `{{ default_warehouse }}`. Deployed apps run with caller's-rights as `{{ viewer_role }}`.
+Query warehouse: `{{ default_warehouse }}`. Deployed apps execute with **owner's rights** — the grants of `{{ ci_role }}` (the deploying role), not `{{ viewer_role }}` and not your personal role. Viewers only need `USAGE` on the app object.
 
 ## Caching
 
@@ -50,3 +50,12 @@ Every number shown to a user includes thousand separators (`format="localized"`/
 - App directories: `{domain}-{function}` kebab-case under `apps/`.
 - Entrypoint is `streamlit_app.py` (not configurable). `st.set_page_config(...)` first, once. Multipage via `st.navigation` + `st.Page`.
 - Import branding from the local copy: `from branding import ...`.
+
+## Production rules
+
+- Before shipping a page that reads a new object, verify `{{ ci_role }}` can `SELECT` it (deployed apps read with its grants — "works locally" proves nothing). Prefer schema-level `FUTURE` grants so new objects are zero-touch.
+- Never pass Python `None` in `params=` — the deployed driver NULL-binds the whole parameter list (local doesn't reproduce). Optional filters go through `render_sql` tokens.
+- A SQL edit that "has no effect" locally needs a full preview restart — hot-reload doesn't refresh cached query results.
+- Diagnosing a deployed feature problem? Verify the actual runtime first: `SHOW STREAMLITS` / `DESC STREAMLIT <fqn>` — `snowflake.yml` only declares intent.
+- DDL the apps consume but this repo doesn't deploy (passthrough views, grants) goes in dated `migrations/YYYY-MM-DD-<desc>.sql` files, committed with the consuming PR; the live object is the source of truth.
+- Retire an app by moving it to `retired_apps/<slug>/` (deploy scopes to `apps/**`) — never delete; `DROP STREAMLIT` is a separate deliberate manual step.
