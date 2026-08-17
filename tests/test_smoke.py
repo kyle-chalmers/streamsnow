@@ -27,6 +27,22 @@ def test_cli_app_imports():
     assert app is not None
 
 
+def test_check_subcommands_are_registered():
+    """Consumers' generated pre-commit hooks call these by name — dropping one breaks them."""
+    from streamsnow.cli import check_app
+
+    assert {c.name for c in check_app.registered_commands} == {
+        "schema-refs",
+        "security",
+        "caching",
+        "bind-predicates",
+        "sql-tokens",
+        "session-fallback",
+        "page-imports",
+        "artifacts",
+    }
+
+
 def test_schema_policy_denies_case_insensitively():
     policy = SchemaPolicy(database="DEMO_DB", schema_allow=("ANALYTICS",), schema_deny=("BRIDGE",))
     assert policy.is_denied("bridge") is True

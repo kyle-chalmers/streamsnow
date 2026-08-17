@@ -87,6 +87,20 @@ def test_init_container_scaffolds_a_working_repo(tmp_path):
     report = check_paths(list((tmp_path / "apps").rglob("*")), policy)
     assert report["ok"], report["findings"]
 
+    # Every governance hook the checks ship is wired into the generated pre-commit.
+    hooks = (tmp_path / ".pre-commit-config.yaml").read_text()
+    for hook in (
+        "schema-refs",
+        "security",
+        "bind-predicates",
+        "caching",
+        "sql-tokens",
+        "session-fallback",
+        "page-imports",
+        "artifacts",
+    ):
+        assert f"streamsnow-{hook}" in hooks, f"missing hook: {hook}"
+
 
 def test_init_warehouse_runtime(tmp_path):
     data = yaml.safe_load(EXAMPLE_CONFIG.read_text())

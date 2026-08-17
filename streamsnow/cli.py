@@ -39,6 +39,7 @@ from .tools.check_app_security import main as _security_main
 from .tools.check_artifacts import main as _artifacts_main
 from .tools.check_bind_predicates import main as _bind_main
 from .tools.check_caching import main as _caching_main
+from .tools.check_page_imports import main as _page_imports_main
 from .tools.check_schema_refs import main as _schema_refs_main
 from .tools.check_session_fallback import main as _session_fallback_main
 from .tools.check_sql_tokens import main as _sql_tokens_main
@@ -679,6 +680,15 @@ def check_session_fallback_cmd(
 ) -> None:
     """Require broad try/except around get_active_session() calls."""
     _run_check(_session_fallback_main, paths, output_format)
+
+
+@check_app.command("page-imports")
+def check_page_imports_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Block imports that resolve under `streamlit run` but not in the deployed app."""
+    _run_check(_page_imports_main, paths, output_format)
 
 
 @check_app.command("artifacts")
