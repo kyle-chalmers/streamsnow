@@ -32,7 +32,9 @@ run the spec phase first ([spec.md](spec.md)) and resume.
 4. **Generate the page module** `pages/<page>.py`: title + one-line caption, one branded
    metric/chart stub per §4 section, filters per §7, and one `@st.cache_data(ttl=...)`-wrapped
    loader per query calling the app's `sql_loader`. Match a sibling page's patterns. TTL = repo
-   default unless §8 says otherwise (then cite it in a comment).
+   default unless §8 says otherwise (then cite it in a comment). Imports of app-root modules
+   (`branding`, `sql_loader`) stay bare; anything you factor out into `pages/` is imported
+   package-qualified (`from pages._header import ...`) — see Gotchas.
 5. **Register the page**: add an `st.Page(...)` entry to the existing `st.navigation` structure in
    `streamlit_app.py`. Show the diff before applying and use multi-line `Edit` context so the match
    is unambiguous. One nav group → add to it; several → ask which.
@@ -60,6 +62,11 @@ return get_active_session().sql(sql, params=[start, end]).to_pandas()
 - **Optional "All" filters:** never bind Python `None` — compose a `{TOKEN}` fragment via
   `render_sql` instead. Deployed, the driver NULL-binds every param when one is `None`; the page
   shows 0/0 KPIs deployed while working locally.
+- **Shared helper in `pages/`:** import it package-qualified (`from pages._header import ...`).
+  Bare (`from _header import ...`) resolves under `streamlit run`, which also puts the executing
+  page's own directory on `sys.path`, then `ModuleNotFoundError`s on every page deployed, where only
+  the app root is. A local boot and a full click-through both pass — `streamsnow check page-imports`
+  is the only thing that catches it. Don't name the helper after an app-root module either.
 - **Cast COUNT-style metrics to int** before formatting (`f"{int(n):,}"`) so a card reads `23`, not `23.0`.
 - **Don't auto-set `default=True`** on the new page; if it should be the landing page, the user
   flips the existing default in a one-line manual edit.

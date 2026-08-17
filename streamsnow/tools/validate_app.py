@@ -2,7 +2,7 @@
 
 Runs the governance checks (required files, naming, runtime-matched manifest,
 artifacts, schema-refs, app-security, bind-predicates, caching, sql-tokens,
-session-fallback) over ``apps/<slug>/`` and
+session-fallback, page-imports) over ``apps/<slug>/`` and
 returns a single PASS/FAIL. No database, no network. This is what the
 ``/validate-app`` skill and ``streamsnow ship-app`` call as the hard gate.
 
@@ -38,6 +38,7 @@ from . import (
     check_artifacts,
     check_bind_predicates,
     check_caching,
+    check_page_imports,
     check_schema_refs,
     check_session_fallback,
     check_sql_tokens,
@@ -377,6 +378,11 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     checks.append(
         {"name": "session-fallback", "ok": session["ok"], "findings": session["findings"]}
     )
+    # Same family as session-fallback: resolves under `streamlit run`, fails deployed.
+    # Takes the app dir, not `files` — a violation can live in a file the caller never
+    # passed (see check_page_imports.scan_paths).
+    imports = check_page_imports.check_app(app_dir)
+    checks.append({"name": "page-imports", "ok": imports["ok"], "findings": imports["findings"]})
     cache = check_caching.scan_paths(files)
     checks.append({"name": "caching", "ok": cache["ok"], "findings": cache["findings"]})
 

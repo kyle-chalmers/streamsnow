@@ -118,6 +118,42 @@ token substitution instead of nullable params. The decidable shape of this bug
 (`(:1 IS NULL OR col = :1)`) is blocked by the `bind-predicates` check; the
 general rule — no `None` in `params=`, ever — is yours to hold.
 
+## Import shared page helpers package-qualified
+
+**Symptom:** every page in a nav group dies with `ModuleNotFoundError: No
+module named '_shared_header'` — after the change shipped with green CI, a
+local boot against live Snowflake, and a click-through of all four pages that
+reported zero console errors.
+
+Deployed, **only the app root is on `sys.path`**. `streamlit run` *additionally*
+puts the executing page's own directory there. So a helper at
+`pages/_shared_header.py` imported by a sibling page as `from _shared_header
+import ...` resolves locally and fails deployed — and the
+local environment is structurally incapable of showing you the difference. This
+is the one to disbelieve last: a full UI walkthrough passing is not evidence.
+
+The same asymmetry has a quieter form. If a name exists *both* in a page's own
+directory and at the app root, the import silently resolves to a **different
+file** in each environment — no error, just the wrong code running in
+production.
+
+Rules:
+
+- Import anything under a subdirectory package-qualified: `from
+  pages._shared_header import ...`, `from pages.admin._hdr import ...`.
+- Bare imports are correct only for modules that sit *beside* the entrypoint
+  (`branding`, `sql_loader`, `config`) — the app root is on `sys.path` in both
+  environments.
+- Never name a file in `pages/` after an app-root module, a standard-library
+  module, or a dependency.
+- No `pages/__init__.py` is needed; PEP 420 makes `pages` an implicit namespace
+  package once the app root is on `sys.path`.
+- Never "fix" this with `sys.path.append(...)` in a page. It papers over the
+  layout and hides the next instance.
+
+The `page-imports` check blocks all of these statically, because nothing else
+can.
+
 ## Retire apps by moving, not deleting
 
 The deploy workflow scopes to `apps/**`, so retiring an app is a `git mv` to
