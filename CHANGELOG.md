@@ -3,6 +3,33 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [Unreleased]
+
+> **Upgrading a consumer repo:** run `streamsnow update --apply` to receive the
+> new pre-commit hook. The `validate-app` gate tightens — a previously-passing
+> app can newly fail `page-imports`. The fix is a one-line import change per
+> call site; see the validate-app skill's `fixing-checks.md`.
+
+### Added
+- **`page-imports` check** — blocks bare imports of modules that live in an app
+  subdirectory (`from _header import ...` for `pages/_header.py`). Deployed,
+  only the app root is on `sys.path`; `streamlit run` *additionally* puts the
+  executing page's own directory there, so this class boots clean locally,
+  survives a full UI walkthrough, and then `ModuleNotFoundError`s on every
+  affected page in production. Also flags the quieter variant: a name present
+  both in a page's own directory and at the app root (or in stdlib, or in a
+  dependency) resolves to a *different file* in each environment. Local
+  verification is structurally incapable of catching either — the check is the
+  only thing that can. (From a real four-page outage that shipped with green
+  CI, a live local boot, and a clean click-through of every page.)
+
+### Changed
+- `AGENTS.md` (generated) and the start-app page recipe now state the
+  package-qualified import rule, so a scaffolded repo teaches it before an
+  agent has a chance to imitate the wrong form from a sibling page.
+- The validate-app skill's "What it covers" list was three checks out of date
+  (`artifacts`, `sql-tokens`, `session-fallback` were missing).
+
 ## [0.5.0] - 2026-07-20
 
 Production-lessons release: the guardrails a real Streamlit-in-Snowflake fleet

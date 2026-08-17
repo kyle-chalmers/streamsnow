@@ -43,6 +43,17 @@ raises during local `streamlit run` (it only works inside the deployed runtime),
 `except ImportError` misses resolver-dependent failure types. Fix with the scaffold shape: call
 inside `try:`, `except Exception:` falling back to `st.connection("snowflake").session()`.
 
+**page-imports.** A bare import of a module that lives in a subdirectory (`from _header import ...`
+for `pages/_header.py`). Deployed, only the app root is on `sys.path`; `streamlit run` also adds the
+executing page's own directory, so this class boots clean locally, survives a full UI walkthrough,
+and then `ModuleNotFoundError`s on every affected page in production — believe the check, not the
+walkthrough. Fix by qualifying the import against the app root (`from pages._header import ...`,
+`from pages.admin._hdr import ...`) — never with a `sys.path.append` shim in the page, which hides
+the next instance. The *ambiguous* variant (a name that exists both in the page's own directory and
+at the app root, in stdlib, or in a dependency) resolves to a different file in each environment;
+fix it by qualifying or renaming, since one of the two files is being silently ignored somewhere.
+No `pages/__init__.py` is required — PEP 420 namespace packages cover it.
+
 **files / layout.** Compare against a freshly scaffolded app rather than guessing, and check the
 runtime first — container and warehouse expect different dependency manifests
 ([_shared/runtime-decision.md](../_shared/runtime-decision.md)).

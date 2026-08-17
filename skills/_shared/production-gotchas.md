@@ -16,6 +16,7 @@ recipes: [`docs/production-lessons.md`](../../docs/production-lessons.md).
 | "Feature X crashes in Snowflake" diagnosis | Verify the **actual** runtime first: `SHOW STREAMLITS` / `DESC STREAMLIT <fqn>` — `snowflake.yml` only declares intent. Container vs warehouse run very different Streamlit versions. |
 | Container app crash-loops after a platform update | The base image passes launcher flags from its own Streamlit build; pin the app's `streamlit` to at least the base image's version. `streamsnow verify-deploy <slug>` detects the `No such option` log signature. |
 | Query "succeeds" deployed but returns nothing | Never pass Python `None` in `params=` — the deployed driver NULL-binds ALL positional params when any is None (local doesn't reproduce). Use `render_sql` tokens for optional filters. |
+| Every page in a group renders locally, `ModuleNotFoundError` deployed | Deployed, **only the app root is on `sys.path`**; `streamlit run` also adds the executing page's own directory. Import subdirectory helpers package-qualified (`from pages._header import ...`). A local boot and a full UI walkthrough cannot catch this — `streamsnow check page-imports` can. |
 | App consumed DDL that lives outside this repo | Record it as a dated SQL file in a `migrations/`-style dir, committed with the consuming PR; live object is the source of truth, the file is the audit trail. |
 | Retiring an app | `git mv apps/<slug> retired_apps/<slug>` (deploy scopes to `apps/**`). Dropping the Snowflake object is a separate deliberate manual step. |
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import yaml
@@ -14,6 +15,7 @@ from streamsnow.tools import (
     check_artifacts,
     check_bind_predicates,
     check_caching,
+    check_page_imports,
     check_session_fallback,
     check_sql_tokens,
 )
@@ -1161,3 +1163,250 @@ def test_validate_app_includes_artifacts_check(tmp_path):
     res = validate_app(tmp_path / "apps/art-app", policy, cfg)
     by_name = {c["name"]: c for c in res["checks"]}
     assert by_name["artifacts"]["ok"] is False
+
+
+# --------------------------------------------------------------------------- #
+# page-imports: sys.path differs between `streamlit run` and the deployed app  #
+# --------------------------------------------------------------------------- #
+
+# The marker phrase that must appear ONLY on findings a local run cannot catch.
+_LOCAL_BLIND = "full UI walkthrough"
+
+
+def _app(tmp_path: Path) -> Path:
+    """Minimal app root: entrypoint, two app-root helpers, and a pages/ helper.
+
+    ``snowflake.yml`` is the app-root marker ``scan_paths`` keys on; ``check_app``
+    takes the root directly and does not need it.
+    """
+    root = tmp_path / "apps" / "demo"
+    _write(root / "snowflake.yml", "definition_version: 2\n")
+    _write(root / "streamlit_app.py", "import streamlit as st\n")
+    _write(root / "branding.py", "BRAND = 1\n")
+    _write(root / "sql_loader.py", "def load_sql(n): ...\n")
+    _write(root / "pages" / "_helper.py", "def go(): ...\n")
+    return root
+
+
+def _page(root: Path, body: str, name: str = "thing.py") -> Path:
+    return _write(root / "pages" / name, body)
+
+
+def _details(root: Path) -> list[str]:
+    return [f["detail"] for f in check_page_imports.check_app(root)["findings"]]
+
+
+def test_page_imports_flags_the_bare_sibling_regression(tmp_path):
+    # The exact production break: a helper that lives only in pages/, imported bare.
+    root = _app(tmp_path)
+    _page(root, "from _helper import go\n")
+    findings = check_page_imports.check_app(root)["findings"]
+    assert len(findings) == 1
+    assert findings[0]["line"] == 1
+    assert "pages/thing.py" in findings[0]["file"]
+    assert "pages._helper" in findings[0]["detail"]  # message names the fix
+    assert _LOCAL_BLIND in findings[0]["detail"]  # and says local testing can't see it
+
+
+def test_page_imports_package_qualified_is_clean(tmp_path):
+    root = _app(tmp_path)
+    _page(root, "from pages._helper import go\n")
+    assert check_page_imports.check_app(root)["ok"]
+
+
+def test_page_imports_app_root_modules_never_flagged(tmp_path):
+    # Guards the scaffold: pages/overview.py imports branding + sql_loader bare, and
+    # the app root IS on sys.path deployed, so both are correct.
+    root = _app(tmp_path)
+    _page(root, "from branding import BRAND\nimport sql_loader\n")
+    assert check_page_imports.check_app(root)["ok"]
+
+
+def test_page_imports_relative_and_dotted_out_of_scope(tmp_path):
+    root = _app(tmp_path)
+    _page(root, "from ._helper import go\nfrom pages._helper import go as g2\n")
+    assert check_page_imports.check_app(root)["ok"]
+
+
+def test_page_imports_plain_import_form_flagged(tmp_path):
+    root = _app(tmp_path)
+    _page(root, "import _helper\n")
+    assert len(_details(root)) == 1
+
+
+def test_page_imports_entrypoint_importing_a_pages_module_is_loud_not_silent(tmp_path):
+    # pages/ is not the entrypoint's own directory, so this fails locally too — the
+    # message must not claim a local run would miss it.
+    root = _app(tmp_path)
+    _write(root / "streamlit_app.py", "from _helper import go\n")
+    details = _details(root)
+    assert len(details) == 1
+    assert "pages._helper" in details[0]
+    assert _LOCAL_BLIND not in details[0]
+
+
+def test_page_imports_same_dir_collision_is_ambiguous(tmp_path):
+    # Root wins deployed, pages/ wins under `streamlit run` — the page silently runs
+    # different code in each environment. Same failure family, so it is a finding.
+    root = _app(tmp_path)
+    _write(root / "pages" / "branding.py", "BRAND = 2\n")
+    _page(root, "from branding import BRAND\n")
+    details = _details(root)
+    assert len(details) == 1
+    assert "ambiguous" in details[0]
+    assert "pages.branding" in details[0]
+
+
+def test_page_imports_other_subdir_collision_is_clean(tmp_path):
+    # lib/ is never on sys.path in EITHER environment, so there is no divergence.
+    root = _app(tmp_path)
+    _write(root / "lib" / "branding.py", "BRAND = 2\n")
+    _page(root, "from branding import BRAND\n")
+    assert check_page_imports.check_app(root)["ok"]
+
+
+def test_page_imports_stdlib_shadowed_in_own_dir_is_ambiguous(tmp_path):
+    root = _app(tmp_path)
+    _write(root / "pages" / "json.py", "X = 1\n")
+    _page(root, "import json\n")
+    details = _details(root)
+    assert len(details) == 1
+    assert "standard-library" in details[0]
+
+
+def test_page_imports_stdlib_in_other_subdir_is_clean(tmp_path):
+    root = _app(tmp_path)
+    _write(root / "lib" / "json.py", "X = 1\n")
+    _page(root, "import json\n")
+    assert check_page_imports.check_app(root)["ok"]
+
+
+def test_page_imports_declared_dependency_in_other_subdir_is_clean(tmp_path):
+    root = _app(tmp_path)
+    _write(
+        root / "pyproject.toml",
+        '[project]\nname = "demo"\ndependencies = ["plotly>=5", "streamlit"]\n',
+    )
+    _write(root / "lib" / "plotly.py", "X = 1\n")
+    _page(root, "import plotly\n")
+    assert check_page_imports.check_app(root)["ok"]
+
+
+def test_page_imports_nested_helper_gets_the_full_dotted_fix(tmp_path):
+    # st.navigation takes page paths, so pages/admin/ is a legitimate layout.
+    root = _app(tmp_path)
+    _write(root / "pages" / "admin" / "_hdr.py", "def go(): ...\n")
+    _write(root / "pages" / "admin" / "report.py", "from _hdr import go\n")
+    details = _details(root)
+    assert len(details) == 1
+    assert "pages.admin._hdr" in details[0]
+    assert _LOCAL_BLIND in details[0]
+
+
+def test_page_imports_noqa_suppresses(tmp_path):
+    root = _app(tmp_path)
+    _page(root, "from _helper import go  # noqa: page-imports\n")
+    assert check_page_imports.check_app(root)["ok"]
+
+
+def test_page_imports_noqa_on_a_multiline_import(tmp_path):
+    root = _app(tmp_path)
+    _page(root, "from _helper import (  # noqa: page-imports\n    go,\n)\n")
+    assert check_page_imports.check_app(root)["ok"]
+
+
+def test_page_imports_syntax_error_is_left_to_ruff(tmp_path):
+    root = _app(tmp_path)
+    _page(root, "def broken(\n")
+    assert check_page_imports.check_app(root)["ok"]
+
+
+def test_page_imports_scan_paths_widens_to_the_whole_app(tmp_path):
+    # Pre-commit passes only the CHANGED files. Adding pages/_helper.py makes an
+    # untouched sibling newly-violating, and the hook never sees that sibling.
+    root = _app(tmp_path)
+    _page(root, "from _helper import go\n")
+    res = check_page_imports.scan_paths([root / "pages" / "_helper.py"])
+    assert not res["ok"]
+    assert "pages/thing.py" in res["findings"][0]["file"]
+
+
+def test_page_imports_scan_paths_skips_a_file_with_no_app_root(tmp_path):
+    other = _write(tmp_path / "tools" / "x.py", "from _helper import go\n")
+    assert check_page_imports.scan_paths([other])["ok"]
+
+
+def test_page_imports_survives_malformed_manifests(tmp_path):
+    # validate_app deliberately routes parse errors to the `manifest` check; this one
+    # must degrade to "no declared deps", never traceback and take down the aggregate.
+    root = _app(tmp_path)
+    _write(root / "pyproject.toml", "[project\nname = nope\n")
+    _write(root / "environment.yml", "name: [unclosed\n")
+    _page(root, "from pages._helper import go\n")
+    assert check_page_imports.check_app(root)["ok"]
+
+
+def test_page_imports_exit_codes(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    root = _app(tmp_path)
+    _page(root, "from pages._helper import go\n")
+    assert check_page_imports.main([str(root)]) == 0
+    assert "page-imports: clean" in capsys.readouterr().out
+
+    _page(root, "from _helper import go\n")
+    assert check_page_imports.main([str(root)]) == 1
+    assert "ModuleNotFoundError" in capsys.readouterr().out
+
+
+def test_page_imports_cli_command_runs(tmp_path, monkeypatch):
+    """`streamsnow check page-imports` — the entry the generated pre-commit hook calls."""
+    from typer.testing import CliRunner
+
+    from streamsnow.cli import app as cli_app
+
+    monkeypatch.chdir(tmp_path)
+    root = _app(tmp_path)
+    _page(root, "from _helper import go\n")
+    result = CliRunner().invoke(cli_app, ["check", "page-imports", "apps"])
+    assert result.exit_code == 1, result.output
+    assert "pages/thing.py" in result.output
+
+    _page(root, "from pages._helper import go\n")
+    result = CliRunner().invoke(cli_app, ["check", "page-imports", "apps"])
+    assert result.exit_code == 0, result.output
+
+
+def test_validate_app_includes_page_imports_check(tmp_path):
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "pi-app")
+    _write(tmp_path / "apps/pi-app/pages/_hdr.py", "def go(): ...\n")
+    _write(tmp_path / "apps/pi-app/pages/broken.py", "from _hdr import go\n")
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    res = validate_app(tmp_path / "apps/pi-app", policy, cfg)
+    by_name = {c["name"]: c for c in res["checks"]}
+    assert by_name["page-imports"]["ok"] is False
+
+
+def test_scaffolded_pages_helper_imports_without_an_init_file(tmp_path, monkeypatch):
+    """The fix form works with no ``pages/__init__.py`` — observed, not argued.
+
+    PEP 420 makes ``pages`` an implicit namespace package once the app root is on
+    sys.path, which is why the scaffold does not ship an ``__init__.py``. The real
+    tradeoff: namespace packages MERGE across sys.path entries where a regular package
+    would shadow. That is a footnote only because the app root is the sole such entry
+    in the Snowflake runtime.
+
+    This proves local Python semantics, not the Snowflake runtime — the honest limit.
+    """
+    import importlib
+
+    cfg = _cfg()
+    scaffold(cfg, tmp_path, "ns-app")
+    app_root = tmp_path / "apps/ns-app"
+    _write(app_root / "pages" / "_hdr.py", "VALUE = 'loaded'\n")
+    assert not (app_root / "pages" / "__init__.py").exists()
+
+    monkeypatch.syspath_prepend(str(app_root))
+    for name in ("pages", "pages._hdr"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    assert importlib.import_module("pages._hdr").VALUE == "loaded"

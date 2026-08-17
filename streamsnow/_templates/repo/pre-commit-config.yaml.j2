@@ -52,6 +52,12 @@ repos:
         language: system
         files: ^apps/.*\.py$
         pass_filenames: true
+      - id: streamsnow-page-imports
+        name: streamsnow check page-imports (deployed sys.path is app root only)
+        entry: streamsnow check page-imports
+        language: system
+        files: ^apps/.*\.py$
+        pass_filenames: true
       - id: streamsnow-artifacts
         name: streamsnow check artifacts (snowflake.yml matches disk)
         entry: streamsnow check artifacts

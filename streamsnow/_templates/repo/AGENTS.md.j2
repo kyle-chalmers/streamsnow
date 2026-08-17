@@ -49,7 +49,8 @@ Every number shown to a user includes thousand separators (`format="localized"`/
 
 - App directories: `{domain}-{function}` kebab-case under `apps/`.
 - Entrypoint is `streamlit_app.py` (not configurable). `st.set_page_config(...)` first, once. Multipage via `st.navigation` + `st.Page`.
-- Import branding from the local copy: `from branding import ...`.
+- Import branding from the local copy: `from branding import ...`. Bare imports are correct **only** for modules beside the entrypoint (`branding`, `sql_loader`) — the app root is the only `sys.path` entry that exists deployed.
+- A shared helper inside a subdirectory is imported package-qualified: `from pages._header import ...`. Bare (`from _header import ...`) works under `streamlit run`, which also adds the executing page's own directory, then `ModuleNotFoundError`s on every page deployed — a local boot and a full click-through cannot catch it. No `pages/__init__.py` needed. Never name a file in `pages/` after an app-root module or a dependency.
 
 ## Production rules
 
