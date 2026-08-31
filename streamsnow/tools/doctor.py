@@ -111,7 +111,7 @@ def check_config(start: Path | None = None) -> dict:
             False,
             REQUIRED,
             {"found": True, "path": str(cfg_path), "error": str(exc)},
-            "fix streamsnow.config.yaml (or re-run 'streamsnow configure')",
+            f"invalid streamsnow.config.yaml — {exc} (fix it or re-run 'streamsnow configure')",
         )
     return _result(
         "config",
