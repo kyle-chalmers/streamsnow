@@ -2,9 +2,12 @@
 
 Runs the governance checks (required files, naming, runtime-matched manifest,
 artifacts, schema-refs, app-security, bind-predicates, caching, sql-tokens,
-session-fallback, page-imports) over ``apps/<slug>/`` and
-returns a single PASS/FAIL. No database, no network. This is what the
-``/validate-app`` skill and ``streamsnow ship-app`` call as the hard gate.
+session-fallback, page-imports, path-leaks, requirements-§11) over
+``apps/<slug>/`` and returns a single PASS/FAIL. No database, no network —
+which is why ``check_dependency_vulns`` (OSV.dev) is deliberately NOT in this
+aggregate: it runs as its own pre-commit hook (``--best-effort``) and CI job,
+and the ``/validate-app`` skill shells to it as a separate section. This is
+what the ``/validate-app`` skill and ``/ship-app`` call as the hard gate.
 
 Exit codes: 0 = PASS, 1 = FAIL, 2 = tool error.
 """
@@ -39,6 +42,8 @@ from . import (
     check_bind_predicates,
     check_caching,
     check_page_imports,
+    check_path_leaks,
+    check_requirements,
     check_schema_refs,
     check_session_fallback,
     check_sql_tokens,
@@ -385,6 +390,13 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     checks.append({"name": "page-imports", "ok": imports["ok"], "findings": imports["findings"]})
     cache = check_caching.scan_paths(files)
     checks.append({"name": "caching", "ok": cache["ok"], "findings": cache["findings"]})
+    leaks = check_path_leaks.scan_paths(files)
+    checks.append({"name": "path-leaks", "ok": leaks["ok"], "findings": leaks["findings"]})
+    # §11 build-state contract — what /start-app resumes from. The check is a
+    # no-op for apps without a REQUIREMENTS.md (spec presence is a build-phase
+    # concern, not a ship gate).
+    reqs = check_requirements.scan_paths([app_dir])
+    checks.append({"name": "requirements", "ok": reqs["ok"], "findings": reqs["findings"]})
 
     return {
         "app": app_dir.name,

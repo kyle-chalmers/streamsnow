@@ -40,6 +40,11 @@ def test_check_subcommands_are_registered():
         "session-fallback",
         "page-imports",
         "artifacts",
+        "path-leaks",
+        "requirements",
+        "branding-parity",
+        "dependency-vulns",
+        "tombstones",
     }
 
 

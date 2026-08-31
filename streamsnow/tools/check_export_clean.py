@@ -31,11 +31,35 @@ DENY_TERMS = [
     "sonarcloud",
     "1password",
 ]
+# Source-domain vocabulary. StreamSnow was extracted from a source-domain
+# monorepo; the OSS release must carry ZERO domain flavor from it — not just
+# literals but the business vocabulary itself. Examples here use a fictional
+# retail-analytics team ("Acme": orders, revenue, inventory) instead. These are
+# substring matches on lowercased text, chosen to be specific enough not to
+# false-positive on ordinary tooling prose.
+DENY_TERMS += [
+    "loan",
+    "source-domain",
+    "borrower",
+    "payoff",
+    "delinquen",  # delinquent / delinquency
+    "charge-off",
+    "chargeoff",
+    "charged_off",
+    "debt sale",
+    "refinanc",  # refinance / refinancing
+    "bankrupt",
+    "underwrit",  # underwrite / underwriting
+    "originations",
+    "servicing",
+]
 # Internal ticket prefixes (word-boundary, case-insensitive).
 DENY_PATTERNS = [
     re.compile(r"\bPROJ-\d{2,}\b"),
     re.compile(r"\bDEVOPS-\d{2,}\b"),
     re.compile(r"\bSNIC\b"),
+    re.compile(r"\bDPD\b"),  # days-past-due — source-domain vocabulary
+    re.compile(r"\bOTP(s)?\b"),  # one-time-payment — source-domain vocabulary
     # personal absolute paths
     re.compile(r"/Users/[A-Za-z0-9._-]+/", re.IGNORECASE),
     re.compile(r"/home/[A-Za-z0-9._-]+/", re.IGNORECASE),
