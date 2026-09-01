@@ -74,8 +74,8 @@ inventory, not its output file. Exit 2 = `--out` unwritable.
 
 The conform worklist. Exit 0 always — the findings, not the exit code, are the output. Re-run
 after each batch of fixes until `uncached_queries`, `select_stars`, and `altair_imports` are
-empty and `legacy_pages_only` is false. `required_grants` is deliberately never empty — it
-inventories every detected schema; only entries with `granted_by_default == false` need action.
+empty and `legacy_pages_only` is false. `required_grants` inventories every detected schema (it may be empty when none are found);
+only entries with `granted_by_default == false` need action.
 
 - JSON: `uncached_queries` (`{file, func, lineno, callee}` — data fetches without
   `@st.cache_data`), `select_stars` (`{file, lineno, snippet}`), `altair_imports`,

@@ -257,3 +257,26 @@ def test_json_format_carries_full_result(tmp_path, monkeypatch, capsys):
     assert not payload["ok"]
     assert payload["checked"] == 1
     assert payload["unscanned"][0]["spec"] == "plotly>=5,<6"
+
+
+def test_strict_pins_fails_on_range_specs(tmp_path, monkeypatch, capsys):
+    """--strict-pins promotes unscanned range/bare specs to findings — the
+    opt-in for shops that exact-pin everything and want CI fully closed."""
+    import json as _json
+
+    from streamsnow.tools import check_dependency_vulns as dv
+
+    app = tmp_path / "apps" / "acme-sales-dashboard"
+    app.mkdir(parents=True)
+    (app / "snowflake.yml").write_text("definition_version: 2\n")
+    (app / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["requests>=2"]\n'
+    )
+    monkeypatch.setattr(dv, "query_osv", lambda pins: [[] for _ in pins])
+    monkeypatch.chdir(tmp_path)
+    assert dv.main(["apps", "--format", "json", "--strict-pins"]) == 1
+    out = _json.loads(capsys.readouterr().out)
+    assert not out["ok"]
+    assert any("--strict-pins" in f["detail"] for f in out["findings"])
+    # Without the flag the same tree passes (documented range-pin policy).
+    assert dv.main(["apps"]) == 0

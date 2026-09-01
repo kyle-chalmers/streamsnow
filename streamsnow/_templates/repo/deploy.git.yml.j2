@@ -46,7 +46,7 @@ jobs:
       - name: Install tooling
         if: steps.gate.outputs.go == 'true'
         run: |
-          uv tool install streamsnow
+          uv tool install 'streamsnow>=0.6,<0.7'
           uv tool install snowflake-cli-labs
 
       - name: Deploy changed apps (git-repository)
@@ -63,6 +63,19 @@ jobs:
             streamsnow deploy-sql "$slug" --refresh > "/tmp/ss-$slug-refresh.sql"
             snow sql -f "/tmp/ss-$slug-refresh.sql" || true
           done
+
+      # A CREATE OR REPLACE pipeline has no delete path — this is it. Every
+      # identifier in deploy/tombstones.yml is dropped on every deploy
+      # (IF EXISTS, so re-runs are no-ops). The PR check guarantees the
+      # registry is complete; a malformed registry exits 2 before any DROP.
+      - name: Reconcile tombstones (drop retired objects)
+        if: steps.gate.outputs.go == 'true'
+        run: |
+          set -euo pipefail
+          streamsnow check tombstones --drop-sql > /tmp/ss-drops.sql
+          if [ -s /tmp/ss-drops.sql ]; then
+            snow sql -f /tmp/ss-drops.sql
+          fi
 
       # "Deploy succeeded" is not "app serves": a missing live version renders
       # nothing in Snowsight, and a container app can crash-loop while its
