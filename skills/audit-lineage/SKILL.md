@@ -63,8 +63,9 @@ notes.
 ## Audit-trail hand-back
 
 8. **While the lineage results are warm**, run `streamsnow sql-review check <slug>`; on gaps offer
-   `discover --write` + `generate` (inside `/review-app --auto`, bootstrap silently with the static
-   skeleton defaults). Then `streamsnow sql-review index <slug>` and fill the README's Upstream
+   `discover --write` + author the literals + `generate` (inside `/review-app --auto`: write the
+   skeletons only and punch-list the authoring — never generate from `-- TODO` literals, which
+   render as mid-clause comments). Then `streamsnow sql-review index <slug>` and fill the README's Upstream
    cells from step 5, setting Verified (date) only on live-confirmed rows — see [tracing.md](tracing.md).
 
 ## Judgment guardrails

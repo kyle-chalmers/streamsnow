@@ -73,7 +73,9 @@ inventory, not its output file. Exit 2 = `--out` unwritable.
 ### `streamsnow migrate scan-conformance apps/<slug> [--config ...]`
 
 The conform worklist. Exit 0 always — the findings, not the exit code, are the output. Re-run
-after each batch of fixes until every list is empty and `legacy_pages_only` is false.
+after each batch of fixes until `uncached_queries`, `select_stars`, and `altair_imports` are
+empty and `legacy_pages_only` is false. `required_grants` is deliberately never empty — it
+inventories every detected schema; only entries with `granted_by_default == false` need action.
 
 - JSON: `uncached_queries` (`{file, func, lineno, callee}` — data fetches without
   `@st.cache_data`), `select_stars` (`{file, lineno, snippet}`), `altair_imports`,

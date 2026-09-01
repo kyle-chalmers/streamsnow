@@ -52,8 +52,8 @@ Step 1.
 8. `streamsnow migrate scan-conformance apps/<slug>` is the worklist: wrap each `uncached_queries`
    fetch in `@st.cache_data(ttl=...)` (filters as function arguments, not closures), pin explicit
    columns per `select_stars` entry, swap `altair_imports` to the repo chart standard, rebuild
-   navigation if `legacy_pages_only`, and surface the `required_grants` split (CI-covered vs
-   needs-a-DBA) in the PR. Re-run after each batch until the lists are empty.
+   navigation if `legacy_pages_only`, and surface the `required_grants` split in the PR. Re-run
+   until the three fix-lists empty and `legacy_pages_only` is false ([engine.md](engine.md)).
 9. `streamsnow migrate scan-inline-sql apps/<slug>` lists the SQL to externalize into
    `queries/<name>.sql` with the required header block (`Query / Feeds / Schemas / Params /
    Tokens`) behind `load_sql`/`render_sql`. **Walk the Feeds/Schemas mapping with the user one
