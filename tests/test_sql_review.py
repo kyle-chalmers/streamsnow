@@ -349,3 +349,133 @@ def test_scaffolded_app_ships_manifest_and_companion(tmp_path: Path) -> None:
     assert "-- Provenance:" in companion.read_text()
     # And the fresh scaffold passes its own gate.
     assert sr.main(["check", "acme-sales-dashboard", "--dir", str(tmp_path)]) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Phase 2 external-review regressions (Codex pass)
+# --------------------------------------------------------------------------- #
+
+
+def test_with_cte_prefixed_write_refused() -> None:
+    # A CTE prefix proves nothing about the terminal statement.
+    assert sr._verify_read_only("WITH x AS (SELECT 1) DELETE FROM t;") != []
+    assert sr._verify_read_only("WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x;") != []
+    # Legitimate shapes stay allowed: single, multi, column-list, nested parens.
+    assert sr._verify_read_only("WITH x AS (SELECT 1) SELECT * FROM x;") == []
+    assert (
+        sr._verify_read_only(
+            "WITH a (c) AS (SELECT 1), b AS (SELECT MAX(c) FROM (SELECT c FROM a)) SELECT * FROM b;"
+        )
+        == []
+    )
+
+
+def test_content_after_provenance_is_a_finding(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    _generate(repo)
+    f = _review_file(repo)
+    f.write_text(f.read_text() + "DELETE FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY;\n")
+    assert _check(repo) == 1
+    assert "content after the provenance line" in capsys.readouterr().out
+
+
+def test_second_provenance_line_is_a_finding(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    _generate(repo)
+    f = _review_file(repo)
+    text = f.read_text()
+    prov = [ln for ln in text.splitlines() if ln.startswith("-- Provenance: ")][0]
+    f.write_text(text.replace("SET start_date", f"{prov}\nSET start_date"))
+    assert _check(repo) == 1
+    assert "multiple provenance lines" in capsys.readouterr().out
+
+
+def test_crlf_conversion_reads_as_edit(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    _generate(repo)
+    f = _review_file(repo)
+    f.write_bytes(f.read_bytes().replace(b"\n", b"\r\n"))
+    assert _check(repo) == 1
+
+
+def test_transitive_module_edit_reads_as_drift(repo: Path) -> None:
+    # data.py delegates to helper.py; only helper.py changes after generation.
+    app = repo / "apps" / SLUG
+    (app / "helper.py").write_text("def frag(region):\n    return f\"AND region = '{region}'\"\n")
+    (app / "data.py").write_text(
+        "from helper import frag\n\ndef region_filter_sql(region):\n    return frag(region)\n"
+    )
+    manifest = dict(MANIFEST)
+    manifest["token_strategy"] = "manifest"
+    manifest["modules"] = {"data": "data"}
+    manifest["token_dispatchers"] = {
+        "REGION_FILTER": {"call": "region_filter_sql", "args": ["West"]}
+    }
+    mp = app / "sql_review" / "manifests" / "revenue.json"
+    mp.write_text(json.dumps(manifest))
+    assert _generate(repo) == 0
+    assert _check(repo) == 0
+    (app / "helper.py").write_text("def frag(region):\n    return \"AND region = 'East'\"\n")
+    assert _check(repo) == 1
+
+
+def test_traversal_combo_name_rejected(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    manifest = dict(MANIFEST)
+    manifest["combos"] = [
+        {"name": "ok", "description": "x"},
+        {"name": "../../../evil", "description": "y"},
+    ]
+    mp = repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json"
+    mp.write_text(json.dumps(manifest))
+    assert _generate(repo) == 2
+    assert "combo name" in capsys.readouterr().err
+
+
+def test_traversal_source_query_rejected(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    manifest = dict(MANIFEST)
+    manifest["query_specs"] = {"revenue_daily": {"source_query": "../../secret"}}
+    mp = repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json"
+    mp.write_text(json.dumps(manifest))
+    assert _generate(repo) == 2
+    assert "bare query name" in capsys.readouterr().err
+
+
+def test_orphaned_review_file_is_a_finding_and_generate_cleans_it(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    manifest = dict(MANIFEST)
+    manifest["combos"] = [
+        {"name": "west", "description": "w"},
+        {"name": "east", "description": "e"},
+    ]
+    mp = repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json"
+    mp.write_text(json.dumps(manifest))
+    _generate(repo)
+    # Drop the east combo: check flags the orphan; regenerate removes it.
+    mp.write_text(json.dumps({**manifest, "combos": [{"name": "west", "description": "w"}]}))
+    assert _check(repo) == 1
+    assert "orphaned review file" in capsys.readouterr().out
+    _generate(repo)
+    assert not (repo / "apps" / SLUG / "sql_review" / "revenue.east.review.sql").exists()
+    assert _check(repo) == 0
+
+
+def test_unreadable_review_file_is_a_finding_not_a_traceback(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    _generate(repo)
+    _review_file(repo).write_bytes(b"\xff\xfe invalid utf8 \xff")
+    assert _check(repo) == 1
+    assert "unreadable review file" in capsys.readouterr().out
+
+
+def test_hand_added_write_statement_fails_even_with_forged_hashes(repo: Path) -> None:
+    """Even if someone recomputes both digests over an edited file, the
+    check-time allowlist re-verification refuses a write statement."""
+    _generate(repo)
+    f = _review_file(repo)
+    text = f.read_text()
+    body, _, _ = text.rpartition("-- Provenance:")
+    evil_body = body + "DELETE FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY;\n"
+    forged_output = sr._output_digest(evil_body + sr._FINAL_PROVENANCE_PLACEHOLDER + "\n")
+    prov_line = [ln for ln in text.splitlines() if ln.startswith("-- Provenance: ")][0]
+    forged_prov = prov_line[: prov_line.rfind("output=")] + f"output={forged_output}"
+    f.write_text(evil_body + forged_prov + "\n")
+    assert _check(repo) == 1
