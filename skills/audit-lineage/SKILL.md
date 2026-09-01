@@ -60,6 +60,13 @@ object); **should-fix** — measurable cost or coordination risk (view chain ≥
 soft-delete flag, pruning trap, shared-materialization opportunity); **nice-to-have** — hygiene
 notes.
 
+## Audit-trail hand-back
+
+8. **While the lineage results are warm**, run `streamsnow sql-review check <slug>`; on gaps offer
+   `discover --write` + `generate` (inside `/review-app --auto`, bootstrap silently with the static
+   skeleton defaults). Then `streamsnow sql-review index <slug>` and fill the README's Upstream
+   cells from step 5, setting Verified (date) only on live-confirmed rows — see [tracing.md](tracing.md).
+
 ## Judgment guardrails
 
 - **Don't claim upstream is broken.** An off-looking metric is far more often a cadence or
