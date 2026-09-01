@@ -47,6 +47,7 @@ from . import (
     check_schema_refs,
     check_session_fallback,
     check_sql_tokens,
+    sql_review,
 )
 
 _BASE_REQUIRED = (
@@ -398,6 +399,19 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     reqs = check_requirements.scan_paths([app_dir])
     checks.append({"name": "requirements", "ok": reqs["ok"], "findings": reqs["findings"]})
 
+    # sql_review freshness + coverage — WARN-ONLY in 0.6 (adopters get one
+    # release to backfill audit trails; planned to become a FAIL in 0.7).
+    # `check` is import-free by design, so it is safe inside this gate.
+    sqlr = sql_review._check_app(app_dir.parent.parent, app_dir)
+    checks.append(
+        {
+            "name": "sql-review (warn in 0.6 → FAIL in 0.7)",
+            "ok": True,  # deliberately never fails the aggregate this release
+            "findings": [],
+            "warnings": sqlr,
+        }
+    )
+
     return {
         "app": app_dir.name,
         "runtime": runtime,
@@ -463,13 +477,19 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2))
     else:
         for c in result["checks"]:
+            warnings = c.get("warnings") or []
             mark = "✓" if c["ok"] else "✗"
-            print(
-                f"  {mark} {c['name']}" + ("" if c["ok"] else f"  ({len(c['findings'])} issue(s))")
-            )
+            if c["ok"] and warnings:
+                mark = "!"
+            suffix = "" if c["ok"] else f"  ({len(c['findings'])} issue(s))"
+            if warnings:
+                suffix += f"  ({len(warnings)} warning(s))"
+            print(f"  {mark} {c['name']}{suffix}")
             if not c["ok"]:
                 for f in c["findings"][:10]:
                     print(f"      - {_format_finding(f)}")
+            for w in warnings[:10]:
+                print(f"      ~ {_format_finding(w)}")
         print(f"\n{'PASS' if result['ok'] else 'FAIL'}: {result['app']} ({result['runtime']})")
     return 0 if result["ok"] else 1
 

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "feature": "example_metric",
+  "app": "{{ app_slug }}",
+  "description": "Starter audit-trail manifest for the scaffolded example query. One manifest per feature; run `streamsnow sql-review generate {{ app_slug }}` after editing.",
+  "token_strategy": "static",
+  "token_dispatchers": {},
+  "combos": [
+    {"name": "all-default", "description": "default date window, no filters"}
+  ],
+  "pages": [
+    {"name": "Overview", "queries": ["example_metric"]}
+  ],
+  "query_specs": {
+    "example_metric": {
+      "params_doc": ":1 start_date, :2 end_date",
+      "metric_name": "example_metric_trend"
+    }
+  }
+}

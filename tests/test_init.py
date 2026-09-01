@@ -263,3 +263,15 @@ def test_deploy_workflows_pin_verify_concurrency_and_dotfile_copy(tmp_path):
     assert "group: deploy-snowflake" in git_deploy
     assert "cancel-in-progress: false" in git_deploy
     assert "streamsnow verify-deploy" in git_deploy
+
+
+def test_generated_precommit_enforces_sql_review_and_vulns(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    text = (tmp_path / ".pre-commit-config.yaml").read_text()
+    assert "streamsnow sql-review check" in text
+    assert "streamsnow check dependency-vulns --best-effort" in text
+    assert "streamsnow check path-leaks" in text
+    parsed = yaml.safe_load(text)  # stays valid YAML
+    ids = [h["id"] for repo in parsed["repos"] for h in repo["hooks"]]
+    assert "streamsnow-sql-review" in ids
