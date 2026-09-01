@@ -3,9 +3,15 @@
 Turn the newest `.review/` report (written by a review pass or `/audit-lineage` — same schema) into
 per-finding commits, then re-run the gate. This applies findings; it does not re-judge them.
 
-## Buckets
+## Severity × bucket — the canonical taxonomy
 
-Every finding sorts into exactly one bucket; the bucket decides whether you touch code without asking.
+Every finding carries two independent labels. **Severity** — `BLOCK` / `FLAG` / `NICE-TO-HAVE` —
+is how much it matters: BLOCK = a violated governance rule or confirmed breakage; FLAG = real but
+not ship-stopping; NICE-TO-HAVE = polish. **Bucket** — A / B / C — is how the fix gets applied.
+The axes are orthogonal: a BLOCK can be Bucket B (matters a lot, needs judgment) and a
+NICE-TO-HAVE can be Bucket A (matters little, trivially mechanical). Severity sets ordering and
+what the `--auto` loop's exit condition counts; the bucket decides whether you touch code without
+asking. Every finding sorts into exactly one bucket.
 
 - **A — mechanical (auto-applied):** the fix is invariant and a regex/AST-level edit suffices.
   Missing `@st.cache_data(ttl=…)`; a denied-schema reference swapped to the allowed equivalent
@@ -37,9 +43,16 @@ extra question.
    revert just that edit, mark the finding deferred, keep going. Never batch; never abort the chain
    on one failure.
 6. **Bucket B interactively**, committing approved fixes exactly as in step 5.
-7. **Re-gate:** `streamsnow validate-app <slug>` until PASS or the only failures are documented
+7. **Record the resolutions:** append them to the report with
+   `streamsnow review-loop write-resolutions <report.md> --applied <json> --deferred-b <json>
+   --bucket-c <json>` — each `<json>` is a file of finding dicts (the shape
+   `streamsnow review-loop parse-findings` emits) or `-` for stdin; an empty group can be omitted.
+   This is what the `--auto` loop's dedup and no-convergence detector read: an unrecorded applied
+   fix gets re-reported next cycle, and a finding that returns *after* its recorded fix is the
+   no-convergence signal instead of silently deduped noise.
+8. **Re-gate:** `streamsnow validate-app <slug>` until PASS or the only failures are documented
    deferrals.
-8. **Report:** commits applied, decisions made, the punch list, the gate result, and next step
+9. **Report:** commits applied, decisions made, the punch list, the gate result, and next step
    (/ship-app when clean).
 
 ## Focused-check mapping
@@ -51,8 +64,14 @@ extra question.
 | Missing `@st.cache_data(ttl=…)` | `streamsnow check caching apps/<slug>` |
 | `:N IS NULL OR` trap | `streamsnow check bind-predicates apps/<slug>` |
 | UI / chart / docs | lint only; verify visually if a Playwright MCP is loaded |
+| Any edit to `queries/*.sql` or the data layer | `streamsnow sql-review check <slug>` |
 
 If a "fix" can't be confirmed green by a matching check, it's Bucket B — not an auto-fix.
+
+A fix that touches `queries/*.sql` (or the data modules the token dispatchers call into) makes the
+rendered audit trail stale: run `streamsnow sql-review generate <slug>` and then
+`streamsnow sql-review check <slug>` **before the commit**, and commit the regenerated
+`sql_review/` files with it — otherwise the very next `check` reads DRIFT.
 
 ## Runtime-aware fixes
 
