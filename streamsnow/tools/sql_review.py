@@ -623,9 +623,12 @@ def _inputs_digest(app: Path, manifest_path: Path, manifest: dict) -> str:
     h.update(f"schema={GENERATOR_SCHEMA}".encode())
     h.update(manifest_path.read_bytes())
     for rel in sorted(_referenced_sources(manifest)):
-        spath = app / rel
+        try:
+            spath = _metric_source_path(app, rel) if not rel.startswith("queries/") else app / rel
+        except ToolError:
+            spath = None  # unresolvable/symlinked source digests as missing → drift
         h.update(f"\nsource:{rel}\n".encode())
-        h.update(spath.read_bytes() if spath.is_file() else b"<missing>")
+        h.update(spath.read_bytes() if spath is not None and spath.is_file() else b"<missing>")
     if manifest.get("mode", "tokens") == "tokens" and manifest.get("token_strategy") == "manifest":
         # Conservative closure: hash EVERY app Python source, not just the
         # named modules. A dispatcher module can import sibling helpers, and
@@ -897,6 +900,26 @@ def _manifest_outputs(manifest: dict) -> list[str]:
     return [_out_filename(manifest, c["name"], single) for c in combos]
 
 
+def _metric_source_path(app: Path, rel: str) -> Path:
+    """Resolve a metric source with containment + no-symlink checks.
+
+    The manifest regex constrains the LEXICAL path, but reads follow symlinks:
+    a valid-looking ``sql_review/_metrics/x.sql`` symlink could pull any
+    readable file into the rendered review SQL (and the digest). Reject
+    symlinks outright and require the resolved path to stay inside the app.
+    """
+    spath = app / rel
+    if spath.is_symlink():
+        raise ToolError(f"metric source {rel!r} is a symlink — not allowed")
+    try:
+        resolved = spath.resolve()
+        if not resolved.is_relative_to(app.resolve()):
+            raise ToolError(f"metric source {rel!r} resolves outside the app")
+    except OSError as exc:
+        raise ToolError(f"metric source {rel!r}: {exc}") from exc
+    return spath
+
+
 def render_metrics_file(app: Path, manifest: dict) -> str:
     """Assemble the per-visual review file (manifest ``mode: "metrics"``).
 
@@ -933,7 +956,7 @@ def render_metrics_file(app: Path, manifest: dict) -> str:
     ]
     binds_base = {**_DEFAULT_BINDS, **manifest.get("param_bindings", {})}
     for m in metrics:
-        spath = app / m["source"]
+        spath = _metric_source_path(app, m["source"])
         if not spath.is_file():
             raise ToolError(f"metric source not found: {m['source']} (metric {m['name']!r})")
         body = strip_header(spath.read_text(encoding="utf-8"))

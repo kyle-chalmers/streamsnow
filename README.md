@@ -134,8 +134,9 @@ dashboards whose visuals aggregate differently than any single query,
 The skills are generic procedures; your org's knowledge layers on top without
 forking them. Commit `.streamsnow/overlays/<skill>.md` files and every skill
 reads its overlay first — extra steps, local failure signatures, environment
-specifics, explicit overrides. Plugin upgrades never touch them; overlay prose
-cannot disable the coded safety gates. See
+specifics, explicit overrides. Plugin upgrades never touch them; overlays may not
+skip mandatory gate invocations, and the coded gates (hooks, CI, pre-commit)
+run outside skill prose entirely. See
 [skills/_shared/overlays.md](skills/_shared/overlays.md).
 
 ## Hooks, in full

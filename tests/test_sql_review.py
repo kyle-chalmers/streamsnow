@@ -652,3 +652,20 @@ def test_metrics_index_rows(metrics_repo: Path) -> None:
     text = (metrics_repo / "apps" / SLUG / "sql_review" / "README.md").read_text()
     assert "| `avg_daily_revenue` |" in text
     assert "Overview > Revenue trend" in text
+
+
+def test_metrics_symlink_source_refused(metrics_repo: Path, capsys) -> None:
+    """The manifest regex constrains the lexical path; the resolver must
+    refuse a symlink that would pull an out-of-app file into the render."""
+    import os as _os
+
+    app = metrics_repo / "apps" / SLUG
+    outside = metrics_repo / "outside.sql"
+    outside.write_text("SELECT 1\n")
+    target = app / "sql_review" / "_metrics" / "avg_daily_revenue.sql"
+    target.unlink()
+    _os.symlink(outside, target)
+    assert sr.main(["generate", SLUG, "--dir", str(metrics_repo)]) == 2
+    assert "symlink" in capsys.readouterr().err
+    # And check treats the symlinked source as drift, never a trusted read.
+    assert _check(metrics_repo) == 1

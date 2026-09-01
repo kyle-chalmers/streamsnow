@@ -27,12 +27,14 @@ All notable changes to StreamSnow are recorded here. This project follows
 
 - The generated `.gitignore` now excludes only `.streamsnow/preview/` (was all
   of `.streamsnow/`) so committed overlays fit under `.streamsnow/overlays/`.
-  **Existing repos:** re-render governed files (`streamsnow update --apply`)
-  or hand-edit the ignore line before adding overlays, or git will ignore
-  them silently.
-- The migrate engine's Anaconda repodata cache is per-user
-  (`streamsnow-<user>-anaconda-repodata.json`) instead of one shared temp
-  file — a collision and mild poisoning surface on multi-user machines.
+  **Existing repos:** `.gitignore` is user-owned and `streamsnow update`
+  never rewrites it — hand-edit the `.streamsnow/` line to `.streamsnow/preview/`
+  before adding overlays, or git will ignore them silently.
+- The migrate engine's Anaconda repodata cache moved into a private
+  per-user directory (created 0o700, ownership-verified; unique-temp atomic
+  writes). A predictable shared temp file could collide across users and be
+  pre-seeded; any doubt about the directory now means fetch-fresh, never a
+  trusted read.
 
 ## [0.6.0] - 2026-09-01
 
