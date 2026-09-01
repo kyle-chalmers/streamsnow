@@ -64,3 +64,21 @@ repos:
         language: system
         files: ^apps/
         pass_filenames: true
+      - id: streamsnow-path-leaks
+        name: streamsnow check path-leaks (no personal absolute paths)
+        entry: streamsnow check path-leaks
+        language: system
+        files: ^apps/.*\.(py|sql|md)$
+        pass_filenames: true
+      - id: streamsnow-sql-review
+        name: streamsnow sql-review check (audit trail fresh + complete)
+        entry: streamsnow sql-review check
+        language: system
+        files: ^apps/.*(queries/.*\.sql|sql_review/.*|\.py)$
+        pass_filenames: false
+      - id: streamsnow-dependency-vulns
+        name: streamsnow check dependency-vulns (OSV, best-effort locally)
+        entry: streamsnow check dependency-vulns --best-effort
+        language: system
+        files: ^apps/.*(pyproject\.toml|environment\.yml)$
+        pass_filenames: false

@@ -38,10 +38,31 @@ run the spec phase first ([spec.md](spec.md)) and resume.
 5. **Register the page**: add an `st.Page(...)` entry to the existing `st.navigation` structure in
    `streamlit_app.py`. Show the diff before applying and use multi-line `Edit` context so the match
    is unambiguous. One nav group → add to it; several → ask which.
-6. **Run the checks on the new files** (`streamsnow check schema-refs|caching|bind-predicates
-   apps/<slug>`) and fix anything flagged while it's cheap.
+6. **Run the checks on the new files** — `streamsnow check schema-refs apps/<slug>`, then
+   `streamsnow check caching apps/<slug>`, then `streamsnow check bind-predicates apps/<slug>`
+   (three invocations, not a pipeline) — and fix anything flagged while it's cheap.
 7. **Log it:** append a §11 session line (`page <name> scaffolded — queries TODO. Next: fill stubs,
-   then /preview-app <slug>`). Don't commit yet — the page is a reviewable stub.
+   then /preview-app <slug>`). Don't commit yet — the page is a reviewable stub; the commit happens
+   in step 8, once the real SQL lands.
+8. **Fill the stubs, then land the page WITH its audit trail — one commit.** After the page's real
+   query bodies replace the placeholders:
+   1. `streamsnow sql-review discover <slug> --write` — proposes (and persists) a skeleton manifest
+      under `apps/<slug>/sql_review/manifests/` for each query no manifest claims yet. It never
+      overwrites an existing manifest, and exit 1 here just means gaps existed — that's why you ran it.
+   2. **Improve the skeleton's dispatcher literals.** `discover` fills each `{TOKEN}` dispatcher with
+      a `-- TODO: sample fragment for <TOKEN>` placeholder; replace every one with a real sample
+      fragment the page actually renders (e.g. `AND region = 'West'` for a region filter) so the
+      review SQL exercises the query the way the dashboard does. Fix the `description`/`pages`
+      fields if the header's `Feeds` line was still a TODO.
+   3. `streamsnow sql-review generate <slug>` — renders the paste-runnable
+      `sql_review/<feature>.review.sql` files with provenance lines.
+   4. Commit the page module, its `queries/*.sql`, the manifest(s), and the rendered `.review.sql`
+      **together** — a page and its audit trail land together. Splitting them leaves a window where
+      `streamsnow sql-review check` reads uncovered queries or drift, and a reviewer can't re-run
+      the numbers behind the new visuals.
+9. **End of the build phase** (all §4 pages built): `streamsnow sql-review index <slug>` rebuilds
+   the `sql_review/README.md` coverage table so it reflects every page's queries; include the
+   refreshed README in the final build commit.
 
 ## Connection pattern by runtime
 

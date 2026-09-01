@@ -20,9 +20,10 @@ can't catch.
 - **`--auto`** — loop review → fix → re-review until no new mechanical findings remain, then a
   render smoke. Follow [auto-loop.md](auto-loop.md). Warn it takes minutes (and Snowflake credits
   when the lineage pass joins); `--no-lineage` keeps it static-only.
-- **`--sql`** — just write the paste-and-runnable `sql_review/` companions + lineage README for
-  audit. Follow [sql-companions.md](sql-companions.md). Read-only; runs automatically when a review
-  detects a `sql_review/` gap.
+- **`--sql`** — build the manifest-driven `sql_review/` audit trail (`streamsnow sql-review`
+  discover → author manifests → generate → index) + live-verified lineage README. Follow
+  [sql-companions.md](sql-companions.md). Read-only; runs automatically when the post-review gap
+  check `streamsnow sql-review check <slug>` reports uncovered queries or drift.
 
 ## Review pass
 

@@ -1,5 +1,5 @@
 {
-  "//": "StreamSnow Claude Code hooks. SessionStart emits a one-line skill pointer; PreToolUse pauses destructive Streamlit/SQL commands. Both are guarded to fire only inside a StreamSnow repo (repo-gated on streamsnow.config.yaml), stdlib-only, no network, and fail-open. Explicit timeouts so a hung hook can never stall a session.",
+  "//": "StreamSnow Claude Code hooks. SessionStart emits a one-line skill pointer; PreToolUse pauses destructive Streamlit/SQL commands; Stop nudges (warn-only, system-message only) when a substantive app change ends unreviewed. All are guarded to fire only inside a StreamSnow repo (repo-gated on streamsnow.config.yaml), stdlib-only, no network, and fail-open. Explicit timeouts so a hung hook can never stall a session.",
   "hooks": {
     "SessionStart": [
       {
@@ -19,6 +19,17 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/deploy_safety.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/review_gate_stop.py\"",
             "timeout": 10
           }
         ]

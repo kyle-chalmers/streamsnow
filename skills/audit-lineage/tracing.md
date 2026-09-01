@@ -48,6 +48,30 @@ From the DDL plus the app's predicates:
   role is a deployed-app failure waiting to happen) and whether a schema-level future grant covers
   new objects.
 
+## 4 · Hand-back into `sql_review/`
+
+The lineage pass ends holding exactly what the app's audit trail needs — traced upstream objects
+and live confirmation per object — so spend it before it goes cold:
+
+1. `streamsnow sql-review check <slug>` — freshness + coverage gate for the rendered companions.
+   Clean → skip straight to the index step.
+2. **On gaps** (uncovered queries, missing files): interactively, offer
+   `streamsnow sql-review discover <slug> --write` followed by
+   `streamsnow sql-review generate <slug>`, flagging that the skeleton manifests carry `-- TODO`
+   dispatcher literals a person (or the `/review-app --sql` recipe) still has to replace with real
+   sample fragments. Inside `/review-app --auto` there is nobody to ask — bootstrap silently with
+   the static skeleton defaults and add a punch-list item to author the manifests properly.
+   **On DRIFT**: `streamsnow sql-review generate <slug>` regenerates; never edit a `.review.sql`
+   body — the manifest under `sql_review/manifests/` is the editing surface.
+3. `streamsnow sql-review index <slug>` rebuilds the README coverage table between its markers
+   (the tool owns the skeleton; it preserves the Upstream and Verified cells per query and every
+   line outside the markers). Then edit the two human columns from this pass's results:
+   - **Upstream object(s)** — the fully-qualified object(s) the lineage walk (section 2 above)
+     traced for that query, replacing the `_(fill via /review-app --sql)_` placeholder.
+   - **Verified** — today's date, only on rows whose objects THIS pass confirmed live (resolve
+     probe + `INFORMATION_SCHEMA.COLUMNS` both answered). Anything untraced or unreachable stays
+     `no` — a Verified date you didn't earn this pass is fabrication, not paperwork.
+
 ## Troubleshooting
 
 - **No connection resolves** → `streamsnow configure` sets `snowflake.connection_name`, then

@@ -2,13 +2,26 @@
 
 Get a fresh machine and repo ready to build and preview apps. Interactive: propose each fix, run it
 only after the user confirms, verify it before moving on. `streamsnow doctor` is the source of
-truth — don't re-derive prerequisites by hand.
+truth — don't re-derive prerequisites by hand (no `which python`, no version greps).
 
 ## 1 · Machine prerequisites
 
-Run `streamsnow doctor` and report in one line ("5 checks passed, 2 need attention"). Walk each
-failure one at a time — one fix, one re-check, never batched installs. If the user declines a fix,
-mark it skipped and continue.
+Run `streamsnow doctor --format json` and read the per-check results — each check is one object:
+
+```json
+{"name": "uv", "ok": false, "level": "required", "detail": {...}, "hint": "install uv — ..."}
+```
+
+Report in one line ("5 checks passed, 2 need attention"), then walk each `ok: false` check one at a
+time — propose the fix (start from the check's own `hint`; the table below gives per-OS commands),
+run it on confirmation, then re-run `streamsnow doctor --format json` and confirm that check now
+reads `ok: true` before moving on. Never batch installs. `level` decides severity: a `required`
+failure blocks the build phases (doctor exits 1); an `optional` one (`snow`, `streamlit`) is
+offered, skippable. The config check flips level by context — `optional` when no
+`streamsnow.config.yaml` exists yet, `required` when one exists but fails validation, so a
+malformed config is never masked as "not configured". If the user declines a fix, mark it skipped
+and continue. Exit codes: 0 = all required checks pass, 1 = a required check failed, 2 = the
+doctor itself failed (report the error verbatim).
 
 | Tool | Why | macOS | Windows / Linux |
 |---|---|---|---|
@@ -48,7 +61,8 @@ credentials into chat — point them at the file. Two classic traps:
 
 - **`streamsnow: command not found`** — the install bin dir isn't on PATH; re-open the shell.
 - **doctor keeps reporting Python too old** — a newer Python exists but isn't first on PATH.
-- **A check flips back to red** — read its remediation verbatim; don't advance past a red blocker.
+- **A check flips back to red** — read its `hint` and `detail` verbatim; don't advance past a
+  `required` failure.
 - **Preview can't connect** — almost always `secrets.toml` (account format, role, warehouse grant).
   Print the connection error verbatim and have the user recheck the file.
 

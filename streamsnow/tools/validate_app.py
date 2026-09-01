@@ -2,9 +2,12 @@
 
 Runs the governance checks (required files, naming, runtime-matched manifest,
 artifacts, schema-refs, app-security, bind-predicates, caching, sql-tokens,
-session-fallback, page-imports) over ``apps/<slug>/`` and
-returns a single PASS/FAIL. No database, no network. This is what the
-``/validate-app`` skill and ``streamsnow ship-app`` call as the hard gate.
+session-fallback, page-imports, path-leaks, requirements-§11) over
+``apps/<slug>/`` and returns a single PASS/FAIL. No database, no network —
+which is why ``check_dependency_vulns`` (OSV.dev) is deliberately NOT in this
+aggregate: it runs as its own pre-commit hook (``--best-effort``) and CI job,
+and the ``/validate-app`` skill shells to it as a separate section. This is
+what the ``/validate-app`` skill and ``/ship-app`` call as the hard gate.
 
 Exit codes: 0 = PASS, 1 = FAIL, 2 = tool error.
 """
@@ -31,7 +34,7 @@ except ImportError:  # pragma: no cover
         return re.sub(r"[-_.]+", "-", name).lower()
 
 
-from ..config import Config, ConfigError, load_config
+from ..config import Config, ConfigError, find_config, load_config
 from ..policy import SchemaPolicy
 from . import (
     check_app_security,
@@ -39,9 +42,12 @@ from . import (
     check_bind_predicates,
     check_caching,
     check_page_imports,
+    check_path_leaks,
+    check_requirements,
     check_schema_refs,
     check_session_fallback,
     check_sql_tokens,
+    sql_review,
 )
 
 _BASE_REQUIRED = (
@@ -385,6 +391,26 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     checks.append({"name": "page-imports", "ok": imports["ok"], "findings": imports["findings"]})
     cache = check_caching.scan_paths(files)
     checks.append({"name": "caching", "ok": cache["ok"], "findings": cache["findings"]})
+    leaks = check_path_leaks.scan_paths(files)
+    checks.append({"name": "path-leaks", "ok": leaks["ok"], "findings": leaks["findings"]})
+    # §11 build-state contract — what /start-app resumes from. The check is a
+    # no-op for apps without a REQUIREMENTS.md (spec presence is a build-phase
+    # concern, not a ship gate).
+    reqs = check_requirements.scan_paths([app_dir])
+    checks.append({"name": "requirements", "ok": reqs["ok"], "findings": reqs["findings"]})
+
+    # sql_review freshness + coverage — WARN-ONLY in 0.6 (adopters get one
+    # release to backfill audit trails; planned to become a FAIL in 0.7).
+    # `check` is import-free by design, so it is safe inside this gate.
+    sqlr = sql_review._check_app(app_dir.parent.parent, app_dir)
+    checks.append(
+        {
+            "name": "sql-review (warn in 0.6 → FAIL in 0.7)",
+            "ok": True,  # deliberately never fails the aggregate this release
+            "findings": [],
+            "warnings": sqlr,
+        }
+    )
 
     return {
         "app": app_dir.name,
@@ -427,7 +453,14 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     try:
-        cfg = load_config(Path(args.config) if args.config else None)
+        # Config discovery is anchored on --dir, not the process cwd: running
+        # `validate-app x --dir /repo` from elsewhere must apply /repo's
+        # policy, not whatever config the caller's cwd happens to sit under.
+        cfg_path = Path(args.config) if args.config else find_config(Path(args.dir).resolve())
+        if cfg_path is None:
+            print(f"config error: no streamsnow.config.yaml found under {Path(args.dir).resolve()}")
+            return 2
+        cfg = load_config(cfg_path)
     except ConfigError as exc:
         print(f"config error: {exc}")
         return 2
@@ -444,13 +477,19 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2))
     else:
         for c in result["checks"]:
+            warnings = c.get("warnings") or []
             mark = "✓" if c["ok"] else "✗"
-            print(
-                f"  {mark} {c['name']}" + ("" if c["ok"] else f"  ({len(c['findings'])} issue(s))")
-            )
+            if c["ok"] and warnings:
+                mark = "!"
+            suffix = "" if c["ok"] else f"  ({len(c['findings'])} issue(s))"
+            if warnings:
+                suffix += f"  ({len(warnings)} warning(s))"
+            print(f"  {mark} {c['name']}{suffix}")
             if not c["ok"]:
                 for f in c["findings"][:10]:
                     print(f"      - {_format_finding(f)}")
+            for w in warnings[:10]:
+                print(f"      ~ {_format_finding(w)}")
         print(f"\n{'PASS' if result['ok'] else 'FAIL'}: {result['app']} ({result['runtime']})")
     return 0 if result["ok"] else 1
 
