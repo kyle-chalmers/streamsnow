@@ -103,6 +103,12 @@ def _deployable_files(app_dir: Path) -> list[str]:
             continue
         if "__pycache__" in parts:
             continue
+        # sql_review/ is the repo-side audit trail for REVIEWERS — the running
+        # app never reads it, snowflake.yml must not declare it, and --fix must
+        # never "repair" it into the deploy set. (A fresh scaffold generates a
+        # companion there before its first validate run.)
+        if parts[0] == "sql_review":
+            continue
         rel_str = rel.as_posix()
         if rel_str in _EXCLUDED:
             continue

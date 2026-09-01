@@ -3,9 +3,10 @@
 Hard-won rules from running a fleet of Streamlit-in-Snowflake apps in
 production. Each section names the failure mode first — if you're debugging,
 scan the headings for your symptom. The enforceable subset is automated
-(`streamsnow validate-app`, the deploy-safety hook, `streamsnow verify-deploy`);
-the rest live here because they depend on warehouse state or judgment that a
-static check can't see.
+(`streamsnow validate-app`, the deploy-safety hook, `streamsnow verify-deploy`,
+`streamsnow check tombstones`, `streamsnow sql-review check`, the review-gate
+Stop hook); the rest live here because they depend on warehouse state or
+judgment that a static check can't see.
 
 The condensed symptom→rule version for agent sessions is
 [`skills/_shared/production-gotchas.md`](../skills/_shared/production-gotchas.md).
@@ -159,5 +160,92 @@ can.
 The deploy workflow scopes to `apps/**`, so retiring an app is a `git mv` to
 `retired_apps/<slug>/`: it stops deploying and stops being scanned with no
 pipeline change, and the source stays in-tree as documentation. The pipeline
-never drops Snowflake objects — `DROP STREAMLIT <fqn>` is a deliberate manual
-step (the deploy-safety hook gates it on purpose).
+never drops a Snowflake object on its own — a drop happens only through the
+tombstone registry (next section), and ad-hoc `DROP STREAMLIT <fqn>` from a
+session is gated by the deploy-safety hook on purpose.
+
+## A CREATE OR REPLACE pipeline has no delete path — tombstone what you abandon
+
+**Symptom:** an app directory was renamed (or removed), and the *old* deployed
+object is still live in Snowflake — frozen at the source of the last merge
+that deployed it, flagged unhealthy by `streamsnow verify-deploy` on every
+later merge, and cleaned up by nothing, because nothing left in the repo knows
+it exists.
+
+The pipeline only ever runs `CREATE OR REPLACE STREAMLIT`. The slug *is* the
+object identity, so `git mv apps/a apps/b` doesn't rename the deployed object —
+it mints a **new** object with a **new URL** and abandons the old one. In the
+fleet this convention comes from, three rename PRs left four such orphans
+before the rule was automated.
+
+The organizing principle: **detection is automated and total; destruction
+requires explicit committed consent.**
+
+- *Detection:* `streamsnow check tombstones` (generated CI runs it on every
+  PR) diffs declared identifiers against `origin/main` and blocks a PR that
+  stops declaring one without a tombstone — the author of that PR is the one
+  person who still has the context to say whether the object should die or the
+  directory should be restored.
+- *Consent:* `deploy/tombstones.yml` — identifier, reason, date, committed in
+  the same PR as the rename/removal.
+- *Execution:* the deploy workflow's reconcile step (`check tombstones
+  --drop-sql`) drops every registered identifier on every deploy. `IF EXISTS`
+  makes re-runs no-ops; a malformed registry exits 2 before any DROP; and the
+  step refuses outright if a tombstone matches a currently-declared app —
+  dropping that would kill the app the same deploy just created.
+
+## Review coverage is per-change, not per-app (and never time-based)
+
+**Symptom:** either the review nag never fires (an app was "reviewed once" so
+everything after rides free), or it fires right after a review finishes
+(a timestamp check sees the review's own fix commits as newer than the
+review).
+
+"Has this app been reviewed" is the wrong question — what matters is whether
+*the changes being shipped* were reviewed. `streamsnow review-gate` therefore
+stamps review artifacts with a per-file coverage key computed from the **AST
+shape** (comments and docstrings stripped): reword a comment in a reviewed
+file and it stays reviewed; change a line of logic and only that file reopens.
+The same shape decides triviality, so a change too trivial to require review
+is also too trivial to invalidate one. A file-mtime rule can't do this — the
+review loop writes its report *and then* commits fixes, so mtime marks the
+review it just finished as stale and nags after every successful run.
+
+Delivery matters as much as the decision. The nudge is a warn-only `Stop`
+hook, and its payload is `systemMessage`-only, **measured, not assumed**
+(2026-08-04, in the source fleet): emitting `additionalContext` from a Stop
+hook does not queue a reminder — it starts a fresh assistant turn with no user
+input, costing an unrequested turn per change. Don't switch it to a richer
+payload without re-measuring.
+
+## Rendered SQL nobody can re-run rots — hash the audit trail
+
+**Symptom:** the "reviewed SQL" a dashboard's numbers were signed off on no
+longer matches what the app executes — a template or filter changed after the
+review file was written, and the file kept looking authoritative.
+
+Apps store `{TOKEN}` + `:N` templates a reviewer can't paste into Snowsight,
+so hand-rendered review copies get written once, drift silently, and end up
+*worse* than nothing: they document a query the app no longer runs. The fix is
+to make the rendered copy a build product, not prose:
+
+- Each feature's filter combos, token values, and bind placeholders live in a
+  JSON **manifest** under `apps/<slug>/sql_review/manifests/` (in the app dir
+  on purpose — renaming or retiring the app moves its audit trail with it).
+- `streamsnow sql-review generate` renders the paste-runnable `.review.sql`
+  files and stamps each with a **provenance line** — content hashes of every
+  input (manifest, query templates, dispatcher modules) and of the rendered
+  output itself.
+- `streamsnow sql-review check` recomputes both hashes **without importing any
+  app code** — a shared pre-commit/CI hook that imports consumer modules would
+  execute arbitrary code on every commit — so an edited template, manifest, or
+  hand-edited rendered file all read as DRIFT, and every `queries/*.sql` must
+  be claimed by some manifest (a query the generator can't account for is a
+  named failure, never a silent skip).
+
+Rendered files are also verified against a statement-root allowlist (`SELECT`
+/ `WITH…SELECT` / `SHOW` / `DESCRIBE` / `EXPLAIN` / session-variable `SET`) —
+an allowlist, not a write-verb denylist, because the failure mode of a
+denylist is the statement type nobody thought of. Scope honesty: the hashes
+catch accidents and drift, not a deliberate committer — repository review
+remains the trust boundary for malicious commits.

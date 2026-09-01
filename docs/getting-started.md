@@ -83,11 +83,20 @@ apps/<slug>/
   streamlit_app.py         # st.navigation entrypoint, apply_branding()
   pages/overview.py        # branded metric + Plotly chart + a cached loader
   queries/example_metric.sql
+  sql_review/              # human-runnable SQL audit trail (streamsnow sql-review)
+    manifests/example_metric.json   # the editing surface
+    example_metric.review.sql       # generated: paste-runnable in Snowsight
   branding.py  sql_loader.py
   .streamlit/config.toml   .streamlit/secrets.toml.example
   snowflake.yml            pyproject.toml (container) | environment.yml (warehouse)
   AGENTS.md
 ```
+
+At the repo level, `init` also writes `deploy/tombstones.yml` (the registry
+the deploy pipeline uses to drop retired apps — empty until your first
+rename; see [Deploying](deploying.md#retiring-or-renaming-an-app)) and a
+`.gitignore` that excludes `.streamsnow/` (local preview state and logs —
+runtime artifacts, never committed) along with `secrets.toml`.
 
 ### 3. Connect to Snowflake (for local preview)
 
@@ -121,11 +130,25 @@ streamsnow preview marketing-campaign-dashboard   # run locally vs live Snowflak
 streamsnow validate-app marketing-campaign-dashboard   # PASS/FAIL ship gate
 ```
 
+`preview start` launches the app in the background, polls its health endpoint,
+and translates the common launch failures (missing `secrets.toml`, a bad
+account locator, a missing package) into actionable hints; `preview status`,
+`preview logs`, and `preview stop` manage it from there. A bare
+`streamsnow preview <slug>` is shorthand for `preview start <slug>`.
+
 `validate-app` is the deterministic gate: required files, manifest contents,
-naming, and the governance checks (`schema-refs`, `security`, `bind-predicates`,
-`caching` — the same names you pass to `streamsnow check`). Any **FAIL** must be
-fixed before shipping. Run an individual check while iterating with, e.g.,
-`streamsnow check caching apps/<slug>`.
+naming, and the governance checks (`schema-refs`, `security`,
+`bind-predicates`, `caching`, `sql-tokens`, `session-fallback`,
+`page-imports`, `artifacts`, `path-leaks`, `requirements` — the same names you
+pass to `streamsnow check`). Any **FAIL** must be fixed before shipping. Run an
+individual check while iterating with, e.g., `streamsnow check caching
+apps/<slug>`.
+
+One convention worth knowing on day one: every query your pages run also gets
+a **paste-runnable audit copy** under `apps/<slug>/sql_review/`, so a reviewer
+can re-run each visual's SQL in Snowsight — `streamsnow sql-review discover |
+generate | check` keeps it generated and fresh (the scaffold ships a starter
+manifest, so the pattern is live from commit 1).
 
 ### 5. (Optional) Claude Code plugin
 
@@ -139,6 +162,14 @@ Inside Claude Code:
 This adds the skills that wrap the CLI — `/start-app` (the front door),
 `/preview-app`, `/validate-app`, `/review-app`, `/ship-app`, and more — plus a SessionStart hook
 scoped to StreamSnow repos.
+
+**The review gate will nudge you.** When a Claude Code turn ends with a
+substantive app change that no review covers, a one-line message suggests
+`/review-app <slug> --auto`. It's advisory only — it never blocks a turn or a
+ship, and coverage is per-change (a reviewed file stays reviewed until its
+logic actually changes). Silence it with `REVIEW_GATE_OFF=1`, an
+`apps/<slug>/.review/SKIP` marker, or `review_gate: {enabled: false}` in
+`streamsnow.config.yaml`.
 
 ## The config file
 
