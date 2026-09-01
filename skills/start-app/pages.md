@@ -38,8 +38,9 @@ run the spec phase first ([spec.md](spec.md)) and resume.
 5. **Register the page**: add an `st.Page(...)` entry to the existing `st.navigation` structure in
    `streamlit_app.py`. Show the diff before applying and use multi-line `Edit` context so the match
    is unambiguous. One nav group → add to it; several → ask which.
-6. **Run the checks on the new files** (`streamsnow check schema-refs|caching|bind-predicates
-   apps/<slug>`) and fix anything flagged while it's cheap.
+6. **Run the checks on the new files** — `streamsnow check schema-refs apps/<slug>`, then
+   `streamsnow check caching apps/<slug>`, then `streamsnow check bind-predicates apps/<slug>`
+   (three invocations, not a pipeline) — and fix anything flagged while it's cheap.
 7. **Log it:** append a §11 session line (`page <name> scaffolded — queries TODO. Next: fill stubs,
    then /preview-app <slug>`). Don't commit yet — the page is a reviewable stub; the commit happens
    in step 8, once the real SQL lands.
