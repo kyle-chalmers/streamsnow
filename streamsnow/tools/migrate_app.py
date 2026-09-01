@@ -73,7 +73,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import getpass
 import json
+import os
 import re
 import sys
 import tempfile
@@ -138,7 +140,32 @@ REPODATA_URLS = (
     # alone falsely reports the most common data deps as unavailable.
     "https://repo.anaconda.com/pkgs/snowflake/linux-64/repodata.json",
 )
-REPODATA_CACHE = Path(tempfile.gettempdir()) / "snowflake_anaconda_repodata.json"
+
+
+def _cache_dir() -> Path | None:
+    """Private per-user cache dir (0o700), or None when it can't be trusted.
+
+    A predictable file in shared temp storage can be pre-seeded by another
+    local user; the availability list drives dependency advice, so it gets a
+    directory we create 0o700 and verify we own. Any doubt → no cache (fetch
+    fresh), never a trusted read.
+    """
+    d = Path(tempfile.gettempdir()) / f"streamsnow-{getpass.getuser()}"
+    try:
+        d.mkdir(mode=0o700, exist_ok=True)
+        st = d.stat()
+        if st.st_uid != os.getuid() or (st.st_mode & 0o077):
+            return None
+        return d
+    except OSError:
+        return None
+
+
+def _repodata_cache() -> Path | None:
+    d = _cache_dir()
+    return d / "anaconda-repodata.json" if d else None
+
+
 REPODATA_TTL = 86400  # 24 hours
 
 # Default conda pin injected when the source doesn't declare streamlit. Keep in
@@ -832,7 +859,8 @@ def _get_snowflake_packages(offline: bool = False) -> tuple[set[str], bool]:
     if offline:
         return {p.lower() for p in OFFLINE_ANACONDA_ALLOWLIST}, False
     try:
-        mtime = REPODATA_CACHE.stat().st_mtime if REPODATA_CACHE.exists() else 0
+        cache_path = _repodata_cache()
+        mtime = cache_path.stat().st_mtime if cache_path is not None and cache_path.exists() else 0
         if (time.time() - mtime) > REPODATA_TTL:
             merged_names: set[str] = set()
             for url in REPODATA_URLS:
@@ -847,11 +875,15 @@ def _get_snowflake_packages(offline: bool = False) -> tuple[set[str], bool]:
             # Persist as a simple name list so re-reads are cheap. Write
             # atomically (temp + rename) so a concurrent invocation can't
             # observe a partial JSON and be forced into a spurious refetch.
-            tmp_path = REPODATA_CACHE.with_suffix(".tmp")
-            tmp_path.write_text(json.dumps({"names": sorted(merged_names)}), encoding="utf-8")
-            tmp_path.replace(REPODATA_CACHE)
+            if cache_path is not None:
+                fd, tmp_name = tempfile.mkstemp(dir=str(cache_path.parent), suffix=".tmp")
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"names": sorted(merged_names)}))
+                os.replace(tmp_name, cache_path)
             return merged_names, True
-        cached = json.loads(REPODATA_CACHE.read_text(encoding="utf-8"))
+        if cache_path is None:  # pragma: no cover — TTL branch handles this
+            raise ValueError("no usable cache")
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
         names = {str(n).lower() for n in cached.get("names", [])}
         if not names:
             raise ValueError("empty cache")

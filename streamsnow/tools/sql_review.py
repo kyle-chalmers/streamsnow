@@ -65,6 +65,16 @@ Two token strategies:
   exactly what the app emits. **Only ``generate`` may import consumer app
   code**, and only on a developer's machine.
 
+Metrics mode (``"mode": "metrics"``)
+------------------------------------
+For dashboards whose visuals aggregate differently than any single app query:
+one AUTHORED block per visual, in on-screen order, from files under
+``sql_review/_metrics/*.sql`` (or a ``queries/*.sql`` when a visual is 1:1
+with an app query — that reference also claims the query for coverage). No
+combos, no dispatchers, never any import; a dashboard-map index heads the
+single ``<feature>.review.sql``. Sources are allowlisted to the two roots
+(traversal-safe) and digest-pinned like every other input.
+
 Import-free ``check`` (the CI / pre-commit / validate hook)
 -----------------------------------------------------------
 ``check`` NEVER imports app code — importing consumer modules from a shared
@@ -234,6 +244,39 @@ def load_manifest(path: Path) -> dict:
     return data
 
 
+#: Metric source paths may live in exactly these app-relative roots. The
+#: allowlist (not a "no .." check alone) is what makes the path traversal-safe:
+#: a source is read and hashed, so it must never reach outside the app.
+_METRIC_SOURCE_RE = re.compile(r"^(sql_review/_metrics|queries)/[A-Za-z0-9_][A-Za-z0-9_.-]*\.sql$")
+
+
+def _validate_metrics_manifest(m: dict, out: list[str]) -> None:
+    """Extra rules for ``mode: "metrics"`` — per-visual authored blocks.
+
+    Metrics mode carries no combos/pages/dispatchers: each entry is one
+    dashboard visual, in on-screen order, whose SQL is an authored file. The
+    named ``source`` is both read and digest-pinned, so it is allowlisted to
+    the two sanctioned roots.
+    """
+    metrics = m.get("metrics")
+    if not isinstance(metrics, list) or not metrics:
+        out.append("mode 'metrics' requires a non-empty metrics[] list")
+        return
+    for i, metric in enumerate(metrics):
+        if not isinstance(metric, dict):
+            out.append(f"metrics[{i}] must be an object")
+            continue
+        for req in ("name", "page", "title", "source"):
+            if not metric.get(req):
+                out.append(f"metrics[{i}] needs {req!r}")
+        source = str(metric.get("source", ""))
+        if source and not _METRIC_SOURCE_RE.match(source):
+            out.append(
+                f"metrics[{i}].source {source!r} must be an app-relative path under "
+                "sql_review/_metrics/ or queries/ (resolved strictly inside the app)"
+            )
+
+
 def validate_manifest(m: dict) -> list[str]:
     """Schema-validate one manifest dict. Returns problem strings (empty = ok)."""
     out: list[str] = []
@@ -242,6 +285,12 @@ def validate_manifest(m: dict) -> list[str]:
     feature = m.get("feature", "")
     if not isinstance(feature, str) or not _FEATURE_RE.match(feature):
         out.append(f"feature {feature!r} must match ^[a-z][a-z0-9_-]*$")
+    mode = m.get("mode", "tokens")
+    if mode not in ("tokens", "metrics"):
+        out.append(f"mode must be 'tokens' (default) or 'metrics' (got {mode!r})")
+    if mode == "metrics":
+        _validate_metrics_manifest(m, out)
+        return out
     strategy = m.get("token_strategy", "static")
     if strategy not in ("static", "manifest"):
         out.append(f"token_strategy must be 'static' or 'manifest' (got {strategy!r})")
@@ -573,11 +622,14 @@ def _inputs_digest(app: Path, manifest_path: Path, manifest: dict) -> str:
     h = hashlib.sha256()
     h.update(f"schema={GENERATOR_SCHEMA}".encode())
     h.update(manifest_path.read_bytes())
-    for name in sorted(_referenced_queries(manifest)):
-        qpath = app / "queries" / f"{name}.sql"
-        h.update(f"\nquery:{name}\n".encode())
-        h.update(qpath.read_bytes() if qpath.is_file() else b"<missing>")
-    if manifest.get("token_strategy") == "manifest":
+    for rel in sorted(_referenced_sources(manifest)):
+        try:
+            spath = _metric_source_path(app, rel) if not rel.startswith("queries/") else app / rel
+        except ToolError:
+            spath = None  # unresolvable/symlinked source digests as missing → drift
+        h.update(f"\nsource:{rel}\n".encode())
+        h.update(spath.read_bytes() if spath is not None and spath.is_file() else b"<missing>")
+    if manifest.get("mode", "tokens") == "tokens" and manifest.get("token_strategy") == "manifest":
         # Conservative closure: hash EVERY app Python source, not just the
         # named modules. A dispatcher module can import sibling helpers, and
         # a dotted module name maps to a package path — enumerating the true
@@ -592,13 +644,28 @@ def _inputs_digest(app: Path, manifest_path: Path, manifest: dict) -> str:
 
 
 def _referenced_queries(manifest: dict) -> set[str]:
+    """Query NAMES (stems under queries/) this manifest claims for coverage."""
     out: set[str] = set()
+    if manifest.get("mode", "tokens") == "metrics":
+        # A metric whose authored block IS an app query (1:1 visual) claims it.
+        for metric in manifest.get("metrics", []):
+            source = str(metric.get("source", ""))
+            if source.startswith("queries/"):
+                out.add(Path(source).stem)
+        return out
     specs = manifest.get("query_specs", {})
     for page in manifest.get("pages", []):
         for q in page.get("queries", []):
             spec = specs.get(q, {})
             out.add(spec.get("source_query", q))
     return out
+
+
+def _referenced_sources(manifest: dict) -> set[str]:
+    """App-relative source FILES the rendered output is a function of."""
+    if manifest.get("mode", "tokens") == "metrics":
+        return {str(m.get("source", "")) for m in manifest.get("metrics", []) if m.get("source")}
+    return {f"queries/{name}.sql" for name in _referenced_queries(manifest)}
 
 
 def _normalize_for_output_hash(text: str) -> str:
@@ -824,6 +891,97 @@ def cmd_discover(args: argparse.Namespace) -> int:
     return 1 if cov["uncovered"] else 0
 
 
+def _manifest_outputs(manifest: dict) -> list[str]:
+    """The review filenames one manifest produces (metrics: exactly one)."""
+    if manifest.get("mode", "tokens") == "metrics":
+        return [f"{manifest['feature']}.review.sql"]
+    combos = manifest.get("combos") or [{"name": "all-default"}]
+    single = len(combos) == 1
+    return [_out_filename(manifest, c["name"], single) for c in combos]
+
+
+def _metric_source_path(app: Path, rel: str) -> Path:
+    """Resolve a metric source with containment + no-symlink checks.
+
+    The manifest regex constrains the LEXICAL path, but reads follow symlinks:
+    a valid-looking ``sql_review/_metrics/x.sql`` symlink could pull any
+    readable file into the rendered review SQL (and the digest). Reject
+    symlinks outright and require the resolved path to stay inside the app.
+    """
+    spath = app / rel
+    if spath.is_symlink():
+        raise ToolError(f"metric source {rel!r} is a symlink — not allowed")
+    try:
+        resolved = spath.resolve()
+        if not resolved.is_relative_to(app.resolve()):
+            raise ToolError(f"metric source {rel!r} resolves outside the app")
+    except OSError as exc:
+        raise ToolError(f"metric source {rel!r}: {exc}") from exc
+    return spath
+
+
+def render_metrics_file(app: Path, manifest: dict) -> str:
+    """Assemble the per-visual review file (manifest ``mode: "metrics"``).
+
+    One runnable block per dashboard visual, in on-screen order, from AUTHORED
+    SQL files (``sql_review/_metrics/*.sql``, or a ``queries/*.sql`` where a
+    visual is 1:1 with an app query) — the mode for dashboards whose visuals
+    aggregate differently than any single app query. Each block's ``-- <name>``
+    tag is the on-screen visual name, so running it labels the result to match
+    the dashboard; a dashboard-map index sits up top. Never imports anything —
+    metrics blocks are static by nature.
+    """
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d")
+    metrics = manifest["metrics"]
+    header = _banner(
+        f"{manifest['feature'].upper()} SQL REVIEW — apps/{app.name} (generated, per-visual)",
+        [
+            f"Generated: {timestamp} by streamsnow sql-review",
+            f"Feature:   {manifest['feature']}",
+            "Mode:      metrics — one runnable block per dashboard visual, in on-screen order.",
+            "",
+            "Each block's comment line (-- <name>) is the on-screen visual name, so",
+            "running it labels the result tab to match the dashboard. Bind params are",
+            "replaced with session variables; edit the SET block once per session.",
+        ],
+    )
+    map_rows = [f"{(m['page'] + ' > ' + m['title']):<52} {m['name']}" for m in metrics]
+    parts: list[str] = [
+        header,
+        "",
+        _set_block(manifest),
+        "",
+        _banner("DASHBOARD MAP (in on-screen order)", map_rows),
+        "",
+    ]
+    binds_base = {**_DEFAULT_BINDS, **manifest.get("param_bindings", {})}
+    for m in metrics:
+        spath = _metric_source_path(app, m["source"])
+        if not spath.is_file():
+            raise ToolError(f"metric source not found: {m['source']} (metric {m['name']!r})")
+        body = strip_header(spath.read_text(encoding="utf-8"))
+        binds = {**binds_base, **m.get("bind_overrides", {})}
+        runnable = _substitute_binds(body, binds).rstrip().rstrip(";").rstrip() + ";"
+        sublines = [f"Page:   {m['page']}", f"Visual: {m['title']}", f"Source: {m['source']}"]
+        if m.get("params_doc"):
+            sublines.append(f"Params: {m['params_doc']}")
+        if m.get("notes"):
+            sublines.append(f"Notes:  {m['notes']}")
+        parts.append(_banner(f"[{m['page']}] {m['title']}", sublines))
+        parts.append("")
+        parts.append(f"-- {m['name']}")
+        parts.append(runnable)
+        parts.append("")
+
+    text = "\n".join(line.rstrip() for line in "\n".join(parts).splitlines()).rstrip() + "\n"
+    problems = _verify_read_only(text)
+    if problems:
+        raise ToolError(
+            f"refusing to write {manifest['feature']!r} metrics review SQL: " + "; ".join(problems)
+        )
+    return text
+
+
 def cmd_generate(args: argparse.Namespace) -> int:
     repo = Path(args.dir).resolve()
     app = _app_dir(repo, args.slug)
@@ -853,20 +1011,28 @@ def cmd_generate(args: argparse.Namespace) -> int:
         manifest = load_manifest(mp)
         if manifest.get("app") not in (None, app.name):
             raise ToolError(f"{mp}: manifest app={manifest.get('app')!r} != {app.name!r}")
-        modules: dict = {}
-        if manifest.get("token_strategy") == "manifest":
-            modules = _import_modules(app, manifest)
         inputs = _inputs_digest(app, mp, manifest)
-        combos = manifest.get("combos") or [{"name": "all-default", "description": "defaults"}]
-        single = len(combos) == 1
         produced: set[str] = set()
-        for combo in combos:
-            text = render_review_file(app, mp, manifest, combo, modules)
-            out = _review_dir(app) / _out_filename(manifest, combo["name"], single)
+        if manifest.get("mode", "tokens") == "metrics":
+            text = render_metrics_file(app, manifest)
+            out = _review_dir(app) / _manifest_outputs(manifest)[0]
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(_stamp_provenance(text, inputs), encoding="utf-8")
             produced.add(out.name)
             written.append(str(out.relative_to(repo)))
+        else:
+            modules: dict = {}
+            if manifest.get("token_strategy") == "manifest":
+                modules = _import_modules(app, manifest)
+            combos = manifest.get("combos") or [{"name": "all-default", "description": "defaults"}]
+            single = len(combos) == 1
+            for combo in combos:
+                text = render_review_file(app, mp, manifest, combo, modules)
+                out = _review_dir(app) / _out_filename(manifest, combo["name"], single)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_text(_stamp_provenance(text, inputs), encoding="utf-8")
+                produced.add(out.name)
+                written.append(str(out.relative_to(repo)))
         # A combo removed from the manifest takes its rendered file with it —
         # a stale generated file nobody accounts for is unexamined surface.
         feature = manifest["feature"]
@@ -890,10 +1056,8 @@ def _output_owners(app: Path) -> dict[str, list[str]]:
     for mp in _manifest_paths(app):
         with contextlib.suppress(ToolError):
             manifest = load_manifest(mp)
-            combos = manifest.get("combos") or [{"name": "all-default"}]
-            single = len(combos) == 1
-            for c in combos:
-                owners.setdefault(_out_filename(manifest, c["name"], single), []).append(mp.name)
+            for fname in _manifest_outputs(manifest):
+                owners.setdefault(fname, []).append(mp.name)
     return owners
 
 
@@ -947,10 +1111,8 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
             findings.append({"file": str(mp.relative_to(repo)), "line": 1, "detail": str(exc)})
             continue
         inputs = _inputs_digest(app, mp, manifest)
-        combos = manifest.get("combos") or [{"name": "all-default"}]
-        single = len(combos) == 1
-        for combo in combos:
-            out = _review_dir(app) / _out_filename(manifest, combo["name"], single)
+        for fname in _manifest_outputs(manifest):
+            out = _review_dir(app) / fname
             rel = f"apps/{app.name}/sql_review/{out.name}"
             if not out.is_file():
                 findings.append(
@@ -1086,9 +1248,17 @@ def cmd_index(args: argparse.Namespace) -> int:
             manifest = load_manifest(mp)
         except ToolError:
             continue
-        combos = manifest.get("combos") or [{"name": "all-default"}]
-        single = len(combos) == 1
-        review_file = _out_filename(manifest, combos[0]["name"], single)
+        review_file = _manifest_outputs(manifest)[0]
+        if manifest.get("mode", "tokens") == "metrics":
+            for m in manifest.get("metrics", []):
+                upstream, verified = carried.get(
+                    m["name"], ("_(fill via /review-app --sql)_", "no")
+                )
+                rows.append(
+                    f"| `{m['name']}` | {upstream} | {m['page']} > {m['title']} | "
+                    f"`{review_file}` | {verified} |"
+                )
+            continue
         for page in manifest.get("pages", []):
             for q in page.get("queries", []):
                 upstream, verified = carried.get(q, ("_(fill via /review-app --sql)_", "no"))

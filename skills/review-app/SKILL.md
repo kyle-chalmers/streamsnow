@@ -7,6 +7,8 @@ allowed-tools: [Bash, Read, Edit, Glob, Grep, Task]
 
 # /review-app
 
+> **Repo overlay:** if `.streamsnow/overlays/review-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+
 Judgment-tier review of `apps/<slug>` — it surfaces what a senior reviewer would flag and (with
 `--fix`) turns findings into atomic per-finding commits. It never blocks a ship; the pass/fail gate
 is `streamsnow validate-app` (/validate-app), run first so reviewers spend judgment on what the gate
