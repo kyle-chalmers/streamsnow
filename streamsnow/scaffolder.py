@@ -110,9 +110,7 @@ REPO_ITEMS = tuple(i for i in RENDER_MAP if not i.output.startswith("apps/{slug}
 # user-owned; deploy/tombstones.yml is a REGISTRY users append to — an update
 # re-render would wipe their tombstone entries.
 GOVERNANCE_ITEMS = tuple(
-    i
-    for i in REPO_ITEMS
-    if i.output not in ("README.md", ".gitignore", "deploy/tombstones.yml")
+    i for i in REPO_ITEMS if i.output not in ("README.md", ".gitignore", "deploy/tombstones.yml")
 )
 
 

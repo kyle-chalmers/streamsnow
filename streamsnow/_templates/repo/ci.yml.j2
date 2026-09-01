@@ -27,7 +27,7 @@ jobs:
       - name: Install tooling
         run: |
           uv tool install ruff
-          uv tool install streamsnow
+          uv tool install 'streamsnow>=0.6,<0.7'
       - name: Lint
         run: ruff check apps/
       - name: Governance gate (validate every app)
@@ -36,7 +36,11 @@ jobs:
             [ -d "$d" ] || continue
             streamsnow validate-app "$(basename "$d")"
           done
-      - name: Dependency vulnerabilities (OSV — fail-closed; CI is authoritative)
+      # Fail-closed for every EXACT pin (==). Range pins are reported unscanned
+      # by design — the scaffold deliberately leaves e.g. snowflake-snowpark-python
+      # range-pinned so uv resolves it. Stricter shops: add --strict-pins here
+      # AND pin every dependency exactly.
+      - name: Dependency vulnerabilities (OSV — exact pins, fail-closed)
         run: streamsnow check dependency-vulns
       - name: SQL-review audit trail (fresh + complete)
         run: streamsnow sql-review check

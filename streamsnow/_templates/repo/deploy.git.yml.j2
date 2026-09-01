@@ -46,7 +46,7 @@ jobs:
       - name: Install tooling
         if: steps.gate.outputs.go == 'true'
         run: |
-          uv tool install streamsnow
+          uv tool install 'streamsnow>=0.6,<0.7'
           uv tool install snowflake-cli-labs
 
       - name: Deploy changed apps (git-repository)
@@ -64,8 +64,6 @@ jobs:
             snow sql -f "/tmp/ss-$slug-refresh.sql" || true
           done
 
-      # "Deploy succeeded" is not "app serves": a missing live version renders
-      # nothing in Snowsight, and a container app can crash-loop while its
       # A CREATE OR REPLACE pipeline has no delete path — this is it. Every
       # identifier in deploy/tombstones.yml is dropped on every deploy
       # (IF EXISTS, so re-runs are no-ops). The PR check guarantees the
@@ -79,6 +77,8 @@ jobs:
             snow sql -f /tmp/ss-drops.sql
           fi
 
+      # "Deploy succeeded" is not "app serves": a missing live version renders
+      # nothing in Snowsight, and a container app can crash-loop while its
       # service reports healthy. (No --sha here: the git source pins freshness
       # via fetch + PULL, not a SHA-versioned stage path.)
       - name: Verify deploy health

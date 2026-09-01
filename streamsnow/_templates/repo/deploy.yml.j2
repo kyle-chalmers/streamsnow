@@ -46,7 +46,7 @@ jobs:
       - name: Install tooling
         if: steps.gate.outputs.go == 'true'
         run: |
-          uv tool install streamsnow
+          uv tool install 'streamsnow>=0.6,<0.7'
           uv tool install snowflake-cli-labs
 
       - name: Deploy changed apps (stage-copy)
