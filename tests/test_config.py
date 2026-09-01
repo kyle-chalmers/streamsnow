@@ -192,3 +192,13 @@ def test_bare_account_with_metacharacters_rejected():
     d["snowflake"]["account"] = "ab123$(whoami)"
     with pytest.raises(ConfigError):
         Config.from_dict(d)
+
+
+def test_explicit_missing_config_path_is_a_config_error(tmp_path):
+    """An explicit --config path that doesn't exist must raise the friendly
+    ConfigError, not a raw FileNotFoundError traceback (seen live from
+    `streamsnow update` run outside a configured repo)."""
+    from streamsnow.config import load_config
+
+    with pytest.raises(ConfigError, match="cannot read config"):
+        load_config(tmp_path / "streamsnow.config.yaml")
