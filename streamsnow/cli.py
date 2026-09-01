@@ -51,6 +51,7 @@ from .tools.migrate_app import main as _migrate_main
 from .tools.preview_app import main as _preview_main
 from .tools.review_gate import main as _review_gate_main
 from .tools.review_loop import main as _review_loop_main
+from .tools.sql_review import main as _sql_review_main
 from .tools.validate_app import main as _validate_app_main
 
 app = typer.Typer(
@@ -410,6 +411,10 @@ def init(
         raise typer.Exit(2) from exc
 
     written = repo_written + app_written
+    # Render the starter app's audit trail so the sql_review pattern is live
+    # from commit 1 (static manifest — deterministic, no app imports).
+    if app_written and _sql_review_main(["generate", app_slug, "--dir", str(target)]) != 0:
+        console.print("[yellow]∘[/] sql_review companion generation failed — see error above")
     console.print(f"[green]✓[/] scaffolded {len(written)} files into {target}")
     console.print(
         f"\nNext:\n"
@@ -439,6 +444,8 @@ def new(
     except FileExistsError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
+    if _sql_review_main(["generate", slug, "--dir", str(Path.cwd())]) != 0:
+        console.print("[yellow]∘[/] sql_review companion generation failed — see error above")
     console.print(f"[green]✓[/] created app {slug} ({len(written)} files)")
 
 
@@ -823,6 +830,19 @@ def preview(ctx: typer.Context) -> None:
 def review_gate_cmd(ctx: typer.Context) -> None:
     """Decide whether an app change needs review (classify | baseline | stamp | stop-hook)."""
     raise typer.Exit(code=_review_gate_main(list(ctx.args)))
+
+
+@app.command(
+    name="sql-review",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def sql_review_cmd(ctx: typer.Context) -> None:
+    """Human-runnable audit trail per app (discover | generate | check | index).
+
+    Every UI-feeding query gets a fully-rendered, paste-and-runnable review
+    file under apps/<slug>/sql_review/ so a person can trace each visual back
+    to the data. `check` is the import-free freshness + coverage gate."""
+    raise typer.Exit(code=_sql_review_main(list(ctx.args)))
 
 
 @app.command(
