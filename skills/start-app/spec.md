@@ -89,6 +89,12 @@ oversight. §11 is the resume contract: a phase line plus an append-only session
 names the next command. There is no per-page status table — page state is visible in the tree and
 git; the log records what happened and what's next.
 
+`streamsnow check requirements apps/<slug>` validates exactly this contract — the section exists,
+the phase is a recognized lifecycle value, the last session line carries an ISO timestamp and (for
+a non-terminal phase) a `Next:` hint. It runs inside `streamsnow validate-app`, so a hand-mangled
+§11 becomes a named finding instead of a silent failure to resume. Run it after any hand edit to
+the section.
+
 ## Gotchas
 
 - **Optional filters, recorded early:** an optional filter renders as a conditional `{TOKEN}` SQL
