@@ -8,10 +8,11 @@ disable-model-invocation: true
 
 # /ship-app
 
-Take a built app from working tree to open PR, gated on validation, then watch CI. Scope is
-intentionally narrow: **one app at a time** (`apps/<slug>/`), and deployment is **CI-only on merge
-to `main`** — this skill never runs a local Snowflake deploy. Repo-level changes (templates,
-governance files, shared recipes, CI) do not belong in a `/ship-app` PR; commit those separately.
+> **Repo overlay:** if `.streamsnow/overlays/ship-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+
+Take a built app from working tree to open PR, gated on validation, then watch CI. **One app at a
+time**; deployment is **CI-only on merge to `main`** — never a local Snowflake deploy. Repo-level
+changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit those separately.
 
 ## Steps
 
@@ -62,14 +63,13 @@ governance files, shared recipes, CI) do not belong in a `/ship-app` PR; commit 
 - **Commit message must match the diff.** A claimed change with no matching hunk means a fix was
   lost (often in manual conflict resolution) — re-read the diff and correct one or the other before
   opening the PR.
-- Most deploy-run failures resolve to one-time, admin-applied DDL (a grant, a compute pool, an
-  external-access integration) emitted by `streamsnow deploy-setup` — surface the named fix; never
-  run DDL from here.
+- Most deploy-run failures resolve to one-time, admin-applied DDL emitted by
+  `streamsnow deploy-setup` — surface the named fix; never run DDL from here.
 
 ## Troubleshooting
 
-- **Push rejected (stale `--force-with-lease`)** → re-fetch, rebase, push — never plain `--force`.
-- **PR opens "behind"** → `main` moved; re-run the sync step and let checks re-run.
+Push rejected (stale `--force-with-lease`) → re-fetch, rebase, push — never plain `--force`. PR
+opens "behind" → `main` moved; re-run the sync step and let checks re-run.
 
 ## Done when
 

@@ -7,6 +7,8 @@ allowed-tools: [Bash, Read, Edit, Glob, Grep]
 
 # /feedback-app
 
+> **Repo overlay:** if `.streamsnow/overlays/feedback-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+
 The user-driven counterpart to `/review-app`: instead of reviewers finding issues, the human brings
 them. Free-form feedback (text and/or screenshots) becomes classified items, spec updates where
 scope changes, and atomic per-item commits — so feedback doesn't rot in chat. Chatty by design:

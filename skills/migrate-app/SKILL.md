@@ -8,15 +8,16 @@ disable-model-invocation: true
 
 # /migrate-app
 
+> **Repo overlay:** if `.streamsnow/overlays/migrate-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+
 Bring an external Streamlit app into the repo, then conform it to StreamSnow conventions until the
 validation check passes. **Two commits** — the lift (files relocated, only ship blockers scrubbed),
 then the conform diff — because mixing the move and the rewrite makes review impossible and kills
 your ability to bisect a misbehaving conform against the known-good lift.
 
-Detection is `streamsnow migrate <verb>` — JSON out, deterministic, AST-only (it never executes
-source code). You read the JSON and make the judgment calls. [engine.md](engine.md) documents every
-verb: when to run it, what its JSON tells you, and the judgment call that follows — read it before
-Step 1.
+Detection is `streamsnow migrate <verb>` — JSON out, deterministic, AST-only (never executes
+source). You read the JSON and make the judgment calls. Read [engine.md](engine.md) before Step 1 —
+it documents every verb: when to run it, what its JSON says, the judgment call that follows.
 
 ## Step 1 — lift-and-shift (get it in the tree)
 
@@ -75,9 +76,8 @@ Step 1.
 
 ## Hand-offs
 
-PASS → /ship-app opens the PR (a first-time account may need one-time `streamsnow deploy-setup`
-DDL). Quality depth beyond the gate → /review-app (and /audit-lineage for live-number fidelity).
-Refactoring an app already in the repo → skip Step 1; run Step 2's scans + gate directly.
+PASS → /ship-app opens the PR (first-time accounts may need one-time `streamsnow deploy-setup`
+DDL); deeper quality → /review-app + /audit-lineage; an app already in the repo → Step 2 only.
 
 ## Done when
 

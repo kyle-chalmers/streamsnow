@@ -7,13 +7,13 @@ allowed-tools: [Bash, Read, Write, Edit]
 
 # /preview-app
 
-Launch `apps/<slug>` locally against live Snowflake and open it in the browser — the "see it before
-you ship it" step. Deploys are CI-driven, so clicking through locally is how the user verifies
-behavior before /validate-app and /ship-app.
+> **Repo overlay:** if `.streamsnow/overlays/preview-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
 
-`streamsnow preview` owns the whole lifecycle — detached launch, health polling, log capture,
-classified failures, teardown — so never hand-roll `streamlit run` + `nohup` + PID bookkeeping. This
-skill owns the interactive UX: slug confirmation, safe secrets provisioning, URL surfacing, triage.
+Launch `apps/<slug>` locally against live Snowflake and open it in the browser — the "see it
+before you ship it" step, ahead of /validate-app and /ship-app. `streamsnow preview` owns the whole
+lifecycle — detached launch, health polling, log capture, classified failures, teardown — so never
+hand-roll `streamlit run` + `nohup` + PID bookkeeping. This skill owns the interactive UX: slug
+confirmation, safe secrets provisioning, URL surfacing, triage.
 
 ## Lifecycle verbs
 

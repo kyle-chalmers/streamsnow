@@ -7,6 +7,8 @@ allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion]
 
 # /start-app
 
+> **Repo overlay:** if `.streamsnow/overlays/start-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+
 One command owns the app lifecycle: **spec → scaffold → build → preview → verify → ship → done**.
 It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume an interrupted build, tells the user the exact
 next command at each judgment point, and never skips a checkpoint.
