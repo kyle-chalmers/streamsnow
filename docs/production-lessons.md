@@ -158,11 +158,13 @@ can.
 ## Retire apps by moving, not deleting
 
 The deploy workflow scopes to `apps/**`, so retiring an app is a `git mv` to
-`retired_apps/<slug>/`: it stops deploying and stops being scanned with no
-pipeline change, and the source stays in-tree as documentation. The pipeline
-never drops a Snowflake object on its own — a drop happens only through the
-tombstone registry (next section), and ad-hoc `DROP STREAMLIT <fqn>` from a
-session is gated by the deploy-safety hook on purpose.
+`retired_apps/<slug>/` **plus a tombstone entry in the same PR**: the move
+stops the app being deployed or scanned while the source stays in-tree as
+documentation, and the entry in `deploy/tombstones.yml` is what the generated
+CI demands — `streamsnow check tombstones` blocks a PR that stops declaring an
+identifier without one — and what the deploy workflow's reconcile step then
+drops (next section). Ad-hoc `DROP STREAMLIT <fqn>` from a session is gated by
+the deploy-safety hook on purpose: destruction goes through the registry.
 
 ## A CREATE OR REPLACE pipeline has no delete path — tombstone what you abandon
 

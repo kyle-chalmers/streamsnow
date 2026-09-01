@@ -1,8 +1,11 @@
 # Deploying
 
 StreamSnow scaffolds a `.github/workflows/deploy.yml` that ships your apps to
-Snowflake on merge to `main`. It **skips automatically** until you add the CI
-secrets, so it never fails a normal merge before you're ready.
+Snowflake on merge to `main`. It **skips automatically while the
+`SNOWFLAKE_ACCOUNT` secret is unset** — that one secret is the gate, so it
+never fails a normal merge before you're ready. Once `SNOWFLAKE_ACCOUNT` is
+set, the job runs, and will fail at authentication if the other secrets are
+still missing.
 
 This is the end-to-end picture. For the one-time Snowflake objects and the exact
 CI secret list, see **[Deploy setup](deploy-setup.md)**.
@@ -20,11 +23,20 @@ On merge to `main`, the workflow:
    `deploy/tombstones.yml` (see
    [Retiring or renaming an app](#retiring-or-renaming-an-app)).
 5. **Verifies deploy health** per app (`streamsnow verify-deploy`) — object
-   exists, live version set, version source matches the merge SHA, no
-   container crash-loop signature.
+   exists, live version set, no container crash-loop signature. With the
+   **stage-copy** source it also confirms the version source matches the merge
+   SHA. The **git-repository** workflow verifies health only — it calls
+   `verify-deploy` without `--sha` (the fetch/refresh step is what advances
+   versions there), and that refresh step is best-effort: a failed refresh
+   logs and continues rather than failing the run.
 
-`validate-app` is the hard gate *before* a PR merges; the deploy job assumes the
-merged code already passed it.
+The scaffolded checks workflow runs `validate-app` on every PR, but nothing
+wires it to the deploy job: `checks.yml` and `deploy.yml` are independent
+workflows, and StreamSnow does not scaffold branch protection. The gate holds
+only if your repo requires the checks before merge — recommended: add a GitHub
+branch protection rule (or ruleset) on `main` that lists the checks jobs as
+required status checks. With that in place, the deploy job can safely assume
+merged code already passed.
 
 An app's `sql_review/` directory (the paste-runnable SQL audit trail that
 `streamsnow sql-review` maintains) is a **repo-side artifact for human
@@ -68,11 +80,12 @@ Set `deploy.source` in `streamsnow.config.yaml`:
 | One-time objects | an internal stage | API integration + secret (GitHub token) + `GIT REPOSITORY` |
 | Best when | you want the fewest moving parts and no Snowflake→GitHub dependency | you already run a Snowflake `GIT REPOSITORY` workflow |
 
-The scaffolded `deploy.yml` targets **stage-copy** — Snowflake never reaches out
-to GitHub, so there's no network-policy dependency. Choose `git-repository` only
-if you specifically want Snowflake to pull from your repo; your CI then runs
-`snow git fetch` and Snowflake must reach GitHub (or you mint a GitHub-App token
-into the secret).
+The scaffold renders `deploy.yml` for whichever source your config declares.
+With the default **stage-copy**, Snowflake never reaches out to GitHub, so
+there's no network-policy dependency. Choose `git-repository` only if you
+specifically want Snowflake to pull from your repo; the rendered workflow then
+runs `snow git fetch` and Snowflake must reach GitHub (or you mint a
+GitHub-App token into the secret).
 
 ## One-time setup
 

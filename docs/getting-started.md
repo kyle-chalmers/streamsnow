@@ -63,7 +63,8 @@ anything it flags before continuing.
 ### 2. Configure + scaffold
 
 ```bash
-uvx streamsnow init
+uv tool install streamsnow   # persistent `streamsnow` on your PATH (a bare uvx run is one-shot)
+streamsnow init              # scaffolds into the current directory — cd to your repo root first, or pass --dir
 ```
 
 `init` runs an interactive wizard that writes
@@ -72,9 +73,11 @@ roles, governance schemas, runtime, and deploy source), then scaffolds a
 governed repo with a starter app under `apps/<slug>/`. To split the steps, run
 `streamsnow configure` first (config only), then `streamsnow init` to scaffold.
 
-`init` reuses an existing config, so re-running it is safe. Pass
-`--reconfigure` to re-run the wizard, or `--app <slug>` to name the starter app
-(default `example-dashboard`).
+`init` reuses an existing config and silently skips repo-level files it already
+wrote, but it **errors on the starter app's files** if that app already exists —
+re-run with `--force` to overwrite them, or `--app <slug>` to name a different
+starter app (default `example-dashboard`). Pass `--reconfigure` to re-run the
+wizard.
 
 A scaffolded app looks like:
 
@@ -126,9 +129,15 @@ run under that role, so matching it locally surfaces grant gaps before deploy.
 
 ```bash
 streamsnow new marketing campaign-dashboard      # scaffold another app
+uv venv && uv pip install -e apps/marketing-campaign-dashboard   # install the app's deps locally
 streamsnow preview marketing-campaign-dashboard   # run locally vs live Snowflake
 streamsnow validate-app marketing-campaign-dashboard   # PASS/FAIL ship gate
 ```
+
+App dependencies are not installed automatically — `preview` runs the
+`streamlit` on your PATH, so install the app's `pyproject.toml` deps into a
+local venv first (the missing-package launch failure is one of the hints
+`preview` translates).
 
 `preview start` launches the app in the background, polls its health endpoint,
 and translates the common launch failures (missing `secrets.toml`, a bad
@@ -144,11 +153,14 @@ pass to `streamsnow check`). Any **FAIL** must be fixed before shipping. Run an
 individual check while iterating with, e.g., `streamsnow check caching
 apps/<slug>`.
 
-One convention worth knowing on day one: every query your pages run also gets
-a **paste-runnable audit copy** under `apps/<slug>/sql_review/`, so a reviewer
-can re-run each visual's SQL in Snowsight — `streamsnow sql-review discover |
-generate | check` keeps it generated and fresh (the scaffold ships a starter
-manifest, so the pattern is live from commit 1).
+One convention worth knowing on day one: every query under
+`apps/<slug>/queries/` — the directory the validate gate pushes UI-feeding SQL
+into — also gets a **paste-runnable audit copy** under
+`apps/<slug>/sql_review/`, so a reviewer can re-run each visual's SQL in
+Snowsight. `streamsnow sql-review discover | generate | check` keeps it
+generated and fresh (the scaffold ships a starter manifest, so the pattern is
+live from commit 1); the `check` fails closed in pre-commit and the generated
+CI, and warns only inside `validate-app` in 0.6.
 
 ### 5. (Optional) Claude Code plugin
 
@@ -182,7 +194,7 @@ secrets / `secrets.toml`). The load-bearing sections:
 | `runtime` | `container` (default) or `warehouse` |
 | `snowflake.objects` | where apps deploy (app database/schema), the warehouse, and container `compute_pool` + `external_access_integration` |
 | `snowflake.roles` | `ci_role` (deploy) and `viewer_role` (preview + deployed access) |
-| `governance` | `database`, `schema_allow`, `schema_deny`, `read_exceptions` — the data guardrails the checks enforce |
+| `governance` | `database`, `schema_allow`, `schema_deny`, `read_exceptions` — the data guardrails. `schema_deny` is what the `schema-refs` check enforces (a denylist); `schema_allow` is the convention the scaffolded queries and docs point at, not an enforced gate |
 | `deploy.source` | `stage-copy` (default) or `git-repository` |
 
 See [`streamsnow.config.example.yaml`](../streamsnow.config.example.yaml) for an

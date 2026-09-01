@@ -24,8 +24,10 @@ delete path — detection automated, destruction only by committed consent.
 > `requirements` (one-line fixes each; see **Changed** below). The new
 > `sql-review` section only **warns** in 0.6, so missing audit trails don't
 > block this upgrade. `deploy/tombstones.yml` is scaffolded on `init` for new
-> repos; existing repos create it on the first rename that needs it
-> (`streamsnow update` never writes it — it's a user-appended registry).
+> repos only — `streamsnow update` never creates or rewrites it (it's a
+> user-appended registry). In an existing repo, create the file by hand at the
+> first rename or removal: a missing registry reads as empty, so
+> `check tombstones` fails the PR until the file and its entry exist.
 
 ### Added
 
@@ -67,8 +69,10 @@ delete path — detection automated, destruction only by committed consent.
 **SQL-review audit trail**
 
 - **`streamsnow sql-review`** (`discover` | `generate` | `check` | `index`) —
-  every UI-feeding query gets a fully-rendered, paste-runnable
-  `.review.sql` under `apps/<slug>/sql_review/`, driven by per-feature JSON
+  every query under `apps/<slug>/queries/` (the convention UI-feeding SQL
+  lands in; SQL inlined in Python is outside its reach) gets a fully-rendered,
+  paste-runnable `.review.sql` under `apps/<slug>/sql_review/`, driven by
+  per-feature JSON
   manifests in `sql_review/manifests/` (co-located with the app so a rename
   moves the audit trail with it). Rationale: apps store `{TOKEN}` + `:N`
   templates a reviewer can't run, and a dashboard whose numbers nobody can

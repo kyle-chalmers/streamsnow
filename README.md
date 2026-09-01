@@ -71,8 +71,10 @@ StreamSnow treats two axes as first-class, configurable options:
 # 0. Check your machine has the prerequisites (Python 3.11+, uv, git, snow CLI)
 uvx streamsnow doctor
 
-# 1. Configure your Snowflake environment + scaffold a governed repo with a starter app
-uvx streamsnow init          # runs the config wizard, then scaffolds
+# 1. Install the CLI, then configure + scaffold a governed repo with a starter app
+uv tool install streamsnow   # persistent `streamsnow` on your PATH (uvx runs are one-shot)
+mkdir my-snowflake-apps && cd my-snowflake-apps   # init scaffolds into the current directory (or pass --dir)
+streamsnow init              # runs the config wizard, then scaffolds
 #    (or split it: `streamsnow configure` to set up streamsnow.config.yaml first,
 #     then `streamsnow init` to scaffold)
 
@@ -87,7 +89,8 @@ cp apps/<slug>/.streamlit/secrets.toml.example apps/<slug>/.streamlit/secrets.to
 
 # 4. Build, preview, validate, ship
 streamsnow new marketing campaign-dashboard   # or let /start-app drive the whole flow
-streamlit run apps/marketing-campaign-dashboard/streamlit_app.py
+uv venv && uv pip install -e apps/marketing-campaign-dashboard   # install the app's deps first
+uv run streamlit run apps/marketing-campaign-dashboard/streamlit_app.py
 #    /start-app  ->  /preview-app  ->  /validate-app  ->  /review-app  ->  /ship-app
 ```
 
@@ -113,19 +116,23 @@ work as deprecated aliases and will be removed in the next major release.
 
 ## The audit trail (new in 0.6)
 
-Every UI-feeding query gets a **human-runnable proof**: a fully-rendered,
-paste-runnable `.review.sql` under `apps/<slug>/sql_review/`, generated from a
-per-feature manifest and verified by an import-free freshness + coverage gate
-(`streamsnow sql-review check`, wired into pre-commit, CI, and the validate
-gate). A person with nothing but Snowsight can trace any visual back to the
-data and confirm it — see **[Auditing a visual](docs/auditing-a-visual.md)**.
-Pages and their audit trails land in the same commit; a changed query cannot
-ship with a stale one.
+Every query under `apps/<slug>/queries/` gets a **human-runnable proof**: a
+fully-rendered, paste-runnable `.review.sql` under `apps/<slug>/sql_review/`,
+generated from a per-feature manifest and verified by an import-free freshness
++ coverage gate (`streamsnow sql-review check`). Coverage is keyed to the
+`queries/` convention — the same place the validate gate pushes UI-feeding SQL
+— so SQL inlined in Python sits outside its reach. The gate fails closed in
+pre-commit and the generated CI where those configs are adopted; inside
+`streamsnow validate-app` it warns only in 0.6 (FAIL planned for 0.7). A
+person with nothing but Snowsight can trace a covered visual back to the data
+and confirm it — see **[Auditing a visual](docs/auditing-a-visual.md)**.
 
 ## Hooks, in full
 
 Trust demands transparency: this plugin runs hooks, so here is every one of them. All are
-stdlib-only, make **no network calls**, never write outside the repo, and fail open — a hook
+stdlib-only, make **no network calls**, never write outside the repo (plus one best-effort
+dedupe state file in `$TMPDIR`, so the review nudge fires once per state, not every turn),
+and fail open — a hook
 error never blocks your session; the guards only ever *add* a confirmation or a note.
 
 | Event | Script | What it does |

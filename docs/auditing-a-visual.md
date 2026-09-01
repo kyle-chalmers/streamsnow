@@ -1,7 +1,9 @@
 # Auditing a visual — trace any number on a dashboard back to the data
 
-Every StreamSnow app carries a human-runnable audit trail: for each UI-feeding
-query there is a fully-rendered, paste-runnable SQL file under
+Every StreamSnow app carries a human-runnable audit trail: for each query under
+`apps/<slug>/queries/` — the directory the validate gate pushes UI-feeding SQL
+into (SQL inlined in Python sits outside the trail) — there is a fully-rendered,
+paste-runnable SQL file under
 `apps/<slug>/sql_review/`. You do not need the app's code, a local Python
 environment, or StreamSnow itself to use it — just Snowsight (or any SQL
 editor) and a role that can read the app's schemas. This page is the runbook
@@ -41,12 +43,16 @@ for the person who looks at a chart and asks *"is that number right?"*
 
 ## What you can trust about these files
 
-- **They are exactly what the app runs.** The files are generated from the
-  same query templates and token fragments the app renders at runtime —
-  not a hand-written approximation. A provenance line at the bottom pins the
-  generation to the exact manifest, templates, and app code that produced it;
-  CI fails when any of those drift without a regenerate, and when the
-  rendered file itself is edited by hand.
+- **What the provenance digest pins depends on the manifest's
+  `token_strategy`.** With `manifest`, the files are rendered by calling the
+  same token dispatchers the app calls, and the digest pins the manifest, the
+  query templates, *and* the app modules those dispatchers live in — the SQL
+  is exactly what the app runs. With `static` (the default), the digest pins
+  the manifest and templates only: the token literals are the manifest
+  author's assertion of what the app renders, kept honest by code review
+  rather than by the digest. Under either strategy, CI fails when any pinned
+  input drifts without a regenerate, and when the rendered file itself is
+  edited by hand.
 - **They are read-only by construction.** The generator refuses to emit
   anything but `SELECT`/`WITH…SELECT`/`SHOW`/`DESCRIBE`/`EXPLAIN` plus the
   `SET` session variables, and CI re-verifies committed files. Running a
@@ -62,7 +68,9 @@ for the person who looks at a chart and asks *"is that number right?"*
 The rendered files are **not** the editing surface — the manifest at
 `apps/<slug>/sql_review/manifests/<feature>.json` is. Edit the manifest (or
 the query templates), then `streamsnow sql-review generate <slug>`. The
-`check` verb (pre-commit, CI, and `streamsnow validate-app`) keeps coverage
-complete and renders fresh: a new page cannot ship without its audit trail,
-and a changed query cannot ship with a stale one. `/review-app --sql` is the
+`check` verb keeps coverage complete and renders fresh: every
+`queries/*.sql` must be claimed by a manifest, and an unregenerated change
+reads as DRIFT. It fails closed in pre-commit and the generated CI where
+those configs are adopted; inside `streamsnow validate-app` it warns only in
+0.6 (FAIL planned for 0.7). `/review-app --sql` is the
 assisted path that authors manifests well and live-verifies the README.
