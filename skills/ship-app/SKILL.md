@@ -19,7 +19,7 @@ governance files, shared recipes, CI) do not belong in a `/ship-app` PR; commit 
    ahead of `main` → nothing to PR; stop and say so.
 2. **Preflight 0 — review gate (asks, never blocks):**
    `streamsnow review-gate classify <slug> --format json`. Reviewed/trivial/skip-marker → proceed.
-   `needs_review: true` → offer the choice: review first (`/review-app <slug> --auto`) or **ship
+   `.apps[0].needs_review == true` → offer the choice: review first (`/review-app <slug> --auto`) or **ship
    as-is** — always available (ships can be time-critical; /validate-app + CI are the real publish
    gates), but note "shipped unreviewed" in the PR body so the approver sees it. Never auto-run a
    credit-spending review loop on the user's behalf here.

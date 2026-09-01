@@ -26,10 +26,17 @@ Trust bar (matches deploy_safety.py):
 
 Off-switches: ``REVIEW_GATE_OFF=1``, ``apps/<slug>/.review/SKIP``, or
 ``review_gate: {enabled: false}`` in streamsnow.config.yaml.
+
+Dedupe is best-effort: the gate remembers (repo, slug, baseline) per session
+in ``$TMPDIR`` so the same unreviewed state nudges once, not every turn. When
+that state cannot be written (read-only TMPDIR), the nudge may repeat — a
+worse failure mode than silence would be, so it is accepted rather than
+made load-bearing.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import runpy
 import sys
@@ -50,10 +57,12 @@ def main() -> int:
         # keeps this a single process (a subprocess would double the hook's
         # startup cost inside its 10s budget).
         sys.argv = [str(gate), "stop-hook", "--payload=system-only"]
-        try:
+        with contextlib.suppress(SystemExit):
+            # The gate's stop-hook always intends 0; clamp regardless.
             runpy.run_path(str(gate), run_name="__main__")
-        except SystemExit as exc:
-            return int(exc.code or 0)
+        # ALWAYS 0, whatever the delegated gate did — a non-zero exit from a
+        # Stop hook is interpreted by the harness, and this wrapper's whole
+        # contract is "never influence the turn".
         return 0
     except Exception:  # noqa: BLE001 — fail-open is the contract
         return 0

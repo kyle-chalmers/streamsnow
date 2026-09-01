@@ -119,3 +119,48 @@ def test_hooks_json_declares_stop_with_timeout() -> None:
         for matcher_block in event_entries:
             for h in matcher_block["hooks"]:
                 assert h.get("timeout"), h
+
+
+def test_nonzero_gate_exit_is_clamped_to_zero(tmp_path: Path) -> None:
+    """Whatever the delegated gate exits with, the wrapper exits 0 — a
+    non-zero Stop-hook exit is interpreted by the harness."""
+    fake_root = tmp_path / "plugin"
+    (fake_root / "hooks").mkdir(parents=True)
+    (fake_root / "streamsnow" / "tools").mkdir(parents=True)
+    (fake_root / "streamsnow" / "tools" / "review_gate.py").write_text("import sys\nsys.exit(2)\n")
+    wrapper_copy = fake_root / "hooks" / "review_gate_stop.py"
+    wrapper_copy.write_text(WRAPPER.read_text())
+    proc = subprocess.run(
+        [sys.executable, str(wrapper_copy)],
+        input="{}",
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": str(fake_root)},
+        timeout=30,
+    )
+    assert proc.returncode == 0
+    assert proc.stdout == ""
+
+
+def test_silent_when_stop_hook_active(tmp_path: Path) -> None:
+    repo = _make_streamsnow_repo(tmp_path / "repo")
+    page = repo / "apps" / "acme-sales-dashboard" / "pages" / "overview.py"
+    page.write_text("import streamlit as st\nst.metric('Orders', 2)\n")
+    proc = _run_wrapper(
+        {"cwd": str(repo), "session_id": "hook-s3", "stop_hook_active": True},
+        repo,
+        tmp_path / "st",
+    )
+    assert proc.returncode == 0
+    assert proc.stdout == ""
+
+
+def test_silent_when_disabled_in_config(tmp_path: Path) -> None:
+    repo = _make_streamsnow_repo(tmp_path / "repo")
+    (repo / "streamsnow.config.yaml").write_text("review_gate:\n  enabled: false\n")
+    page = repo / "apps" / "acme-sales-dashboard" / "pages" / "overview.py"
+    page.write_text("import streamlit as st\nst.metric('Orders', 2)\n")
+    proc = _run_wrapper({"cwd": str(repo), "session_id": "hook-s4"}, repo, tmp_path / "st")
+    assert proc.returncode == 0
+    assert proc.stdout == ""

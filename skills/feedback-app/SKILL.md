@@ -50,10 +50,10 @@ interpretation of *their* words in real time.
 ## Follow-up review (default on)
 
 8. If at least one code-touching commit landed, ask the gate what the edits amount to:
-   `streamsnow review-gate classify <slug> --format json`. `needs_review: true` → escalate to
-   `/review-app <slug> --auto` (the full loop — feedback batches routinely seed several mechanical
-   findings); a `trivial` verdict or `reviewed: true` → a single diff-scoped `/review-app <slug>`
-   pass is enough. Skip entirely when `--no-followup-review` is passed, when only docs/captions
+   `streamsnow review-gate classify <slug> --format json`. `.apps[0].needs_review == true` →
+   escalate to `/review-app <slug> --auto` (the full loop — feedback batches routinely seed several
+   mechanical findings); a `trivial` verdict or `reviewed: true` → no review is owed; skip the
+   follow-up and say why. Skip also when `--no-followup-review` is passed, when only docs/captions
    changed, or when `/start-app` is orchestrating (it reviews at its own checkpoint). The gate
    decides *whether* review is owed — never re-derive substantive-vs-trivial by hand.
 
