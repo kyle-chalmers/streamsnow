@@ -398,4 +398,9 @@ def load_config(path: Path | None = None) -> Config:
         data = yaml.safe_load(Path(cfg_path).read_text()) or {}
     except yaml.YAMLError as exc:  # pragma: no cover - passthrough
         raise ConfigError(f"{cfg_path}: invalid YAML: {exc}") from exc
+    except OSError as exc:
+        # An explicit path that doesn't exist must be the same friendly error
+        # as no discovered config — not a raw traceback (seen live from
+        # `streamsnow update` outside a configured repo).
+        raise ConfigError(f"{cfg_path}: cannot read config: {exc}") from exc
     return Config.from_dict(data)
