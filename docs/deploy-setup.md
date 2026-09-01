@@ -1,8 +1,10 @@
 # Deploy setup
 
 StreamSnow scaffolds a `.github/workflows/deploy.yml` that ships your apps to
-Snowflake on merge to `main`. It **skips automatically** until you set the
-secrets below, so it never fails a normal merge before you're ready.
+Snowflake on merge to `main`. It **skips automatically while the
+`SNOWFLAKE_ACCOUNT` secret is unset** — that one secret is the gate, so it
+never fails a normal merge before you're ready. Once it is set, the job runs,
+and will fail at authentication if the other secrets below are still missing.
 
 ## 1. One-time Snowflake objects
 
@@ -35,15 +37,25 @@ Snowflake user, and add these **repo secrets**:
 | `SNOWFLAKE_ROLE` | your `ci_role` from `streamsnow.config.yaml` |
 
 Once `SNOWFLAKE_ACCOUNT` is present, the deploy job runs on the next merge:
-it uploads `apps/` to the SHA-versioned stage and runs `CREATE OR REPLACE
-STREAMLIT` (via `streamsnow deploy-sql`) for each app.
+it uploads `apps/` to the SHA-versioned stage, runs `CREATE OR REPLACE
+STREAMLIT` (via `streamsnow deploy-sql`) for each app, reconciles the
+tombstone registry (`streamsnow check tombstones --drop-sql` — a
+`DROP STREAMLIT IF EXISTS` per entry in `deploy/tombstones.yml`, idempotent
+across re-runs, refusing if a tombstone still names a declared app), and
+verifies each app's health (`streamsnow verify-deploy`). See
+[Deploying → Retiring or renaming an app](deploying.md#retiring-or-renaming-an-app).
+
+Note that an app's `sql_review/` audit-trail directory is repo-side
+documentation for reviewers — the deployed app never reads it, and it is not
+declared in the app's `snowflake.yml` `artifacts:`.
 
 ## git-repository note
 
-The generated workflow targets the **stage-copy** path (CI pushes; Snowflake
-never reaches out to GitHub — fewer moving parts, no network-policy dependency).
-If you set `deploy.source: git-repository`, your CI must instead `snow git fetch`
-the repository and Snowflake must be able to reach GitHub (or mint a GitHub-App
-token into the secret). Use `streamsnow deploy-sql <slug>` for the create
+The generated workflow matches your `deploy.source`. The default **stage-copy**
+rendering has CI push to a stage (Snowflake never reaches out to GitHub — fewer
+moving parts, no network-policy dependency). With
+`deploy.source: git-repository`, the rendered workflow instead runs
+`snow git fetch` and Snowflake must be able to reach GitHub (or mint a
+GitHub-App token into the secret). Use `streamsnow deploy-sql <slug>` for the create
 statement and `streamsnow deploy-sql <slug> --refresh` for the
 ABORT/PULL/COMMIT refresh of an existing app.

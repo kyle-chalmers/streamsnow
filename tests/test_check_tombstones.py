@@ -299,3 +299,18 @@ def test_namespace_move_requires_tombstones_for_old_fqns(tmp_path, monkeypatch, 
     out = capsys.readouterr().out
     assert code == 1
     assert SALES_FQN in out  # the OLD namespace's identifier needs a tombstone
+
+
+def test_drop_sql_from_wrong_cwd_fails_closed(tmp_path, monkeypatch, capsys):
+    """Run from a cwd where apps/ doesn't resolve, the live guard must refuse
+    (exit 2, zero DROPs) — an empty glob must never read as 'no live apps'."""
+    _init_repo(tmp_path)
+    _tombstone(
+        tmp_path,
+        f"tombstones:\n  - identifier: {SALES_FQN}\n    reason: retired\n    date: 2026-08-31\n",
+    )
+    monkeypatch.chdir(tmp_path / "apps")  # apps/apps does not exist
+    assert main(["--drop-sql", "--registry", str(tmp_path / "deploy" / "tombstones.yml")]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "not found from cwd" in captured.err

@@ -180,6 +180,15 @@ def worktree_identifiers(cfg, apps_dir: Path) -> dict[str, str]:
     from the "declared" set would let a tombstone for a live app pass the
     contradiction check, which is the exact bug class this tool closes.
     """
+    if not apps_dir.is_dir():
+        # glob on a missing directory silently yields [] — and an empty live
+        # map would let the --drop-sql live guard pass a DROP for a declared
+        # app when the tool is run from the wrong cwd. "Cannot see the apps"
+        # must never read as "no apps exist".
+        raise ToolError(
+            f"apps directory {apps_dir} not found from cwd {Path.cwd()} — run from "
+            "the repo root (or pass --apps-dir)"
+        )
     out: dict[str, str] = {}
     for yml in sorted(apps_dir.glob("*/snowflake.yml")):
         slug = yml.parent.name
