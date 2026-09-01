@@ -263,3 +263,100 @@ def test_deploy_workflows_pin_verify_concurrency_and_dotfile_copy(tmp_path):
     assert "group: deploy-snowflake" in git_deploy
     assert "cancel-in-progress: false" in git_deploy
     assert "streamsnow verify-deploy" in git_deploy
+
+
+def test_generated_precommit_enforces_sql_review_and_vulns(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    text = (tmp_path / ".pre-commit-config.yaml").read_text()
+    assert "streamsnow sql-review check" in text
+    assert "streamsnow check dependency-vulns --best-effort" in text
+    assert "streamsnow check path-leaks" in text
+    parsed = yaml.safe_load(text)  # stays valid YAML
+    ids = [h["id"] for repo in parsed["repos"] for h in repo["hooks"]]
+    assert "streamsnow-sql-review" in ids
+
+
+def test_generated_ci_enforces_the_deterministic_gates(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    text = (tmp_path / ".github" / "workflows" / "checks.yml").read_text()
+    assert "streamsnow check dependency-vulns" in text  # fail-closed: no --best-effort in CI
+    assert "--best-effort" not in text
+    assert "streamsnow sql-review check" in text
+    assert "streamsnow check tombstones --base-ref origin/main" in text
+    assert "fetch-depth: 0" in text  # the tombstones diff needs history
+    yaml.safe_load(text)
+
+
+def test_generated_deploy_workflows_reconcile_tombstones(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    stage_copy = (tmp_path / ".github" / "workflows" / "deploy.yml").read_text()
+    assert "streamsnow check tombstones --drop-sql" in stage_copy
+    yaml.safe_load(stage_copy)
+    # git-repository deploy source renders the other template — same step.
+    gitdata = dict(data)
+    gitdata["deploy"] = {
+        "source": "git-repository",
+        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "api_integration_name": "GITHUB_API_INTEGRATION",
+        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+    }
+    scaffold(Config.from_dict(gitdata), tmp_path / "g", "acme-sales-dashboard")
+    git_deploy = (tmp_path / "g" / ".github" / "workflows" / "deploy.yml").read_text()
+    assert "streamsnow check tombstones --drop-sql" in git_deploy
+    yaml.safe_load(git_deploy)
+
+
+def test_scaffolded_tombstones_registry_is_valid_and_user_owned(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    reg = tmp_path / "deploy" / "tombstones.yml"
+    assert yaml.safe_load(reg.read_text()) == {"tombstones": []}
+    # `streamsnow update` must never re-render the registry (it would wipe
+    # user-appended tombstone entries).
+    from streamsnow.scaffolder import GOVERNANCE_ITEMS
+
+    assert "deploy/tombstones.yml" not in {i.output for i in GOVERNANCE_ITEMS}
+
+
+def test_generated_workflows_pin_a_compatible_streamsnow(tmp_path):
+    """The templates install a pinned range; it must always cover the version
+    of streamsnow that generated them — a 0.7 bump that forgets the templates
+    fails here, not in a consumer's CI."""
+    from packaging.specifiers import SpecifierSet
+
+    import streamsnow
+
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    for wf in ("checks.yml", "deploy.yml"):
+        text = (tmp_path / ".github" / "workflows" / wf).read_text()
+        assert "uv tool install 'streamsnow" in text
+        spec = text.split("uv tool install 'streamsnow")[1].split("'")[0]
+        assert streamsnow.__version__ in SpecifierSet(spec), (
+            f"{wf} pins streamsnow{spec}, which excludes this version "
+            f"({streamsnow.__version__}) — update the template pin with the release"
+        )
+
+
+def test_fresh_scaffold_passes_its_own_validate_gate(tmp_path):
+    """A repo straight out of `streamsnow init` (including the auto-generated
+    sql_review companion) must pass `validate-app` — the accuracy audit caught
+    check-artifacts demanding the .review.sql be declared deployable."""
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "--config",
+            str(EXAMPLE_CONFIG),
+            "--dir",
+            str(tmp_path),
+            "--app",
+            "acme-sales-dashboard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(app, ["validate-app", "acme-sales-dashboard", "--dir", str(tmp_path)])
+    assert result.exit_code == 0, result.output

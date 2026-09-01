@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -30,19 +28,30 @@ from .config import (
     RUNTIMES,
     Config,
     ConfigError,
-    find_config,
     load_config,
 )
 from .deploy import generate_create_sql, generate_refresh_sql, generate_setup_sql, stage_path
 from .scaffolder import APP_ITEMS, GOVERNANCE_ITEMS, REPO_ITEMS, render_item, scaffold
+from .tools import doctor as _doctor
+from .tools.app_nav import main as _app_nav_main
 from .tools.check_app_security import main as _security_main
 from .tools.check_artifacts import main as _artifacts_main
 from .tools.check_bind_predicates import main as _bind_main
+from .tools.check_branding_parity import main as _branding_parity_main
 from .tools.check_caching import main as _caching_main
+from .tools.check_dependency_vulns import main as _dependency_vulns_main
 from .tools.check_page_imports import main as _page_imports_main
+from .tools.check_path_leaks import main as _path_leaks_main
+from .tools.check_requirements import main as _requirements_main
 from .tools.check_schema_refs import main as _schema_refs_main
 from .tools.check_session_fallback import main as _session_fallback_main
 from .tools.check_sql_tokens import main as _sql_tokens_main
+from .tools.check_tombstones import main as _tombstones_main
+from .tools.migrate_app import main as _migrate_main
+from .tools.preview_app import main as _preview_main
+from .tools.review_gate import main as _review_gate_main
+from .tools.review_loop import main as _review_loop_main
+from .tools.sql_review import main as _sql_review_main
 from .tools.validate_app import main as _validate_app_main
 
 app = typer.Typer(
@@ -402,6 +411,10 @@ def init(
         raise typer.Exit(2) from exc
 
     written = repo_written + app_written
+    # Render the starter app's audit trail so the sql_review pattern is live
+    # from commit 1 (static manifest — deterministic, no app imports).
+    if app_written and _sql_review_main(["generate", app_slug, "--dir", str(target)]) != 0:
+        console.print("[yellow]∘[/] sql_review companion generation failed — see error above")
     console.print(f"[green]✓[/] scaffolded {len(written)} files into {target}")
     console.print(
         f"\nNext:\n"
@@ -431,6 +444,8 @@ def new(
     except FileExistsError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
+    if _sql_review_main(["generate", slug, "--dir", str(Path.cwd())]) != 0:
+        console.print("[yellow]∘[/] sql_review companion generation failed — see error above")
     console.print(f"[green]✓[/] created app {slug} ({len(written)} files)")
 
 
@@ -449,41 +464,23 @@ def check_schema_refs_cmd(
 
 
 @app.command()
-def doctor() -> None:
-    """Check the local environment for the prerequisites StreamSnow needs."""
-    ok = True
-    py = sys.version_info
-    if (py.major, py.minor) >= (3, 11):
-        console.print(f"[green]✓[/] Python {py.major}.{py.minor} (>=3.11)")
-    else:
-        console.print(f"[red]✗[/] Python {py.major}.{py.minor} — need >=3.11")
-        ok = False
-    for tool, hint in (
-        ("git", "install git"),
-        ("uv", "https://docs.astral.sh/uv/"),
-        ("snow", "uv tool install snowflake-cli-labs (for preview/deploy)"),
-        ("streamlit", "uv pip install streamlit (in your app environment, for preview)"),
-    ):
-        if shutil.which(tool):
-            console.print(f"[green]✓[/] {tool} found")
-        else:
-            console.print(f"[yellow]∘[/] {tool} not found — {hint}")
-            if tool in {"git", "uv"}:
-                ok = False
-    # Config check, when run inside a StreamSnow repo. Distinguish a missing
-    # config (fine — just not configured here) from a malformed one (a real
-    # error that must not be masked).
-    cfg_path = find_config()
-    if cfg_path is None:
-        console.print("[yellow]∘[/] no streamsnow.config.yaml here (run 'streamsnow configure')")
-    else:
-        try:
-            cfg = load_config(cfg_path)
-            console.print(f"[green]✓[/] {cfg_path.name} valid (schema v{cfg.schema_version})")
-        except ConfigError as exc:
-            console.print(f"[red]✗[/] {cfg_path} is invalid: {exc}")
-            ok = False
-    raise typer.Exit(code=0 if ok else 1)
+def doctor(
+    output_json: bool = typer.Option(False, "--json", help="Emit per-check JSON results."),
+    output_format: str = typer.Option(
+        "md", "--format", help="md | json (package-wide check contract; --json is an alias)."
+    ),
+) -> None:
+    """Check the local environment for the prerequisites StreamSnow needs.
+
+    Each prerequisite is an independent sub-check with a machine-readable
+    result ({name, ok, level, detail, hint}) so skills can shell out per
+    check instead of prose-detecting. Exit 0 = all required checks pass,
+    1 = a required check failed, 2 = tool error.
+    """
+    argv = ["--format", output_format]
+    if output_json:
+        argv.append("--json")
+    raise typer.Exit(code=_doctor.main(argv))
 
 
 @app.command(name="deploy-setup")
@@ -677,9 +674,20 @@ def check_sql_tokens_cmd(
 def check_session_fallback_cmd(
     paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
     output_format: str = typer.Option("md", "--format"),
+    base_ref: str = typer.Option(
+        None, "--base-ref", help="Flag only calls introduced vs this ref (default origin/main)."
+    ),
+    scan_all: bool = typer.Option(
+        False, "--all", help="Tree-wide scan (legacy debt included) instead of new-only."
+    ),
 ) -> None:
-    """Require broad try/except around get_active_session() calls."""
-    _run_check(_session_fallback_main, paths, output_format)
+    """Require broad try/except around get_active_session() calls (new-only by default)."""
+    argv = list(paths or ["apps"]) + ["--format", output_format]
+    if base_ref:
+        argv += ["--base-ref", base_ref]
+    if scan_all:
+        argv.append("--all")
+    raise typer.Exit(code=_session_fallback_main(argv))
 
 
 @check_app.command("page-imports")
@@ -695,9 +703,86 @@ def check_page_imports_cmd(
 def check_artifacts_cmd(
     paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
     output_format: str = typer.Option("md", "--format"),
+    fix: bool = typer.Option(
+        False, "--fix", help="Repair each app's artifacts block from files on disk."
+    ),
 ) -> None:
     """Cross-check snowflake.yml artifacts against files on disk."""
-    _run_check(_artifacts_main, paths, output_format)
+    argv = list(paths or ["apps"]) + ["--format", output_format]
+    if fix:
+        argv.append("--fix")
+    raise typer.Exit(code=_artifacts_main(argv))
+
+
+@check_app.command("path-leaks")
+def check_path_leaks_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Block personal absolute paths (home directories) in committed code and docs."""
+    _run_check(_path_leaks_main, paths, output_format)
+
+
+@check_app.command("requirements")
+def check_requirements_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Validate the REQUIREMENTS.md §11 build-state contract /start-app resumes from."""
+    _run_check(_requirements_main, paths, output_format)
+
+
+@check_app.command("branding-parity")
+def check_branding_parity_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Flag _BRANDING_VERSION skew across apps' branding.py copies."""
+    _run_check(_branding_parity_main, paths, output_format)
+
+
+@check_app.command("dependency-vulns")
+def check_dependency_vulns_cmd(
+    paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
+    output_format: str = typer.Option("md", "--format"),
+    allowlist: Path = typer.Option(
+        None, "--allowlist", help="Allowlist JSON (default: osv_allowlist.json beside the config)."
+    ),
+    best_effort: bool = typer.Option(
+        False, "--best-effort", help="Warn instead of failing when OSV.dev is unreachable."
+    ),
+) -> None:
+    """Scan exact dependency pins against OSV.dev (range pins reported unscanned)."""
+    argv = list(paths or ["apps"]) + ["--format", output_format]
+    if allowlist is not None:
+        argv += ["--allowlist", str(allowlist)]
+    if best_effort:
+        argv.append("--best-effort")
+    raise typer.Exit(code=_dependency_vulns_main(argv))
+
+
+@check_app.command("tombstones")
+def check_tombstones_cmd(
+    base_ref: str = typer.Option("origin/main", "--base-ref"),
+    registry: Path = typer.Option(None, "--registry", help="Path to deploy/tombstones.yml."),
+    drop_sql: bool = typer.Option(
+        False, "--drop-sql", help="Emit DROP STREAMLIT IF EXISTS for tombstoned identifiers."
+    ),
+    apps_dir: Path = typer.Option(None, "--apps-dir", help="Apps directory (default: apps)."),
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Block renames/removals that abandon a deployed STREAMLIT without a tombstone."""
+    argv = ["--base-ref", base_ref, "--format", output_format]
+    if registry is not None:
+        argv += ["--registry", str(registry)]
+    if apps_dir is not None:
+        argv += ["--apps-dir", str(apps_dir)]
+    if drop_sql:
+        argv.append("--drop-sql")
+    if config is not None:
+        argv += ["--config", str(config)]
+    raise typer.Exit(code=_tombstones_main(argv))
 
 
 @app.command("validate-app")
@@ -714,30 +799,84 @@ def validate_app_cmd(
     raise typer.Exit(code=_validate_app_main(argv))
 
 
-@app.command()
-def preview(
-    slug: str = typer.Argument(..., help="App slug to run locally."),
-    directory: Path = typer.Option(Path("."), "--dir", help="Repo root."),
-    port: int = typer.Option(8501, "--port"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print the command without launching."),
-) -> None:
-    """Run an app locally against live Snowflake (reads .streamlit/secrets.toml)."""
-    app_py = directory / "apps" / slug / "streamlit_app.py"
-    if not app_py.is_file():
-        _err(f"no entrypoint at {app_py}")
-        raise typer.Exit(2)
-    cmd = ["streamlit", "run", str(app_py), "--server.port", str(port)]
-    if dry_run:
-        console.print(" ".join(cmd))
-        return
-    if not shutil.which("streamlit"):
-        _err(
-            "streamlit not found — install it in this app's environment (uv pip install streamlit)."
-        )
-        raise typer.Exit(2)
-    import subprocess
+_PREVIEW_VERBS = {"start", "status", "stop", "logs"}
 
-    raise typer.Exit(code=subprocess.call(cmd))
+
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def preview(ctx: typer.Context) -> None:
+    """Run an app locally against live Snowflake (reads .streamlit/secrets.toml).
+
+    Subcommands: start <slug> (background launch + health poll), status <slug>,
+    stop <slug>, logs <slug>. A bare `streamsnow preview <slug>` is shorthand
+    for `preview start <slug>` (compatibility with pre-0.6 usage).
+    """
+    argv = list(ctx.args)
+    # The shorthand must also route flag-first invocations (`preview --port
+    # 8501 my-app`): when NO verb appears anywhere, this is the shorthand —
+    # unless the user is asking for help.
+    wants_help = any(a in ("-h", "--help") for a in argv)
+    has_verb = any(a in _PREVIEW_VERBS for a in argv)
+    if argv and not has_verb and not wants_help:
+        argv = ["start", *argv]
+    raise typer.Exit(code=_preview_main(argv))
+
+
+@app.command(
+    name="review-gate",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def review_gate_cmd(ctx: typer.Context) -> None:
+    """Decide whether an app change needs review (classify | baseline | stamp | stop-hook)."""
+    raise typer.Exit(code=_review_gate_main(list(ctx.args)))
+
+
+@app.command(
+    name="sql-review",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def sql_review_cmd(ctx: typer.Context) -> None:
+    """Human-runnable audit trail per app (discover | generate | check | index).
+
+    Every UI-feeding query gets a fully-rendered, paste-and-runnable review
+    file under apps/<slug>/sql_review/ so a person can trace each visual back
+    to the data. `check` is the import-free freshness + coverage gate."""
+    raise typer.Exit(code=_sql_review_main(list(ctx.args)))
+
+
+@app.command(
+    name="review-loop",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def review_loop_cmd(ctx: typer.Context) -> None:
+    """Deterministic /review-app --auto primitives (parse-findings | dedup-findings |
+    write-resolutions | exit-condition | merge-findings)."""
+    raise typer.Exit(code=_review_loop_main(list(ctx.args)))
+
+
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def migrate(ctx: typer.Context) -> None:
+    """Migration engine for /migrate-app (preflight | scan-hardfails | translate-deps |
+    graft-plan | scan-imports | scan-conformance | scan-inline-sql)."""
+    raise typer.Exit(code=_migrate_main(list(ctx.args)))
+
+
+@app.command()
+def nav(
+    slug: str = typer.Argument(..., help="App slug (directory under apps/)."),
+    directory: Path = typer.Option(Path("."), "--dir", help="Repo root."),
+    json_array: bool = typer.Option(
+        False, "--json-array", help="Emit one JSON array instead of JSONL."
+    ),
+) -> None:
+    """Enumerate an app's pages (st.navigation / single-page / legacy pages-dir)."""
+    argv = [str(directory / "apps" / slug)]
+    if json_array:
+        argv.append("--json-array")
+    raise typer.Exit(code=_app_nav_main(argv))
 
 
 if __name__ == "__main__":  # pragma: no cover

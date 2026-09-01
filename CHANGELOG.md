@@ -3,14 +3,106 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
-## [Unreleased]
+## [0.6.0] - UNRELEASED
+
+The enforcement release: the review-escalation loop becomes executable (one
+gate, one Stop hook, loop primitives instead of prose), every app grows a
+human-runnable SQL audit trail, and the generated pipeline gains its missing
+delete path — detection automated, destruction only by committed consent.
+
+> **Upgrading the plugin — reinstall required:** this release adds a `Stop`
+> hook to `hooks/hooks.json`, and hook additions do **not** reach installed
+> copies via autoUpdate (Claude Code pins the install path — see claude-code
+> issue #52218, same dance as v0.4). Reinstall: `/plugin uninstall streamsnow`
+> then `/plugin install streamsnow@streamsnow`, and relaunch.
 
 > **Upgrading a consumer repo:** run `streamsnow update --apply` to receive the
-> new pre-commit hook. The `validate-app` gate tightens — a previously-passing
-> app can newly fail `page-imports`. The fix is a one-line import change per
-> call site; see the validate-app skill's `fixing-checks.md`.
+> new pre-commit hooks (`page-imports`, `path-leaks`, `sql-review`,
+> `dependency-vulns --best-effort`), the regenerated CI gates, and the deploy workflows'
+> tombstone-reconcile step. The `validate-app` gate tightens — a
+> previously-passing app can newly fail `page-imports`, `path-leaks`, or
+> `requirements` (one-line fixes each; see **Changed** below). The new
+> `sql-review` section only **warns** in 0.6, so missing audit trails don't
+> block this upgrade. `deploy/tombstones.yml` is scaffolded on `init` for new
+> repos only — `streamsnow update` never creates or rewrites it (it's a
+> user-appended registry). In an existing repo, create the file by hand at the
+> first rename or removal: a missing registry reads as empty, so
+> `check tombstones` fails the PR until the file and its entry exist.
 
 ### Added
+
+**Review gate + Stop hook**
+
+- **`streamsnow review-gate`** (`classify` | `baseline` | `stamp` |
+  `stop-hook`) — the single decision function for "does this change need
+  review, and how deep?". In the source monorepo each caller hand-rolled its
+  own substantive-vs-trivial bash and they drifted until the full review loop
+  had no executable caller at all; now `/ship-app`'s preflight,
+  `/feedback-app`'s follow-up, and the Stop hook all call the same `classify`.
+  Coverage is **per-change, not per-app**: review artifacts record a
+  `Reviewed-baseline:` digest plus per-file coverage keys computed from the
+  AST shape (comments/docstrings stripped), so a comment reword stays
+  reviewed while a logic change reopens exactly the files it touched.
+- **Warn-only `Stop` hook** (`hooks/review_gate_stop.py`) — when a turn ends
+  with a substantive app change no review artifact covers, it emits a one-line
+  `systemMessage` pointing at `/review-app <slug> --auto`. Never blocks a
+  turn; fail-open (any internal error exits 0); repo-gated on
+  `streamsnow.config.yaml`; dedupes per (repo, slug, baseline) so the same
+  unreviewed state nudges once. The payload is `systemMessage`-only on
+  purpose: emitting `additionalContext` from a Stop hook was measured
+  (2026-08-04) to start a fresh assistant turn with no user input — an
+  unrequested turn per change. Off-switches: `REVIEW_GATE_OFF=1`, an
+  `apps/<slug>/.review/SKIP` marker, or `review_gate: {enabled: false}` in
+  `streamsnow.config.yaml` (block added to the example config). The hook
+  executes the gate **by path** from the plugin root, so it works on
+  plugin-only installs with no `streamsnow` pip package.
+- **`streamsnow review-loop`** (`parse-findings` | `dedup-findings` |
+  `write-resolutions` | `exit-condition` | `merge-findings`) — the
+  deterministic primitives `/review-app --auto` runs each cycle, extracted so
+  the loop doesn't re-derive its dedup from prose (which re-reports findings
+  it already resolved and never converges). Dedup is against everything
+  previously *resolved* — including judge-rejected findings — within a 7-day
+  artifact window; `exit-condition` names its reason (`max-iterations`,
+  `plateau`, `walk-degraded`, `walk-reentry`, `clean`, `continue`) so a
+  transcript shows *why* the loop stopped.
+
+**SQL-review audit trail**
+
+- **`streamsnow sql-review`** (`discover` | `generate` | `check` | `index`) —
+  every query under `apps/<slug>/queries/` (the convention UI-feeding SQL
+  lands in; SQL inlined in Python is outside its reach) gets a fully-rendered,
+  paste-runnable `.review.sql` under `apps/<slug>/sql_review/`, driven by
+  per-feature JSON
+  manifests in `sql_review/manifests/` (co-located with the app so a rename
+  moves the audit trail with it). Rationale: apps store `{TOKEN}` + `:N`
+  templates a reviewer can't run, and a dashboard whose numbers nobody can
+  independently re-run is a dashboard nobody can sign off.
+- **Import-free `check`** — each generated file carries a provenance line
+  (`-- Provenance: schema=1 inputs=<sha256/16> output=<sha256/16>`) digesting
+  the manifest, the referenced query templates, and (manifest strategy) the
+  app modules the token dispatchers call into. `check` recomputes both hashes
+  statically — it **never imports consumer app code** (a shared hook importing
+  arbitrary modules would execute code on every commit) — so an edited
+  template, manifest, module, or hand-edited rendered file all read as DRIFT,
+  and every `queries/*.sql` must be claimed by some manifest (uncovered is a
+  named failure, never a silent skip). Only `generate` may import app code,
+  and only under the opt-in `manifest` token strategy on a developer machine.
+- **Read-only guard** — rendered output is verified against a statement-root
+  **allowlist** (`SELECT` / `WITH`→`SELECT` / `SHOW` / `DESCRIBE` / `EXPLAIN`
+  plus `SET <ident> =` session variables), an allowlist rather than a
+  write-verb denylist because the failure mode of a denylist is the statement
+  type nobody thought of. Structural analysis runs with string literals and
+  comments masked. Scope honesty (documented in the tool): this catches
+  accidents and drift, not a deliberate committer — repo review remains the
+  trust boundary.
+- `streamsnow init` / `streamsnow new` render a starter manifest for the
+  example query and run `sql-review generate`, so the audit-trail pattern is
+  live in the tree from commit 1. Wired into pre-commit
+  (`streamsnow-sql-review`), generated CI, and the validate gate (warn-only
+  this release — see **Changed**).
+
+**New tools and verbs**
+
 - **`page-imports` check** — blocks bare imports of modules that live in an app
   subdirectory (`from _header import ...` for `pages/_header.py`). Deployed,
   only the app root is on `sys.path`; `streamlit run` *additionally* puts the
@@ -22,13 +114,129 @@ All notable changes to StreamSnow are recorded here. This project follows
   verification is structurally incapable of catching either — the check is the
   only thing that can. (From a real four-page outage that shipped with green
   CI, a live local boot, and a clean click-through of every page.)
+- **`dependency-vulns` check** — queries OSV.dev for every **exact** pin in
+  `pyproject.toml` / `environment.yml` (one batched POST, stdlib urllib);
+  a new CVE against an existing pin fails the next run, so the gate ages with
+  the ecosystem, not the repo. Range pins are reported "unscanned" but never
+  fail — they have no single version to query. Findings can be
+  expiry-dated-allowlisted in `osv_allowlist.json`; `--best-effort` (the
+  pre-commit default) warns instead of failing when OSV is unreachable, while
+  generated CI runs it fail-closed as the authority.
+- **`path-leaks` check** — blocks personal absolute paths
+  (`C:/Users/<name>/…`, `/Users/<name>/Development/…`, `/home/<name>/…`) in
+  committed `.py`/`.md`: broken for every other developer, and a real
+  username leaked into a repo that may become public. Placeholder forms like
+  `<user>` never trip it; the GitHub Actions `runner` home is exempt.
+- **`tombstones` check + `deploy/tombstones.yml`** — the generated pipeline
+  only ever runs `CREATE OR REPLACE STREAMLIT`; it has **no delete path**, so
+  a renamed/removed app directory abandons its deployed object, frozen at the
+  last merge and flagged unhealthy by `verify-deploy` forever after. The check
+  diffs declared identifiers against `--base-ref` (via `git merge-base`, read
+  with `git ls-tree` so it works across branches) and blocks a PR that stops
+  declaring an identifier without tombstoning it in the same PR. Identity is
+  `streamsnow.deploy.streamlit_fqn` of the slug — the *same derivation the
+  deploy uses*, deliberately not a second parse of `snowflake.yml`.
+  `--drop-sql` emits `DROP STREAMLIT IF EXISTS …` for the deploy reconcile
+  step, and **refuses** (exit 2) when a tombstone matches a currently-declared
+  app — dropping it would kill the app the same deploy just created. An
+  unresolvable base ref exits 2: "could not compare" must never pass as clean.
+- **`requirements` check** — validates the §11 Build Progress block
+  (`**Current phase:**` with a recognized lifecycle phase, an append-only
+  `Sessions` log whose last line is ISO-timestamped and names `Next:` for
+  non-terminal phases) — exactly what `/start-app` resumes from, so a mangled
+  hand edit becomes a named finding instead of silent amnesia. Apps without a
+  `REQUIREMENTS.md` are not findings (spec presence is a build-phase concern).
+- **`branding-parity` check** — every app ships its own `branding.py` copy, so
+  a branding change never propagates by itself. The scaffold template now
+  carries a `_BRANDING_VERSION` stamp; the check flags apps whose stamp lags
+  the newest across apps, and only *notes* (never fails) unstamped pre-0.6
+  copies and lag behind the installed template.
+- **`streamsnow migrate`** (`preflight` | `scan-hardfails` | `translate-deps`
+  | `graft-plan` | `scan-imports` | `scan-conformance` | `scan-inline-sql`) —
+  the deterministic detection engine behind `/migrate-app`: JSON out,
+  AST-only (no exec/eval/import of the source tree, so a hostile source can't
+  run code on the migrating machine), secrets detected by *presence* only
+  (contents never read, so nothing can leak into output or a transcript).
+- **`streamsnow nav <slug>`** — AST enumeration of an app's pages
+  (`st.navigation` dict/list forms, bare `st.Page` assignments, legacy
+  `pages/`-dir, single-page), JSONL or `--json-array`, with a
+  partial-enumeration warning when navigation is built dynamically — for
+  walkthrough tooling that needs the ordered page list without regex.
+- **`streamsnow doctor` per-check JSON** — `doctor` is rebuilt on a module
+  returning one `{name, ok, level, detail, hint}` dict per prerequisite
+  (`--json` / `--format json`), so `/start-app` preflight and fix-then-recheck
+  loops stop scraping console text. `level` is per-result: a missing config is
+  *optional* (a machine can be healthy outside any repo) but a present,
+  invalid config is *required* — malformed must never read as "not configured
+  yet".
+- **`check artifacts --fix`** — repairs the `snowflake.yml` `artifacts:` block
+  from files on disk as a minimal edit (only the block's own lines rewritten),
+  also shipping referenced image/data assets that would 404 deployed; refuses
+  (with a finding) manifests it can't rewrite safely.
+- **`check session-fallback --base-ref`** — git-aware baseline mode: flag only
+  files whose violation count *grew* versus the base ref, so adopting repos
+  gate new debt without first paying down legacy debt (`--all` restores the
+  tree-wide scan).
+
+**Enforcement templates**
+
+- Generated CI (`checks.yml`) now runs the deterministic gates
+  **fail-closed**: `streamsnow check dependency-vulns` (no `--best-effort` —
+  CI is the authority), `streamsnow sql-review check`, and `streamsnow check
+  tombstones --base-ref origin/main` (checkout gains `fetch-depth: 0` for the
+  diff). Verified by template regression tests in `tests/test_init.py`.
+- Both deploy workflows (stage-copy and git-repository) gain a **Reconcile
+  tombstones** step: every registry identifier is dropped on every deploy via
+  `check tombstones --drop-sql` (`IF EXISTS`, so re-runs are no-ops; a
+  malformed registry exits 2 *before* any DROP; the live-app guard re-checks
+  on the deploy side because a direct push to main never saw the PR check).
+- `streamsnow init` scaffolds `deploy/tombstones.yml` as an empty,
+  self-documenting registry, excluded from `streamsnow update` re-renders —
+  it's user-appended consent, not a governance file to regenerate.
+- The 8 skills are rebuilt on the new tools: `/ship-app`'s preflight and
+  `/feedback-app`'s follow-up step call `review-gate classify` (asks, never
+  blocks — shipping unreviewed stays available; validate + CI are the real
+  publish gates),
+  `/review-app --auto` runs on the `review-loop` primitives, `--sql` drives
+  `sql-review`, and `/migrate-app` reasons over `streamsnow migrate` JSON.
 
 ### Changed
+- **`validate-app` tightens** — four new sections:
+  - `page-imports` (fix: package-qualify the import, `from pages._x import …`);
+  - `path-leaks` (fix: replace the personal path with a placeholder or docs
+    link);
+  - `requirements` (fix: restore the §11 `**Current phase:**` line / a
+    timestamped last session line with a `Next:` hint);
+  - `sql-review` — **warn-only in 0.6, planned to become a FAIL in 0.7**, so
+    adopters get one release to backfill audit trails (fix: `streamsnow
+    sql-review discover <slug> --write`, edit the manifests, `generate`).
+  `dependency-vulns` is deliberately NOT in the aggregate (it needs the
+  network; the gate stays no-DB/no-network) — it runs as its own pre-commit
+  hook and CI job instead.
+- **`streamsnow preview` is now a lifecycle**, not a blocking foreground run:
+  `start` (detached launch, log capture, `/_stcore/health` poll, classified
+  launch failures — missing secrets, bad account locator, missing package,
+  port collision — instead of a raw traceback), `status`, `stop`
+  (idempotent, process-group SIGTERM→SIGKILL), `logs` (kept after stop for
+  post-mortems). State lives per-repo in `.streamsnow/preview/` (gitignored by
+  the scaffold; nothing global). Bare `streamsnow preview <slug>` remains a
+  shorthand for `start`; the old `--dry-run` flag is gone.
+- Generated CI and deploy workflows install a **pinned range**
+  (`uv tool install 'streamsnow>=0.6,<0.7'`) instead of an unpinned latest, so
+  a future 0.7 gate-tightening can't fail consumer CI unasked.
 - `AGENTS.md` (generated) and the start-app page recipe now state the
   package-qualified import rule, so a scaffolded repo teaches it before an
-  agent has a chance to imitate the wrong form from a sibling page.
+  agent has a chance to imitate the wrong form from a sibling page; the
+  repo-level template also documents the `sql_review/` audit-trail convention.
 - The validate-app skill's "What it covers" list was three checks out of date
   (`artifacts`, `sql-tokens`, `session-fallback` were missing).
+
+### Fixed
+- **`streamsnow update` outside a configured repo tracebacked** with a raw
+  `FileNotFoundError` instead of the "run `streamsnow init`" guidance every
+  other path gets: `load_config` with an explicit `--config` path that doesn't
+  exist now maps `OSError` to the friendly `ConfigError` (seen live;
+  regression-tested in `tests/test_config.py`).
 
 ## [0.5.0] - 2026-07-20
 

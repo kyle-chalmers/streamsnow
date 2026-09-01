@@ -30,12 +30,40 @@ DENY_TERMS = [
     "data-intell-pr-bot",
     "sonarcloud",
     "1password",
+    # Source-organization names — a pasted reference must never pass the gate.
+    "happymoney",
+    "happy money",
+    "happy-money",
+]
+# Source-domain vocabulary. StreamSnow was extracted from a consumer-lending
+# monorepo; the OSS release must carry ZERO domain flavor from it — not just
+# literals but the business vocabulary itself. Examples here use a fictional
+# retail-analytics team ("Acme": orders, revenue, inventory) instead. These are
+# substring matches on lowercased text, chosen to be specific enough not to
+# false-positive on ordinary tooling prose.
+DENY_TERMS += [
+    "loan",
+    "lending",
+    "borrower",
+    "payoff",
+    "delinquen",  # delinquent / delinquency
+    "charge-off",
+    "chargeoff",
+    "charged_off",
+    "debt sale",
+    "refinanc",  # refinance / refinancing
+    "bankrupt",
+    "underwrit",  # underwrite / underwriting
+    "originations",
+    "servicing",
 ]
 # Internal ticket prefixes (word-boundary, case-insensitive).
 DENY_PATTERNS = [
     re.compile(r"\bDI-\d{2,}\b"),
     re.compile(r"\bDEVOPS-\d{2,}\b"),
     re.compile(r"\bSNIC\b"),
+    re.compile(r"\bDPD\b"),  # days-past-due — lending vocabulary
+    re.compile(r"\bOTP(s)?\b"),  # one-time-payment — lending vocabulary
     # personal absolute paths
     re.compile(r"/Users/[A-Za-z0-9._-]+/", re.IGNORECASE),
     re.compile(r"/home/[A-Za-z0-9._-]+/", re.IGNORECASE),
@@ -87,12 +115,27 @@ def scan_tree(root: Path) -> dict:
         low = text.lower()
         rel = str(p.relative_to(root))
         for term in DENY_TERMS:
-            if term in low:
-                findings.append({"file": rel, "match": term})
+            idx = low.find(term)
+            if idx != -1:
+                findings.append(
+                    {
+                        "file": rel,
+                        "line": text.count("\n", 0, idx) + 1,
+                        "match": term,
+                        "detail": f"denied term {term!r}",
+                    }
+                )
         for pat in DENY_PATTERNS:
             m = pat.search(text)
             if m:
-                findings.append({"file": rel, "match": m.group(0)})
+                findings.append(
+                    {
+                        "file": rel,
+                        "line": text.count("\n", 0, m.start()) + 1,
+                        "match": m.group(0),
+                        "detail": f"denied pattern match {m.group(0)!r}",
+                    }
+                )
     return {"ok": not findings, "findings": findings}
 
 

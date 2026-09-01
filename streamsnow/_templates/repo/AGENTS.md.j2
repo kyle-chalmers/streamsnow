@@ -32,6 +32,13 @@ Every data-fetching function MUST use `@st.cache_data(ttl=<seconds>)`. Default T
 
 Any SQL that feeds a UI element lives in `apps/<slug>/queries/<name>.sql` (loaded via `sql_loader.py`), with a header block: `-- Query:`, `-- Feeds:`, `-- Schemas:`, `-- Params:`. Inline SQL is only for plumbing/discovery.
 
+Every query also carries a human-runnable **audit trail**: `apps/<slug>/sql_review/` holds a
+manifest per feature and a fully-rendered, paste-runnable `.review.sql` per filter combo, so a
+person can re-run each visual's SQL in Snowsight and confirm the numbers. Generated and verified
+by `streamsnow sql-review` (discover | generate | check | index); the manifest is the editing
+surface — `check` flags hand-edited rendered files, uncovered queries, and stale renders, and
+runs in pre-commit + CI.
+
 ## Deploy source: {{ deploy_source }}
 
 {% if deploy_source == 'stage-copy' %}
@@ -59,4 +66,4 @@ Every number shown to a user includes thousand separators (`format="localized"`/
 - A SQL edit that "has no effect" locally needs a full preview restart — hot-reload doesn't refresh cached query results.
 - Diagnosing a deployed feature problem? Verify the actual runtime first: `SHOW STREAMLITS` / `DESC STREAMLIT <fqn>` — `snowflake.yml` only declares intent.
 - DDL the apps consume but this repo doesn't deploy (passthrough views, grants) goes in dated `migrations/YYYY-MM-DD-<desc>.sql` files, committed with the consuming PR; the live object is the source of truth.
-- Retire an app by moving it to `retired_apps/<slug>/` (deploy scopes to `apps/**`) — never delete; `DROP STREAMLIT` is a separate deliberate manual step.
+- Retire an app by moving it to `retired_apps/<slug>/` (deploy scopes to `apps/**`) — never delete the source — **and** add the abandoned identifier to `deploy/tombstones.yml` in the same PR (renames too: a renamed slug abandons the old object). CI (`streamsnow check tombstones`) blocks the PR otherwise; the deploy workflow's reconcile step performs the `DROP`. Never hand-run `DROP STREAMLIT`.

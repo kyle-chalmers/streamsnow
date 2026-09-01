@@ -1,7 +1,7 @@
 {
   "name": "streamsnow",
   "displayName": "StreamSnow",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Build, govern, and ship Streamlit-in-Snowflake apps with Claude Code: scaffolding, data-governance guardrails, local preview, validation, review, and deploy.",
   "author": {
     "name": "Kyle Chalmers"
