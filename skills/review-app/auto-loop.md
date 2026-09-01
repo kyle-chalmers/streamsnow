@@ -16,7 +16,7 @@ re-derives its dedup each cycle re-reports findings it already resolved:
 | Step | Verb |
 |---|---|
 | Parse a report into findings | `streamsnow review-loop parse-findings <report.md>` |
-| Filter against prior Resolutions | `streamsnow review-loop dedup-findings apps/<slug>/.review --new <report.md>` |
+| Filter against prior Resolutions (+ repeat detection) | `streamsnow review-loop dedup-findings apps/<slug>/.review --new <report.md> --with-repeats` |
 | Record what happened to each finding | `streamsnow review-loop write-resolutions <report.md> --applied … --deferred-b … --bucket-c …` |
 | Decide continue/stop and why | `streamsnow review-loop exit-condition --iter N --max-iter 5 --applied N --block N --flag N [walk flags]` |
 | Merge cross-agent reports | `streamsnow review-loop merge-findings --inputs claude:<a>,<agent>:<b>` |
@@ -32,24 +32,28 @@ re-derives its dedup each cycle re-reports findings it already resolved:
    or `--no-lineage` → static-only; say so once and continue — no connection is not a failure.
 4. **Cycle:** run the review pass (and the lineage pass, in parallel Task subagents when in scope),
    writing `apps/<slug>/.review/review-<ts>.md`. Merge multi-reviewer output with `merge-findings`;
-   filter re-reports with `dedup-findings` (dedup is against everything previously RESOLVED, not
-   merely seen — else judgment-rejected findings reappear every round and the loop never converges).
-5. **Apply Bucket A findings** per [fixes.md](fixes.md) — one atomic commit per finding — then
-   `write-resolutions` so the next cycle's dedup sees them; collect judgment/informational items
-   into the running punch list.
-6. **Ask `exit-condition`** with this cycle's counts; obey its verdict (it checks max-iterations
-   FIRST, so a loop that ran out of budget never masquerades as clean).
-7. **Final smoke:** confirm the app still renders — browser walkthrough across all pages when the
-   tooling is loaded ([_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md)),
-   otherwise `/preview-app` and a manual click-through. The walk is a **finding source, not
-   confirmation**: its report uses the standard schema, and its mechanically-fixable findings
-   re-enter the loop via the `--walk-*` flags of `exit-condition` (bounded by `--max-walk-reentries`
-   plus the already-attempted set — a flapping page cannot ping-pong). A walk that cannot be trusted
-   (missing browser, un-seeded auth) is **DEGRADED and terminal**: zero findings, never a re-entry.
-8. **Stamp LAST:** after the final fix commit,
-   `streamsnow review-gate stamp apps/<slug>/.review/review-<ts>.md --slug <slug>` — stamping
-   before the fix commits records a tree state the commits immediately invalidate, and the gate
-   would nag after every successful run.
+   filter re-reports with `dedup-findings --with-repeats`. **A non-empty `repeats_of_applied` is
+   no-convergence** — the same finding returned after its own applied fix, meaning the recipe is
+   wrong for this case: stop the loop, don't re-apply, hand that finding to the user. (Plain dedup
+   alone would hide the repeat — it filters everything previously resolved.)
+5. **Apply Bucket A findings** (from `kept`) per [fixes.md](fixes.md) — one atomic commit per
+   finding — then `write-resolutions` so the next cycle's dedup sees them; collect
+   judgment/informational items into the running punch list.
+6. **Ask `exit-condition`** with this cycle's counts (no walk flags yet); `continue` → back to
+   step 4. Any terminal verdict except `clean` → skip to step 8's stamp decision and report.
+7. **A pre-walk `clean` earns the smoke, and the walk gets the LAST word:** run the browser
+   walkthrough across all pages when the tooling is loaded
+   ([_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md)), otherwise
+   `/preview-app` and a manual click-through. The walk is a **finding source, not confirmation** —
+   re-run `exit-condition` WITH the `--walk-*` flags from its report: `walk-reentry` loops back to
+   step 4 (bounded by `--max-walk-reentries` plus the already-attempted set — a flapping page
+   cannot ping-pong); a walk that cannot be trusted (missing browser, un-seeded auth) is
+   **DEGRADED and terminal**: zero findings, never a re-entry, and the UI reads UNVERIFIED.
+8. **Stamp LAST — and only on a genuinely reviewed tree:** after the final fix commit,
+   `streamsnow review-gate stamp apps/<slug>/.review/review-<ts>.md --slug <slug>` (stamping
+   earlier records a tree state the commits immediately invalidate, and the gate would nag after
+   every successful run). Skip the stamp on a no-convergence stop — an unresolved repeat is not a
+   reviewed state.
 9. **Report:** cycles run, commits (with SHAs), the punch list, the smoke outcome, the exit reason,
    and the hand-off — /validate-app then /ship-app.
 
@@ -65,8 +69,6 @@ re-derives its dedup each cycle re-reports findings it already resolved:
 
 - **The loop is not the gate.** It polishes; only `streamsnow validate-app` passes/fails a ship —
   always finish with it, since a mechanical fix can't see everything the gate can.
-- **No convergence** — the same finding reappearing after its "fix" means the recipe is wrong for
-  this case: stop, don't re-apply, hand that finding to the user.
 - **Plateaus at cycle 1 with no commits** — everything was judgment; there's nothing to loop. Walk
   the punch list with `--fix` interactively.
 - **Loop feels slow** — the browser walkthrough is the long pole; drop to a manual smoke and/or

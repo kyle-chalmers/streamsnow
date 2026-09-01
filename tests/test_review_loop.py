@@ -300,3 +300,24 @@ def test_merge_findings_missing_report_errors(
     a.write_text(REPORT)
     code = rl.main(["merge-findings", "--inputs", f"claude:{a},other:{tmp_path / 'nope.md'}"])
     assert code == 2
+
+
+def test_dedup_with_repeats_surfaces_no_convergence(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """A finding that returns after its own applied fix must be surfaced as a
+    repeat (no-convergence signal), even though plain dedup filters it."""
+    session = tmp_path / ".review"
+    session.mkdir()
+    _write_report_with_resolutions(session / "review-20260830-090000.md")
+    new_report = session / "review-20260831-090000.md"
+    new_report.write_text(REPORT)  # the SELECT * BLOCK is back after being Applied
+    code = rl.main(["dedup-findings", str(session), "--new", str(new_report), "--with-repeats"])
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    kept_cites = {f["citation"] for f in out["kept"]}
+    repeat_cites = {f["citation"] for f in out["repeats_of_applied"]}
+    assert "apps/acme-sales-dashboard/queries/revenue_daily.sql:12" in repeat_cites
+    # The deferred (Bucket B) finding is deduped but NOT a repeat-of-applied.
+    assert "apps/acme-sales-dashboard/pages/overview.py:40" not in repeat_cites
+    assert "apps/acme-sales-dashboard/queries/revenue_daily.sql:12" not in kept_cites
