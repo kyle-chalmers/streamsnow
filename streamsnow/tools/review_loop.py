@@ -240,6 +240,60 @@ def parse_resolution_tuples(text: str) -> set[tuple[str, str]]:
     return out
 
 
+_APPLIED_HEADER_RE = re.compile(r"^###\s+Applied\b.*$", re.MULTILINE)
+_SUBSECTION_RE = re.compile(r"^###\s+", re.MULTILINE)
+
+
+def parse_applied_tuples(text: str) -> set[tuple[str, str]]:
+    """(citation, normalized_summary) tuples from ``### Applied`` blocks only.
+
+    Distinct from :func:`parse_resolution_tuples` on purpose: dedup filters
+    everything previously RESOLVED, which also hides a finding that RETURNS
+    after its own fix — the no-convergence signal. Callers compare a new
+    report against the applied-only set BEFORE deduping: an overlap means the
+    fix recipe is wrong for that case, and the loop must stop and surface it
+    rather than falsely reporting clean.
+    """
+    out: set[tuple[str, str]] = set()
+    for res_match in _RESOLUTIONS_HEADER_RE.finditer(text):
+        start = res_match.end()
+        next_dim = _DIMENSION_RE.search(text, pos=start)
+        block = text[start : next_dim.start() if next_dim else len(text)]
+        for applied in _APPLIED_HEADER_RE.finditer(block):
+            sub_start = applied.end()
+            nxt = _SUBSECTION_RE.search(block, pos=sub_start)
+            section = block[sub_start : nxt.start() if nxt else len(block)]
+            for line in section.splitlines():
+                line = line.strip()
+                if not (line.startswith(("- ", "* "))) or line.startswith(("- _none_", "* _none_")):
+                    continue
+                fl = _FINDING_LINE_RE.match(line)
+                if not fl or not (fl.group("citation") or "").strip():
+                    continue
+                body = fl.group("body").strip()
+                summary = body.split(" — ", 1)[0].split(" -- ", 1)[0]
+                out.add((fl.group("citation").strip(), normalize_summary(summary)))
+    return out
+
+
+def collect_applied_tuples(session_dir: Path, window_days: int = 7) -> set[tuple[str, str]]:
+    """Union of Applied tuples across the session's review reports."""
+    cutoff = time.time() - (window_days * 86400)
+    out: set[tuple[str, str]] = set()
+    if not session_dir.is_dir():
+        return out
+    for path in session_dir.iterdir():
+        if not path.is_file() or not _is_review_report(path):
+            continue
+        try:
+            if path.stat().st_mtime < cutoff:
+                continue
+            out |= parse_applied_tuples(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return out
+
+
 def _is_review_report(path: Path) -> bool:
     """Case-insensitive review-report filename match (both artifact dialects)."""
     name = path.name.lower()
@@ -298,9 +352,25 @@ def cmd_dedup_findings(args: argparse.Namespace) -> int:
         return 2
 
     resolved = collect_resolution_tuples(session_dir, window_days=args.window_days)
+    applied = collect_applied_tuples(session_dir, window_days=args.window_days)
     new_findings = parse_findings(new_report.read_text(encoding="utf-8"))
     kept = [f for f in new_findings if (f.citation, normalize_summary(f.summary)) not in resolved]
-    print(json.dumps([asdict(f) for f in kept], indent=2))
+    # A finding that RETURNS after its own applied fix would otherwise be
+    # deduped into invisibility — surface it separately so the loop can stop
+    # with no-convergence instead of falsely reporting clean.
+    repeats = [f for f in new_findings if (f.citation, normalize_summary(f.summary)) in applied]
+    if args.with_repeats:
+        print(
+            json.dumps(
+                {
+                    "kept": [asdict(f) for f in kept],
+                    "repeats_of_applied": [asdict(f) for f in repeats],
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(json.dumps([asdict(f) for f in kept], indent=2))
     return 0
 
 
@@ -563,6 +633,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("session_dir", help="Directory of review reports (apps/<slug>/.review/)")
     p.add_argument("--new", required=True, help="The new report to filter")
     p.add_argument("--window-days", type=int, default=7)
+    p.add_argument(
+        "--with-repeats",
+        action="store_true",
+        help="Emit {kept, repeats_of_applied} — repeats signal no-convergence.",
+    )
 
     p = sub.add_parser("write-resolutions", help="Append a ## Resolutions block to a report.")
     p.add_argument("report")

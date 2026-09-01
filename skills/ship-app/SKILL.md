@@ -17,29 +17,33 @@ governance files, shared recipes, CI) do not belong in a `/ship-app` PR; commit 
 
 1. **Resolve the slug**; `git status --short apps/<slug>` must show changes to ship — zero changes
    ahead of `main` → nothing to PR; stop and say so.
-2. **Hard gate:** run /validate-app. Any FAIL → stop; report and do not stage, commit, or push.
+2. **Preflight 0 — review gate (asks, never blocks):**
+   `streamsnow review-gate classify <slug> --format json`. Reviewed/trivial/skip-marker → proceed.
+   `.apps[0].needs_review == true` → offer the choice: review first (`/review-app <slug> --auto`) or **ship
+   as-is** — always available (ships can be time-critical; /validate-app + CI are the real publish
+   gates), but note "shipped unreviewed" in the PR body so the approver sees it. Never auto-run a
+   credit-spending review loop on the user's behalf here.
+3. **Hard gate:** run /validate-app. Any FAIL → stop; report and do not stage, commit, or push.
    /validate-app is the fix-it path — don't auto-fix here.
-3. **Branch hygiene.** On `main` → `git switch -c ship/<slug>-<desc>` first. **Never reuse a
+4. **Branch hygiene.** On `main` → `git switch -c ship/<slug>-<desc>` first. **Never reuse a
    squash-merged branch** — Git's three-way merge can silently revert your own deletions. Check:
    `gh pr list --search "head:$(git branch --show-current) is:merged" --json number` — non-empty
    means the branch is spent; start fresh off `main` and re-apply (cherry-pick or copy edits, never
    `git merge` from the old branch).
-4. **Stage only the app:** `git add apps/<slug>` (plus the repo README only if its app-index row
+5. **Stage only the app:** `git add apps/<slug>` (plus the repo README only if its app-index row
    changed). Show `git diff --cached --stat`; unstage anything else — don't widen scope to "fix one
    more thing".
-5. **Commit** conventionally (`feat(<slug>): <summary>`), the summary matching the diff —
+6. **Commit** conventionally (`feat(<slug>): <summary>`), the summary matching the diff —
    underclaim, never overclaim. Pre-commit hooks block → **stop and surface the error**; never
    `--no-verify` (the hooks run the same checks CI does).
-6. **Sync with `origin/main` before pushing** per
+7. **Sync with `origin/main` before pushing** per
    [_shared/sync-with-main.md](../_shared/sync-with-main.md): rebase (never merge), then
    `git push --force-with-lease`. A rebase conflict stops with manual instructions — don't guess a
    resolution.
-7. **Push** (`git push -u origin HEAD` if the sync didn't already) — refuse to push to `main`.
-8. **Open the PR** (`gh pr create --fill` or a written title/body: what changed, validation passed).
-   Print the number and URL.
-9. **Note the deploy path:** merging to `main` triggers CI, which deploys to Snowflake — there is no
-   local deploy step.
-10. **Watch checks to a terminal state** (`gh pr checks <num> --watch` in the background;
+8. **Push** (`git push -u origin HEAD` if the sync didn't already) — refuse to push to `main`.
+9. **Open the PR** (title/body: what changed, validation passed). Print the number and URL.
+10. **Note the deploy path:** merging to `main` triggers CI, which deploys — no local deploy step.
+11. **Watch checks to a terminal state** (`gh pr checks <num> --watch` in the background;
     `gh pr view <num> --json state,mergeStateStatus`) and report once on exit.
 
 ## Reporting the outcome
@@ -54,7 +58,7 @@ governance files, shared recipes, CI) do not belong in a `/ship-app` PR; commit 
 ## Gotchas
 
 - **Squash-merged branch reuse is the highest-severity trap** — it fails silently: CI passes, the
-  deploy ships the wrong code. The step 3 check is non-negotiable.
+  deploy ships the wrong code. The step 4 check is non-negotiable.
 - **Commit message must match the diff.** A claimed change with no matching hunk means a fix was
   lost (often in manual conflict resolution) — re-read the diff and correct one or the other before
   opening the PR.
@@ -64,8 +68,7 @@ governance files, shared recipes, CI) do not belong in a `/ship-app` PR; commit 
 
 ## Troubleshooting
 
-- **Push rejected (stale `--force-with-lease`)** → someone pushed to your branch; re-fetch, rebase,
-  push — never escalate to plain `--force`.
+- **Push rejected (stale `--force-with-lease`)** → re-fetch, rebase, push — never plain `--force`.
 - **PR opens "behind"** → `main` moved; re-run the sync step and let checks re-run.
 
 ## Done when
