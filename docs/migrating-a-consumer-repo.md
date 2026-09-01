@@ -122,3 +122,13 @@ a trial run), **extends** (domain-specific variant → keep, note it in AGENTS.m
 - **Missing config degrades instead of blocking:** review runs static-only without governance
   context, lineage marks rows unverified without a connection — each names the enabler instead of
   refusing.
+
+## Where org-specific skill content goes: repo overlays
+
+Home-grown skills usually mix a generic procedure with org knowledge (local
+failure signatures, environment setup steps, role specifics). The generic half
+is the plugin's job; the org half moves into committed
+`.streamsnow/overlays/<skill>.md` files, which every plugin skill reads before
+executing — see `skills/_shared/overlays.md` in the plugin. That split is what
+lets you delete a forked skill without losing what it knew: diff each retired
+skill against your AGENTS.md, and anything homeless becomes an overlay.

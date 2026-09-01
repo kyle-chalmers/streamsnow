@@ -125,7 +125,18 @@ generated from a per-feature manifest and verified by an import-free freshness
 pre-commit and the generated CI where those configs are adopted; inside
 `streamsnow validate-app` it warns only in 0.6 (FAIL planned for 0.7). A
 person with nothing but Snowsight can trace a covered visual back to the data
-and confirm it — see **[Auditing a visual](docs/auditing-a-visual.md)**.
+and confirm it — see **[Auditing a visual](docs/auditing-a-visual.md)**. For
+dashboards whose visuals aggregate differently than any single query,
+`"mode": "metrics"` manifests (0.6.1) render one authored block per visual.
+
+## Make it yours — repo overlays (new in 0.6.1)
+
+The skills are generic procedures; your org's knowledge layers on top without
+forking them. Commit `.streamsnow/overlays/<skill>.md` files and every skill
+reads its overlay first — extra steps, local failure signatures, environment
+specifics, explicit overrides. Plugin upgrades never touch them; overlay prose
+cannot disable the coded safety gates. See
+[skills/_shared/overlays.md](skills/_shared/overlays.md).
 
 ## Hooks, in full
 

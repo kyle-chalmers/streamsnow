@@ -73,6 +73,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import getpass
 import json
 import re
 import sys
@@ -138,7 +139,11 @@ REPODATA_URLS = (
     # alone falsely reports the most common data deps as unavailable.
     "https://repo.anaconda.com/pkgs/snowflake/linux-64/repodata.json",
 )
-REPODATA_CACHE = Path(tempfile.gettempdir()) / "snowflake_anaconda_repodata.json"
+# Per-user cache path: a shared /tmp file on a multi-user machine is both a
+# collision and a (mild) poisoning surface — getpass.getuser() scopes it.
+REPODATA_CACHE = (
+    Path(tempfile.gettempdir()) / f"streamsnow-{getpass.getuser()}-anaconda-repodata.json"
+)
 REPODATA_TTL = 86400  # 24 hours
 
 # Default conda pin injected when the source doesn't declare streamlit. Keep in

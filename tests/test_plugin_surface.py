@@ -132,3 +132,17 @@ def test_every_relative_markdown_link_in_skills_resolves():
             if not (p.parent / target).resolve().exists():
                 broken.append(f"{p.relative_to(REPO_ROOT)} -> {target}")
     assert not broken, broken
+
+
+def test_every_skill_declares_its_repo_overlay_point():
+    """The overlay convention only works if every skill actually reads its
+    overlay — the line is load-bearing, not decoration."""
+    import pathlib
+
+    skills_dir = pathlib.Path(__file__).resolve().parent.parent / "skills"
+    for skill in sorted(d for d in skills_dir.iterdir() if d.is_dir() and d.name != "_shared"):
+        text = (skill / "SKILL.md").read_text()
+        assert f".streamsnow/overlays/{skill.name}.md" in text, (
+            f"{skill.name}/SKILL.md does not declare its repo-overlay point"
+        )
+    assert (skills_dir / "_shared" / "overlays.md").is_file()
