@@ -3,7 +3,7 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
-## [0.6.1] - UNRELEASED
+## [0.6.1] - 2026-09-01
 
 ### Added
 
