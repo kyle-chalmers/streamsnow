@@ -7,10 +7,11 @@ allowed-tools: [Bash, Read]
 
 # /validate-app
 
+> **Repo overlay:** if `.streamsnow/overlays/validate-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+
 Run the pass/fail check on one app and report exactly what fails and how to fix it.
 `streamsnow validate-app <slug>` is the single source of truth — it bundles the same checks the
-governance hooks and CI enforce, so a clean run here means a clean run there. This is the fast local
-pre-flight; CI re-runs the authoritative version after push.
+governance hooks and CI enforce. Fast local pre-flight; CI re-runs the authoritative version.
 
 ## What it covers
 

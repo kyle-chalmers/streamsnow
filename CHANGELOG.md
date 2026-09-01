@@ -3,6 +3,39 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [0.6.1] - UNRELEASED
+
+### Added
+
+- **sql-review metrics mode** (`"mode": "metrics"` manifests): one AUTHORED
+  runnable block per dashboard visual, in on-screen order, from files under
+  `sql_review/_metrics/*.sql` (or a `queries/*.sql` when a visual is 1:1 with
+  an app query — that reference also claims the query for coverage). A
+  dashboard-map index heads the single rendered file. Sources are allowlisted
+  to the two roots (traversal-safe), digest-pinned like every other input,
+  and never imported — metrics blocks are static by nature. For dashboards
+  whose visuals aggregate differently than any single app query.
+- **Repo overlays** — project-level augmentation of the plugin's skills
+  without forking them: every skill now reads `.streamsnow/overlays/<skill>.md`
+  (committed, repo-owned) first, applying repo-specific additions/overrides;
+  `overlays/all.md` applies to every skill. Overlay prose cannot disable the
+  coded safety gates (hooks, validate, the sql-review read-only guard, CI).
+  Contract: `skills/_shared/overlays.md`; a plugin-surface test pins the
+  overlay point in every skill.
+
+### Changed
+
+- The generated `.gitignore` now excludes only `.streamsnow/preview/` (was all
+  of `.streamsnow/`) so committed overlays fit under `.streamsnow/overlays/`.
+  **Existing repos:** `.gitignore` is user-owned and `streamsnow update`
+  never rewrites it — hand-edit the `.streamsnow/` line to `.streamsnow/preview/`
+  before adding overlays, or git will ignore them silently.
+- The migrate engine's Anaconda repodata cache moved into a private
+  per-user directory (created 0o700, ownership-verified; unique-temp atomic
+  writes). A predictable shared temp file could collide across users and be
+  pre-seeded; any doubt about the directory now means fetch-fresh, never a
+  trusted read.
+
 ## [0.6.0] - 2026-09-01
 
 The enforcement release: the review-escalation loop becomes executable (one

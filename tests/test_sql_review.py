@@ -559,3 +559,113 @@ def test_index_unrelated_table_cannot_clobber_signoff(repo: Path) -> None:
     # The sign-off survives; the narrative's bogus 'table' value did not win.
     assert "| yes |" in rebuilt.split(sr._README_TABLE_END)[0]
     assert "Narrative example (not the index):" in rebuilt
+
+
+# --------------------------------------------------------------------------- #
+# Metrics mode (0.6.1): per-visual authored blocks
+# --------------------------------------------------------------------------- #
+
+METRICS_MANIFEST = {
+    "schema_version": 1,
+    "feature": "overview_metrics",
+    "app": SLUG,
+    "mode": "metrics",
+    "description": "Per-visual review blocks for the Overview page",
+    "metrics": [
+        {
+            "name": "avg_daily_revenue",
+            "page": "Overview",
+            "title": "Avg daily revenue",
+            "source": "sql_review/_metrics/avg_daily_revenue.sql",
+            "params_doc": ":1 start_date, :2 end_date",
+        },
+        {
+            "name": "revenue_trend",
+            "page": "Overview",
+            "title": "Revenue trend",
+            "source": "queries/revenue_daily.sql",
+            "notes": "1:1 with the app query",
+        },
+    ],
+}
+
+
+@pytest.fixture()
+def metrics_repo(repo: Path) -> Path:
+    app = repo / "apps" / SLUG
+    mdir = app / "sql_review" / "_metrics"
+    mdir.mkdir(parents=True)
+    (mdir / "avg_daily_revenue.sql").write_text(
+        "-- Query: avg_daily_revenue\n-- Feeds: Overview KPI\n"
+        "SELECT AVG(revenue) FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY\n"
+        "WHERE order_date BETWEEN :1 AND :2\n"
+    )
+    # The token-mode manifest from `repo` also claims revenue_daily; replace it
+    # with the metrics manifest to keep this fixture single-manifest.
+    (app / "sql_review" / "manifests" / "revenue.json").unlink()
+    (app / "sql_review" / "manifests" / "overview_metrics.json").write_text(
+        json.dumps(METRICS_MANIFEST, indent=2)
+    )
+    return repo
+
+
+def test_metrics_mode_renders_per_visual_blocks(metrics_repo: Path) -> None:
+    assert sr.main(["generate", SLUG, "--dir", str(metrics_repo)]) == 0
+    out = metrics_repo / "apps" / SLUG / "sql_review" / "overview_metrics.review.sql"
+    text = out.read_text()
+    assert "DASHBOARD MAP" in text
+    assert "-- avg_daily_revenue" in text and "-- revenue_trend" in text
+    assert "[Overview] Avg daily revenue" in text
+    sql_lines = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("--"))
+    assert ":1" not in sql_lines and "$start_date" in sql_lines
+    assert "-- Provenance: schema=1" in text
+    # Round-trips clean, incl. coverage: the queries/-sourced metric claims it.
+    assert _check(metrics_repo) == 0
+
+
+def test_metrics_source_edit_reads_as_drift(metrics_repo: Path) -> None:
+    sr.main(["generate", SLUG, "--dir", str(metrics_repo)])
+    src = metrics_repo / "apps" / SLUG / "sql_review" / "_metrics" / "avg_daily_revenue.sql"
+    src.write_text(src.read_text().replace("AVG(revenue)", "MEDIAN(revenue)"))
+    assert _check(metrics_repo) == 1
+
+
+def test_metrics_traversal_source_rejected(metrics_repo: Path, capsys) -> None:
+    manifest = json.loads(json.dumps(METRICS_MANIFEST))
+    manifest["metrics"][0]["source"] = "../../secrets.toml"
+    mp = metrics_repo / "apps" / SLUG / "sql_review" / "manifests" / "overview_metrics.json"
+    mp.write_text(json.dumps(manifest))
+    assert sr.main(["generate", SLUG, "--dir", str(metrics_repo)]) == 2
+    assert "app-relative path under" in capsys.readouterr().err
+
+
+def test_metrics_write_statement_refused(metrics_repo: Path, capsys) -> None:
+    src = metrics_repo / "apps" / SLUG / "sql_review" / "_metrics" / "avg_daily_revenue.sql"
+    src.write_text(src.read_text() + ";\nTRUNCATE TABLE ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY")
+    assert sr.main(["generate", SLUG, "--dir", str(metrics_repo)]) == 2
+    assert "not allowed" in capsys.readouterr().err
+
+
+def test_metrics_index_rows(metrics_repo: Path) -> None:
+    sr.main(["generate", SLUG, "--dir", str(metrics_repo)])
+    sr.main(["index", SLUG, "--dir", str(metrics_repo)])
+    text = (metrics_repo / "apps" / SLUG / "sql_review" / "README.md").read_text()
+    assert "| `avg_daily_revenue` |" in text
+    assert "Overview > Revenue trend" in text
+
+
+def test_metrics_symlink_source_refused(metrics_repo: Path, capsys) -> None:
+    """The manifest regex constrains the lexical path; the resolver must
+    refuse a symlink that would pull an out-of-app file into the render."""
+    import os as _os
+
+    app = metrics_repo / "apps" / SLUG
+    outside = metrics_repo / "outside.sql"
+    outside.write_text("SELECT 1\n")
+    target = app / "sql_review" / "_metrics" / "avg_daily_revenue.sql"
+    target.unlink()
+    _os.symlink(outside, target)
+    assert sr.main(["generate", SLUG, "--dir", str(metrics_repo)]) == 2
+    assert "symlink" in capsys.readouterr().err
+    # And check treats the symlinked source as drift, never a trusted read.
+    assert _check(metrics_repo) == 1
