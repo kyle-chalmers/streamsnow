@@ -3,7 +3,7 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
-## [0.6.0] - UNRELEASED
+## [0.6.0] - 2026-09-01
 
 The enforcement release: the review-escalation loop becomes executable (one
 gate, one Stop hook, loop primitives instead of prose), every app grows a
