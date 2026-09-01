@@ -319,3 +319,23 @@ def test_scaffolded_tombstones_registry_is_valid_and_user_owned(tmp_path):
     from streamsnow.scaffolder import GOVERNANCE_ITEMS
 
     assert "deploy/tombstones.yml" not in {i.output for i in GOVERNANCE_ITEMS}
+
+
+def test_generated_workflows_pin_a_compatible_streamsnow(tmp_path):
+    """The templates install a pinned range; it must always cover the version
+    of streamsnow that generated them — a 0.7 bump that forgets the templates
+    fails here, not in a consumer's CI."""
+    from packaging.specifiers import SpecifierSet
+
+    import streamsnow
+
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    for wf in ("checks.yml", "deploy.yml"):
+        text = (tmp_path / ".github" / "workflows" / wf).read_text()
+        assert "uv tool install 'streamsnow" in text
+        spec = text.split("uv tool install 'streamsnow")[1].split("'")[0]
+        assert streamsnow.__version__ in SpecifierSet(spec), (
+            f"{wf} pins streamsnow{spec}, which excludes this version "
+            f"({streamsnow.__version__}) — update the template pin with the release"
+        )
