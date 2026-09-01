@@ -275,3 +275,47 @@ def test_generated_precommit_enforces_sql_review_and_vulns(tmp_path):
     parsed = yaml.safe_load(text)  # stays valid YAML
     ids = [h["id"] for repo in parsed["repos"] for h in repo["hooks"]]
     assert "streamsnow-sql-review" in ids
+
+
+def test_generated_ci_enforces_the_deterministic_gates(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    text = (tmp_path / ".github" / "workflows" / "checks.yml").read_text()
+    assert "streamsnow check dependency-vulns" in text  # fail-closed: no --best-effort in CI
+    assert "--best-effort" not in text
+    assert "streamsnow sql-review check" in text
+    assert "streamsnow check tombstones --base-ref origin/main" in text
+    assert "fetch-depth: 0" in text  # the tombstones diff needs history
+    yaml.safe_load(text)
+
+
+def test_generated_deploy_workflows_reconcile_tombstones(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    stage_copy = (tmp_path / ".github" / "workflows" / "deploy.yml").read_text()
+    assert "streamsnow check tombstones --drop-sql" in stage_copy
+    yaml.safe_load(stage_copy)
+    # git-repository deploy source renders the other template — same step.
+    gitdata = dict(data)
+    gitdata["deploy"] = {
+        "source": "git-repository",
+        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "api_integration_name": "GITHUB_API_INTEGRATION",
+        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+    }
+    scaffold(Config.from_dict(gitdata), tmp_path / "g", "acme-sales-dashboard")
+    git_deploy = (tmp_path / "g" / ".github" / "workflows" / "deploy.yml").read_text()
+    assert "streamsnow check tombstones --drop-sql" in git_deploy
+    yaml.safe_load(git_deploy)
+
+
+def test_scaffolded_tombstones_registry_is_valid_and_user_owned(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    reg = tmp_path / "deploy" / "tombstones.yml"
+    assert yaml.safe_load(reg.read_text()) == {"tombstones": []}
+    # `streamsnow update` must never re-render the registry (it would wipe
+    # user-appended tombstone entries).
+    from streamsnow.scaffolder import GOVERNANCE_ITEMS
+
+    assert "deploy/tombstones.yml" not in {i.output for i in GOVERNANCE_ITEMS}

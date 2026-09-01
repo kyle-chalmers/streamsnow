@@ -66,6 +66,20 @@ jobs:
             snow sql -f "/tmp/ss-$slug.sql"
           done
 
+      # A CREATE OR REPLACE pipeline has no delete path — this is it. Every
+      # identifier in deploy/tombstones.yml is dropped on every deploy
+      # (IF EXISTS, so re-runs are no-ops). The PR check `streamsnow check
+      # tombstones` is what guarantees the registry is complete; a malformed
+      # registry makes --drop-sql exit 2 and fails this step before any DROP.
+      - name: Reconcile tombstones (drop retired objects)
+        if: steps.gate.outputs.go == 'true'
+        run: |
+          set -euo pipefail
+          streamsnow check tombstones --drop-sql > /tmp/ss-drops.sql
+          if [ -s /tmp/ss-drops.sql ]; then
+            snow sql -f /tmp/ss-drops.sql
+          fi
+
       # "Deploy succeeded" is not "app serves": a missing live version renders
       # nothing in Snowsight, a stale version-source URI serves old code, and a
       # container app can crash-loop while its service reports healthy.
