@@ -245,6 +245,23 @@ def validate_manifest(m: dict) -> list[str]:
             if not isinstance(c, dict) or not c.get("name"):
                 out.append("every combo needs a name")
                 break
+            # Combo names land in output FILENAMES — restrict to a safe
+            # basename charset so a manifest can never write outside
+            # sql_review/ (path traversal via "name": "../../x").
+            if not re.match(r"^[a-z0-9][a-z0-9_-]*$", str(c["name"])):
+                out.append(
+                    f"combo name {c['name']!r} must match ^[a-z0-9][a-z0-9_-]*$ "
+                    "(it becomes part of the output filename)"
+                )
+                break
+    for q, spec in (m.get("query_specs") or {}).items():
+        source = (spec or {}).get("source_query", q)
+        # source_query resolves to queries/<name>.sql — same traversal risk.
+        if not re.match(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$", str(source)):
+            out.append(
+                f"query_specs[{q!r}].source_query {source!r} must be a bare query name "
+                "(resolved strictly inside queries/)"
+            )
     pages = m.get("pages")
     if not isinstance(pages, list) or not pages:
         out.append("pages must be a non-empty list of {name, queries}")
@@ -257,6 +274,12 @@ def validate_manifest(m: dict) -> list[str]:
             ):
                 out.append("every pages[] entry needs name + queries[]")
                 break
+            for q in p["queries"]:
+                # Query names resolve to queries/<name>.sql when no spec
+                # overrides source_query — bare names only, no traversal.
+                if not re.match(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$", str(q)):
+                    out.append(f"pages[].queries entry {q!r} must be a bare query name")
+                    break
     dispatchers = m.get("token_dispatchers", {})
     if strategy == "static":
         for tok, d in dispatchers.items():
@@ -398,12 +421,88 @@ def _split_statements(text: str) -> list[str]:
     return [s.strip() for s in no_comments.split(";") if s.strip()]
 
 
+def _with_terminal_verb(stmt: str) -> str:
+    """The top-level verb a ``WITH`` statement terminates in, or "".
+
+    A CTE prefix is not read-only by itself — ``WITH x AS (SELECT 1) DELETE
+    FROM t`` is a delete. Walk ``name [(cols)] AS ( … )`` definitions with
+    paren balancing; whatever keyword follows the last CTE is the statement's
+    real verb. Anything this walker cannot confidently parse returns "" and
+    fails toward "not allowed".
+    """
+    tokens = stmt.split()
+    if not tokens or tokens[0].upper() != "WITH":
+        return ""
+    # Re-scan character-wise for balanced parens; token-wise is not enough
+    # because CTE bodies contain arbitrary whitespace/commas.
+    i = len("WITH")
+    n = len(stmt)
+    while True:
+        # Skip whitespace, optional RECURSIVE, the CTE name, optional column
+        # list, AS, then the balanced parenthesised body.
+        while i < n and stmt[i].isspace():
+            i += 1
+        m = re.match(r"(?:RECURSIVE\s+)?[A-Za-z_][A-Za-z0-9_$]*", stmt[i:], re.IGNORECASE)
+        if not m:
+            return ""
+        i += m.end()
+        while i < n and stmt[i].isspace():
+            i += 1
+        if i < n and stmt[i] == "(":  # optional column list
+            depth = 1
+            i += 1
+            while i < n and depth:
+                depth += stmt[i] == "("
+                depth -= stmt[i] == ")"
+                i += 1
+            while i < n and stmt[i].isspace():
+                i += 1
+        if stmt[i : i + 2].upper() != "AS":
+            return ""
+        i += 2
+        while i < n and stmt[i].isspace():
+            i += 1
+        if i >= n or stmt[i] != "(":
+            return ""
+        depth = 1
+        i += 1
+        while i < n and depth:
+            depth += stmt[i] == "("
+            depth -= stmt[i] == ")"
+            i += 1
+        while i < n and stmt[i].isspace():
+            i += 1
+        if i < n and stmt[i] == ",":
+            i += 1
+            continue  # next CTE definition
+        m = re.match(r"[A-Za-z]+", stmt[i:])
+        return m.group(0).upper() if m else ""
+
+
 def _verify_read_only(text: str) -> list[str]:
-    """Statement-root allowlist over the whole rendered file."""
+    """Statement-root allowlist over the whole rendered file.
+
+    ``WITH`` is only allowed when its terminal statement is a ``SELECT`` —
+    a CTE can prefix DELETE/INSERT/UPDATE/MERGE, so the root alone proves
+    nothing. Body lines that look like a provenance record are also refused:
+    the check verb trusts exactly one final provenance line, so a template
+    must never be able to plant a second.
+    """
     problems: list[str] = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("-- Provenance:"):
+            problems.append("a review body line may not start with '-- Provenance:'")
     for stmt in _split_statements(text):
         root = stmt.split(None, 1)[0].upper() if stmt.split() else ""
-        if root in ALLOWED_ROOTS:
+        if root == "WITH":
+            if _with_terminal_verb(stmt) == "SELECT":
+                continue
+            problems.append(
+                "WITH statement does not terminate in SELECT — CTE-prefixed writes "
+                "are not allowed in review SQL"
+            )
+            continue
+        if root in ALLOWED_ROOTS - {"WITH"}:
             continue
         if root == "SET" and _SET_STMT_RE.match(stmt):
             continue
@@ -426,13 +525,16 @@ def _inputs_digest(app: Path, manifest_path: Path, manifest: dict) -> str:
         h.update(f"\nquery:{name}\n".encode())
         h.update(qpath.read_bytes() if qpath.is_file() else b"<missing>")
     if manifest.get("token_strategy") == "manifest":
-        for alias in sorted(manifest.get("modules") or {"data": "data"}):
-            mod_name = (manifest.get("modules") or {"data": "data"})[alias]
-            if mod_name is None:
+        # Conservative closure: hash EVERY app Python source, not just the
+        # named modules. A dispatcher module can import sibling helpers, and
+        # a dotted module name maps to a package path — enumerating the true
+        # import closure without importing is not worth the failure mode of
+        # missing one file and reporting a stale render as clean forever.
+        for py in sorted(app.rglob("*.py")):
+            if any(part.startswith(".") or part == "__pycache__" for part in py.parts):
                 continue
-            mpath = app / f"{mod_name}.py"
-            h.update(f"\nmodule:{mod_name}\n".encode())
-            h.update(mpath.read_bytes() if mpath.is_file() else b"<missing>")
+            h.update(f"\nmodule:{py.relative_to(app).as_posix()}\n".encode())
+            h.update(py.read_bytes())
     return h.hexdigest()[:16]
 
 
@@ -447,23 +549,56 @@ def _referenced_queries(manifest: dict) -> set[str]:
 
 
 def _normalize_for_output_hash(text: str) -> str:
-    """Volatile lines (Generated date, the provenance line itself) normalized
-    so re-generating on a later day is not drift — same lesson as the source
-    monorepo's generator: a byte-exact compare turns the freshness gate into
-    a daily false alarm."""
+    """Normalize ONLY the volatile pieces, preserving every other byte.
+
+    Exactly two things may differ between two legitimate generations of the
+    same inputs: the Generated date, and the provenance record itself (which
+    contains the output hash and so cannot be part of it). Everything else —
+    including line endings and trailing whitespace — participates in the
+    digest: a CRLF conversion or an appended statement after the provenance
+    line is an edit, and must read as one. The split preserves ``\\r`` (we
+    split on ``\\n`` only), so CRLF text hashes differently from the LF text
+    the generator writes.
+    """
     lines = []
-    for line in text.splitlines():
-        if _GENERATED_RE.match(line):
+    for line in text.split("\n"):
+        stripped = line.rstrip("\r")
+        if _GENERATED_RE.match(stripped):
             lines.append("-- Generated: <date> by streamsnow sql-review")
-        elif _PROVENANCE_RE.match(line + "\n") or line.startswith("-- Provenance: "):
-            lines.append("-- Provenance: <normalized>")
+        elif stripped == _FINAL_PROVENANCE_PLACEHOLDER or _PROVENANCE_RE.match(stripped + "\n"):
+            lines.append(_FINAL_PROVENANCE_PLACEHOLDER)
         else:
             lines.append(line)
     return "\n".join(lines)
 
 
+_FINAL_PROVENANCE_PLACEHOLDER = "-- Provenance: <normalized>"
+
+
 def _output_digest(text: str) -> str:
     return hashlib.sha256(_normalize_for_output_hash(text).encode()).hexdigest()[:16]
+
+
+def parse_provenance(text: str) -> tuple[dict | None, str | None]:
+    """Locate the single, FINAL provenance line. Returns (record, problem).
+
+    Content after the provenance line — or a second provenance-shaped line
+    anywhere — is how an edit could hide from the digest, so both are
+    structural failures, never silently tolerated.
+    """
+    lines = text.split("\n")
+    prov_idx = [i for i, ln in enumerate(lines) if ln.rstrip("\r").startswith("-- Provenance: ")]
+    if not prov_idx:
+        return None, "no provenance line — regenerate"
+    if len(prov_idx) > 1:
+        return None, "multiple provenance lines — the file was edited; regenerate"
+    idx = prov_idx[0]
+    if any(ln.strip() for ln in lines[idx + 1 :]):
+        return None, "content after the provenance line — the file was edited; regenerate"
+    m = _PROVENANCE_RE.match(lines[idx].rstrip("\r") + "\n")
+    if not m:
+        return None, "malformed provenance line — regenerate"
+    return {"schema": m.group(1), "inputs": m.group(2), "output": m.group(3)}, None
 
 
 def _out_filename(manifest: dict, combo_name: str, single_combo: bool) -> str:
@@ -572,8 +707,14 @@ def render_review_file(
 
 
 def _stamp_provenance(text: str, inputs: str) -> str:
+    """Append the final provenance line.
+
+    The output digest is computed over the file WITH the provenance line
+    normalized to its placeholder — exactly the transformation ``check``
+    applies to the finished file — so both sides hash the same string.
+    """
     body = text.rstrip() + "\n"
-    output = _output_digest(body)
+    output = _output_digest(body + _FINAL_PROVENANCE_PLACEHOLDER + "\n")
     return body + f"-- Provenance: schema={GENERATOR_SCHEMA} inputs={inputs} output={output}\n"
 
 
@@ -655,15 +796,36 @@ def cmd_generate(args: argparse.Namespace) -> int:
         inputs = _inputs_digest(app, mp, manifest)
         combos = manifest.get("combos") or [{"name": "all-default", "description": "defaults"}]
         single = len(combos) == 1
+        produced: set[str] = set()
         for combo in combos:
             text = render_review_file(app, mp, manifest, combo, modules)
             out = _review_dir(app) / _out_filename(manifest, combo["name"], single)
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(_stamp_provenance(text, inputs), encoding="utf-8")
+            produced.add(out.name)
             written.append(str(out.relative_to(repo)))
+        # A combo removed from the manifest takes its rendered file with it —
+        # a stale generated file nobody accounts for is unexamined surface.
+        feature = manifest["feature"]
+        for stale in _review_dir(app).glob(f"{feature}.*review.sql"):
+            if stale.name not in produced:
+                stale.unlink()
+                print(f"removed stale {stale.relative_to(repo)}")
     for w in written:
         print(f"wrote {w}")
     return 0
+
+
+def _expected_outputs(app: Path) -> set[str]:
+    """Every review filename the current manifests account for."""
+    expected: set[str] = set()
+    for mp in _manifest_paths(app):
+        with contextlib.suppress(ToolError):
+            manifest = load_manifest(mp)
+            combos = manifest.get("combos") or [{"name": "all-default"}]
+            single = len(combos) == 1
+            expected |= {_out_filename(manifest, c["name"], single) for c in combos}
+    return expected
 
 
 def _check_app(repo: Path, app: Path) -> list[dict]:
@@ -678,6 +840,23 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
         }
         for q in cov["uncovered"]
     ]
+
+    # Orphans: a review file no manifest accounts for is unexamined surface —
+    # a combo removed from a manifest must take its rendered file with it.
+    expected = _expected_outputs(app)
+    review_dir = _review_dir(app)
+    if review_dir.is_dir():
+        for stray in sorted(review_dir.glob("*.review.sql")):
+            if stray.name not in expected:
+                findings.append(
+                    {
+                        "file": f"apps/{app.name}/sql_review/{stray.name}",
+                        "line": 1,
+                        "detail": "orphaned review file — no current manifest produces it; "
+                        f"delete it or re-run `streamsnow sql-review generate {app.name}`",
+                    }
+                )
+
     for mp in _manifest_paths(app):
         try:
             manifest = load_manifest(mp)
@@ -700,14 +879,20 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
                     }
                 )
                 continue
-            text = out.read_text(encoding="utf-8")
-            m = _PROVENANCE_RE.search(text)
-            if not m:
+            try:
+                text = out.read_bytes().decode("utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                # A structured finding, never a traceback: the gate runs
+                # inside pre-commit/CI/validate and must stay exit-1-shaped.
                 findings.append(
-                    {"file": rel, "line": 1, "detail": "no provenance line — regenerate"}
+                    {"file": rel, "line": 1, "detail": f"unreadable review file ({exc})"}
                 )
                 continue
-            if m.group(2) != inputs:
+            record, problem = parse_provenance(text)
+            if record is None:
+                findings.append({"file": rel, "line": 1, "detail": problem})
+                continue
+            if record["inputs"] != inputs:
                 findings.append(
                     {
                         "file": rel,
@@ -716,7 +901,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
                         f"generation — run `streamsnow sql-review generate {app.name}`",
                     }
                 )
-            if m.group(3) != _output_digest(text[: m.start()]):
+            if record["output"] != _output_digest(text):
                 findings.append(
                     {
                         "file": rel,
@@ -725,6 +910,14 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
                         "manifest is the editing surface, not the rendered file)",
                     }
                 )
+            # Belt over the digest: the committed file must ALSO still be
+            # read-only SQL, whatever its provenance says. The single final
+            # provenance line (already structurally validated) is exempt.
+            body_only = "\n".join(
+                ln for ln in text.split("\n") if not ln.rstrip("\r").startswith("-- Provenance: ")
+            )
+            for problem_line in _verify_read_only(body_only):
+                findings.append({"file": rel, "line": 1, "detail": problem_line})
     return findings
 
 
