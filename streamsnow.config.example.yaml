@@ -55,3 +55,8 @@ brand:                                 # optional — neutral defaults if omitte
     primary: "#3B82F6"
     background: "#FFFFFF"
   chart_sequence: ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"]
+
+review_gate:                           # optional — the warn-only Stop-hook nudge
+  enabled: true                        # false disables the nudge repo-wide
+  # apps_dir: "apps"                   # only if your apps live elsewhere
+  # base_ref: "origin/main"            # ref changes are classified against

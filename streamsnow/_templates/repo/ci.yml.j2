@@ -20,6 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the tombstones check diffs against origin/main.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v5
       - name: Install tooling
         run: |
@@ -33,3 +36,9 @@ jobs:
             [ -d "$d" ] || continue
             streamsnow validate-app "$(basename "$d")"
           done
+      - name: Dependency vulnerabilities (OSV — fail-closed; CI is authoritative)
+        run: streamsnow check dependency-vulns
+      - name: SQL-review audit trail (fresh + complete)
+        run: streamsnow sql-review check
+      - name: Tombstones (no abandoned deployed objects)
+        run: streamsnow check tombstones --base-ref origin/main

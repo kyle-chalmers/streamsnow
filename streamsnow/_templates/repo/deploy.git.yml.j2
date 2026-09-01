@@ -66,6 +66,19 @@ jobs:
 
       # "Deploy succeeded" is not "app serves": a missing live version renders
       # nothing in Snowsight, and a container app can crash-loop while its
+      # A CREATE OR REPLACE pipeline has no delete path — this is it. Every
+      # identifier in deploy/tombstones.yml is dropped on every deploy
+      # (IF EXISTS, so re-runs are no-ops). The PR check guarantees the
+      # registry is complete; a malformed registry exits 2 before any DROP.
+      - name: Reconcile tombstones (drop retired objects)
+        if: steps.gate.outputs.go == 'true'
+        run: |
+          set -euo pipefail
+          streamsnow check tombstones --drop-sql > /tmp/ss-drops.sql
+          if [ -s /tmp/ss-drops.sql ]; then
+            snow sql -f /tmp/ss-drops.sql
+          fi
+
       # service reports healthy. (No --sha here: the git source pins freshness
       # via fetch + PULL, not a SHA-versioned stage path.)
       - name: Verify deploy health
