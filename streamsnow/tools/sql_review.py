@@ -82,14 +82,22 @@ review file all read as DRIFT. ``check`` also enforces **coverage**: every
 ``queries/*.sql`` in the app must be claimed by some manifest — a query the
 generator can't account for is a hard, named failure, never a silent skip.
 
-Read-only guarantee
--------------------
+Read-only guard
+---------------
 Rendered output is verified with a statement-root **allowlist** — only
-``SELECT`` / ``WITH`` / ``SHOW`` / ``DESCRIBE`` / ``EXPLAIN`` statements plus
-``SET <ident> =`` session-variable assignments may be emitted (an allowlist,
-not a write-verb denylist: the failure mode of a denylist is the statement
-type nobody thought of). A manifest whose rendered output violates this is an
-error; nothing is written.
+``SELECT`` / ``WITH``-terminating-in-``SELECT`` / ``SHOW`` / ``DESCRIBE`` /
+``EXPLAIN`` statements plus ``SET <ident> =`` session-variable assignments may
+be emitted (an allowlist, not a write-verb denylist: the failure mode of a
+denylist is the statement type nobody thought of). All structural analysis
+runs on text with string literals and comments masked, so literal contents
+can never influence parsing. A manifest whose rendered output violates this
+is an error; nothing is written, and ``check`` re-verifies committed files.
+
+Scope honesty: this guard (and the provenance digests) catches accidents and
+drift, and blocks templates from ever emitting a write. It is NOT a proof
+against a deliberate committer with write access — the digest algorithm is
+public and there is no signing key. Repository review remains the trust
+boundary for malicious commits.
 
 Verbs
 -----
@@ -409,16 +417,57 @@ def _set_block(manifest: dict) -> str:
     return "\n".join(lines)
 
 
-def _split_statements(text: str) -> list[str]:
-    """Naive-but-sufficient statement split: strip ``--`` comments, split on
-    ``;``. Review files are generated from templates that follow the repo
-    conventions (no procedures, no ``;`` inside string literals in practice);
-    anything exotic fails toward "not allowed", which is the safe direction.
+def _mask_strings_and_comments(text: str) -> str:
+    """Replace string-literal contents and comments with spaces, same length.
+
+    Every structural decision downstream (statement splitting, paren
+    balancing, verb extraction) runs on the MASKED text — a ``)`` or ``;`` or
+    verb-shaped word inside a string literal must never influence structure.
+    This closed a real bypass: ``WITH x AS (SELECT ')SELECT' …) DELETE …``
+    fooled a raw paren counter into reading the literal's contents as the
+    terminal verb. Handles ``''`` escaping; an unterminated literal masks to
+    end-of-text, which downstream reads as "cannot parse" → not allowed.
+    Length and newlines are preserved so nothing shifts.
     """
-    no_comments = "\n".join(
-        line for line in text.splitlines() if not line.lstrip().startswith("--")
-    )
-    return [s.strip() for s in no_comments.split(";") if s.strip()]
+    out = list(text)
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "'":  # string literal
+            i += 1
+            while i < n:
+                if text[i] == "'" and i + 1 < n and text[i + 1] == "'":
+                    out[i] = out[i + 1] = " "
+                    i += 2
+                    continue
+                if text[i] == "'":
+                    break
+                if text[i] != "\n":
+                    out[i] = " "
+                i += 1
+            i += 1
+        elif c == "-" and text[i : i + 2] == "--":  # line comment
+            while i < n and text[i] != "\n":
+                out[i] = " "
+                i += 1
+        elif c == "/" and text[i : i + 2] == "/*":  # block comment
+            end = text.find("*/", i + 2)
+            end = n if end == -1 else end + 2
+            for j in range(i, end):
+                if text[j] != "\n":
+                    out[j] = " "
+            i = end
+        else:
+            i += 1
+    return "".join(out)
+
+
+def _split_statements(text: str) -> list[str]:
+    """Split masked text on ``;``. Comments and string contents are already
+    spaces (see ``_mask_strings_and_comments``), so a ``;`` in a literal or a
+    block comment can neither split a legitimate statement nor hide one."""
+    masked = _mask_strings_and_comments(text)
+    return [s.strip() for s in masked.split(";") if s.strip()]
 
 
 def _with_terminal_verb(stmt: str) -> str:
@@ -429,6 +478,10 @@ def _with_terminal_verb(stmt: str) -> str:
     paren balancing; whatever keyword follows the last CTE is the statement's
     real verb. Anything this walker cannot confidently parse returns "" and
     fails toward "not allowed".
+
+    Callers MUST pass masked text (``_mask_strings_and_comments``): the paren
+    balance is only sound when string-literal contents cannot contribute
+    parens or verb-shaped words.
     """
     tokens = stmt.split()
     if not tokens or tokens[0].upper() != "WITH":
@@ -785,6 +838,16 @@ def cmd_generate(args: argparse.Namespace) -> int:
             f"`streamsnow sql-review discover {args.slug} --write` first"
         )
 
+    # Collision gate across ALL of the app's manifests (not just the subset
+    # being regenerated): two manifests producing the same filename would
+    # silently clobber each other's audit trail.
+    for fname, owner_list in _output_owners(app).items():
+        if len(owner_list) > 1:
+            raise ToolError(
+                f"output collision: {fname} is produced by {', '.join(owner_list)} — "
+                "give each manifest a distinct feature (or distinct combo names)"
+            )
+
     written: list[str] = []
     for mp in manifests:
         manifest = load_manifest(mp)
@@ -816,16 +879,22 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
-def _expected_outputs(app: Path) -> set[str]:
-    """Every review filename the current manifests account for."""
-    expected: set[str] = set()
+def _output_owners(app: Path) -> dict[str, list[str]]:
+    """Map review filename -> the manifest files that would produce it.
+
+    Two manifests sharing a ``feature`` (or overlapping combo names) would
+    silently overwrite each other's rendered files and still read clean —
+    every caller must treat len(owners) > 1 as a failure.
+    """
+    owners: dict[str, list[str]] = {}
     for mp in _manifest_paths(app):
         with contextlib.suppress(ToolError):
             manifest = load_manifest(mp)
             combos = manifest.get("combos") or [{"name": "all-default"}]
             single = len(combos) == 1
-            expected |= {_out_filename(manifest, c["name"], single) for c in combos}
-    return expected
+            for c in combos:
+                owners.setdefault(_out_filename(manifest, c["name"], single), []).append(mp.name)
+    return owners
 
 
 def _check_app(repo: Path, app: Path) -> list[dict]:
@@ -841,9 +910,23 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
         for q in cov["uncovered"]
     ]
 
+    # Cross-manifest collisions read as findings here too, so the gate can
+    # never report clean while one manifest's trail overwrites another's.
+    owners = _output_owners(app)
+    for fname, owner_list in owners.items():
+        if len(owner_list) > 1:
+            findings.append(
+                {
+                    "file": f"apps/{app.name}/sql_review/{fname}",
+                    "line": 1,
+                    "detail": "output collision — produced by "
+                    f"{', '.join(owner_list)}; give each manifest a distinct feature",
+                }
+            )
+
     # Orphans: a review file no manifest accounts for is unexamined surface —
     # a combo removed from a manifest must take its rendered file with it.
-    expected = _expected_outputs(app)
+    expected = set(owners)
     review_dir = _review_dir(app)
     if review_dir.is_dir():
         for stray in sorted(review_dir.glob("*.review.sql")):
@@ -963,9 +1046,33 @@ def cmd_index(args: argparse.Namespace) -> int:
     readme = _review_dir(app) / "README.md"
     existing = readme.read_text(encoding="utf-8") if readme.is_file() else ""
 
-    # Carry over the human-maintained columns (upstream, verified).
+    # The markers must be unambiguous before anything is rewritten: with
+    # duplicated or reordered markers, a first-occurrence splice silently
+    # swallows narrative (observed in review). Line-anchored, count-checked.
+    start_count = sum(1 for ln in existing.splitlines() if ln.strip() == _README_TABLE_START)
+    end_count = sum(1 for ln in existing.splitlines() if ln.strip() == _README_TABLE_END)
+    if (start_count, end_count) not in ((0, 0), (1, 1)):
+        raise ToolError(
+            f"README has {start_count} start / {end_count} end index markers — "
+            "expected exactly one pair (or none); fix the README before re-indexing"
+        )
+    has_markers = start_count == 1
+    start_idx = end_idx = -1
+    if has_markers:
+        lines = existing.splitlines()
+        start_idx = next(i for i, ln in enumerate(lines) if ln.strip() == _README_TABLE_START)
+        end_idx = next(i for i, ln in enumerate(lines) if ln.strip() == _README_TABLE_END)
+        if end_idx < start_idx:
+            raise ToolError("README index markers are reversed — fix the README")
+        block_lines = lines[start_idx + 1 : end_idx]
+    else:
+        block_lines = []
+
+    # Carry over the human-maintained columns (upstream, verified) — reading
+    # ONLY the marked block. An unrelated 5-column table elsewhere in the
+    # narrative must never overwrite a reviewer's sign-off (observed in review).
     carried: dict[str, tuple[str, str]] = {}
-    for line in existing.splitlines():
+    for line in block_lines:
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if len(cells) == 5 and cells[0] not in ("Query", "---", ""):
             carried[cells[0].strip("`")] = (cells[1], cells[4])
@@ -993,10 +1100,11 @@ def cmd_index(args: argparse.Namespace) -> int:
         rows.append(f"| `{q}` | {upstream} | — | **UNCOVERED** | no |")
 
     table = "\n".join([_README_TABLE_START, *rows, _README_TABLE_END])
-    if _README_TABLE_START in existing and _README_TABLE_END in existing:
-        pre, _, rest = existing.partition(_README_TABLE_START)
-        _, _, post = rest.partition(_README_TABLE_END)
-        new = pre + table + post
+    if has_markers:
+        lines = existing.splitlines()
+        new = "\n".join([*lines[:start_idx], table, *lines[end_idx + 1 :]])
+        if existing.endswith("\n"):
+            new += "\n"
     elif existing:
         new = existing.rstrip() + "\n\n## Coverage\n\n" + table + "\n"
     else:

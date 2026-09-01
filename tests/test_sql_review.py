@@ -479,3 +479,83 @@ def test_hand_added_write_statement_fails_even_with_forged_hashes(repo: Path) ->
     forged_prov = prov_line[: prov_line.rfind("output=")] + f"output={forged_output}"
     f.write_text(evil_body + forged_prov + "\n")
     assert _check(repo) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Phase 2 second-reviewer regressions
+# --------------------------------------------------------------------------- #
+
+
+def test_string_literal_paren_cannot_smuggle_a_cte_write() -> None:
+    """The confirmed bypass: a literal containing ')SELECT' collapsed a raw
+    paren counter and the DELETE read as a SELECT. Masked scanning closes it."""
+    evil = "WITH x AS (SELECT ')SELECT' AS s FROM t) DELETE FROM x;"
+    assert sr._verify_read_only(evil) != []
+    # And the equivalent through generate: nothing is written.
+
+
+def test_semicolon_inside_string_literal_is_legit(repo: Path) -> None:
+    """Over-rejection fix: a ; or verb inside a literal must not split the
+    statement into a fragment with a disallowed root."""
+    ok = "SELECT 'a; DROP TABLE x' AS s FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY;"
+    assert sr._verify_read_only(ok) == []
+    q = repo / "apps" / SLUG / "queries" / "revenue_daily.sql"
+    q.write_text(QUERY.replace("SUM(revenue)", "'a; DROP' || SUM(revenue)"))
+    assert _generate(repo) == 0
+
+
+def test_semicolon_in_block_comment_is_legit() -> None:
+    assert sr._verify_read_only("SELECT 1 /* note; DROP TABLE x */ FROM t;") == []
+
+
+def test_escaped_quotes_handled() -> None:
+    assert sr._verify_read_only("SELECT 'it''s; fine' FROM t;") == []
+
+
+def test_unterminated_literal_fails_closed() -> None:
+    # Masking consumes to end; a WITH that can't be parsed is not allowed.
+    assert sr._verify_read_only("WITH x AS (SELECT 'unterminated) DELETE FROM t;") != []
+
+
+def test_manifest_feature_collision_is_detected(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    # Second manifest with the same feature: generate refuses, check flags.
+    mdir = repo / "apps" / SLUG / "sql_review" / "manifests"
+    (mdir / "revenue2.json").write_text(json.dumps(MANIFEST))
+    assert _generate(repo) == 2
+    assert "output collision" in capsys.readouterr().err
+    assert _check(repo) == 1
+    assert "output collision" in capsys.readouterr().out
+
+
+def test_index_duplicate_markers_hard_error(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    _generate(repo)
+    readme = repo / "apps" / SLUG / "sql_review" / "README.md"
+    sr.main(["index", SLUG, "--dir", str(repo)])
+    text = readme.read_text()
+    # A second (stray, reversed) marker pair in the narrative must hard-error,
+    # never silently splice the wrong region.
+    readme.write_text(f"{sr._README_TABLE_END}\n\nsomeone quoting the marker syntax\n\n{text}")
+    code = sr.main(["index", SLUG, "--dir", str(repo)])
+    assert code == 2
+    assert "index markers" in capsys.readouterr().err
+
+
+def test_index_unrelated_table_cannot_clobber_signoff(repo: Path) -> None:
+    _generate(repo)
+    readme = repo / "apps" / SLUG / "sql_review" / "README.md"
+    sr.main(["index", SLUG, "--dir", str(repo)])
+    text = readme.read_text()
+    # Reviewer signs off inside the marked block…
+    text = text.replace(
+        "| `revenue_daily` | _(fill via /review-app --sql)_ | Overview | `revenue.review.sql` | no |",
+        "| `revenue_daily` | ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY | Overview | `revenue.review.sql` | yes |",
+    )
+    # …and an unrelated illustrative 5-column table appears in the narrative
+    # BELOW the block, first cell colliding with the query name.
+    text += "\n\nNarrative example (not the index):\n\n| `revenue_daily` | a | b | c | table |\n"
+    readme.write_text(text)
+    assert sr.main(["index", SLUG, "--dir", str(repo)]) == 0
+    rebuilt = readme.read_text()
+    # The sign-off survives; the narrative's bogus 'table' value did not win.
+    assert "| yes |" in rebuilt.split(sr._README_TABLE_END)[0]
+    assert "Narrative example (not the index):" in rebuilt
