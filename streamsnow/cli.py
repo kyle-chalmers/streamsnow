@@ -755,6 +755,7 @@ def check_tombstones_cmd(
     drop_sql: bool = typer.Option(
         False, "--drop-sql", help="Emit DROP STREAMLIT IF EXISTS for tombstoned identifiers."
     ),
+    apps_dir: Path = typer.Option(None, "--apps-dir", help="Apps directory (default: apps)."),
     config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
     output_format: str = typer.Option("md", "--format"),
 ) -> None:
@@ -762,6 +763,8 @@ def check_tombstones_cmd(
     argv = ["--base-ref", base_ref, "--format", output_format]
     if registry is not None:
         argv += ["--registry", str(registry)]
+    if apps_dir is not None:
+        argv += ["--apps-dir", str(apps_dir)]
     if drop_sql:
         argv.append("--drop-sql")
     if config is not None:

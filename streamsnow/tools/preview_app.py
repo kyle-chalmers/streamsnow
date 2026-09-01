@@ -118,6 +118,13 @@ _LOG_PATTERNS: list[tuple[str, str, str]] = [
 
 _URL_RE = re.compile(r"Local URL:\s*(https?://\S+)")
 
+# Slugs land in state/log file paths — reject anything that could traverse.
+_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+
+
+def _validate_slug(slug: str) -> bool:
+    return bool(_SLUG_RE.match(slug))
+
 
 # --------------------------------------------------------------------------- #
 # Log classification (free functions so tests don't go through argparse)
@@ -206,6 +213,42 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def _process_command(pid: int) -> str:
+    """The live command line of ``pid`` via ``ps`` (POSIX), or "" when unknown."""
+    proc = subprocess.run(
+        ["ps", "-o", "command=", "-p", str(pid)],
+        capture_output=True,
+        text=True,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def _state_owns_pid(state: dict[str, Any]) -> bool:
+    """True when the state file's PID is alive AND still looks like OUR process.
+
+    PIDs are reused: a state file left behind by a crash (or written by
+    something else entirely) can name a live PID that belongs to an unrelated
+    process, and ``stop`` would TERM/KILL it. Before trusting a PID, verify
+    the live command line still carries a distinctive token of the command we
+    recorded at launch (the entrypoint path in practice). When the command
+    line cannot be read, or matches nothing we recorded, the state is treated
+    as stale — refusing to signal an unverified PID is the safe direction.
+    """
+    pid = int(state.get("pid", 0))
+    if not _pid_alive(pid):
+        return False
+    recorded: list[str] = [str(t) for t in state.get("cmd") or []]
+    if entry := state.get("entrypoint"):
+        recorded.append(str(entry))
+    tokens = [t for t in recorded if len(t) > 8]
+    if not tokens:
+        # Nothing distinctive was recorded (hand-written state) — do not
+        # claim ownership of an arbitrary PID.
+        return False
+    live = _process_command(pid)
+    return bool(live) and any(t in live for t in tokens)
+
+
 def _port_in_use(port: int) -> bool:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(0.2)
@@ -273,7 +316,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     # A live previous preview is fine — report it instead of double-launching.
     state = _read_state(repo, slug)
-    if state and _pid_alive(int(state.get("pid", 0))):
+    if state and _state_owns_pid(state):
         port = int(state.get("port", 0))
         healthy = probe_health(port)
         _emit(
@@ -336,6 +379,9 @@ def cmd_start(args: argparse.Namespace) -> int:
                 "port": args.port,
                 "log": str(log_path),
                 "entrypoint": str(entrypoint),
+                # Recorded so stop/status can verify the PID still belongs to
+                # this launch before signaling it (PID reuse — _state_owns_pid).
+                "cmd": cmd,
                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             },
             indent=2,
@@ -401,14 +447,15 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 1
     pid = int(state.get("pid", 0))
     port = int(state.get("port", 0))
-    if not _pid_alive(pid):
-        # Stale state from a crashed/killed preview — clean it up, not an error.
+    if not _state_owns_pid(state):
+        # Stale state (dead PID, or a reused PID that is no longer our
+        # process) — clean it up, not an error.
         _state_path(repo, slug).unlink(missing_ok=True)
         _emit(
             {
                 "status": "not_running",
                 "stale_state_cleaned": True,
-                "message": f"{slug}: not running (stale state for dead pid {pid} cleaned up)",
+                "message": f"{slug}: not running (stale state for pid {pid} cleaned up)",
             },
             args.json,
         )
@@ -438,6 +485,21 @@ def cmd_stop(args: argparse.Namespace) -> int:
         _emit({"status": "not_running", "message": f"{slug}: nothing to stop"}, args.json)
         return 0
     pid = int(state.get("pid", 0))
+    if _pid_alive(pid) and not _state_owns_pid(state):
+        # A live PID that is no longer (verifiably) our launch: signaling it
+        # could kill an unrelated process that inherited the PID. Drop the
+        # stale state and refuse.
+        _state_path(repo, slug).unlink(missing_ok=True)
+        _emit(
+            {
+                "status": "stale_state",
+                "pid": pid,
+                "message": f"{slug}: state file named pid {pid}, but that process is not "
+                "this preview (PID reuse) — state cleaned, nothing signaled",
+            },
+            args.json,
+        )
+        return 0
     if _pid_alive(pid) and not _kill(pid):
         _emit(
             {
@@ -507,6 +569,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    if not _validate_slug(args.slug):
+        print(
+            f"error: app slug {args.slug!r} must be kebab-case (^[a-z][a-z0-9-]*$)",
+            file=sys.stderr,
+        )
+        return 2
     dispatch = {"start": cmd_start, "status": cmd_status, "stop": cmd_stop, "logs": cmd_logs}
     return dispatch[args.cmd](args)
 

@@ -34,7 +34,7 @@ except ImportError:  # pragma: no cover
         return re.sub(r"[-_.]+", "-", name).lower()
 
 
-from ..config import Config, ConfigError, load_config
+from ..config import Config, ConfigError, find_config, load_config
 from ..policy import SchemaPolicy
 from . import (
     check_app_security,
@@ -439,7 +439,14 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     try:
-        cfg = load_config(Path(args.config) if args.config else None)
+        # Config discovery is anchored on --dir, not the process cwd: running
+        # `validate-app x --dir /repo` from elsewhere must apply /repo's
+        # policy, not whatever config the caller's cwd happens to sit under.
+        cfg_path = Path(args.config) if args.config else find_config(Path(args.dir).resolve())
+        if cfg_path is None:
+            print(f"config error: no streamsnow.config.yaml found under {Path(args.dir).resolve()}")
+            return 2
+        cfg = load_config(cfg_path)
     except ConfigError as exc:
         print(f"config error: {exc}")
         return 2

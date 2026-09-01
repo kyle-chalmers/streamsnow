@@ -30,6 +30,10 @@ DENY_TERMS = [
     "data-intell-pr-bot",
     "sonarcloud",
     "1password",
+    # Source-organization names — a pasted reference must never pass the gate.
+    "happymoney",
+    "happy money",
+    "happy-money",
 ]
 # Source-domain vocabulary. StreamSnow was extracted from a consumer-lending
 # monorepo; the OSS release must carry ZERO domain flavor from it — not just

@@ -98,7 +98,17 @@ DEFAULT_REGISTRY = Path("deploy/tombstones.yml")
 DEFAULT_APPS_DIR = Path("apps")
 
 _ENTRY_KEYS = {"identifier", "reason", "date"}
-_MANIFEST_RE = re.compile(r"^apps/([^/]+)/snowflake\.yml$")
+
+
+def _manifest_re(apps_dir: Path) -> re.Pattern[str]:
+    """Manifest matcher for a given apps directory (relative repo path).
+
+    Parameterized so ``--apps-dir dashboards`` applies to BOTH sides of the
+    diff — hard-coding ``apps/`` here would silently miss removals under a
+    custom directory while the worktree side honored it.
+    """
+    rel = str(apps_dir).strip("/")
+    return re.compile(rf"^{re.escape(rel)}/([^/]+)/snowflake\.yml$")
 
 
 class ToolError(RuntimeError):
@@ -181,7 +191,9 @@ def worktree_identifiers(cfg, apps_dir: Path) -> dict[str, str]:
     return out
 
 
-def base_identifiers(cfg, base_commit: str) -> tuple[dict[str, str], list[str]]:
+def base_identifiers(
+    cfg, base_commit: str, apps_dir: Path = Path("apps")
+) -> tuple[dict[str, str], list[str]]:
     """Map UPPERCASED deployed identifier -> slug for every app at ``base_commit``.
 
     Enumerated with ``git ls-tree`` because the identity of an app is its slug
@@ -191,11 +203,13 @@ def base_identifiers(cfg, base_commit: str) -> tuple[dict[str, str], list[str]]:
     have deployed, so it cannot have left an orphan, and blocking today's
     change on it would be wrong.
     """
-    listing = _git(["ls-tree", "-r", "--name-only", base_commit, "--", "apps/"])
+    rel = str(apps_dir).strip("/")
+    listing = _git(["ls-tree", "-r", "--name-only", base_commit, "--", f"{rel}/"])
+    manifest_re = _manifest_re(apps_dir)
     out: dict[str, str] = {}
     notes: list[str] = []
     for line in listing.splitlines():
-        match = _MANIFEST_RE.match(line)
+        match = manifest_re.match(line)
         if not match:
             continue
         slug = match.group(1)
@@ -327,7 +341,7 @@ def run_check(cfg, registry_path: Path, apps_dir: Path, base_ref: str) -> Result
             )
 
     base_commit = resolve_base(base_ref)
-    base, notes = base_identifiers(cfg, base_commit)
+    base, notes = base_identifiers(cfg, base_commit, apps_dir)
     result.notes.extend(notes)
 
     tombstoned = {t.identifier.upper() for t in tombstones}

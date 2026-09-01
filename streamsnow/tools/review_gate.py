@@ -248,15 +248,31 @@ def _git(repo_root: Path, *args: str, check: bool = True) -> str:
 
 
 def repo_root(start: Path | None = None) -> Path:
-    """Locate the repository root, preferring $CLAUDE_PROJECT_DIR.
+    """Locate the repository root.
 
-    Hooks run with an arbitrary cwd, so a relative path is not safe. The env
-    var is set by Claude Code; the git fallback covers direct CLI use.
+    An explicit ``start`` wins outright: the Stop hook passes the payload's
+    ``cwd``, and a stale ``CLAUDE_PROJECT_DIR`` from another session must not
+    redirect the gate to inspect (and notify about) a *different* repo than
+    the one the turn actually ran in. The env var is only a fallback for
+    callers with no better anchor (hooks run with an arbitrary process cwd,
+    so a relative path is not safe there); the git fallback covers direct
+    CLI use.
     """
+    if start is not None:
+        base = Path(start).resolve()
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=base,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode == 0:
+            return Path(proc.stdout.strip()).resolve()
+        raise GitError(f"not a git repository: {base}")
     env_dir = os.environ.get("CLAUDE_PROJECT_DIR")
     if env_dir and (Path(env_dir) / ".git").exists():
         return Path(env_dir).resolve()
-    base = (start or Path.cwd()).resolve()
+    base = Path.cwd().resolve()
     proc = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         cwd=base,
@@ -872,6 +888,18 @@ def cmd_baseline(args: argparse.Namespace) -> int:
 def cmd_stamp(args: argparse.Namespace) -> int:
     root = repo_root()
     apps_dir = apps_dir_name(root, args.apps_dir)
+    # A stamp on a filename classification will never discover is worse than
+    # an error: the app reads as permanently unreviewed while the caller
+    # believes it stamped. Fail loudly instead.
+    basename = Path(args.artifact).name.lower()
+    if not (basename.startswith(ARTIFACT_PREFIXES) and basename.endswith(".md")):
+        print(
+            f"error: artifact {Path(args.artifact).name!r} will not be discovered by "
+            f"classify — name it <prefix><ts>.md with a prefix in "
+            f"{', '.join(ARTIFACT_PREFIXES)} (case-insensitive)",
+            file=sys.stderr,
+        )
+        return 2
     base_ref = resolve_base_ref(root, args.base_ref or _config_base_ref(root))
     baseline = compute_baseline(root, args.slug, apps_dir)
     blobs = app_substantive_blobs(root, args.slug, base_ref, apps_dir)
