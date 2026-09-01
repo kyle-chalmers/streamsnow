@@ -240,7 +240,12 @@ def _state_owns_pid(state: dict[str, Any]) -> bool:
     recorded: list[str] = [str(t) for t in state.get("cmd") or []]
     if entry := state.get("entrypoint"):
         recorded.append(str(entry))
-    tokens = [t for t in recorded if len(t) > 8]
+    # Identity tokens are the PATH-bearing arguments (the entrypoint / script
+    # path) — those differ per launch. Generic tokens must never count:
+    # matching on e.g. a shared launcher flag would claim ownership of a PID
+    # reused by a DIFFERENT app's preview started by this same tool, which is
+    # the most plausible reuse collision of all.
+    tokens = [t for t in recorded if "/" in t or "\\" in t]
     if not tokens:
         # Nothing distinctive was recorded (hand-written state) — do not
         # claim ownership of an arbitrary PID.

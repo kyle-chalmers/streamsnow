@@ -459,6 +459,9 @@ def check_schema_refs_cmd(
 @app.command()
 def doctor(
     output_json: bool = typer.Option(False, "--json", help="Emit per-check JSON results."),
+    output_format: str = typer.Option(
+        "md", "--format", help="md | json (package-wide check contract; --json is an alias)."
+    ),
 ) -> None:
     """Check the local environment for the prerequisites StreamSnow needs.
 
@@ -467,7 +470,10 @@ def doctor(
     check instead of prose-detecting. Exit 0 = all required checks pass,
     1 = a required check failed, 2 = tool error.
     """
-    raise typer.Exit(code=_doctor.main(["--json"] if output_json else []))
+    argv = ["--format", output_format]
+    if output_json:
+        argv.append("--json")
+    raise typer.Exit(code=_doctor.main(argv))
 
 
 @app.command(name="deploy-setup")
@@ -800,7 +806,12 @@ def preview(ctx: typer.Context) -> None:
     for `preview start <slug>` (compatibility with pre-0.6 usage).
     """
     argv = list(ctx.args)
-    if argv and argv[0] not in _PREVIEW_VERBS and not argv[0].startswith("-"):
+    # The shorthand must also route flag-first invocations (`preview --port
+    # 8501 my-app`): when NO verb appears anywhere, this is the shorthand —
+    # unless the user is asking for help.
+    wants_help = any(a in ("-h", "--help") for a in argv)
+    has_verb = any(a in _PREVIEW_VERBS for a in argv)
+    if argv and not has_verb and not wants_help:
         argv = ["start", *argv]
     raise typer.Exit(code=_preview_main(argv))
 

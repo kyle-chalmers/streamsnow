@@ -115,12 +115,27 @@ def scan_tree(root: Path) -> dict:
         low = text.lower()
         rel = str(p.relative_to(root))
         for term in DENY_TERMS:
-            if term in low:
-                findings.append({"file": rel, "match": term})
+            idx = low.find(term)
+            if idx != -1:
+                findings.append(
+                    {
+                        "file": rel,
+                        "line": text.count("\n", 0, idx) + 1,
+                        "match": term,
+                        "detail": f"denied term {term!r}",
+                    }
+                )
         for pat in DENY_PATTERNS:
             m = pat.search(text)
             if m:
-                findings.append({"file": rel, "match": m.group(0)})
+                findings.append(
+                    {
+                        "file": rel,
+                        "line": text.count("\n", 0, m.start()) + 1,
+                        "match": m.group(0),
+                        "detail": f"denied pattern match {m.group(0)!r}",
+                    }
+                )
     return {"ok": not findings, "findings": findings}
 
 

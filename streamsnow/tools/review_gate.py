@@ -972,7 +972,11 @@ def cmd_stop_hook(args: argparse.Namespace) -> int:
 
         session_id = payload.get("session_id", "")
         notified = load_notified(session_id)
-        fresh = [v for v in verdicts if f"{v.slug}:{v.baseline}" not in notified]
+        # The dedupe key carries the repo root: one session can touch two
+        # repos holding an identically-named app with identical content
+        # (freshly scaffolded stubs), and the second repo's nudge must not be
+        # swallowed by the first's key.
+        fresh = [v for v in verdicts if f"{root}:{v.slug}:{v.baseline}" not in notified]
         if not fresh:
             return 0
 
@@ -988,7 +992,7 @@ def cmd_stop_hook(args: argparse.Namespace) -> int:
             }
         print(json.dumps(out))
 
-        notified.update(f"{v.slug}:{v.baseline}" for v in fresh)
+        notified.update(f"{root}:{v.slug}:{v.baseline}" for v in fresh)
         save_notified(session_id, notified)
     except Exception:  # noqa: BLE001 — fail-open is the whole point here
         return 0
