@@ -22,11 +22,13 @@
 
 ---
 
-> **Status: alpha, functional.** The CLI (configure / init / new / validate-app /
-> preview / check / deploy-sql / deploy-setup) and the Claude Code plugin (8
-> skills + shared recipes, with deprecated aliases for the pre-0.3 names) are
-> implemented and CI-green for both runtimes and both deploy sources. Published
-> on PyPI (`uvx streamsnow` / `pip install streamsnow`); APIs may still evolve toward 1.0.
+> **Status: beta, functional.** The CLI (configure / init / new / doctor /
+> validate-app / preview / check / sql-review / review-gate / review-loop /
+> migrate / nav / deploy-sql / deploy-setup / verify-deploy) and the Claude
+> Code plugin (8 skills + shared recipes, with deprecated aliases for the
+> pre-0.3 names) are implemented and CI-green for both runtimes and both
+> deploy sources. Published on PyPI (`uvx streamsnow` / `pip install
+> streamsnow`); APIs may still evolve toward 1.0.
 
 ## What it is
 
@@ -99,7 +101,7 @@ lines, with depth in per-skill reference files:
 | `/start-app` | The front door: spec (incl. backfill from existing source) → scaffold → build pages → ship, with checkpoints. Also `--setup` (machine + repo) and `adopt` (existing repos — maps, doesn't scaffold, writes `MIGRATION.md`) |
 | `/preview-app` | Run an app locally against live Snowflake |
 | `/validate-app` | The pass/fail check that must be clean before shipping |
-| `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean, `--sql` writes audit companions |
+| `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` authors the audit-trail manifests |
 | `/audit-lineage` | Live-warehouse column + lineage verification (read-only, bounded) |
 | `/feedback-app` | Turn user feedback into classified, atomic-commit fixes |
 | `/ship-app` | Validate-gated stage → commit → push → PR → watch CI |
@@ -109,20 +111,33 @@ Pre-0.3 names (`/new-app`, `/refine-requirements`, `/add-page`, `/onboard`,
 `/auto-review-app`, `/sql-review`, `/apply-review`, `/deep-dive-data`) still
 work as deprecated aliases and will be removed in the next major release.
 
+## The audit trail (new in 0.6)
+
+Every UI-feeding query gets a **human-runnable proof**: a fully-rendered,
+paste-runnable `.review.sql` under `apps/<slug>/sql_review/`, generated from a
+per-feature manifest and verified by an import-free freshness + coverage gate
+(`streamsnow sql-review check`, wired into pre-commit, CI, and the validate
+gate). A person with nothing but Snowsight can trace any visual back to the
+data and confirm it — see **[Auditing a visual](docs/auditing-a-visual.md)**.
+Pages and their audit trails land in the same commit; a changed query cannot
+ship with a stale one.
+
 ## Hooks, in full
 
 Trust demands transparency: this plugin runs hooks, so here is every one of them. All are
 stdlib-only, make **no network calls**, never write outside the repo, and fail open — a hook
-error never blocks your session; the guard only ever *adds* a confirmation.
+error never blocks your session; the guards only ever *add* a confirmation or a note.
 
 | Event | Script | What it does |
 |---|---|---|
 | PreToolUse (Bash) | `hooks/deploy_safety.py` | Pauses before destructive Streamlit/SQL commands (`snow streamlit deploy/drop`, `CREATE OR REPLACE / DROP / ALTER STREAMLIT`, stage `REMOVE`, destructive SQL incl. `-f` files / stdin) — `/ship-app` is the sanctioned deploy path |
-| SessionStart | `hooks/session_start.sh` | One-line skills banner inside a StreamSnow repo, and announces the guard is active |
+| SessionStart | `hooks/session_start.sh` | One-line skills banner inside a StreamSnow repo, and announces which guards are active |
+| Stop | `hooks/review_gate_stop.py` | Warn-only nudge (a `systemMessage`, never a turn continuation) when a substantive app change ends with no review covering it — points at `/review-app <slug> --auto`. Off-switches: `REVIEW_GATE_OFF=1`, `apps/<slug>/.review/SKIP`, or `review_gate: {enabled: false}` in config |
 
-Both hooks are repo-gated on `streamsnow.config.yaml` — zero cost in unrelated repos — and
+All hooks are repo-gated on `streamsnow.config.yaml` — zero cost in unrelated repos — and
 declare explicit timeouts so a hung hook can never stall a session. To turn them off, disable
-the plugin (`claude plugin disable streamsnow`).
+the plugin (`claude plugin disable streamsnow`). **Upgrading from ≤0.5:** hook additions do not
+reach installed copies automatically — run `/plugin uninstall streamsnow` then reinstall.
 
 ## How it's organized
 
@@ -133,7 +148,9 @@ streamsnow/            the PyPI package — CLI, config, policy, scaffolder, too
   ├── policy.py        schema allow/deny single source of truth
   ├── scaffolder.py    renders a governed repo from config
   ├── _templates/      the Jinja scaffold templates (repo/ + app/)
-  └── tools/           governance checks (e.g. check_schema_refs)
+  └── tools/           governance checks + engines (schema refs, security,
+                       caching, dependency vulns, tombstones, path leaks,
+                       sql_review generator, review gate/loop, migrate, doctor)
 .claude-plugin/        Claude Code plugin manifest + marketplace
 skills/  agents/  hooks/   Claude Code plugin surface (skills + SessionStart hook)
 docs/  examples/            guides + a runnable no-Snowflake example app
@@ -155,6 +172,10 @@ code — one implementation, many consumers.
   deploy sources.
 - **[Deploy setup](docs/deploy-setup.md)** — the one-time Snowflake objects and
   CI secrets the pipeline needs.
+- **[Auditing a visual](docs/auditing-a-visual.md)** — the five-minute runbook
+  for confirming any dashboard number against the warehouse, no code required.
+- **[Production lessons](docs/production-lessons.md)** — the incidents behind
+  the guardrails, genericized.
 - **[Distribution](docs/distribution.md)** — how StreamSnow ships (PyPI CLI +
   plugin) and why there's no separate copy-paste kit.
 - **[Migrating a consumer repo](docs/migrating-a-consumer-repo.md)** — bring a

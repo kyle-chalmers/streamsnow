@@ -36,6 +36,34 @@ Shared recipes (`_shared/playwright-walkthrough.md`, `cross-agent-review.md`,
 that used to live in several skills is now one recipe:
 [`skills/_shared/runtime-decision.md`](../skills/_shared/runtime-decision.md).
 
+## The tool map (home-grown `tools/*.py` → CLI verbs)
+
+Skills are only half of a grown repo — the other half is a `tools/` directory of
+checker scripts wired into pre-commit and CI. As of v0.6 the CLI covers the
+common ones, so a consumer repo can delete the local script and point its hooks
+at the verb:
+
+| Home-grown tool (typical name) | CLI verb | Notes |
+|---|---|---|
+| `check_schema_refs.py` | `streamsnow check schema-refs` | Denylist from `governance.*` in config, not hardcoded |
+| `check_app_security.py` | `streamsnow check security` | |
+| `check_caching.py` | `streamsnow check caching` | |
+| `check_bind_predicates.py` | `streamsnow check bind-predicates` | |
+| `check_page_imports.py` | `streamsnow check page-imports` | |
+| `check_path_leaks.py` | `streamsnow check path-leaks` | |
+| `check_dependency_vulns.py` + `osv_allowlist.json` | `streamsnow check dependency-vulns` | Same allowlist filename, discovered beside the config; `--best-effort` for pre-commit, fail-closed in CI |
+| `check_tombstones.py` + a tombstone registry | `streamsnow check tombstones` (+ `--drop-sql` in deploy) | Registry standardized at `deploy/tombstones.yml` |
+| `check_branding_parity.py` | `streamsnow check branding-parity` | Keyed on the `_BRANDING_VERSION` stamp, not file diffing |
+| a `REQUIREMENTS.md` §11 validator | `streamsnow check requirements` | Validates exactly what `/start-app` resumes from |
+| manifest/artifacts populater | `streamsnow check artifacts --fix` | Repairs `snowflake.yml` `artifacts:` from disk as a minimal edit |
+| `review_gate.py` | `streamsnow review-gate` | classify / baseline / stamp / stop-hook; the plugin's Stop hook runs the same file |
+| `review_loop.py` | `streamsnow review-loop` | parse / dedup / resolutions / exit-condition / merge |
+| a sql-review generator + manifests dir | `streamsnow sql-review` | discover / generate / check / index; manifests move into `apps/<slug>/sql_review/manifests/` |
+| an entrypoint/nav extractor | `streamsnow nav <slug>` | AST-based; JSONL or `--json-array` |
+| a background preview launcher | `streamsnow preview start\|status\|stop\|logs` | State under `.streamsnow/` (gitignored) |
+| migrate-app detection scripts | `streamsnow migrate <verb>` | preflight / scan-hardfails / translate-deps / graft-plan / scan-imports / scan-conformance / scan-inline-sql |
+| a machine-setup checker | `streamsnow doctor --json` | Per-check `{name, ok, level, detail, hint}` results |
+
 ## What stays local (and should)
 
 The plugin is deliberately generic. Keep — as small local skills or AGENTS.md notes — anything that
@@ -51,6 +79,18 @@ encodes *your* organization:
   `/audit-lineage` already flags.
 - **Company governance values** — your real database/schema/role names live in
   `streamsnow.config.yaml`, never in skills.
+- **Repo-housekeeping checks** — a `check_root_files.py` (allowlist of files
+  permitted at the repo root), a `check_agents_todos.py` (no stale TODO
+  markers in agent-instruction files), and similar hygiene scripts encode one
+  repo's tidiness rules, not the platform's. StreamSnow deliberately doesn't
+  ship them; keep them local and wired into your own pre-commit.
+- **Notification CI steps** — a Slack-webhook "deploy finished" step, a
+  tracker-comment bot, or any CI job that talks to your chat/ticketing stack.
+  The generated workflows stay side-effect-free beyond Snowflake itself; graft
+  your notify steps onto the generated `deploy.yml` after `streamsnow update
+  --apply` re-renders (they'll need re-adding when the workflow is
+  regenerated, so keep them in a small composite action or a separate
+  workflow triggered on `workflow_run`).
 
 Classify each local skill the way adopt mode does: **shadows** (the plugin covers it → delete after
 a trial run), **extends** (domain-specific variant → keep, note it in AGENTS.md), **unrelated**

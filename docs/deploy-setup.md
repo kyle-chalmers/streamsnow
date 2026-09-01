@@ -35,8 +35,17 @@ Snowflake user, and add these **repo secrets**:
 | `SNOWFLAKE_ROLE` | your `ci_role` from `streamsnow.config.yaml` |
 
 Once `SNOWFLAKE_ACCOUNT` is present, the deploy job runs on the next merge:
-it uploads `apps/` to the SHA-versioned stage and runs `CREATE OR REPLACE
-STREAMLIT` (via `streamsnow deploy-sql`) for each app.
+it uploads `apps/` to the SHA-versioned stage, runs `CREATE OR REPLACE
+STREAMLIT` (via `streamsnow deploy-sql`) for each app, reconciles the
+tombstone registry (`streamsnow check tombstones --drop-sql` — a
+`DROP STREAMLIT IF EXISTS` per entry in `deploy/tombstones.yml`, idempotent
+across re-runs, refusing if a tombstone still names a declared app), and
+verifies each app's health (`streamsnow verify-deploy`). See
+[Deploying → Retiring or renaming an app](deploying.md#retiring-or-renaming-an-app).
+
+Note that an app's `sql_review/` audit-trail directory is repo-side
+documentation for reviewers — the deployed app never reads it, and it is not
+declared in the app's `snowflake.yml` `artifacts:`.
 
 ## git-repository note
 

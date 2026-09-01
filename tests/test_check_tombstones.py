@@ -307,10 +307,7 @@ def test_drop_sql_from_wrong_cwd_fails_closed(tmp_path, monkeypatch, capsys):
     _init_repo(tmp_path)
     _tombstone(
         tmp_path,
-        "tombstones:\n"
-        f"  - identifier: {SALES_FQN}\n"
-        "    reason: retired\n"
-        "    date: 2026-08-31\n",
+        f"tombstones:\n  - identifier: {SALES_FQN}\n    reason: retired\n    date: 2026-08-31\n",
     )
     monkeypatch.chdir(tmp_path / "apps")  # apps/apps does not exist
     assert main(["--drop-sql", "--registry", str(tmp_path / "deploy" / "tombstones.yml")]) == 2

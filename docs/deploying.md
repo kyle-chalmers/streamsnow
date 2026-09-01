@@ -9,15 +9,53 @@ CI secret list, see **[Deploy setup](deploy-setup.md)**.
 
 ## How a deploy runs
 
-On merge to `main`, for each app under `apps/`, the workflow:
+On merge to `main`, the workflow:
 
 1. Authenticates to Snowflake as your `ci_role` (key-pair / JWT).
 2. Makes the app source available to Snowflake — how depends on your
    **[deploy source](#two-deploy-sources)**.
-3. Runs `CREATE OR REPLACE STREAMLIT` for the app via `streamsnow deploy-sql`.
+3. Runs `CREATE OR REPLACE STREAMLIT` for each app under `apps/` via
+   `streamsnow deploy-sql`.
+4. **Reconciles tombstones** — drops every retired identifier listed in
+   `deploy/tombstones.yml` (see
+   [Retiring or renaming an app](#retiring-or-renaming-an-app)).
+5. **Verifies deploy health** per app (`streamsnow verify-deploy`) — object
+   exists, live version set, version source matches the merge SHA, no
+   container crash-loop signature.
 
 `validate-app` is the hard gate *before* a PR merges; the deploy job assumes the
 merged code already passed it.
+
+An app's `sql_review/` directory (the paste-runnable SQL audit trail that
+`streamsnow sql-review` maintains) is a **repo-side artifact for human
+reviewers** — the running app never reads it, and the scaffolded
+`snowflake.yml` does not declare it among the app's `artifacts:`. It exists so
+someone can re-run each visual's SQL in Snowsight, not to ship.
+
+## Retiring or renaming an app
+
+The pipeline above only ever runs `CREATE OR REPLACE` — it has **no implicit
+delete path**. Renaming `apps/<a>/` to `apps/<b>/` mints a *new* object with a
+*new* URL; removing a directory just stops re-deploying the old object. Either
+way, the previously deployed STREAMLIT lives on, frozen at the last merge that
+deployed it, and `verify-deploy` flags it on every later run.
+
+The delete path is explicit and consent-based:
+
+1. In the **same PR** that renames or removes the app directory, add the
+   abandoned identifier to `deploy/tombstones.yml` (identifier, reason, date).
+   The generated CI runs `streamsnow check tombstones` and **blocks** a PR
+   that abandons an identifier without a tombstone.
+2. On the next merge, the deploy workflow's **Reconcile tombstones** step runs
+   `streamsnow check tombstones --drop-sql` and executes the emitted
+   `DROP STREAMLIT IF EXISTS <identifier>;` statements. `IF EXISTS` makes the
+   step idempotent — every deploy re-drops the registry and re-runs are
+   no-ops.
+3. Two refusals guard the DROP: a malformed registry exits before any
+   statement is emitted, and a tombstone that matches a **currently declared
+   app** makes the step fail outright — dropping it would kill the app this
+   very deploy just created (the reconcile step re-checks this itself because
+   a direct push to `main` never went through the PR check).
 
 ## Two deploy sources
 

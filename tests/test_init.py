@@ -339,3 +339,24 @@ def test_generated_workflows_pin_a_compatible_streamsnow(tmp_path):
             f"{wf} pins streamsnow{spec}, which excludes this version "
             f"({streamsnow.__version__}) — update the template pin with the release"
         )
+
+
+def test_fresh_scaffold_passes_its_own_validate_gate(tmp_path):
+    """A repo straight out of `streamsnow init` (including the auto-generated
+    sql_review companion) must pass `validate-app` — the accuracy audit caught
+    check-artifacts demanding the .review.sql be declared deployable."""
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "--config",
+            str(EXAMPLE_CONFIG),
+            "--dir",
+            str(tmp_path),
+            "--app",
+            "acme-sales-dashboard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(app, ["validate-app", "acme-sales-dashboard", "--dir", str(tmp_path)])
+    assert result.exit_code == 0, result.output
