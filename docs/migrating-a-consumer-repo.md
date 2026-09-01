@@ -6,8 +6,9 @@ equivalent, names what should stay local, and lays out an incremental path — t
 `/start-app adopt` automates ([skills/start-app/adopt.md](../skills/start-app/adopt.md) writes a
 per-repo `MIGRATION.md` from a live inventory).
 
-The worked example throughout is the upstream source repo itself: a production repo with 16 custom
-skills that predate the plugin. If that's you, the table below is your starting MIGRATION.md.
+The worked example throughout is a production repo with 16 custom skills that predate the plugin —
+the shape of the private repo you're migrating from. If that's you, the table below is your
+starting MIGRATION.md.
 
 ## The skill map (16 custom → 8 plugin)
 
@@ -23,7 +24,7 @@ skills that predate the plugin. If that's you, the table below is your starting 
 | `apply-review` | `/review-app --fix` | Same A/B/C bucketing, atomic commits |
 | `auto-review-app` | `/review-app --auto` | Same convergence loop |
 | `sql-review` | `/review-app --sql` | Same paste-and-runnable companions + lineage README |
-| `deep-dive-data` | **`/audit-lineage`** | Renamed; same bounded read-only tracing. Warehouse-specific rules (e.g. a source-system schema helper, an intermediate-layer deploy note) stay local |
+| `deep-dive-data` | **`/audit-lineage`** | Renamed; same bounded read-only tracing. Warehouse-specific rules (e.g. an environment-specific schema helper, an intermediate-layer deploy note) stay local |
 | `feedback-app` | **`/feedback-app`** | Upstreamed in v0.3 — classification buckets, per-item commits, follow-up review |
 | `preview-app` | **`/preview-app`** | Unchanged surface |
 | `validate-app` | **`/validate-app`** | The plugin's gate is `streamsnow validate-app`; a local `--pr` checklist variant is an *extends*, keep it if you use it |

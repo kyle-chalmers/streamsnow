@@ -7,9 +7,11 @@ Thanks for your interest! StreamSnow is in early, active development.
 - **One implementation, many consumers.** Validation/scaffolding logic lives in
   the `streamsnow` Python package. The CLI, the Claude Code plugin, pre-commit,
   and CI all call that same code — never fork logic into a skill or a workflow.
-- **Tools are CLI-first and structured.** Each tool is a small program with
-  `--format=md|json` output and meaningful exit codes (`0` pass, `1` finding,
-  `2` tool error). Skills shell out to them; they never embed prompt text.
+- **Tools are CLI-first and structured.** Each **governance check** tool is a
+  small program with `--format=md|json` output and meaningful exit codes
+  (`0` pass, `1` finding, `2` tool error). Other verbs use the interface that
+  fits their domain — `preview` speaks `--json`, the deploy verbs emit SQL.
+  Skills shell out to all of them; they never embed prompt text.
 - **A tool's docstring carries its rationale.** Not what the code does — why
   the check exists and the concrete failure it prevents (ideally the incident
   shape that motivated it, genericized). A future maintainer deciding whether
