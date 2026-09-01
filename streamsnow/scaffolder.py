@@ -91,6 +91,13 @@ RENDER_MAP: tuple[RenderItem, ...] = (
     RenderItem("app/config.toml.j2", "apps/{slug}/.streamlit/config.toml"),
     RenderItem("app/secrets.toml.example.j2", "apps/{slug}/.streamlit/secrets.toml.example"),
     RenderItem("app/example_metric.sql.j2", "apps/{slug}/queries/example_metric.sql"),
+    # The audit trail exists from commit 1: a starter manifest for the example
+    # query, so `sql-review generate` has something to render and the pattern
+    # is visible before the first real page lands.
+    RenderItem(
+        "app/sql_review_manifest.json.j2",
+        "apps/{slug}/sql_review/manifests/example_metric.json",
+    ),
     RenderItem("app/overview.py.j2", "apps/{slug}/pages/overview.py"),
 )
 
