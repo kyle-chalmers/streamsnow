@@ -62,7 +62,9 @@ _TERMINAL_PHASES = frozenset({"done", "in-production", "in-production (backfille
 # Section header: lenient about heading depth and the separator after "11"
 # (``## 11. Build Progress`` is canonical; hand edits drift).
 _SECTION_RE = re.compile(r"^#{1,4}\s*11[.\s].*build\s+progress.*$", re.IGNORECASE | re.MULTILINE)
-_NEXT_SECTION_RE = re.compile(r"^#{1,2}\s+\d", re.MULTILINE)
+# Matches the same heading depths _SECTION_RE accepts: a `### 12. …` heading
+# must terminate §11, or its content leaks in and satisfies a malformed §11.
+_NEXT_SECTION_RE = re.compile(r"^#{1,4}\s*\d", re.MULTILINE)
 
 _PHASE_RE = re.compile(r"\*\*Current phase:\*\*\s*(.*)$", re.IGNORECASE | re.MULTILINE)
 _SESSIONS_RE = re.compile(r"^(?:#{2,4}\s*Sessions\s*:?|\*\*Sessions:?\*\*)\s*$", re.MULTILINE)

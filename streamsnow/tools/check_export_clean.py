@@ -30,6 +30,10 @@ DENY_TERMS = [
     "example-pr-bot",
     "sonarcloud",
     "1password",
+    # Source-organization names — a pasted reference must never pass the gate.
+    "exampleorg",
+    "example org",
+    "example-org",
 ]
 # Source-domain vocabulary. StreamSnow was extracted from a source-domain
 # monorepo; the OSS release must carry ZERO domain flavor from it — not just

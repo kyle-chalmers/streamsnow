@@ -169,6 +169,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Check the local environment for the prerequisites StreamSnow needs."
     )
     ap.add_argument("--json", action="store_true", help="Emit per-check results as JSON.")
+    # The package-wide check contract is `--format md|json`; honor it here too
+    # so automation doesn't need a doctor-specific flag (--json stays an alias).
+    ap.add_argument("--format", choices=("md", "json"), default="md", dest="output_format")
     args = ap.parse_args(argv)
 
     try:
@@ -177,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"doctor: tool error: {exc}", file=sys.stderr)
         return 2
 
-    if args.json:
+    if args.json or args.output_format == "json":
         print(json.dumps({"ok": required_ok(results), "checks": results}, indent=2))
     else:
         print(render_text(results))
