@@ -89,7 +89,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..config import ConfigError, load_config, validate_fqn
+from ..config import Config, ConfigError, load_config, validate_fqn
 from ..deploy import streamlit_fqn
 
 _KIND = "tombstones"
@@ -191,6 +191,29 @@ def worktree_identifiers(cfg, apps_dir: Path) -> dict[str, str]:
     return out
 
 
+def _base_config(cfg, base_commit: str) -> tuple[Config, list[str]]:
+    """The config AS OF the base commit, for deriving what was deployed THEN.
+
+    A PR that moves ``app_database``/``app_schema`` re-derives every base FQN
+    into the NEW namespace if the current config is used on both sides — the
+    old objects silently orphan with no tombstone required. Deriving the base
+    inventory from the base commit's own config closes that. When the base
+    config is missing or unparseable (pre-adoption history, schema drift),
+    fall back to the current config with a note — a wrong-namespace nag beats
+    a silent orphan, and the note says why.
+    """
+    try:
+        raw = _git(["show", f"{base_commit}:streamsnow.config.yaml"])
+    except ToolError:
+        return cfg, ["base commit has no streamsnow.config.yaml — using current config"]
+    try:
+        import yaml as _yaml
+
+        return Config.from_dict(_yaml.safe_load(raw) or {}), []
+    except Exception as exc:  # noqa: BLE001 — fall back rather than block
+        return cfg, [f"base config unparseable ({exc}) — using current config"]
+
+
 def base_identifiers(
     cfg, base_commit: str, apps_dir: Path = Path("apps")
 ) -> tuple[dict[str, str], list[str]]:
@@ -198,23 +221,25 @@ def base_identifiers(
 
     Enumerated with ``git ls-tree`` because the identity of an app is its slug
     plus config — manifest *presence* is the marker, manifest content never
-    changes the derivation (see module docstring). A slug that is invalid at
-    base is skipped with a note rather than failing the run: it could never
-    have deployed, so it cannot have left an orphan, and blocking today's
-    change on it would be wrong.
+    changes the derivation (see module docstring). The derivation uses the
+    BASE commit's config (see :func:`_base_config`): what was deployed then is
+    a function of the config then. A slug that is invalid at base is skipped
+    with a note rather than failing the run: it could never have deployed, so
+    it cannot have left an orphan, and blocking today's change on it would be
+    wrong.
     """
+    base_cfg, notes = _base_config(cfg, base_commit)
     rel = str(apps_dir).strip("/")
     listing = _git(["ls-tree", "-r", "--name-only", base_commit, "--", f"{rel}/"])
     manifest_re = _manifest_re(apps_dir)
     out: dict[str, str] = {}
-    notes: list[str] = []
     for line in listing.splitlines():
         match = manifest_re.match(line)
         if not match:
             continue
         slug = match.group(1)
         try:
-            fqn = streamlit_fqn(cfg, slug)
+            fqn = streamlit_fqn(base_cfg, slug)
         except ValueError:
             notes.append(f"skipped {line} at base: slug {slug!r} could never have deployed")
             continue
@@ -415,6 +440,29 @@ def main(argv: list[str] | None = None) -> int:
         if errors:
             for err in errors:
                 print(f"{_KIND}: {err}", file=sys.stderr)
+            return 2
+        if not tombstones:
+            return 0  # nothing to drop — no config or live-app check needed
+        # Live-app guard: a tombstone matching a CURRENTLY DECLARED app means
+        # the deploy that just created/replaced it would drop it moments
+        # later. The PR check catches this too, but the reconcile step is the
+        # last hand on the DROP — it must refuse on its own evidence (a
+        # direct push to main never went through the PR check).
+        try:
+            cfg = load_config(args.config)
+            live = worktree_identifiers(cfg, args.apps_dir)
+        except (ConfigError, ToolError) as exc:
+            print(f"{_KIND}: cannot verify live apps before emitting DROPs: {exc}", file=sys.stderr)
+            return 2
+        conflicts = [t.identifier for t in tombstones if t.identifier.upper() in live]
+        if conflicts:
+            for ident in conflicts:
+                print(
+                    f"{_KIND}: refusing --drop-sql: tombstone {ident} is still a "
+                    f"declared app ({live[ident.upper()]}) — dropping it would kill "
+                    "the app this very deploy just created",
+                    file=sys.stderr,
+                )
             return 2
         sql = drop_sql(tombstones)
         if sql:

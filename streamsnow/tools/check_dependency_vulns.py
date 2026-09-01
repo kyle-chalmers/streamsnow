@@ -328,6 +328,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Treat an unreachable OSV API as a pass (warn, exit 0) instead of a tool "
         "error. For local pre-commit where offline must not block; CI omits it.",
     )
+    ap.add_argument(
+        "--strict-pins",
+        action="store_true",
+        help="Fail on range/bare specs instead of reporting them unscanned. The "
+        "generated CI uses this: a range pin resolves to a version OSV never saw, "
+        "so 'unscanned' must not pass a fail-closed gate.",
+    )
     args = ap.parse_args(argv)
 
     try:
@@ -350,12 +357,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
+    if args.strict_pins:
+        # Promote unscanned specs to findings: a range pin resolves to a
+        # version OSV never checked, and a fail-closed gate must not pass it.
+        for u in result["unscanned"]:
+            result["findings"].append(
+                {
+                    "file": u["file"],
+                    "detail": f"unpinned spec {u['spec']!r} cannot be scanned — pin an "
+                    "exact version (==) so OSV checks what actually deploys "
+                    "(--strict-pins)",
+                }
+            )
+        result["ok"] = not result["findings"]
+
     if args.format == "json":
         print(json.dumps(result, indent=2))
         return 0 if result["ok"] else 1
 
-    for u in result["unscanned"]:
-        print(f"note: unscanned (range pin): {u['file']}: {u['spec']}")
+    if not args.strict_pins:
+        for u in result["unscanned"]:
+            print(f"note: unscanned (range pin): {u['file']}: {u['spec']}")
     for e in result["expired"]:
         print(
             f"note: expired allowlist entry: {e.get('id')} on {e.get('package')} "

@@ -77,6 +77,7 @@ RENDER_MAP: tuple[RenderItem, ...] = (
         lambda c: c.deploy.source == "git-repository",
     ),
     RenderItem("repo/README.md.j2", "README.md"),
+    RenderItem("repo/tombstones.yml.j2", "deploy/tombstones.yml"),
     RenderItem("app/streamlit_app.py.j2", "apps/{slug}/streamlit_app.py"),
     RenderItem("app/AGENTS.md.j2", "apps/{slug}/AGENTS.md"),
     RenderItem("app/snowflake.yml.j2", "apps/{slug}/snowflake.yml"),
@@ -105,8 +106,12 @@ RENDER_MAP: tuple[RenderItem, ...] = (
 APP_ITEMS = tuple(i for i in RENDER_MAP if i.output.startswith("apps/{slug}/"))
 # Repo-level files (rendered once per repo; idempotent on re-init).
 REPO_ITEMS = tuple(i for i in RENDER_MAP if not i.output.startswith("apps/{slug}/"))
-# Governance files re-rendered by `streamsnow update` (README/.gitignore are user-owned).
-GOVERNANCE_ITEMS = tuple(i for i in REPO_ITEMS if i.output not in ("README.md", ".gitignore"))
+# Governance files re-rendered by `streamsnow update`. README/.gitignore are
+# user-owned; deploy/tombstones.yml is a REGISTRY users append to — an update
+# re-render would wipe their tombstone entries.
+GOVERNANCE_ITEMS = tuple(
+    i for i in REPO_ITEMS if i.output not in ("README.md", ".gitignore", "deploy/tombstones.yml")
+)
 
 
 def _title_from_slug(slug: str) -> str:

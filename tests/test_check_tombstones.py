@@ -198,7 +198,12 @@ def test_two_part_identifier_rejected(tmp_path):
 
 
 def test_drop_sql_output(tmp_path, monkeypatch, capsys):
+    import shutil
+
     _init_repo(tmp_path)
+    # The tombstoned apps must no longer be declared — the live-app guard
+    # refuses to emit a DROP for an app the deploy just created.
+    shutil.rmtree(tmp_path / "apps" / "acme-sales-dashboard")
     _tombstone(
         tmp_path,
         "tombstones:\n"
@@ -257,3 +262,40 @@ def test_json_format_payload(tmp_path, monkeypatch, capsys):
     assert payload["ok"] is False
     assert payload["findings"][0]["file"] == "apps/acme-sales-dashboard/snowflake.yml"
     assert SALES_FQN in payload["findings"][0]["detail"]
+
+
+def test_drop_sql_refuses_live_tombstone(tmp_path, monkeypatch, capsys):
+    """The reconcile step is the last hand on the DROP: a tombstone naming a
+    still-declared app must refuse, even though the PR check exists — a
+    direct push to main never went through it."""
+    _init_repo(tmp_path)
+    _tombstone(
+        tmp_path,
+        "tombstones:\n"
+        f"  - identifier: {SALES_FQN}\n"
+        "    reason: mistake — app is live\n"
+        "    date: 2026-08-31\n",
+    )
+    monkeypatch.chdir(tmp_path)
+    assert main(["--drop-sql"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""  # zero DROP statements rendered
+    assert "still a declared app" in captured.err
+
+
+def test_namespace_move_requires_tombstones_for_old_fqns(tmp_path, monkeypatch, capsys):
+    """A PR that changes app_database/app_schema orphans every previously
+    deployed object: the base inventory must derive from the BASE commit's
+    config, so the old FQNs demand tombstones."""
+    _init_repo(tmp_path)
+    cfg_path = tmp_path / "streamsnow.config.yaml"
+    cfg_path.write_text(
+        cfg_path.read_text()
+        .replace('app_database: "DATA_APPS"', 'app_database: "NEW_APPS"')
+        .replace('app_schema: "BI_APPS"', 'app_schema: "NEW_SCHEMA"')
+    )
+    monkeypatch.chdir(tmp_path)
+    code = main(["--base-ref", "main"])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert SALES_FQN in out  # the OLD namespace's identifier needs a tombstone
