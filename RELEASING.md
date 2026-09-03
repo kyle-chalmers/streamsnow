@@ -27,12 +27,18 @@ public or cutting the first PyPI release:
 
 1. Bump `version` in `pyproject.toml` (and note changes in `CHANGELOG.md`).
 2. Ensure `main` is green (lint-and-test, privacy-gate, wheel-smoke).
-3. Tag and push:
+3. Tag and push. Use the fully-qualified refspec:
    ```bash
    git tag v0.1.0
-   git push origin v0.1.0
+   git push origin refs/tags/v0.1.0
    ```
    The `publish` workflow builds the sdist + wheel and publishes to PyPI via OIDC.
+
+   `git push origin v0.1.0` is ambiguous and will fail if a release BRANCH of
+   the same name exists, which is the convention here (`v0.6.1`, `v0.6.2` are
+   branches as well as tags). Git refuses with "matches more than one" rather
+   than guessing, so it is a stop, not a mis-push - but it stops you mid-release.
+   `refs/tags/` names the tag unambiguously; `refs/heads/v0.1.0` pushes the branch.
 4. Create a GitHub Release from the tag with the changelog notes.
 
 ## Flip the repo public (separate, deliberate step)
