@@ -1021,6 +1021,30 @@ def test_every_quoting_form_is_masked_for_structure(sql: str, why: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("sql", "why"),
+    [
+        ("WITH x AS (SELECT $$ ) SELECT y $$) DELETE FROM t;", "dollar-quoted constant"),
+        ("WITH x AS (SELECT '\\') SELECT y') DELETE FROM t;", "backslash-escaped quote"),
+        ('WITH x AS (SELECT 1 AS "x) SELECT y") DELETE FROM t;', "delimited identifier"),
+        ("WITH x AS (SELECT ')SELECT' AS s FROM t) DELETE FROM x;", "string literal"),
+    ],
+)
+def test_masking_itself_defeats_each_bypass(sql: str, why: str) -> None:
+    """Exercise the MASKER, not just the aggregate verdict.
+
+    `_verify_read_only` now also carries a write-verb tripwire, which would
+    reject all of these even if masking regressed — so asserting only on the
+    verdict would let a masking bug pass unnoticed. These assert on the thing
+    the bypasses actually attacked: the terminal verb the CTE walker reads out
+    of masked text.
+    """
+    masked = sr._mask_strings_and_comments(sql).strip().rstrip(";").strip()
+    assert sr._with_terminal_verb(masked) != "SELECT", (
+        f"masking still lets {why} pose as a terminal SELECT"
+    )
+
+
+@pytest.mark.parametrize(
     "sql",
     [
         "SELECT $$hello$$ AS greeting FROM ANALYTICS.ORDERS;",
