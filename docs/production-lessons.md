@@ -247,7 +247,28 @@ to make the rendered copy a build product, not prose:
 
 Rendered files are also verified against a statement-root allowlist (`SELECT`
 / `WITH…SELECT` / `SHOW` / `DESCRIBE` / `EXPLAIN` / session-variable `SET`) —
-an allowlist, not a write-verb denylist, because the failure mode of a
-denylist is the statement type nobody thought of. Scope honesty: the hashes
+an allowlist rather than a write-verb denylist *as the primary guard*, because
+the failure mode of a denylist is the statement type nobody thought of.
+
+Underneath it sits a second, independent layer, added in 0.6.2 after the
+allowlist was defeated four separate times. Every one of those bypasses worked
+the same way: hide a `)` inside a quoting form the masker did not know about
+(a single-quoted string, a double-quoted identifier, a dollar-quoted constant,
+a backslash-escaped quote), so the CTE scan ended early and a trailing
+`SELECT` read as the statement's terminal verb while the engine would run the
+`DELETE`. Each individual fix was correct and the next quoting form still got
+through, which is the real lesson: an allowlist is only as good as its ability
+to find statement boundaries, and that is a parsing problem that keeps having
+one more case.
+
+So a write verb in statement-**start** position — at the beginning, or right
+after a `;` or `)` — is now refused with no parsing of its own. That is the
+exact shape every bypass produced, and it holds even when the walker is
+fooled. Note this is not the denylist the paragraph above warns against: as a
+*sole* guard a denylist fails on the verb nobody listed, but as a second layer
+under an allowlist it costs nothing and catches the parser failure. Position
+matters because most of these verbs are not Snowflake reserved words —
+`SELECT 1 AS CALL` is legal read-only SQL, and a blanket token match refused
+it. Refusing to generate a legitimate audit file is its own defect. Scope honesty: the hashes
 catch accidents and drift, not a deliberate committer — repository review
 remains the trust boundary for malicious commits.
