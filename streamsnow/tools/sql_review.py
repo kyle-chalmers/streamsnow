@@ -282,6 +282,63 @@ def _validate_metrics_manifest(m: dict, out: list[str]) -> None:
             )
 
 
+def _validate_fragments(m: dict, out: list[str]) -> None:
+    """Validate ``fragments`` entries.
+
+    A fragment declaration SUPPRESSES a coverage requirement, so a malformed
+    one must be an error rather than silently ignored — otherwise the shape
+    that looks like it works (a bare list of strings) quietly grants no
+    exemption, and a path-shaped one grants the WRONG exemption:
+    ``../../x.sql`` and ``sub/dir/x.sql`` both reduce to the stem ``x`` and
+    would exempt ``queries/x.sql``. Anything that can turn the gate off is
+    validated strictly and must name exactly one file in ``queries/``.
+    """
+    frags = m.get("fragments")
+    if frags is None:
+        return
+    if not isinstance(frags, list):
+        out.append("fragments must be a list of {file, reason} objects")
+        return
+    seen: set[str] = set()
+    for idx, entry in enumerate(frags):
+        where = f"fragments[{idx}]"
+        if not isinstance(entry, dict):
+            out.append(
+                f"{where} must be an object like "
+                '{"file": "_shared_ctes.sql", "reason": "…"} '
+                f"(got {type(entry).__name__})"
+            )
+            continue
+        fname = entry.get("file")
+        if not isinstance(fname, str) or not fname:
+            out.append(f"{where}.file is required and must be a string")
+            continue
+        if "/" in fname or "\\" in fname or fname in (".", "..") or fname.startswith("."):
+            out.append(
+                f"{where}.file {fname!r} must be a bare filename in queries/ — "
+                "no path separators and no traversal (a path would exempt a "
+                "different file than it appears to name)"
+            )
+            continue
+        if not fname.endswith(".sql"):
+            out.append(f"{where}.file {fname!r} must end in .sql")
+            continue
+        if not str(entry.get("reason", "")).strip():
+            out.append(
+                f"{where}.reason is required — a coverage exemption must record WHY "
+                "the file has no runnable companion"
+            )
+        stem = fname[: -len(".sql")]
+        if stem in seen:
+            out.append(f"{where}.file {fname!r} declared more than once")
+        seen.add(stem)
+        if stem in _referenced_queries(m):
+            out.append(
+                f"{where}.file {fname!r} is also claimed by a page — a query is either "
+                "a runnable query or an inlined fragment, not both"
+            )
+
+
 def validate_manifest(m: dict) -> list[str]:
     """Schema-validate one manifest dict. Returns problem strings (empty = ok)."""
     out: list[str] = []
@@ -293,6 +350,7 @@ def validate_manifest(m: dict) -> list[str]:
     mode = m.get("mode", "tokens")
     if mode not in ("tokens", "metrics"):
         out.append(f"mode must be 'tokens' (default) or 'metrics' (got {mode!r})")
+    _validate_fragments(m, out)
     if mode == "metrics":
         _validate_metrics_manifest(m, out)
         return out
@@ -468,7 +526,17 @@ def _var_used(name: str, body: str) -> bool:
     SET line this pruning exists to remove. So it fails toward keeping: an
     extra SET line is harmless, a missing one breaks the file.
     """
-    return re.search(r"\$" + re.escape(name) + r"\b", body, re.IGNORECASE) is not None
+    # Masked, so a `$name` occurring inside a string literal or a quoted
+    # identifier (`SELECT "$start_date"`) does not count as a use — otherwise a
+    # SET line is kept and the header promises a reference that is only text.
+    return (
+        re.search(
+            r"\$" + re.escape(name) + r"\b",
+            _mask_strings_and_comments(body),
+            re.IGNORECASE,
+        )
+        is not None
+    )
 
 
 def _set_block(manifest: dict, body: str | None = None) -> str:
@@ -544,7 +612,13 @@ def _mask_strings_and_comments(text: str) -> str:
       inside it closed the CTE scan early and the trailing ``SELECT`` was read
       as the terminal verb while Snowflake executed the ``DELETE``.
 
-    Both quote styles must therefore be masked, for structure only — this
+    * ``WITH x AS (SELECT $$ ) SELECT y $$) DELETE FROM t`` — a dollar-quoted
+      constant, which was not recognised as a quoting form at all.
+    * ``WITH x AS (SELECT '\\') SELECT y') DELETE FROM t`` — a BACKSLASH-escaped
+      quote. Snowflake accepts both ``''`` and ``\'``; only the doubling form
+      was handled, so the literal looked closed at the wrong place.
+
+    All of these must therefore be masked, for structure only — this
     function's output is never emitted, so losing identifier text is fine.
     Handles ``''`` / ``""`` escaping; an unterminated literal masks to
     end-of-text, which downstream reads as "cannot parse" → not allowed.
@@ -554,10 +628,29 @@ def _mask_strings_and_comments(text: str) -> str:
     i, n = 0, len(text)
     while i < n:
         c = text[i]
-        if c in "'\"":  # string literal, or double-quoted delimited identifier
+        if c == "$" and text[i : i + 2] == "$$":  # dollar-quoted constant
+            end = text.find("$$", i + 2)
+            end = n if end == -1 else end + 2
+            for j in range(i, end):
+                if text[j] != "\n":
+                    out[j] = " "
+            i = end
+        elif c in "'\"":  # string literal, or double-quoted delimited identifier
             quote = c
             i += 1
             while i < n:
+                # Snowflake accepts BOTH doubling ('' / "") and backslash
+                # escaping (\') inside a string literal. Missing the backslash
+                # form let `'\') SELECT y'` read as a closed literal, so the
+                # `)` escaped masking and ended the CTE scan early. Backslash
+                # is not an escape inside a double-quoted identifier, so this
+                # only applies to string literals.
+                if quote == "'" and text[i] == "\\" and i + 1 < n:
+                    for j in (i, i + 1):
+                        if text[j] != "\n":
+                            out[j] = " "
+                    i += 2
+                    continue
                 if text[i] == quote and i + 1 < n and text[i + 1] == quote:
                     out[i] = out[i + 1] = " "  # escaped quote ('' or "")
                     i += 2
@@ -643,7 +736,16 @@ def _with_terminal_verb(stmt: str) -> str:
         # list, AS, then the balanced parenthesised body.
         while i < n and stmt[i].isspace():
             i += 1
-        m = re.match(r"(?:RECURSIVE\s+)?[A-Za-z_][A-Za-z0-9_$]*", stmt[i:], re.IGNORECASE)
+        # The CTE name may be a DELIMITED identifier (`WITH "cte name" AS …`).
+        # Masking blanks its contents but keeps the quotes, so accept a quoted
+        # run here as well — otherwise the walker bails, returns "", and a
+        # perfectly valid read-only CTE is REFUSED. A false positive is a
+        # defect too: it blocks generating a legitimate audit file.
+        m = re.match(
+            r'(?:RECURSIVE\s+)?(?:"[^"]*"|[A-Za-z_][A-Za-z0-9_$]*)',
+            stmt[i:],
+            re.IGNORECASE,
+        )
         if not m:
             return ""
         i += m.end()
@@ -963,9 +1065,14 @@ def _declared_fragments(app: Path) -> dict[str, str]:
     for mp in _manifest_paths(app):
         with contextlib.suppress(ToolError):
             for entry in load_manifest(mp).get("fragments") or []:
-                if isinstance(entry, dict) and entry.get("file"):
-                    stem = Path(str(entry["file"])).stem
-                    frags[stem] = str(entry.get("reason", "")).strip()
+                if not (isinstance(entry, dict) and isinstance(entry.get("file"), str)):
+                    continue
+                fname = entry["file"]
+                # Bare filenames only — never Path().stem, which would collapse
+                # `../../x.sql` onto `queries/x.sql` and exempt the wrong file.
+                if "/" in fname or "\\" in fname or not fname.endswith(".sql"):
+                    continue
+                frags.setdefault(fname[: -len(".sql")], str(entry.get("reason", "")).strip())
     return frags
 
 
