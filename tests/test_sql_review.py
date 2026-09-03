@@ -1188,3 +1188,68 @@ def test_planted_write_in_a_committed_file_is_reported_once(
     assert _check(repo) != 0
     out = capsys.readouterr().out
     assert out.count("statement root 'DELETE' is not allowed") == 1, out
+
+
+# --------------------------------------------------------------------------- #
+# Write-verb tripwire. It fires on statement-START position, not on any token,
+# because most of these verbs are NOT Snowflake reserved words — a blanket
+# match refused legitimate read-only SQL.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "WITH x AS (SELECT 1) DELETE FROM t;",
+        'SELECT $$5" pipe$$ AS a; DELETE FROM t;',
+        "COMMENT ON TABLE t IS 'x';",
+        "UNDROP TABLE t;",
+        "TRUNCATE TABLE t;",
+        "GRANT SELECT ON t TO ROLE r;",
+    ],
+)
+def test_tripwire_catches_writes_in_statement_start_position(sql: str) -> None:
+    assert sr._verify_read_only(sql), f"write slipped through: {sql}"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # These verbs are not reserved words in Snowflake, so they are legal
+        # bare column aliases. Rejecting them refuses a valid audit file.
+        "SELECT 1 AS CALL FROM t;",
+        "SELECT 1 AS COPY FROM t;",
+        "SELECT 1 AS PUT FROM t;",
+        "SELECT 1 AS REMOVE FROM t;",
+        "SELECT 1 AS UNLOAD FROM t;",
+        "SELECT 1 AS EXECUTE FROM t;",
+        # Suffix/prefix names never match, thanks to the word boundary.
+        "SELECT CALLBACK_TS, COMPUTED_PUT_RATIO, COPY_COUNT FROM t;",
+        "SELECT LAST_VALUE(x) OVER (ORDER BY d) FROM t;",
+        # Quoted identifiers are masked before the tripwire sees them.
+        'SELECT "CREATE", "ALTER", "CALL" FROM t;',
+        # The one legal write-shaped root, already validated by the allowlist.
+        "SET start_date = CURRENT_DATE;",
+    ],
+)
+def test_tripwire_does_not_refuse_legitimate_read_only_sql(sql: str) -> None:
+    assert sr._verify_read_only(sql) == [], f"false positive on: {sql}"
+
+
+@pytest.mark.parametrize(
+    "pages",
+    [None, ["a string"], [{"name": "P"}], [{"queries": None}]],
+)
+def test_malformed_pages_with_a_valid_fragment_reports_not_crashes(pages) -> None:
+    """A shape error must not surface as a traceback just because a valid
+    fragment declaration happened to be present."""
+    m = {
+        "schema_version": 1,
+        "feature": "revenue",
+        "app": SLUG,
+        "pages": pages,
+        "query_specs": {},
+        "fragments": [{"file": "_shared.sql", "reason": "inlined"}],
+    }
+    problems = sr.validate_manifest(m)  # must not raise
+    assert problems, "malformed pages reported no problem at all"

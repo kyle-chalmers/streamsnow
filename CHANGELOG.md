@@ -34,11 +34,19 @@ never surfaces.
   passed. Dollar quotes are now consumed before `"` is treated as a delimiter.
 
   Four bypasses in one hand-rolled masker is a pattern, so there is now a
-  second, independent layer: a write verb surviving masking as a bare token is
-  refused outright, with no parsing involved. The allowlist depends on locating
-  statement boundaries correctly, and that has been defeated four times — the
-  next parser gap should not also be a pass. Verified to emit zero false
-  positives across the 30 real audit files of the adopting repo.
+  second, independent layer: a write verb in statement-START position (at the
+  beginning, or right after a `;` or `)`) is refused with no parsing of its
+  own. That is the shape every bypass produced — the verb surfacing after a
+  mis-parsed CTE close — and it holds even when the walker is fooled. The
+  allowlist depends on locating statement boundaries correctly and that has
+  been defeated four times; the next parser gap should not also be a pass.
+
+  Position, not bare tokens: most of these verbs are **not** Snowflake reserved
+  words, so `SELECT 1 AS CALL`, `AS COPY`, `AS PUT`, `AS REMOVE`, `AS UNLOAD`
+  and `AS EXECUTE` are all legal read-only SQL that a blanket token match
+  rejected. Refusing to generate a legitimate audit file is its own defect.
+  `COMMENT` and `UNDROP` are covered too. Zero false positives across the 30
+  real audit files of the adopting repo.
 - **Unsubstituted binds could ship in a rendered file.** A manifest declaring
   only `:1`/`:2` for a query that also uses `:3` emitted seven live
   `AND col <= :3` predicates. Every existing gate passed it: the allowlist
