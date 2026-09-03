@@ -998,3 +998,99 @@ def test_set_block_note_renders_above_the_set_lines(repo: Path) -> None:
     note_at = text.index("Bounds derive")
     set_at = text.index("SET start_date")
     assert note_at < set_at, "note must precede the SET lines it explains"
+
+
+# --------------------------------------------------------------------------- #
+# Masking: every Snowflake quoting form. Four bypasses of the same shape have
+# now been found (single-quote, double-quote, dollar-quote, backslash escape),
+# so each is pinned in BOTH directions.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("sql", "why"),
+    [
+        ("WITH x AS (SELECT $$ ) SELECT y $$) DELETE FROM t;", "dollar-quoted constant"),
+        ("WITH x AS (SELECT '\\') SELECT y') DELETE FROM t;", "backslash-escaped quote"),
+        ('WITH x AS (SELECT 1 AS "x) SELECT y") DELETE FROM t;', "delimited identifier"),
+        ("WITH x AS (SELECT ')SELECT' AS s FROM t) DELETE FROM x;", "string literal"),
+    ],
+)
+def test_every_quoting_form_is_masked_for_structure(sql: str, why: str) -> None:
+    assert sr._verify_read_only(sql), f"bypass via {why}"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT $$hello$$ AS greeting FROM ANALYTICS.ORDERS;",
+        "SELECT 'it\\'s fine' FROM ANALYTICS.ORDERS;",
+        # A delimited CTE name is legal Snowflake; refusing it would block
+        # generating a legitimate audit file, which is also a defect.
+        'WITH "cte name" AS (SELECT 1) SELECT * FROM "cte name";',
+        'WITH RECURSIVE "r" AS (SELECT 1) SELECT * FROM "r";',
+    ],
+)
+def test_masking_does_not_reject_legitimate_sql(sql: str) -> None:
+    assert sr._verify_read_only(sql) == [], f"false positive on: {sql}"
+
+
+def test_var_used_ignores_quoted_and_string_occurrences() -> None:
+    """`SELECT "$start_date"` is an identifier, not a variable reference."""
+    assert not sr._var_used("start_date", 'SELECT "$start_date" FROM t')
+    assert not sr._var_used("start_date", "SELECT '$start_date' FROM t")
+    assert sr._var_used("start_date", "WHERE d >= $start_date")
+
+
+# --------------------------------------------------------------------------- #
+# Fragment declarations suppress a coverage requirement, so a malformed one is
+# an error, never silently ignored — and must never exempt a different file
+# than it appears to name.
+# --------------------------------------------------------------------------- #
+
+
+_FRAG_BASE = {
+    "schema_version": 1,
+    "feature": "revenue",
+    "app": SLUG,
+    "pages": [{"name": "Overview", "queries": ["revenue_daily"]}],
+    "query_specs": {"revenue_daily": {}},
+}
+
+
+@pytest.mark.parametrize(
+    ("fragments", "why"),
+    [
+        (["_x.sql"], "plain string grants no exemption but looks like it does"),
+        ([{"file": "sub/dir/_x.sql", "reason": "r"}], "path exempts a different file"),
+        ([{"file": "../../_x.sql", "reason": "r"}], "traversal exempts a different file"),
+        ([{"file": "_x.sql"}], "no reason recorded"),
+        ([{"file": "_x.sql", "reason": "a"}, {"file": "_x.sql", "reason": "b"}], "duplicate"),
+        ([{"file": "revenue_daily.sql", "reason": "r"}], "also claimed by a page"),
+        ([{"file": "_x.txt", "reason": "r"}], "not a .sql file"),
+        ({"file": "_x.sql"}, "not a list"),
+    ],
+)
+def test_malformed_fragment_declaration_is_rejected(fragments, why: str) -> None:
+    m = {**_FRAG_BASE, "fragments": fragments}
+    assert [p for p in sr.validate_manifest(m) if "fragment" in p], f"accepted: {why}"
+
+
+def test_wellformed_fragment_declaration_is_accepted() -> None:
+    m = {**_FRAG_BASE, "fragments": [{"file": "_shared.sql", "reason": "inlined via a token"}]}
+    assert [p for p in sr.validate_manifest(m) if "fragment" in p] == []
+
+
+def test_path_shaped_fragment_cannot_exempt_a_real_query(repo: Path) -> None:
+    """The traversal form must not silence coverage for `queries/_x.sql`."""
+    (repo / "apps" / SLUG / "queries" / "_x.sql").write_text(
+        "-- Query: _x\n-- Feeds: (fragment)\n-- Schemas: ANALYTICS.ORDERS\nSELECT 1\n"
+    )
+    manifest = dict(MANIFEST)
+    manifest["fragments"] = [{"file": "../../_x.sql", "reason": "r"}]
+    (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
+        json.dumps(manifest, indent=2)
+    )
+    cov = sr.coverage(repo / "apps" / SLUG)
+    assert "_x" in cov["uncovered"], "traversal path silenced coverage"
+    assert cov["fragments"] == []

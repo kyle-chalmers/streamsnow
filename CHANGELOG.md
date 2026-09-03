@@ -16,10 +16,17 @@ never surfaces.
   left it alone — and `WITH x AS (SELECT 1 AS "x) SELECT y") DELETE FROM t`
   passed `_verify_read_only` clean, because the `)` inside the identifier ended
   the CTE scan early and the trailing `SELECT` read as the terminal verb while
-  Snowflake would execute the `DELETE`. Both quote styles are now masked for
-  structural analysis (with `""` escaping). This is the same shape as the
-  single-quote bypass fixed in 0.6.0; cases for both directions of both quote
-  styles are now pinned in tests.
+  Snowflake would execute the `DELETE`. A second review round found two more quoting
+  forms with the same hole: **dollar-quoted constants** (`$$ ) SELECT y $$`),
+  which were not recognised as a quoting form at all, and **backslash-escaped
+  quotes** (`'\')`) — Snowflake accepts both `''` and `\'`, but only the
+  doubling form was handled. All four quoting forms are now masked for
+  structural analysis, and each is pinned in both directions.
+
+  Masking identifiers also introduced a false *positive*: a legal delimited CTE
+  name (`WITH "cte name" AS (SELECT 1) SELECT …`) made the CTE walker bail and
+  the file be refused. Refusing to generate a legitimate audit file is a defect
+  too, so the walker now accepts a quoted CTE name.
 - **Unsubstituted binds could ship in a rendered file.** A manifest declaring
   only `:1`/`:2` for a query that also uses `:3` emitted seven live
   `AND col <= :3` predicates. Every existing gate passed it: the allowlist
@@ -38,6 +45,13 @@ never surfaces.
   omitted entirely when none survive, and the header describes what was really
   emitted.
 
+  Two follow-on fixes to that pruning: variable matching is **case-insensitive**
+  because Snowflake identifiers are (`$START_DATE` is `$start_date`, and
+  matching case-sensitively would prune a SET line that IS used, leaving a
+  dangling reference — a worse failure than the unused line the pruning
+  removes); and it reads masked text, so a `$name` inside a string literal or a
+  quoted identifier no longer counts as a reference.
+
 ### Added
 
 - **`fragments` manifest field** — declares a `queries/*.sql` that is a shared
@@ -47,6 +61,14 @@ never surfaces.
   from a filename, so it cannot be used to silence the gate by renaming; a
   declaration whose file no longer exists is itself a finding, and the `reason`
   renders into the README index.
+
+  Because a fragment declaration *suppresses* a gate, its shape is validated
+  strictly rather than best-effort: a bare list of strings (the form that looks
+  like it works) is an error instead of a silent no-op, `file` must name exactly
+  one file in `queries/` with no path separators or traversal (`../../x.sql`
+  would otherwise reduce to a stem and exempt a different file), `reason` is
+  mandatory, duplicates are rejected, and a query that is both page-claimed and
+  declared a fragment is a contradiction rather than a silent last-wins.
 - **`set_block_note` manifest field** — renders the rationale for the defaults
   (which source the bounds derive from, why that source and not the calendar,
   mechanics that bite when editing them) inline above the SET lines, where the
