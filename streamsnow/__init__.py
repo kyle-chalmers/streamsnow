@@ -16,4 +16,4 @@ try:  # pragma: no cover - trivial
 
     __version__ = _version("streamsnow")
 except Exception:  # pragma: no cover - source checkout without install
-    __version__ = "0.6.1"
+    __version__ = "0.6.2"

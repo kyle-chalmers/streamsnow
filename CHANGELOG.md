@@ -3,6 +3,55 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [0.6.2] - 2026-09-03
+
+Everything here came out of adopting 0.6.1 on a real 5-app repo with 231
+queries and 28 existing audit manifests — the failures a greenfield scaffold
+never surfaces.
+
+### Fixed
+
+- **Read-only guard bypass via double-quoted identifiers** (security). Snowflake
+  treats `"…"` as a delimited identifier rather than a string, so the masker
+  left it alone — and `WITH x AS (SELECT 1 AS "x) SELECT y") DELETE FROM t`
+  passed `_verify_read_only` clean, because the `)` inside the identifier ended
+  the CTE scan early and the trailing `SELECT` read as the terminal verb while
+  Snowflake would execute the `DELETE`. Both quote styles are now masked for
+  structural analysis (with `""` escaping). This is the same shape as the
+  single-quote bypass fixed in 0.6.0; cases for both directions of both quote
+  styles are now pinned in tests.
+- **Unsubstituted binds could ship in a rendered file.** A manifest declaring
+  only `:1`/`:2` for a query that also uses `:3` emitted seven live
+  `AND col <= :3` predicates. Every existing gate passed it: the allowlist
+  checks statement roots, provenance checks input hashes, coverage checks
+  claims — none asks whether the output *runs*. `generate` now refuses to write
+  a file with a surviving `:N`, and `check` additionally audits the committed
+  bytes (still import-free), so a hand-edited or pre-guard file is caught
+  without regenerating. `Params:` banner comments stay exempt by construction.
+- **SET blocks that promised a review window they did not control.** Three
+  files declared `start_date`/`end_date`, referenced them zero times (their
+  queries self-anchor on `CURRENT_DATE`/`DATE_TRUNC`), and carried a header
+  telling the reviewer to edit those lines to change the window. The reviewer
+  edits, reruns, gets byte-identical numbers, and signs off believing the
+  window applied — a confidently wrong verification, which is worse than no SET
+  block. The block is now pruned to the variables the body actually references,
+  omitted entirely when none survive, and the header describes what was really
+  emitted.
+
+### Added
+
+- **`fragments` manifest field** — declares a `queries/*.sql` that is a shared
+  CTE inlined via a token and therefore not independently runnable, exempting
+  it from coverage. Without this the gate is unsatisfiable for any repo that
+  factors CTEs into their own files. Exemption is explicit and never inferred
+  from a filename, so it cannot be used to silence the gate by renaming; a
+  declaration whose file no longer exists is itself a finding, and the `reason`
+  renders into the README index.
+- **`set_block_note` manifest field** — renders the rationale for the defaults
+  (which source the bounds derive from, why that source and not the calendar,
+  mechanics that bite when editing them) inline above the SET lines, where the
+  auditor actually reads it.
+
 ## [0.6.1] - 2026-09-01
 
 ### Added
