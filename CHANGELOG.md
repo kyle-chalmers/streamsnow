@@ -27,6 +27,18 @@ never surfaces.
   name (`WITH "cte name" AS (SELECT 1) SELECT …`) made the CTE walker bail and
   the file be refused. Refusing to generate a legitimate audit file is a defect
   too, so the walker now accepts a quoted CTE name.
+
+  It briefly introduced a **regression**, too: an odd `"` inside a `$$…$$`
+  constant (`SELECT $$5" pipe$$ AS a; DELETE FROM t;`) masked to end-of-text and
+  hid every following statement, turning a write 0.6.1 *caught* into one that
+  passed. Dollar quotes are now consumed before `"` is treated as a delimiter.
+
+  Four bypasses in one hand-rolled masker is a pattern, so there is now a
+  second, independent layer: a write verb surviving masking as a bare token is
+  refused outright, with no parsing involved. The allowlist depends on locating
+  statement boundaries correctly, and that has been defeated four times — the
+  next parser gap should not also be a pass. Verified to emit zero false
+  positives across the 30 real audit files of the adopting repo.
 - **Unsubstituted binds could ship in a rendered file.** A manifest declaring
   only `:1`/`:2` for a query that also uses `:3` emitted seven live
   `AND col <= :3` predicates. Every existing gate passed it: the allowlist
