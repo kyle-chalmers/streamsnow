@@ -336,7 +336,14 @@ def _validate_fragments(m: dict, out: list[str]) -> None:
         if stem in seen:
             out.append(f"{where}.file {fname!r} declared more than once")
         seen.add(stem)
-        if stem in _referenced_queries(m):
+        try:
+            claimed = _referenced_queries(m)
+        except (AttributeError, TypeError):
+            # `pages` is malformed; the page validators below report that
+            # properly. Bailing here keeps a shape error from surfacing as a
+            # traceback just because a valid fragment happened to be declared.
+            claimed = set()
+        if stem in claimed:
             out.append(
                 f"{where}.file {fname!r} is also claimed by a page — a query is either "
                 "a runnable query or an inlined fragment, not both"
@@ -799,13 +806,19 @@ def _with_terminal_verb(stmt: str) -> str:
 # bypasses have been found in this module (single-quote, double-quote,
 # dollar-quote, backslash escape), every one of which worked by making the
 # structural parser mis-read where a statement began or ended. A recurring
-# class like that says the next parser gap should not also be a pass, so a
-# write verb appearing as a bare token ANYWHERE in masked text is refused
-# outright — no parsing required, and it holds even if the walker is fooled.
-# Masking means a verb inside a string, comment or quoted identifier is
-# already invisible here, and token boundaries keep `deleted_rows` /
-# `update_ts` / `merged_at` legal. Verified emitting zero false positives
-# across the 30 real audit files of the adopting repo.
+# class like that says the next parser gap should not also be a pass.
+#
+# The tripwire fires on a write verb sitting in STATEMENT-START position in
+# masked text — at the beginning, or right after a `;` or a `)`. That is
+# exactly the shape every bypass produced (the verb surfaced after a
+# mis-parsed CTE close), and it needs no parse of its own.
+#
+# Position matters because most of these verbs are NOT Snowflake reserved
+# words: `SELECT 1 AS CALL`, `AS COPY`, `AS PUT`, `AS REMOVE`, `AS UNLOAD` and
+# `AS EXECUTE` are all legal read-only SQL. A blanket token match rejected
+# them, and refusing to generate a legitimate audit file is its own defect.
+# Suffix names (`CALLBACK_TS`, `COPY_COUNT`, `COMPUTED_PUT_RATIO`) never match
+# anyway, because of the word boundary, and quoted identifiers are masked.
 _WRITE_VERBS = (
     "INSERT",
     "UPDATE",
@@ -813,10 +826,12 @@ _WRITE_VERBS = (
     "MERGE",
     "TRUNCATE",
     "DROP",
+    "UNDROP",
     "ALTER",
     "CREATE",
     "GRANT",
     "REVOKE",
+    "COMMENT",
     "COPY",
     "PUT",
     "REMOVE",
@@ -824,8 +839,13 @@ _WRITE_VERBS = (
     "CALL",
     "EXECUTE",
     "UNSET",
+    "SET",
 )
-_WRITE_VERB_RE = re.compile(r"\b(" + "|".join(_WRITE_VERBS) + r")\b", re.IGNORECASE)
+# `(?<=[;)])` / start-of-text, allowing whitespace between.
+_WRITE_VERB_RE = re.compile(
+    r"(?:(?<=;)|(?<=\))|\A)\s*(" + "|".join(_WRITE_VERBS) + r")\b",
+    re.IGNORECASE,
+)
 
 
 def _verify_read_only(text: str) -> list[str]:
@@ -844,13 +864,19 @@ def _verify_read_only(text: str) -> list[str]:
     """
     problems: list[str] = []
     masked_all = _mask_strings_and_comments(text)
-    for lineno, line in enumerate(masked_all.splitlines(), start=1):
-        for m in _WRITE_VERB_RE.finditer(line):
-            problems.append(
-                f"line {lineno}: write verb {m.group(1).upper()!r} present in review SQL — "
-                "audit files are read-only; if this is a false positive the verb is being "
-                "used as an identifier and should be quoted"
-            )
+    for stmt in _split_statements(masked_all):
+        m = _WRITE_VERB_RE.search(stmt)
+        if not m:
+            continue
+        verb = m.group(1).upper()
+        # `SET <var> = <expr>;` is the one legal write-shaped root here, and the
+        # allowlist already validates its exact form; don't double-report it.
+        if verb == "SET" and _SET_STMT_RE.match(stmt):
+            continue
+        problems.append(
+            f"write verb {verb!r} in statement-start position — audit files are "
+            "read-only. If this is an identifier rather than a command, quote it."
+        )
     for line in text.splitlines():
         if line.lstrip().startswith("-- Provenance:"):
             problems.append("a review body line may not start with '-- Provenance:'")
