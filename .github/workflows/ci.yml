@@ -96,8 +96,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
+      # Pinned deliberately: this step executes the package, and its lifecycle scripts,
+      # inside CI. An unpinned "npm install -g" lets an upstream release change what runs
+      # here without review. Bump this together with the version check below.
+      - name: Install Claude Code CLI 2.1.258 (pinned)
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.258
+          installed="$(claude --version)"
+          case "$installed" in
+            2.1.258*) echo "claude $installed" ;;
+            *) echo "::error::Expected claude 2.1.258, got '$installed'"; exit 1 ;;
+          esac
 
       # This repo is BOTH a plugin and a single-plugin marketplace. A root-directory target
       # resolves to marketplace.json in preference to plugin.json and never reads skills or
