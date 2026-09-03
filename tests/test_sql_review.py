@@ -728,6 +728,35 @@ def test_var_used_is_word_boundary_anchored() -> None:
     assert not sr._var_used("start_date", "WHERE d >= $startdate")
 
 
+def test_var_used_is_case_insensitive_like_snowflake_identifiers() -> None:
+    """`$START_DATE` is the SAME variable as `$start_date`.
+
+    Matching case-sensitively would prune a SET line that is actually used,
+    leaving a dangling `$START_DATE` that errors on paste — worse than the
+    unused SET line the pruning exists to remove.
+    """
+    assert sr._var_used("start_date", "WHERE d >= $START_DATE")
+    assert sr._var_used("start_date", "WHERE d >= $Start_Date")
+
+
+def test_uppercase_reference_keeps_its_set_line(repo: Path) -> None:
+    """End-to-end: an uppercase reference must not lose its SET line."""
+    q = (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").read_text()
+    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(
+        q.replace("BETWEEN :1 AND :2", "BETWEEN :1 AND :2").replace(
+            "WHERE order_date", "WHERE order_date"
+        )
+    )
+    assert _generate(repo) == 0
+    rf = _review_file(repo)
+    # Force the emitted body to reference the variable in upper case, as a
+    # hand-authored metrics source legitimately might.
+    rf.write_text(rf.read_text().replace("$start_date", "$START_DATE"))
+    text = rf.read_text()
+    body = "\n".join(ln for ln in text.splitlines() if not ln.startswith("SET "))
+    assert sr._var_used("start_date", body), "uppercase use went undetected"
+
+
 def test_metrics_mode_also_prunes_unused_set_block(tmp_path: Path) -> None:
     """Metrics mode shares the pruning path — and keeps its dashboard map."""
     root = tmp_path / "repo"

@@ -460,9 +460,15 @@ def _banner(title: str, sublines: list[str]) -> str:
 def _var_used(name: str, body: str) -> bool:
     """Is session variable ``name`` actually referenced in the rendered body?
 
-    Word-boundary anchored so ``$start_date`` is not matched by ``$start_date_x``.
+    Word-boundary anchored so ``$start_date`` is not matched by
+    ``$start_date_x``, and CASE-INSENSITIVE because Snowflake identifiers are:
+    ``$START_DATE`` and ``$start_date`` are the same variable. Matching
+    case-sensitively here would prune a SET line that IS used, leaving a
+    dangling reference that errors on paste — a worse failure than the unused
+    SET line this pruning exists to remove. So it fails toward keeping: an
+    extra SET line is harmless, a missing one breaks the file.
     """
-    return re.search(r"\$" + re.escape(name) + r"\b", body) is not None
+    return re.search(r"\$" + re.escape(name) + r"\b", body, re.IGNORECASE) is not None
 
 
 def _set_block(manifest: dict, body: str | None = None) -> str:
