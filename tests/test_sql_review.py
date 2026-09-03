@@ -703,7 +703,7 @@ def test_no_set_block_when_queries_self_anchor(repo: Path) -> None:
     # And the header must not promise an editable window that does not exist.
     assert "edit the SET lines once to apply new values" not in text
     assert "No SET block" in text
-    assert "self-anchors" in text
+    assert "bounds its own range" in text
 
 
 def test_set_block_pruned_to_referenced_vars_only(repo: Path) -> None:
@@ -1094,3 +1094,73 @@ def test_path_shaped_fragment_cannot_exempt_a_real_query(repo: Path) -> None:
     cov = sr.coverage(repo / "apps" / SLUG)
     assert "_x" in cov["uncovered"], "traversal path silenced coverage"
     assert cov["fragments"] == []
+
+
+# --------------------------------------------------------------------------- #
+# Second-round review findings.
+# --------------------------------------------------------------------------- #
+
+
+def test_dollar_quote_masking_does_not_regress_the_double_quote_fix() -> None:
+    """An odd `"` inside `$$…$$` must not blind the guard to later statements.
+
+    Making `"` a delimiter without teaching the masker about `$$` turned a
+    write that 0.6.1 CAUGHT into one that passed: the unbalanced quote masked
+    to end-of-text and hid every following statement.
+    """
+    sql = 'SELECT $$5" pipe$$ AS a; DELETE FROM t;'
+    assert sr._verify_read_only(sql), "dollar-quote/double-quote interaction regressed"
+    # It must also not hide a surviving bind on a later line.
+    sql2 = 'SELECT $$5" pipe$$ AS a;\nSELECT b FROM t WHERE d <= :3;\n'
+    assert sr._verify_binds_bound(sql2), "unbalanced quote hid a live bind"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT $$refreshes at 12:30 UTC$$ AS note FROM t;",
+        "SELECT $$see http://host:8080/x$$ AS url FROM t;",
+        # Snowflake semi-structured access with a numeric key is not a bind.
+        "SELECT payload:1 FROM t;",
+        "SELECT b:2 FROM t;",
+        "SELECT 1::INT FROM t;",
+    ],
+)
+def test_bind_check_does_not_falsely_refuse_valid_sql(sql: str) -> None:
+    """A false positive here refuses to generate a legitimate audit file, and
+    the remedy the message prescribes cannot fix it."""
+    assert sr._verify_binds_bound(sql) == [], f"false positive on: {sql}"
+
+
+def test_no_set_block_header_claims_only_what_it_verified() -> None:
+    """The header must not assert HOW a section bounds itself.
+
+    `_bind_note` never inspects the query, so claiming the sections
+    self-anchor on CURRENT_DATE / DATE_TRUNC / DATEADD is unverified — and a
+    body using hardcoded literal dates would make it false. That is the same
+    species of misdescription the SET pruning exists to remove.
+    """
+    lines = " ".join(sr._bind_note(False))
+    assert "bind param" in lines and "session" in lines
+    for unverified in ("CURRENT_DATE", "DATE_TRUNC", "DATEADD"):
+        assert unverified not in lines, f"header asserts unverified {unverified}"
+
+
+def test_non_string_set_block_note_is_a_validation_error_not_a_traceback() -> None:
+    m = {"schema_version": 1, "feature": "revenue", "app": SLUG, "set_block_note": ["a", "list"]}
+    assert [p for p in sr.validate_manifest(m) if "set_block_note" in p]
+    # And rendering must degrade rather than raise, if validation is bypassed.
+    out = sr._set_block({"set_block": {"d": "CURRENT_DATE"}, "set_block_note": ["a"]}, "x $d")
+    assert "SET d = CURRENT_DATE;" in out
+
+
+def test_planted_write_in_a_committed_file_is_reported_once(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """One defect, one finding — duplicates bury the real one."""
+    assert _generate(repo) == 0
+    rf = _review_file(repo)
+    rf.write_text(rf.read_text().replace("-- Provenance:", "DELETE FROM t;\n-- Provenance:", 1))
+    assert _check(repo) != 0
+    out = capsys.readouterr().out
+    assert out.count("statement root 'DELETE' is not allowed") == 1, out

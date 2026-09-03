@@ -159,7 +159,11 @@ _GENERATED_RE = re.compile(r"^-- Generated: \d{4}-\d{2}-\d{2} by streamsnow sql-
 
 _HEADER_FIELD_RE = re.compile(r"^--\s*(Query|Feeds|Schemas|Params|Tokens):\s*(.*)$")
 _TOKEN_RE = re.compile(r"\{([A-Z][A-Z0-9_]*)\}")
-_BIND_RE = re.compile(r"(?<!:):(\d+)\b")  # skip :: casts; word-boundary right
+# A bind marker is `:N` in an operand position, so it never directly follows an
+# identifier character. Requiring that excludes `::` casts AND Snowflake
+# semi-structured access with a numeric key (`payload:1`), which would otherwise
+# read as a surviving bind and refuse to generate a perfectly valid file.
+_BIND_RE = re.compile(r"(?<![:\w\"$]):(\d+)\b")
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _FEATURE_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
@@ -350,6 +354,9 @@ def validate_manifest(m: dict) -> list[str]:
     mode = m.get("mode", "tokens")
     if mode not in ("tokens", "metrics"):
         out.append(f"mode must be 'tokens' (default) or 'metrics' (got {mode!r})")
+    note = m.get("set_block_note")
+    if note is not None and not isinstance(note, str):
+        out.append(f"set_block_note must be a string (got {type(note).__name__})")
     _validate_fragments(m, out)
     if mode == "metrics":
         _validate_metrics_manifest(m, out)
@@ -575,7 +582,8 @@ def _set_block(manifest: dict, body: str | None = None) -> str:
     # difference between an auditor reproducing the page and an auditor
     # reproducing a number that merely looks plausible, so it renders inline
     # rather than living in a manifest nobody opens.
-    note = (manifest.get("set_block_note") or "").strip()
+    raw_note = manifest.get("set_block_note") or ""
+    note = raw_note.strip() if isinstance(raw_note, str) else ""
     if note:
         intro += [f"-- {line}" for line in textwrap.wrap(note, width=94)]
     return "\n".join([*intro, *emitted])
@@ -588,10 +596,15 @@ def _bind_note(has_set_block: bool) -> list[str]:
             "Bind params are replaced with session variables (see the SET block);",
             "edit the SET lines once to apply new values across every section.",
         ]
+    # Claim ONLY what emitting no SET block actually proves: no bind params and
+    # no session variables. HOW each section bounds itself is a property of the
+    # query, which this function never inspected — asserting "self-anchors on
+    # CURRENT_DATE / DATE_TRUNC / DATEADD" is the same species of misdescription
+    # the pruning exists to remove (the body might use hardcoded literal dates).
     return [
-        "No SET block: every section below self-anchors its own date range",
-        "internally (CURRENT_DATE / DATE_TRUNC / DATEADD) and takes no bind params,",
-        "so there is no review window to edit here — change the query to change it.",
+        "No SET block: no section below takes a bind param or references a session",
+        "variable, so there is no shared review window to edit here. Each section",
+        "bounds its own range — read the query to see how, and edit it to change it.",
     ]
 
 
@@ -782,16 +795,62 @@ def _with_terminal_verb(stmt: str) -> str:
         return m.group(0).upper() if m else ""
 
 
+# Second, independent layer under the statement-root allowlist. Four masking
+# bypasses have been found in this module (single-quote, double-quote,
+# dollar-quote, backslash escape), every one of which worked by making the
+# structural parser mis-read where a statement began or ended. A recurring
+# class like that says the next parser gap should not also be a pass, so a
+# write verb appearing as a bare token ANYWHERE in masked text is refused
+# outright — no parsing required, and it holds even if the walker is fooled.
+# Masking means a verb inside a string, comment or quoted identifier is
+# already invisible here, and token boundaries keep `deleted_rows` /
+# `update_ts` / `merged_at` legal. Verified emitting zero false positives
+# across the 30 real audit files of the adopting repo.
+_WRITE_VERBS = (
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "MERGE",
+    "TRUNCATE",
+    "DROP",
+    "ALTER",
+    "CREATE",
+    "GRANT",
+    "REVOKE",
+    "COPY",
+    "PUT",
+    "REMOVE",
+    "UNLOAD",
+    "CALL",
+    "EXECUTE",
+    "UNSET",
+)
+_WRITE_VERB_RE = re.compile(r"\b(" + "|".join(_WRITE_VERBS) + r")\b", re.IGNORECASE)
+
+
 def _verify_read_only(text: str) -> list[str]:
-    """Statement-root allowlist over the whole rendered file.
+    """Statement-root allowlist, plus a write-verb tripwire, over the file.
 
     ``WITH`` is only allowed when its terminal statement is a ``SELECT`` —
     a CTE can prefix DELETE/INSERT/UPDATE/MERGE, so the root alone proves
     nothing. Body lines that look like a provenance record are also refused:
     the check verb trusts exactly one final provenance line, so a template
     must never be able to plant a second.
+
+    Defence in depth: the allowlist depends on parsing statement boundaries
+    correctly, and that parsing has been defeated four times. So a write verb
+    surviving masking as a bare token is refused independently of any parse
+    (see ``_WRITE_VERBS``).
     """
     problems: list[str] = []
+    masked_all = _mask_strings_and_comments(text)
+    for lineno, line in enumerate(masked_all.splitlines(), start=1):
+        for m in _WRITE_VERB_RE.finditer(line):
+            problems.append(
+                f"line {lineno}: write verb {m.group(1).upper()!r} present in review SQL — "
+                "audit files are read-only; if this is a false positive the verb is being "
+                "used as an identifier and should be quoted"
+            )
     for line in text.splitlines():
         if line.lstrip().startswith("-- Provenance:"):
             problems.append("a review body line may not start with '-- Provenance:'")
@@ -1371,11 +1430,16 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
                 raw = rf.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue  # unreadable files are reported by the provenance pass
-            # Strip the trailing provenance line before re-running the write
-            # guard: that guard rejects a `-- Provenance:` line anywhere but
-            # last, and a committed file legitimately ends with one.
-            body = "\n".join(ln for ln in raw.splitlines() if not ln.startswith("-- Provenance: "))
-            for detail in _verify_binds_bound(body) + _verify_read_only(body):
+            # Strip the trailing provenance line first: the write guard rejects
+            # a `-- Provenance:` line anywhere but last, and a committed file
+            # legitimately ends with one. Same predicate as parse_provenance.
+            body = "\n".join(
+                ln for ln in raw.splitlines() if not ln.rstrip("\r").startswith("-- Provenance: ")
+            )
+            # Only the bind audit here. The read-only allowlist already runs over
+            # committed bodies in the provenance pass below; re-running it made
+            # one planted DELETE report three times, which buries a real finding.
+            for detail in _verify_binds_bound(body):
                 findings.append(
                     {
                         "file": f"apps/{app.name}/sql_review/{rf.name}",
