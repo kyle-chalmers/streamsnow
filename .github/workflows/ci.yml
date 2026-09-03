@@ -72,11 +72,75 @@ jobs:
           # from cwd) — proves the wheel ships templates AND the check works.
           cd /tmp/wheel-init && /tmp/wheelenv/bin/streamsnow check schema-refs apps
 
+      # The sdist is only built at release time by publish.yml, so its contents were never
+      # checked until the moment they shipped. The plugin-validate negative control relies on
+      # an sdist exclude (pyproject: tool.hatch.build.targets.sdist), and a changed glob or a
+      # hatchling behaviour change would otherwise surface as a published tarball containing
+      # a deliberately malformed SKILL.md.
+      - name: Sdist excludes the negative-control fixture
+        run: |
+          set -euo pipefail
+          uv build --sdist
+          sdist="$(ls dist/*.tar.gz)"
+          if tar -tzf "$sdist" | grep -q 'plugin-validate-negative'; then
+            echo "::error::The negative-control fixture leaked into the sdist."
+            tar -tzf "$sdist" | grep 'plugin-validate-negative'
+            exit 1
+          fi
+          # Guard the guard: if tests/ stopped shipping entirely the grep above would also
+          # pass, and the exclude would look effective while proving nothing.
+          tar -tzf "$sdist" | grep -q '/tests/'
+          echo "sdist OK: fixture excluded, tests/ still present."
+
   plugin-validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
-      - name: Plugin + marketplace manifest validation (strict)
-        run: claude plugin validate . --strict
+
+      # This repo is BOTH a plugin and a single-plugin marketplace. A root-directory target
+      # resolves to marketplace.json in preference to plugin.json and never reads skills or
+      # hooks, so the old "claude plugin validate . --strict" passed even with a garbage
+      # SKILL.md. There is no flag to force plugin mode -- name each manifest explicitly.
+      - name: Marketplace manifest (strict)
+        run: claude plugin validate .claude-plugin/marketplace.json --strict
+
+      - name: Plugin manifest + skills + hooks (strict)
+        run: claude plugin validate .claude-plugin/plugin.json --strict
+
+      # Negative control: if this ever passes, the gate above has stopped reading skill
+      # content and every green tick on it is meaningless. Runs against a throwaway tree.
+      - name: "Negative control: corrupt skill must fail validation"
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          git archive HEAD | tar -x -C "$tmp"
+          # sort between find and head is deliberate: it consumes all of find's output, so
+          # find is never SIGPIPEd by head closing early (which pipefail would treat as a
+          # step failure). It also makes the choice of victim deterministic across runs.
+          victim="$(find "$tmp/skills" -type f -name SKILL.md | sort | head -n 1)"
+          test -f "$victim"
+          cp tests/plugin-validate-negative/broken-SKILL.md "$victim"
+          out="$tmp/validate.out"
+          if claude plugin validate "$tmp/.claude-plugin/plugin.json" --strict >"$out" 2>&1; then
+            echo "::error::Negative control PASSED. The plugin-validate gate is not reading skill content."
+            cat "$out"
+            exit 1
+          fi
+          # A non-zero exit is not enough on its own -- a missing file, a CLI error or any
+          # unrelated validation failure would also be non-zero and would silently look like
+          # proof. Require that it failed for THIS reason: naming the skill we corrupted, with
+          # a frontmatter diagnostic.
+          if ! grep -qF "${victim#"$tmp"/}" "$out"; then
+            echo "::error::Validation failed but never named the corrupted skill -- wrong reason."
+            cat "$out"
+            exit 1
+          fi
+          if ! grep -qiE 'frontmatter|yaml' "$out"; then
+            echo "::error::Validation failed without a frontmatter/YAML diagnostic -- wrong reason."
+            cat "$out"
+            exit 1
+          fi
+          echo "Negative control OK: corrupt frontmatter rejected, and the diagnostic named the skill."
