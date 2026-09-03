@@ -47,6 +47,10 @@ Manifest schema (v1)
       "param_bindings": {"1": "$start_date", "2": "$end_date"},
       "set_block": {"start_date": "DATEADD('year', -1, CURRENT_DATE)",
                      "end_date": "CURRENT_DATE"},
+      "set_block_note": "why these defaults — which source the bounds derive
+                          from, and any mechanics that bite when editing them",
+      "fragments": [{"file": "_shared_ctes.sql",
+                      "reason": "inlined via {SHARED_CTES}; not runnable alone"}],
       "pages": [{"name": "Overview", "queries": ["revenue_summary"]}],
       "query_specs": {
         "revenue_summary": {"tokens": ["REGION_FILTER"],
@@ -134,6 +138,7 @@ import io
 import json
 import re
 import sys
+import textwrap
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -452,18 +457,68 @@ def _banner(title: str, sublines: list[str]) -> str:
     return "\n".join(body)
 
 
-def _set_block(manifest: dict) -> str:
+def _var_used(name: str, body: str) -> bool:
+    """Is session variable ``name`` actually referenced in the rendered body?
+
+    Word-boundary anchored so ``$start_date`` is not matched by ``$start_date_x``.
+    """
+    return re.search(r"\$" + re.escape(name) + r"\b", body) is not None
+
+
+def _set_block(manifest: dict, body: str | None = None) -> str:
+    """Render the SET block, pruned to the variables the body actually uses.
+
+    ``body`` is the already-rendered query text. Passing it prunes SET lines for
+    variables nothing references and returns "" when none survive. This is not
+    cosmetic: a SET block whose variables are unused, under a header promising
+    "edit the SET lines to change the review window", makes a reviewer edit the
+    window, rerun, get byte-identical numbers, and conclude the data is
+    window-stable when the window was never applied. A confidently wrong
+    verification is worse than no SET block at all. Some queries self-anchor
+    internally (CURRENT_DATE / DATE_TRUNC / DATEADD) and take no date binds.
+    """
     pairs = manifest.get("set_block") or _DEFAULT_SET
-    lines = [
-        "-- Edit these SET lines to change the review window. Every section below",
+    emitted: list[str] = []
+    for name, expr in pairs.items():
+        if body is not None and not _var_used(name, body):
+            continue
+        emitted.append(f"SET {name} = {expr};")
+    for sv in manifest.get("set_vars", []):
+        if body is not None and not _var_used(sv["name"], body):
+            continue
+        if sv.get("comment"):
+            emitted.append(f"-- {sv['comment']}")
+        emitted.append(f"SET {sv['name']} = {sv['default']};")
+    if not emitted:
+        return ""
+    intro = [
+        "-- Edit these SET lines to change the review parameters. Every section below",
         "-- references the session variables — no per-section edits required.",
     ]
-    lines += [f"SET {name} = {expr};" for name, expr in pairs.items()]
-    for sv in manifest.get("set_vars", []):
-        if sv.get("comment"):
-            lines.append(f"-- {sv['comment']}")
-        lines.append(f"SET {sv['name']} = {sv['default']};")
-    return "\n".join(lines)
+    # `set_block_note` carries WHY these defaults are what they are — which
+    # source the bounds derive from, why that source and not the calendar, and
+    # any mechanics that bite when editing them. That rationale is the
+    # difference between an auditor reproducing the page and an auditor
+    # reproducing a number that merely looks plausible, so it renders inline
+    # rather than living in a manifest nobody opens.
+    note = (manifest.get("set_block_note") or "").strip()
+    if note:
+        intro += [f"-- {line}" for line in textwrap.wrap(note, width=94)]
+    return "\n".join([*intro, *emitted])
+
+
+def _bind_note(has_set_block: bool) -> list[str]:
+    """Header lines describing bind handling — must match what was emitted."""
+    if has_set_block:
+        return [
+            "Bind params are replaced with session variables (see the SET block);",
+            "edit the SET lines once to apply new values across every section.",
+        ]
+    return [
+        "No SET block: every section below self-anchors its own date range",
+        "internally (CURRENT_DATE / DATE_TRUNC / DATEADD) and takes no bind params,",
+        "so there is no review window to edit here — change the query to change it.",
+    ]
 
 
 def _mask_strings_and_comments(text: str) -> str:
@@ -472,9 +527,20 @@ def _mask_strings_and_comments(text: str) -> str:
     Every structural decision downstream (statement splitting, paren
     balancing, verb extraction) runs on the MASKED text — a ``)`` or ``;`` or
     verb-shaped word inside a string literal must never influence structure.
-    This closed a real bypass: ``WITH x AS (SELECT ')SELECT' …) DELETE …``
-    fooled a raw paren counter into reading the literal's contents as the
-    terminal verb. Handles ``''`` escaping; an unterminated literal masks to
+    This closed two real bypasses:
+
+    * ``WITH x AS (SELECT ')SELECT' …) DELETE …`` — a single-quoted literal
+      fooled a raw paren counter into reading the literal's contents as the
+      terminal verb.
+    * ``WITH x AS (SELECT 1 AS "x) SELECT y") DELETE FROM t`` — a DOUBLE-quoted
+      delimited identifier did the same thing. Snowflake treats ``"…"`` as an
+      identifier, not a string, so it was initially left unmasked; the ``)``
+      inside it closed the CTE scan early and the trailing ``SELECT`` was read
+      as the terminal verb while Snowflake executed the ``DELETE``.
+
+    Both quote styles must therefore be masked, for structure only — this
+    function's output is never emitted, so losing identifier text is fine.
+    Handles ``''`` / ``""`` escaping; an unterminated literal masks to
     end-of-text, which downstream reads as "cannot parse" → not allowed.
     Length and newlines are preserved so nothing shifts.
     """
@@ -482,14 +548,15 @@ def _mask_strings_and_comments(text: str) -> str:
     i, n = 0, len(text)
     while i < n:
         c = text[i]
-        if c == "'":  # string literal
+        if c in "'\"":  # string literal, or double-quoted delimited identifier
+            quote = c
             i += 1
             while i < n:
-                if text[i] == "'" and i + 1 < n and text[i + 1] == "'":
-                    out[i] = out[i + 1] = " "
+                if text[i] == quote and i + 1 < n and text[i + 1] == quote:
+                    out[i] = out[i + 1] = " "  # escaped quote ('' or "")
                     i += 2
                     continue
-                if text[i] == "'":
+                if text[i] == quote:
                     break
                 if text[i] != "\n":
                     out[i] = " "
@@ -509,6 +576,32 @@ def _mask_strings_and_comments(text: str) -> str:
         else:
             i += 1
     return "".join(out)
+
+
+def _verify_binds_bound(text: str) -> list[str]:
+    """Every ``:N`` bind must have been substituted in executable lines.
+
+    A surviving ``:N`` is not valid Snowflake outside a driver-bound statement,
+    so the block errors the moment it is pasted — the exact failure the whole
+    artifact exists to avoid. This is the assertion that was missing when a
+    manifest declaring only ``:1``/``:2`` rendered seven live ``AND col <= :3``
+    predicates: the read-only allowlist passed it, the provenance hashes
+    passed it, and coverage passed it, because none of them ask whether the
+    output actually runs.
+
+    Comments are masked first, so the ``Params: :1 start_date`` banner lines
+    that document the original slots are exempt by construction. ``::`` casts
+    are already excluded by ``_BIND_RE``.
+    """
+    problems: list[str] = []
+    masked = _mask_strings_and_comments(text)
+    for lineno, line in enumerate(masked.splitlines(), start=1):
+        for m in _BIND_RE.finditer(line):
+            problems.append(
+                f"line {lineno}: unsubstituted bind :{m.group(1)} — declare it in the "
+                "manifest's param_bindings (and set_block) so it renders a value"
+            )
+    return problems
 
 
 def _split_statements(text: str) -> list[str]:
@@ -737,21 +830,9 @@ def render_review_file(
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d")
     combo_keys = [k for k in combo if k not in {"name", "description", "notes"}]
     combo_summary = " ".join(f"{k}={combo[k]}" for k in combo_keys) or "(defaults)"
-    header = _banner(
-        f"{manifest['feature'].upper()} SQL REVIEW — apps/{app.name} (generated)",
-        [
-            f"Generated: {timestamp} by streamsnow sql-review",
-            f"Feature:   {manifest['feature']}",
-            f"Combo:     {combo['name']}  {combo_summary}",
-            f"Notes:     {combo.get('description', '')}",
-            "",
-            "Each section is a fully-rendered, paste-and-runnable query.",
-            "Bind params are replaced with session variables (see the SET block);",
-            "edit the SET lines once to change the review window for every section.",
-        ],
-    )
-
-    parts: list[str] = [header, "", _set_block(manifest), ""]
+    # Sections are rendered FIRST so the SET block can be pruned to the variables
+    # they actually reference and the header can describe what was really emitted.
+    parts: list[str] = []
     dispatchers = manifest.get("token_dispatchers", {})
     specs = manifest.get("query_specs", {})
     binds_base = {**_DEFAULT_BINDS, **manifest.get("param_bindings", {})}
@@ -817,8 +898,25 @@ def render_review_file(
             parts.append(runnable)
             parts.append("")
 
-    text = "\n".join(line.rstrip() for line in "\n".join(parts).splitlines()).rstrip() + "\n"
-    problems = _verify_read_only(text)
+    set_block = _set_block(manifest, "\n".join(parts))
+    header = _banner(
+        f"{manifest['feature'].upper()} SQL REVIEW — apps/{app.name} (generated)",
+        [
+            f"Generated: {timestamp} by streamsnow sql-review",
+            f"Feature:   {manifest['feature']}",
+            f"Combo:     {combo['name']}  {combo_summary}",
+            f"Notes:     {combo.get('description', '')}",
+            "",
+            "Each section is a fully-rendered, paste-and-runnable query.",
+            *_bind_note(bool(set_block)),
+        ],
+    )
+    prefix = [header, ""] + ([set_block, ""] if set_block else [])
+
+    text = (
+        "\n".join(line.rstrip() for line in "\n".join(prefix + parts).splitlines()).rstrip() + "\n"
+    )
+    problems = _verify_read_only(text) + _verify_binds_bound(text)
     if problems:
         raise ToolError(
             f"refusing to write {manifest['feature']!r} review SQL: " + "; ".join(problems)
@@ -841,6 +939,30 @@ def _stamp_provenance(text: str, inputs: str) -> str:
 # --------------------------------------------------------------------------- #
 # Coverage
 # --------------------------------------------------------------------------- #
+def _declared_fragments(app: Path) -> dict[str, str]:
+    """Query files a manifest declares as CTE fragments, mapped to the reason.
+
+    A shared-CTE file (``queries/_region_ctes.sql``) is inlined into other
+    queries via a token and is NOT independently runnable, so it can never be
+    "claimed" by a manifest the way a real query is — yet coverage counted it
+    as an uncovered gap, which makes the gate unsatisfiable for any repo that
+    factors CTEs into their own files.
+
+    Exemption is explicit, never inferred from the filename: a bare
+    leading-underscore convention would let anyone silence the gate by
+    renaming a query. Declaring one also preserves WHY it is a fragment, which
+    is exactly the knowledge that a per-file naming convention loses.
+    """
+    frags: dict[str, str] = {}
+    for mp in _manifest_paths(app):
+        with contextlib.suppress(ToolError):
+            for entry in load_manifest(mp).get("fragments") or []:
+                if isinstance(entry, dict) and entry.get("file"):
+                    stem = Path(str(entry["file"])).stem
+                    frags[stem] = str(entry.get("reason", "")).strip()
+    return frags
+
+
 def coverage(app: Path) -> dict:
     """Which queries/*.sql are claimed by a manifest, and which are not."""
     claimed: set[str] = set()
@@ -848,10 +970,17 @@ def coverage(app: Path) -> dict:
         with contextlib.suppress(ToolError):
             claimed |= _referenced_queries(load_manifest(mp))
     all_queries = {p.stem for p in _query_files(app)}
+    fragments = _declared_fragments(app)
+    exempt = all_queries & set(fragments)
     return {
         "queries": sorted(all_queries),
         "claimed": sorted(all_queries & claimed),
-        "uncovered": sorted(all_queries - claimed),
+        "uncovered": sorted(all_queries - claimed - exempt),
+        "fragments": sorted(exempt),
+        "fragment_reasons": {k: fragments[k] for k in sorted(exempt)},
+        # A fragment declared but absent from queries/ is a stale declaration —
+        # surfaced so a deleted fragment cannot quietly keep its exemption.
+        "fragments_missing": sorted(set(fragments) - all_queries),
     }
 
 
@@ -933,27 +1062,9 @@ def render_metrics_file(app: Path, manifest: dict) -> str:
     """
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d")
     metrics = manifest["metrics"]
-    header = _banner(
-        f"{manifest['feature'].upper()} SQL REVIEW — apps/{app.name} (generated, per-visual)",
-        [
-            f"Generated: {timestamp} by streamsnow sql-review",
-            f"Feature:   {manifest['feature']}",
-            "Mode:      metrics — one runnable block per dashboard visual, in on-screen order.",
-            "",
-            "Each block's comment line (-- <name>) is the on-screen visual name, so",
-            "running it labels the result tab to match the dashboard. Bind params are",
-            "replaced with session variables; edit the SET block once per session.",
-        ],
-    )
-    map_rows = [f"{(m['page'] + ' > ' + m['title']):<52} {m['name']}" for m in metrics]
-    parts: list[str] = [
-        header,
-        "",
-        _set_block(manifest),
-        "",
-        _banner("DASHBOARD MAP (in on-screen order)", map_rows),
-        "",
-    ]
+    # Blocks are rendered FIRST so the SET block can be pruned to the variables
+    # they actually reference and the header can describe what was really emitted.
+    parts: list[str] = []
     binds_base = {**_DEFAULT_BINDS, **manifest.get("param_bindings", {})}
     for m in metrics:
         spath = _metric_source_path(app, m["source"])
@@ -973,8 +1084,29 @@ def render_metrics_file(app: Path, manifest: dict) -> str:
         parts.append(runnable)
         parts.append("")
 
-    text = "\n".join(line.rstrip() for line in "\n".join(parts).splitlines()).rstrip() + "\n"
-    problems = _verify_read_only(text)
+    set_block = _set_block(manifest, "\n".join(parts))
+    header = _banner(
+        f"{manifest['feature'].upper()} SQL REVIEW — apps/{app.name} (generated, per-visual)",
+        [
+            f"Generated: {timestamp} by streamsnow sql-review",
+            f"Feature:   {manifest['feature']}",
+            "Mode:      metrics — one runnable block per dashboard visual, in on-screen order.",
+            "",
+            "Each block's comment line (-- <name>) is the on-screen visual name, so",
+            "running it labels the result tab to match the dashboard.",
+            *_bind_note(bool(set_block)),
+        ],
+    )
+    map_rows = [f"{(m['page'] + ' > ' + m['title']):<52} {m['name']}" for m in metrics]
+    prefix = [header, ""]
+    if set_block:
+        prefix += [set_block, ""]
+    prefix += [_banner("DASHBOARD MAP (in on-screen order)", map_rows), ""]
+
+    text = (
+        "\n".join(line.rstrip() for line in "\n".join(prefix + parts).splitlines()).rstrip() + "\n"
+    )
+    problems = _verify_read_only(text) + _verify_binds_bound(text)
     if problems:
         raise ToolError(
             f"refusing to write {manifest['feature']!r} metrics review SQL: " + "; ".join(problems)
@@ -1074,6 +1206,17 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
         for q in cov["uncovered"]
     ]
 
+    findings += [
+        {
+            "file": f"apps/{app.name}/sql_review/manifests",
+            "line": 1,
+            "detail": f"manifest declares fragment {f!r} but queries/{f}.sql does not "
+            "exist — drop the stale declaration so a deleted file cannot keep its "
+            "coverage exemption",
+        }
+        for f in cov.get("fragments_missing", [])
+    ]
+
     # Cross-manifest collisions read as findings here too, so the gate can
     # never report clean while one manifest's trail overwrites another's.
     owners = _output_owners(app)
@@ -1101,6 +1244,30 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
                         "line": 1,
                         "detail": "orphaned review file — no current manifest produces it; "
                         f"delete it or re-run `streamsnow sql-review generate {app.name}`",
+                    }
+                )
+
+    # Static audit of the committed text itself. Provenance hashes prove a file
+    # matches its inputs; they do not prove the file RUNS. A hand-edited trail,
+    # or one generated before a guard existed, can carry an unsubstituted bind
+    # or a write statement while hashing perfectly — so check the bytes too.
+    # Import-free: pure text analysis, no consumer code executed.
+    if review_dir.is_dir():
+        for rf in sorted(review_dir.glob("*.review.sql")):
+            try:
+                raw = rf.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue  # unreadable files are reported by the provenance pass
+            # Strip the trailing provenance line before re-running the write
+            # guard: that guard rejects a `-- Provenance:` line anywhere but
+            # last, and a committed file legitimately ends with one.
+            body = "\n".join(ln for ln in raw.splitlines() if not ln.startswith("-- Provenance: "))
+            for detail in _verify_binds_bound(body) + _verify_read_only(body):
+                findings.append(
+                    {
+                        "file": f"apps/{app.name}/sql_review/{rf.name}",
+                        "line": 1,
+                        "detail": detail,
                     }
                 )
 
@@ -1265,9 +1432,16 @@ def cmd_index(args: argparse.Namespace) -> int:
                 rows.append(
                     f"| `{q}` | {upstream} | {page['name']} | `{review_file}` | {verified} |"
                 )
-    for q in coverage(app)["uncovered"]:
+    cov = coverage(app)
+    for q in cov["uncovered"]:
         upstream, _ = carried.get(q, ("_(fill via /review-app --sql)_", "no"))
         rows.append(f"| `{q}` | {upstream} | — | **UNCOVERED** | no |")
+    # Declared CTE fragments are listed WITH their reason rather than hidden:
+    # a reader who greps this index for a query file must find out why it has
+    # no runnable companion, not merely that it is absent.
+    for q in cov.get("fragments", []):
+        reason = cov.get("fragment_reasons", {}).get(q) or "shared CTE fragment"
+        rows.append(f"| `{q}` | — | — | _fragment — {reason}_ | n/a |")
 
     table = "\n".join([_README_TABLE_START, *rows, _README_TABLE_END])
     if has_markers:

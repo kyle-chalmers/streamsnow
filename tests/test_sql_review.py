@@ -322,7 +322,6 @@ def test_index_builds_table_and_preserves_narrative(repo: Path) -> None:
 
 
 def test_scaffolded_app_ships_manifest_and_companion(tmp_path: Path) -> None:
-
     from typer.testing import CliRunner
 
     from streamsnow.cli import app as cli_app
@@ -669,3 +668,304 @@ def test_metrics_symlink_source_refused(metrics_repo: Path, capsys) -> None:
     assert "symlink" in capsys.readouterr().err
     # And check treats the symlinked source as drift, never a trusted read.
     assert _check(metrics_repo) == 1
+
+
+# --------------------------------------------------------------------------- #
+# SET-block honesty (regression: a header promising an editable review window
+# over variables no section references makes a reviewer edit the window, rerun,
+# get byte-identical numbers, and sign off believing the window was applied.)
+# --------------------------------------------------------------------------- #
+
+
+_SELF_ANCHORED = """-- Query: revenue_daily
+-- Feeds: Overview page — daily revenue
+-- Schemas: ANALYTICS.ORDERS
+SELECT order_date, SUM(revenue) AS revenue
+FROM ANALYTICS.ORDERS
+WHERE order_date >= DATEADD('day', -7, CURRENT_DATE)
+GROUP BY 1
+"""
+
+
+def test_no_set_block_when_queries_self_anchor(repo: Path) -> None:
+    """A query taking no date binds must not get a SET block it ignores."""
+    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(_SELF_ANCHORED)
+    manifest = dict(MANIFEST)
+    manifest["query_specs"] = {"revenue_daily": {"params_doc": "(none)"}}
+    manifest["token_dispatchers"] = {}
+    mdir = repo / "apps" / SLUG / "sql_review" / "manifests"
+    (mdir / "revenue.json").write_text(json.dumps(manifest, indent=2))
+
+    assert _generate(repo) == 0
+    text = _review_file(repo).read_text()
+    assert "SET start_date" not in text, "emitted a SET line nothing references"
+    assert "SET end_date" not in text
+    # And the header must not promise an editable window that does not exist.
+    assert "edit the SET lines once to apply new values" not in text
+    assert "No SET block" in text
+    assert "self-anchors" in text
+
+
+def test_set_block_pruned_to_referenced_vars_only(repo: Path) -> None:
+    """Half-used SET blocks emit only the half that is actually referenced."""
+    q = (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").read_text()
+    # Drop the :2 (end_date) bind; keep :1.
+    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(
+        q.replace("AND order_date <= :2", "").replace(":2", ":1")
+    )
+    assert _generate(repo) == 0
+    text = _review_file(repo).read_text()
+    assert "SET start_date" in text
+    assert "SET end_date" not in text, "end_date is unreferenced but was emitted"
+    # A surviving variable means the editable-window promise is still accurate.
+    assert "edit the SET lines once to apply new values" in text
+
+
+def test_var_used_is_word_boundary_anchored() -> None:
+    """`$start_date_cutoff` must not count as a use of `start_date`."""
+    assert sr._var_used("start_date", "WHERE d >= $start_date")
+    assert not sr._var_used("start_date", "WHERE d >= $start_date_cutoff")
+    assert not sr._var_used("start_date", "WHERE d >= $startdate")
+
+
+def test_metrics_mode_also_prunes_unused_set_block(tmp_path: Path) -> None:
+    """Metrics mode shares the pruning path — and keeps its dashboard map."""
+    root = tmp_path / "repo"
+    app = root / "apps" / SLUG
+    (app / "queries").mkdir(parents=True)
+    (app / "snowflake.yml").write_text("definition_version: 2\n")
+    metrics_dir = app / "sql_review" / "_metrics"
+    metrics_dir.mkdir(parents=True)
+    (metrics_dir / "revenue_card.sql").write_text(_SELF_ANCHORED)
+    mdir = app / "sql_review" / "manifests"
+    mdir.mkdir(parents=True)
+    (mdir / "revenue.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "feature": "revenue",
+                "app": SLUG,
+                "mode": "metrics",
+                "metrics": [
+                    {
+                        "name": "revenue_card",
+                        "page": "Overview",
+                        "title": "Revenue (7d)",
+                        "source": "sql_review/_metrics/revenue_card.sql",
+                    }
+                ],
+            },
+            indent=2,
+        )
+    )
+    assert sr.main(["generate", SLUG, "--dir", str(root)]) == 0
+    text = (app / "sql_review" / "revenue.review.sql").read_text()
+    assert "SET start_date" not in text
+    assert "No SET block" in text
+    assert "DASHBOARD MAP (in on-screen order)" in text
+    assert "Overview > Revenue (7d)" in text
+
+
+# --------------------------------------------------------------------------- #
+# Read-only guard — quote-aware masking. Two bypasses of the same shape have
+# now been found, so both quote styles are pinned with cases in BOTH
+# directions: a bypass must be rejected, and legitimate quoting must not be.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Double-quoted DELIMITED IDENTIFIER hiding a `)` — Snowflake treats
+        # "..." as an identifier, not a string, so it was initially unmasked:
+        # the `)` closed the CTE scan early and the trailing SELECT read as the
+        # terminal verb while Snowflake executed the DELETE.
+        'WITH x AS (SELECT 1 AS "x) SELECT y") DELETE FROM target;',
+        # Single-quoted literal, the original bypass.
+        "WITH x AS (SELECT ')SELECT' AS s FROM t) DELETE FROM x;",
+        # Block comment hiding the same trick.
+        "WITH x AS (SELECT 1 /* ) SELECT */ ) DELETE FROM t;",
+    ],
+)
+def test_read_only_guard_rejects_quote_hidden_writes(sql: str) -> None:
+    assert sr._verify_read_only(sql), f"guard accepted a write statement: {sql}"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        'SELECT "weird col name" FROM ANALYTICS.ORDERS;',
+        'SELECT 1 AS "quoted "" escaped" FROM ANALYTICS.ORDERS;',
+        "WITH x AS (SELECT 1) SELECT * FROM x;",
+        "SELECT 'a string with ) parens' FROM t;",
+    ],
+)
+def test_read_only_guard_allows_legitimate_quoting(sql: str) -> None:
+    assert sr._verify_read_only(sql) == [], f"guard rejected valid read-only SQL: {sql}"
+
+
+def test_generate_refuses_to_write_a_quote_hidden_write(repo: Path) -> None:
+    """End-to-end: the guard runs before the file is written, not after."""
+    q = repo / "apps" / SLUG / "queries" / "revenue_daily.sql"
+    q.write_text(
+        "-- Query: revenue_daily\n"
+        "-- Feeds: Overview\n"
+        "-- Schemas: ANALYTICS.ORDERS\n"
+        'WITH x AS (SELECT 1 AS "x) SELECT y") DELETE FROM ANALYTICS.ORDERS\n'
+    )
+    assert _generate(repo) != 0
+    assert not _review_file(repo).exists(), "wrote a file containing a write statement"
+
+
+# --------------------------------------------------------------------------- #
+# Unbound binds. Provenance hashes prove a file matches its inputs; they do not
+# prove it RUNS. A manifest declaring only :1/:2 for a query using :3 rendered
+# seven live `AND col <= :3` predicates that passed every existing gate.
+# --------------------------------------------------------------------------- #
+
+
+def _query_with_third_bind() -> str:
+    return (
+        "-- Query: revenue_daily\n"
+        "-- Feeds: Overview page — daily revenue\n"
+        "-- Schemas: ANALYTICS.ORDERS\n"
+        "-- Params: :1 start_date, :2 end_date, :3 cutoff_date\n"
+        "SELECT order_date, SUM(revenue) AS revenue\n"
+        "FROM ANALYTICS.ORDERS\n"
+        "WHERE order_date BETWEEN :1 AND :2\n"
+        "  AND load_date <= :3\n"
+        "GROUP BY 1\n"
+    )
+
+
+def test_generate_refuses_unsubstituted_bind(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    """An undeclared :3 must fail generation, not ship an unrunnable file."""
+    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(_query_with_third_bind())
+    manifest = dict(MANIFEST)
+    manifest["token_dispatchers"] = {}
+    (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
+        json.dumps(manifest, indent=2)
+    )
+    assert _generate(repo) != 0
+    assert "unsubstituted bind :3" in capsys.readouterr().err
+    assert not _review_file(repo).exists()
+
+
+def test_declaring_the_bind_makes_generation_succeed(repo: Path) -> None:
+    """The remedy the error names must actually work."""
+    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(_query_with_third_bind())
+    manifest = dict(MANIFEST)
+    manifest["token_dispatchers"] = {}
+    manifest["set_block"] = {
+        "start_date": "DATEADD('year', -1, CURRENT_DATE)",
+        "end_date": "CURRENT_DATE",
+        "cutoff_date": "CURRENT_DATE",
+    }
+    manifest["param_bindings"] = {"1": "$start_date", "2": "$end_date", "3": "$cutoff_date"}
+    (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
+        json.dumps(manifest, indent=2)
+    )
+    assert _generate(repo) == 0
+    text = _review_file(repo).read_text()
+    assert "$cutoff_date" in text
+    sql_lines = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("--"))
+    assert ":3" not in sql_lines
+
+
+def test_check_flags_a_committed_file_with_an_unbound_bind(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """check is import-free but must still audit the committed bytes."""
+    assert _generate(repo) == 0
+    rf = _review_file(repo)
+    text = rf.read_text()
+    # Simulate a hand-edit / a file generated before the guard existed, keeping
+    # provenance intact so ONLY the byte-level audit can catch it.
+    rf.write_text(text.replace("$end_date", ":3"))
+    assert _check(repo) != 0
+    assert "unsubstituted bind :3" in capsys.readouterr().out
+
+
+def test_params_banner_comment_is_not_mistaken_for_an_unbound_bind(repo: Path) -> None:
+    """`Params: :1 start_date` documentation lines must stay exempt."""
+    assert _generate(repo) == 0
+    text = _review_file(repo).read_text()
+    assert "Params: :1 start_date" in text  # the banner survives
+    assert _check(repo) == 0  # and does not trip the audit
+
+
+# --------------------------------------------------------------------------- #
+# CTE fragments. A shared-CTE file is inlined via a token and is not
+# independently runnable, so it can never be "claimed" — yet it counted as an
+# uncovered gap, making the coverage gate unsatisfiable for any repo that
+# factors CTEs into their own files.
+# --------------------------------------------------------------------------- #
+
+
+def _add_fragment(repo: Path, declare: bool, *, reason: str = "inlined as {REGION_CTES}") -> None:
+    (repo / "apps" / SLUG / "queries" / "_region_ctes.sql").write_text(
+        "-- Query: _region_ctes\n"
+        "-- Feeds: (fragment — inlined into other queries)\n"
+        "-- Schemas: ANALYTICS.ORDERS\n"
+        "SELECT 1 AS region\n"
+    )
+    manifest = dict(MANIFEST)
+    if declare:
+        manifest["fragments"] = [{"file": "_region_ctes.sql", "reason": reason}]
+    (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
+        json.dumps(manifest, indent=2)
+    )
+
+
+def test_undeclared_fragment_still_fails_coverage(repo: Path) -> None:
+    """Exemption must be explicit — a filename convention would be a hole."""
+    _add_fragment(repo, declare=False)
+    _generate(repo)
+    assert "_region_ctes" in sr.coverage(repo / "apps" / SLUG)["uncovered"]
+    assert _check(repo) != 0
+
+
+def test_declared_fragment_is_exempt_from_coverage(repo: Path) -> None:
+    _add_fragment(repo, declare=True)
+    assert _generate(repo) == 0
+    cov = sr.coverage(repo / "apps" / SLUG)
+    assert "_region_ctes" not in cov["uncovered"]
+    assert cov["fragments"] == ["_region_ctes"]
+    assert _check(repo) == 0
+
+
+def test_declared_fragment_reason_reaches_the_index(repo: Path) -> None:
+    """The reason is the knowledge a naming convention would have lost."""
+    _add_fragment(repo, declare=True, reason="produces REGION_CASE; inlined, never joined")
+    _generate(repo)
+    assert sr.main(["index", SLUG, "--dir", str(repo)]) == 0
+    readme = (repo / "apps" / SLUG / "sql_review" / "README.md").read_text()
+    assert "produces REGION_CASE; inlined, never joined" in readme
+    assert "_region_ctes" in readme
+
+
+def test_stale_fragment_declaration_is_a_finding(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    """A deleted fragment must not keep its exemption silently."""
+    _add_fragment(repo, declare=True)
+    _generate(repo)
+    (repo / "apps" / SLUG / "queries" / "_region_ctes.sql").unlink()
+    assert _check(repo) != 0
+    assert "does not exist" in capsys.readouterr().out
+
+
+def test_set_block_note_renders_above_the_set_lines(repo: Path) -> None:
+    """Rationale for the defaults renders inline, not only in the manifest."""
+    manifest = dict(MANIFEST)
+    manifest["set_block_note"] = (
+        "Bounds derive from this page's OWN freshness source, not the calendar: "
+        "capping on another source asks for a day this view has no rows for."
+    )
+    (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
+        json.dumps(manifest, indent=2)
+    )
+    assert _generate(repo) == 0
+    text = _review_file(repo).read_text()
+    assert "Bounds derive from this page's OWN freshness source" in text
+    note_at = text.index("Bounds derive")
+    set_at = text.index("SET start_date")
+    assert note_at < set_at, "note must precede the SET lines it explains"
