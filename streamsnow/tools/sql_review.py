@@ -892,8 +892,28 @@ _WRITE_VERBS_RESERVED = (
     "SET",
 )
 _WRITE_VERB_AT_START_RE = re.compile(r"\A\s*(" + "|".join(_WRITE_VERBS) + r")\b", re.IGNORECASE)
+# The non-reserved verbs CAN be bare column aliases, so they are matched only in
+# their two-token COMMAND form. Without this the after-paren anchor was blind to
+# `) MERGE INTO t` and `) TRUNCATE TABLE t`. The allowlist catches those today,
+# but this layer exists to hold when the walker is fooled, so omitting them
+# traded away exactly the coverage it is for. A bare alias is followed by
+# FROM / `,` / `;`, never by INTO / TABLE / ON / IMMEDIATE, so these cannot fire
+# on `SELECT COUNT(*) merge FROM t`.
+_WRITE_COMMANDS_AFTER_PAREN = (
+    r"MERGE\s+INTO",
+    r"TRUNCATE\s+TABLE",
+    r"COMMENT\s+ON",
+    r"COPY\s+INTO",
+    r"EXECUTE\s+IMMEDIATE",
+    r"UNDROP\s+TABLE",
+    r"REMOVE\s+@",
+    r"PUT\s+file://",
+)
 _WRITE_VERB_AFTER_PAREN_RE = re.compile(
-    r"(?<=\))\s*(" + "|".join(_WRITE_VERBS_RESERVED) + r")\b", re.IGNORECASE
+    r"(?<=\))\s*("
+    + "|".join([*(v + r"\b" for v in _WRITE_VERBS_RESERVED), *_WRITE_COMMANDS_AFTER_PAREN])
+    + r")",
+    re.IGNORECASE,
 )
 
 

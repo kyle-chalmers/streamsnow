@@ -1407,3 +1407,42 @@ def test_provenance_is_independent_of_the_checkout_path(tmp_path: Path) -> None:
         sr._inputs_digest(root, root / "sql_review" / "manifests" / "revenue.json", manifest)
         != (digests[0])
     ), "an app-module edit did not change the digest"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "WITH x AS (SELECT 1) MERGE INTO t USING s ON 1=1",
+        "WITH x AS (SELECT 1) TRUNCATE TABLE t",
+        "WITH x AS (SELECT 1) COMMENT ON TABLE t IS 1",
+        "WITH x AS (SELECT 1) COPY INTO t FROM @s",
+        "WITH x AS (SELECT 1) DELETE FROM t",
+    ],
+)
+def test_after_paren_anchor_sees_non_reserved_commands_too(sql: str) -> None:
+    """The tripwire must not be blind to the non-reserved write commands.
+
+    Restricting the after-paren anchor to RESERVED words (to stop it refusing
+    bare column aliases) left it blind to `) MERGE INTO t` and
+    `) TRUNCATE TABLE t`. The allowlist catches those today, but this layer
+    exists to hold when the walker is fooled, so omitting them traded away the
+    exact coverage it is for. Matched in two-token command form instead.
+    """
+    masked = sr._mask_strings_and_comments(sql)
+    assert sr._WRITE_VERB_AFTER_PAREN_RE.search(masked), f"tripwire blind to: {sql}"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # The same verbs as BARE aliases: followed by FROM, never INTO/TABLE/ON.
+        "SELECT COUNT(*) merge FROM ANALYTICS.ORDERS;",
+        "SELECT MAX(d) truncate FROM ANALYTICS.ORDERS;",
+        "SELECT MAX(d) put FROM ANALYTICS.ORDERS;",
+        "SELECT MAX(d) remove FROM ANALYTICS.ORDERS;",
+        "SELECT MAX(d) comment FROM ANALYTICS.ORDERS;",
+        "SELECT LISTAGG(x, chr(44)) copy FROM ANALYTICS.ORDERS;",
+    ],
+)
+def test_two_token_commands_do_not_fire_on_bare_aliases(sql: str) -> None:
+    assert sr._verify_read_only(sql) == [], f"false positive on: {sql}"

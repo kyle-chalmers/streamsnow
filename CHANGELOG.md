@@ -39,8 +39,11 @@ never surfaces.
   statement ANY of these verbs is a command, while right after a `)` only
   RESERVED words are checked, because that is where a bare column alias lives
   (`SELECT MAX(d) comment FROM t` is legal Snowflake, and `comment` is a real
-  `INFORMATION_SCHEMA` column). There is no `;` anchor: statements are split on
-  `;` before this runs. The
+  `INFORMATION_SCHEMA` column). The non-reserved verbs are still covered there
+  in their two-token command form (`MERGE INTO`, `TRUNCATE TABLE`, `COMMENT ON`,
+  `COPY INTO`, …), which a bare alias can never match since an alias is followed
+  by `FROM` / `,` / `;` and never by `INTO` / `TABLE` / `ON`. There is no `;`
+  anchor: statements are split on `;` before this runs. The
   allowlist depends on locating statement boundaries correctly and that has
   been defeated four times; the next parser gap should not also be a pass.
 
