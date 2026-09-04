@@ -102,7 +102,30 @@ never surfaces.
   `check app-security` and `check schema-refs` scanned NOTHING and reported OK.
   A gate that passes because it examined zero files is worse than no gate. All
   three now filter relative to the scan root, or by directory name where no root
-  exists.
+  exists. Each argument carries its own root, so a checkout living under a path
+  segment literally named `venv` or `node_modules` is scanned in full rather
+  than skipped wholesale — while a `.review/` artifact handed over by explicit
+  path is still skipped. Both fixes are mutation-covered: reverting either now
+  fails tests, where before it left the suite green.
+- **A `SET` statement's expression was unchecked past its prefix.** The
+  allowlist's `SET` form was prefix-anchored, so `SET x = (SELECT 1) DELETE
+  FROM t` matched it and every token after the `=` was examined by neither
+  layer. Chasing that with more tripwire verbs fixed one verb at a time; a
+  `SET` statement must now END where its expression ends, which closes the
+  class including verbs nobody listed (`CALL`, `UNLOAD`, `UNSET`). An empty
+  `set_block` value (`SET x = ;`) is rejected at validation, since it was
+  invalid SQL that still read as a definition to the session-variable check.
+- **Snowflake's multi-variable `SET (a, b) = (…)` was falsely refused** — the
+  session-variable check recorded neither name and then reported both as
+  undefined.
+- **`COMMENT ON` matched a JOIN alias.** `JOIN (SELECT …) comment ON a.id =
+  comment.id` is legal read-only SQL; it now requires an object type after
+  `ON`, which a JOIN never has.
+- **Duplicate `fragments` declarations across manifests** were silently
+  accepted with the first reason winning; now reported.
+- **A symlinked app module made provenance environment-dependent** again by
+  hashing whatever the target held in that checkout; the link text is hashed
+  instead.
 
 ### Added
 

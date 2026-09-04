@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 from streamsnow.config import Config
@@ -1410,3 +1411,54 @@ def test_scaffolded_pages_helper_imports_without_an_init_file(tmp_path, monkeypa
     for name in ("pages", "pages._hdr"):
         monkeypatch.delitem(sys.modules, name, raising=False)
     assert importlib.import_module("pages._hdr").VALUE == "loaded"
+
+
+# --------------------------------------------------------------------------- #
+# Junk-directory filtering must not depend on where the repo is checked out.
+# Filtering on the ABSOLUTE path's components made a checkout under any dotted
+# directory (a worktree at `.claude/worktrees/<name>/`) look entirely hidden,
+# so these gates scanned NOTHING and reported OK. These had no mutation
+# coverage, so reverting the fix left the suite green.
+# --------------------------------------------------------------------------- #
+
+
+_EGRESS = 'import requests\ndef f():\n    requests.get("https://example.invalid/x")\n'
+_DENIED = "-- q\nSELECT a FROM DB.BRIDGE.T\n"
+
+
+@pytest.mark.parametrize("shape", ["plain", ".claude/worktrees/w", "venv"])
+def test_app_security_scans_whatever_the_checkout_path_looks_like(tmp_path, shape):
+    from streamsnow.tools.check_app_security import _iter_files, scan_paths
+
+    repo = tmp_path / shape / "repo"
+    (repo / "apps" / "x").mkdir(parents=True)
+    (repo / "apps" / "x" / "bad.py").write_text(_EGRESS)
+    res = scan_paths(_iter_files(repo / "apps"), repo / "apps")
+    assert len(res["findings"]) == 1, f"scanned nothing under a {shape!r} checkout"
+
+
+@pytest.mark.parametrize("shape", ["plain", ".claude/worktrees/w", "venv"])
+def test_schema_refs_scans_whatever_the_checkout_path_looks_like(tmp_path, shape):
+    from streamsnow.policy import SchemaPolicy as SP
+    from streamsnow.tools.check_schema_refs import _iter_files, check_paths
+
+    policy = SP(database="DB", schema_allow=("ANALYTICS",), schema_deny=("BRIDGE",))
+    repo = tmp_path / shape / "repo"
+    (repo / "apps" / "x" / "queries").mkdir(parents=True)
+    (repo / "apps" / "x" / "queries" / "q.sql").write_text(_DENIED)
+    res = check_paths(_iter_files(repo / "apps"), policy, repo / "apps")
+    assert len(res["findings"]) == 1, f"scanned nothing under a {shape!r} checkout"
+
+
+def test_junk_dirs_inside_the_repo_are_still_skipped(tmp_path):
+    """The fix must not turn into 'scan everything'."""
+    from streamsnow.tools.check_app_security import _iter_files, scan_paths
+
+    repo = tmp_path / "repo"
+    for sub in (".review", ".venv", "__pycache__"):
+        (repo / "apps" / "x" / sub).mkdir(parents=True)
+        (repo / "apps" / "x" / sub / "junk.py").write_text(_EGRESS)
+    (repo / "apps" / "x" / "real.py").write_text(_EGRESS)
+    res = scan_paths(_iter_files(repo / "apps"), repo / "apps")
+    files = {f["file"] for f in res["findings"]}
+    assert len(files) == 1 and any("real.py" in f for f in files), files
