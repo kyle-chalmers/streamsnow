@@ -82,14 +82,19 @@ jobs:
           set -euo pipefail
           uv build --sdist
           sdist="$(ls dist/*.tar.gz)"
-          if tar -tzf "$sdist" | grep -q 'plugin-validate-negative'; then
+          # List once into a file rather than piping tar into grep. "grep -q" exits on its
+          # first match and closes the pipe, which SIGPIPEs tar -- and under pipefail that
+          # fails the step even though the check itself succeeded.
+          listing="$(mktemp)"
+          tar -tzf "$sdist" > "$listing"
+          if grep -q 'plugin-validate-negative' "$listing"; then
             echo "::error::The negative-control fixture leaked into the sdist."
-            tar -tzf "$sdist" | grep 'plugin-validate-negative'
+            grep 'plugin-validate-negative' "$listing"
             exit 1
           fi
-          # Guard the guard: if tests/ stopped shipping entirely the grep above would also
+          # Guard the guard: if tests/ stopped shipping entirely the check above would also
           # pass, and the exclude would look effective while proving nothing.
-          tar -tzf "$sdist" | grep -q '/tests/'
+          grep -q '/tests/' "$listing"
           echo "sdist OK: fixture excluded, tests/ still present."
 
   plugin-validate:
