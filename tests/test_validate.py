@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -1462,3 +1463,60 @@ def test_junk_dirs_inside_the_repo_are_still_skipped(tmp_path):
     res = scan_paths(_iter_files(repo / "apps"), repo / "apps")
     files = {f["file"] for f in res["findings"]}
     assert len(files) == 1 and any("real.py" in f for f in files), files
+
+
+# --------------------------------------------------------------------------- #
+# CLI entrypoints. 592 tests passed while `streamsnow check schema-refs`
+# tracebacked on every CLEAN run, because every test called check_paths()
+# directly and none exercised main(). The clean path is the common one.
+# --------------------------------------------------------------------------- #
+
+
+def _mini_repo(tmp_path, sql: str):
+    (tmp_path / "apps" / "x" / "queries").mkdir(parents=True)
+    (tmp_path / "apps" / "x" / "queries" / "q.sql").write_text(sql)
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        (Path(__file__).parent.parent / "streamsnow.config.example.yaml").read_text()
+    )
+    return tmp_path
+
+
+@pytest.mark.parametrize("fmt", ["md", "json"])
+def test_schema_refs_cli_clean_run_does_not_crash(tmp_path, monkeypatch, capsys, fmt):
+    from streamsnow.tools.check_schema_refs import main
+
+    repo = _mini_repo(tmp_path, "-- q\nSELECT a FROM DB.ANALYTICS.T\n")
+    monkeypatch.chdir(repo)
+    rc = main(["apps", "--format", fmt])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    if fmt == "json":
+        # The output contract includes `denylist`; consumers read it.
+        assert sorted(json.loads(out)) == ["denylist", "findings", "ok"]
+    else:
+        assert "clean" in out
+
+
+def test_schema_refs_cli_reports_a_violation(tmp_path, monkeypatch, capsys):
+    from streamsnow.tools.check_schema_refs import main
+
+    repo = _mini_repo(tmp_path, "-- q\nSELECT a FROM DB.BRIDGE.T\n")
+    monkeypatch.chdir(repo)
+    rc = main(["apps"])
+    assert rc == 1
+    assert "BLOCK" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("fmt", ["md", "json"])
+def test_app_security_cli_clean_run_does_not_crash(tmp_path, monkeypatch, capsys, fmt):
+    from streamsnow.tools.check_app_security import main
+
+    repo = _mini_repo(tmp_path, "-- q\nSELECT a FROM DB.ANALYTICS.T\n")
+    monkeypatch.chdir(repo)
+    rc = main(["apps", "--format", fmt])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    if fmt == "json":
+        assert json.loads(out)["ok"] is True
+    else:
+        assert "clean" in out
