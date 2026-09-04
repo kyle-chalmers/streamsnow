@@ -199,22 +199,82 @@ def find_denied_refs(
     return sorted(_scan_text(_strip_sql_comments(text), denied, read_exc))
 
 
-def _has_dotted_dir(path: Path) -> bool:
-    """True if any directory component of *path* starts with a dot.
+# Directory names that never hold reviewable source. Matched by NAME, never by
+# scanning the absolute path's components: filtering on absolute parts meant a
+# checkout living under ANY dotted directory (a git worktree at
+# `.claude/worktrees/<name>/` is the common case, and this project's own
+# guidance recommends exactly that) made every file look hidden, so the scan
+# silently examined nothing and reported OK. A gate that passes because it
+# looked at zero files is worse than no gate. Name-matching cannot be poisoned
+# by where the repo lives, and errs toward scanning MORE rather than less.
+_IGNORED_DIR_NAMES = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        ".review",
+        ".ruff_cache",
+        ".pytest_cache",
+        ".mypy_cache",
+        "__pycache__",
+        "node_modules",
+    }
+)
+
+
+def _in_ignored_dir(path: Path, root: Path | None = None) -> bool:
+    """True if *path* sits under a directory that never holds reviewable source.
+
+    Only components BELOW the scan root are considered. Filtering on the
+    ABSOLUTE path's components made a checkout under any matching directory
+    look entirely hidden, so the scan examined nothing and reported OK — a gate
+    that passes because it looked at zero files is worse than no gate.
+
+    With no root, the current working directory is used (pre-commit and CI both
+    invoke from the repo root). If the path is not under either, NOTHING is
+    filtered: erring toward scanning more is the only safe direction here, and
+    a repo that merely LIVES under a path segment named `venv` must still be
+    scanned in full.
+    """
+    for base in (root, Path.cwd()):
+        if base is None:
+            continue
+        try:
+            return any(p in _IGNORED_DIR_NAMES for p in path.relative_to(base).parts)
+        except ValueError:
+            continue
+    # Not locatable under a root: fall back to matching NAMES anywhere in the
+    # path. That still skips a `.review/` artifact handed over as an absolute
+    # path outside the tree, and is safe for the case that caused this bug -
+    # `.claude/worktrees/<name>/` contains no ignored NAME. The residual gap is
+    # a repo living directly under a directory literally called `venv` or
+    # `node_modules`; callers that know their root pass it and avoid even that.
+    return any(p in _IGNORED_DIR_NAMES for p in path.parts)
+
+
+def _has_dotted_dir(path: Path, root: Path | None = None) -> bool:
+    """True if *path* sits under a directory that never holds reviewable source.
 
     Skips review artifacts (``.review/``), VCS metadata (``.git/``), virtualenvs
-    (``.venv/``), etc. The file's own name is excluded (a leading-dot filename
-    like ``.foo.py`` is still scanned).
+    (``.venv/``) and caches. The file's own name is excluded (a leading-dot
+    filename like ``.foo.py`` is still scanned).
+
+    Matched by directory NAME rather than "any dotted component of the absolute
+    path", which silently skipped EVERY file whenever the checkout lived under a
+    dotted directory - e.g. a git worktree at ``.claude/worktrees/<name>/`` - and
+    turned this governance gate into a no-op that reported clean.
     """
-    return any(part.startswith(".") for part in path.parts[:-1])
+    return _in_ignored_dir(path.parent, root)
 
 
-def check_paths(paths: list[Path], policy: SchemaPolicy) -> dict:
+def check_paths(paths: list[Path], policy: SchemaPolicy, root: Path | None = None) -> dict:
     findings = []
     for p in paths:
         if p.suffix not in (".py", ".sql") or not p.is_file():
             continue
-        if _has_dotted_dir(p):
+        if _has_dotted_dir(p, root):
             continue  # dotted dir (.review/, .git/, ...) — not real app code
         text = p.read_text(errors="ignore")
         for line_no, schema in find_denied_refs(text, policy, is_python=p.suffix == ".py"):
@@ -230,7 +290,7 @@ def _iter_files(root: Path) -> list[Path]:
     for p in root.rglob("*"):
         if p.suffix not in (".py", ".sql") or not p.is_file():
             continue
-        if _has_dotted_dir(p):
+        if _has_dotted_dir(p, root):
             continue
         out.append(p)
     return out
@@ -252,11 +312,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     policy = SchemaPolicy.from_governance(cfg.governance)
-    files: list[Path] = []
+    # Per-argument root: see the note in check_app_security.main.
+    findings: list[dict] = []
     for raw in args.paths or ["."]:
-        files.extend(_iter_files(Path(raw)))
-
-    result = check_paths(files, policy)
+        target = Path(raw)
+        root = target if target.is_dir() else None
+        findings.extend(check_paths(_iter_files(target), policy, root)["findings"])
+    # Keep check_paths' full output contract. Rebuilding this dict from just
+    # `findings` dropped `denylist`, which the md success branch below prints
+    # and JSON consumers read — so every CLEAN run tracebacked with
+    # KeyError: 'denylist', and no test noticed because none called main().
+    result = {"ok": not findings, "findings": findings, "denylist": list(policy.schema_deny)}
     if args.format == "json":
         print(json.dumps(result, indent=2))
     else:
