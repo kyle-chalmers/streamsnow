@@ -22,10 +22,20 @@ for the person who looks at a chart and asks *"is that number right?"*
    The header banner tells you which combo you're holding and what every
    `{TOKEN}` was substituted with.
 
-3. **Run the SET block first.** The top of the file declares session
-   variables (`SET start_date = …`). Paste and run those lines once; every
-   section below references them. To audit a different date window, edit the
-   SET lines — never the queries.
+3. **Run the SET block first, if the file has one.** When the sections take
+   bind params, the top of the file declares session variables
+   (`SET start_date = …`); paste and run those lines once, and to audit a
+   different window edit the SET lines — never the queries. A `set_block_note`
+   above them, when present, records *why* the defaults are what they are:
+   which source the bounds derive from, and any mechanics that bite when you
+   change them. Read it before widening a window.
+
+   Some files legitimately have **no** SET block — the header says so — because
+   no section references a session variable or takes a bind param. There the
+   range lives inside each query, so there is nothing global to edit: read the
+   section to see how it bounds itself. The generator prunes SET lines nothing
+   references precisely so this step never lies to you; a SET block you can
+   edit with no effect on the numbers is worse than none.
 
 4. **Run the section for your visual.** Each section is one statement,
    labeled `[Page: <page>] <query>.sql`, with a one-line `-- <metric_name>`
@@ -36,7 +46,8 @@ for the person who looks at a chart and asks *"is that number right?"*
 
 5. **Check freshness before crying foul.** A mismatch is very often a date
    window or a filter, not a data bug: confirm the dashboard's selected range
-   matches your SET block, and its filter widgets match the combo. If the
+   matches your SET block (or, with no SET block, the range the section sets
+   for itself), and its filter widgets match the combo. If the
    numbers still disagree, you have a real finding — file it via
    `/feedback-app <slug>` (quoting the review file and combo you ran), or
    route deeper lineage questions to `/audit-lineage <slug>`.

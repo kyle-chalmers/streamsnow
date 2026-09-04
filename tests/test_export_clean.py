@@ -18,7 +18,16 @@ def test_detects_proprietary_term(tmp_path):
 
 
 def test_detects_ticket_prefix_and_personal_path(tmp_path):
-    (tmp_path / "c.py").write_text("# tracked in DI-1339\nP = '/Users/someone/secret/x'\n")
+    # The ticket id is COMPOSED at runtime rather than written as a literal.
+    # DENY_PATTERNS names real internal prefixes (`\bDI-\d{2,}\b`), so the test
+    # needs that prefix to prove DI- detection - but this file sits in the
+    # gate's own _SKIP_FILES, so the gate structurally cannot see its own
+    # fixtures, and it ships in every sdist. A literal here would publish a real
+    # internal ticket id to PyPI via the very tool meant to prevent that.
+    # Composing it keeps the detection honest and leaves no ticket-shaped
+    # string in the released source.
+    ticket = "DI" + "-1339"
+    (tmp_path / "c.py").write_text(f"# tracked in {ticket}\nP = '/Users/someone/secret/x'\n")
     res = scan_tree(tmp_path)
     matches = {f["match"] for f in res["findings"]}
     assert not res["ok"]
@@ -34,8 +43,18 @@ def test_detects_private_key_block(tmp_path):
 
 def test_detects_source_org_names(tmp_path):
     # Case-folded organization terms: a pasted internal reference must fail
-    # the export gate. Terms are spelled only in this exempt file.
-    for leak in ("built at HappyMoney", "Happy Money internal", "the happy-money org"):
+    # the export gate.
+    #
+    # COMPOSED at runtime, for the same reason the ticket id above is: this file
+    # sits in the gate's own _SKIP_FILES, so the gate structurally cannot see
+    # its own fixtures, and it ships in every sdist. A literal here publishes
+    # the employer name to PyPI via the very tool meant to prevent that. The
+    # DENY_TERMS list in check_export_clean.py necessarily spells them and also
+    # ships; this fixture does not have to.
+    org = "Happy" + "Money"
+    spaced = "Happy" + " " + "Money"
+    hyphen = "happy" + "-" + "money"
+    for leak in (f"built at {org}", f"{spaced} internal", f"the {hyphen} org"):
         doc = tmp_path / "doc.md"
         doc.write_text(f"prose. {leak}. prose.\n")
         assert not scan_tree(tmp_path)["ok"], leak

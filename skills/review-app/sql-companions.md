@@ -42,11 +42,26 @@ until regenerated. To change what a companion renders, edit
      it. Only `generate` imports app code, and only on a developer machine; `check` stays
      import-free by design.
    - Defaults cover `:1 start_date, :2 end_date` via the `SET` block; override `param_bindings` /
-     `set_block` when the query binds something else.
+     `set_block` when the query binds something else. **Every bind a query uses must be declared**
+     — an undeclared `:3` is a hard error, and `param_bindings` must point at a variable that
+     `set_block` actually declares (a `$var` with no `SET` line is also a hard error). Unused
+     `set_block` entries are pruned from the output, so declare what the queries use.
+   - `set_block_note`: why these defaults are what they are — which source the bounds derive from,
+     and any mechanics that bite when editing them. It renders above the `SET` lines, where the
+     auditor reads it. Put the rationale here, not in a manifest comment.
+   - `fragments`: `[{"file": "_shared_ctes.sql", "reason": "..."}]`. A `queries/*.sql` that is a
+     shared CTE inlined via a token is **not independently runnable**, so it can never be claimed
+     by a page — and without declaring it, coverage demands a companion it can never have, which
+     makes the gate unsatisfiable for any app that factors CTEs into their own files. `reason` is
+     required and renders into the index. Never rename a query to dodge coverage; declare it.
 4. **Render:** `streamsnow sql-review generate <slug>` (scope one manifest with `--feature
-   <name>`). The tool substitutes tokens and binds, verifies the output is read-only (statement-root
-   allowlist), stamps provenance, and deletes stale files for removed combos. An unresolved token
-   or a write-shaped statement is a hard error — fix the manifest, never the output.
+   <name>`). The tool substitutes tokens and binds, verifies the output is read-only, stamps
+   provenance, and deletes stale files for removed combos. Read-only is enforced in two
+   independent layers: a statement-root allowlist (`SELECT` / `WITH…SELECT` / `SHOW` / `DESCRIBE`
+   / `EXPLAIN` / session-variable `SET`), plus a tripwire that refuses a write verb in command
+   position even if the parser is fooled. Four hard errors — an unresolved `{TOKEN}`, a surviving
+   `:N` bind, a `$var` with no `SET` line, or a write-shaped statement. Fix the manifest, never
+   the output.
 5. **Check for a connection** (`streamsnow doctor` / `snow connection list`). It's a branch, not a
    gate: with one, lineage rows get live-verified; without one, everything is written from static
    analysis and marked **unverified** — still useful, still honest. Never fabricate column lists.
@@ -63,7 +78,10 @@ until regenerated. To change what a companion renders, edit
      this pass; leave `no` otherwise.
    - The **narrative around the markers** — lineage notes, known caveats, how to read the files.
 8. **Report the coverage delta** — total queries, covered, still uncovered (`check` names them),
-   live-verified vs. static rows.
+   declared CTE fragments, and live-verified vs. static rows. Two `check` findings need action
+   rather than a number: a declared fragment whose file no longer exists (a stale exemption), and
+   a query claimed by a page in one manifest while another declares it a fragment (contradictory;
+   the exemption is ignored until resolved). Report those as findings, not as coverage.
 
 ## Judgment calls
 

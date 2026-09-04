@@ -580,6 +580,61 @@ def _scan_sql(path: Path) -> list[dict]:
 # --------------------------------------------------------------------------- #
 
 
+# Directory names that never hold reviewable source. Matched by NAME, never by
+# scanning the absolute path's components: filtering on absolute parts meant a
+# checkout living under ANY dotted directory (a git worktree at
+# `.claude/worktrees/<name>/` is the common case, and this project's own
+# guidance recommends exactly that) made every file look hidden, so the scan
+# silently examined nothing and reported OK. A gate that passes because it
+# looked at zero files is worse than no gate. Name-matching cannot be poisoned
+# by where the repo lives, and errs toward scanning MORE rather than less.
+_IGNORED_DIR_NAMES = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        ".review",
+        ".ruff_cache",
+        ".pytest_cache",
+        ".mypy_cache",
+        "__pycache__",
+        "node_modules",
+    }
+)
+
+
+def _in_ignored_dir(path: Path, root: Path | None = None) -> bool:
+    """True if *path* sits under a directory that never holds reviewable source.
+
+    Only components BELOW the scan root are considered. Filtering on the
+    ABSOLUTE path's components made a checkout under any matching directory
+    look entirely hidden, so the scan examined nothing and reported OK — a gate
+    that passes because it looked at zero files is worse than no gate.
+
+    With no root, the current working directory is used (pre-commit and CI both
+    invoke from the repo root). If the path is not under either, NOTHING is
+    filtered: erring toward scanning more is the only safe direction here, and
+    a repo that merely LIVES under a path segment named `venv` must still be
+    scanned in full.
+    """
+    for base in (root, Path.cwd()):
+        if base is None:
+            continue
+        try:
+            return any(p in _IGNORED_DIR_NAMES for p in path.relative_to(base).parts)
+        except ValueError:
+            continue
+    # Not locatable under a root: fall back to matching NAMES anywhere in the
+    # path. That still skips a `.review/` artifact handed over as an absolute
+    # path outside the tree, and is safe for the case that caused this bug -
+    # `.claude/worktrees/<name>/` contains no ignored NAME. The residual gap is
+    # a repo living directly under a directory literally called `venv` or
+    # `node_modules`; callers that know their root pass it and avoid even that.
+    return any(p in _IGNORED_DIR_NAMES for p in path.parts)
+
+
 def _iter_files(root: Path) -> list[Path]:
     """Yield real ``.py``/``.sql`` app files under ``root``, skipping dotted dirs.
 
@@ -591,19 +646,20 @@ def _iter_files(root: Path) -> list[Path]:
     for p in root.rglob("*"):
         if p.suffix not in (".py", ".sql") or not p.is_file():
             continue
-        if any(part.startswith(".") or part == "__pycache__" for part in p.parts):
+        if _in_ignored_dir(p, root):
             continue
         out.append(p)
     return sorted(out)
 
 
-def scan_paths(paths: list[Path]) -> dict:
+def scan_paths(paths: list[Path], root: Path | None = None) -> dict:
     findings: list[dict] = []
     for p in paths:
         if not p.is_file():
             continue
-        # Skip files living under a dotted/cache dir even when passed explicitly.
-        if any(part.startswith(".") or part == "__pycache__" for part in p.parts):
+        # Skip files under a junk dir even when passed explicitly. No root is
+        # available here, so this matches directory NAMES (see _in_ignored_dir).
+        if _in_ignored_dir(p, root):
             continue
         if p.suffix == ".py":
             findings.extend(_scan_python(p))
@@ -620,15 +676,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--format", choices=("md", "json"), default="md")
     args = ap.parse_args(argv)
 
-    files: list[Path] = []
+    # Each argument carries its own root. A directory arg anchors the
+    # junk-directory filter to itself, so a checkout living under a path
+    # segment named `venv` is scanned in full instead of skipped wholesale;
+    # explicitly-named files keep the name-based filter, which is what stops a
+    # `.review/` artifact handed over by path from being scanned.
+    findings: list[dict] = []
     for raw in args.paths or ["apps"]:
-        root = Path(raw)
-        if root.is_dir():
-            files.extend(_iter_files(root))
+        target = Path(raw)
+        if target.is_dir():
+            findings.extend(scan_paths(_iter_files(target), target)["findings"])
         else:
-            files.append(root)
-
-    result = scan_paths(files)
+            findings.extend(scan_paths([target])["findings"])
+    result = {"ok": not findings, "findings": findings}
     if args.format == "json":
         print(json.dumps(result, indent=2))
     elif result["ok"]:

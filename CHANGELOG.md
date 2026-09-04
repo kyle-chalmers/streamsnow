@@ -3,6 +3,171 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [0.6.2] - 2026-09-03
+
+Everything here came out of adopting 0.6.1 on a real 5-app repo with 231
+queries and 28 existing audit manifests — the failures a greenfield scaffold
+never surfaces.
+
+### Fixed
+
+- **Read-only guard bypass via double-quoted identifiers** (security). Snowflake
+  treats `"…"` as a delimited identifier rather than a string, so the masker
+  left it alone — and `WITH x AS (SELECT 1 AS "x) SELECT y") DELETE FROM t`
+  passed `_verify_read_only` clean, because the `)` inside the identifier ended
+  the CTE scan early and the trailing `SELECT` read as the terminal verb while
+  Snowflake would execute the `DELETE`. A second review round found two more quoting
+  forms with the same hole: **dollar-quoted constants** (`$$ ) SELECT y $$`),
+  which were not recognised as a quoting form at all, and **backslash-escaped
+  quotes** (`'\')`) — Snowflake accepts both `''` and `\'`, but only the
+  doubling form was handled. All four quoting forms are now masked for
+  structural analysis, and each is pinned in both directions.
+
+  Masking identifiers also introduced a false *positive*: a legal delimited CTE
+  name (`WITH "cte name" AS (SELECT 1) SELECT …`) made the CTE walker bail and
+  the file be refused. Refusing to generate a legitimate audit file is a defect
+  too, so the walker now accepts a quoted CTE name.
+
+  It briefly introduced a **regression**, too: an odd `"` inside a `$$…$$`
+  constant (`SELECT $$5" pipe$$ AS a; DELETE FROM t;`) masked to end-of-text and
+  hid every following statement, turning a write 0.6.1 *caught* into one that
+  passed. Dollar quotes are now consumed before `"` is treated as a delimiter.
+
+  Four bypasses in one hand-rolled masker is a pattern, so there is now a
+  second, independent layer: a write verb in command position is refused with no
+  parsing of its own. Two anchors, deliberately different — at the START of a
+  statement ANY of these verbs is a command, while right after a `)` only
+  RESERVED words are checked, because that is where a bare column alias lives
+  (`SELECT MAX(d) comment FROM t` is legal Snowflake, and `comment` is a real
+  `INFORMATION_SCHEMA` column). The non-reserved verbs are still covered there
+  in their two-token command form (`MERGE INTO`, `TRUNCATE [TABLE]`,
+  `COMMENT ON <object-type>`, `COPY INTO`, `EXECUTE IMMEDIATE|TASK`,
+  `UNDROP TABLE|SCHEMA|DATABASE`, `REMOVE|RM @`, `PUT file://`, and
+  `CALL`/`UNSET` with an argument). Matching the verb plus "any identifier" is
+  NOT sufficient: a bare alias is followed by a CLAUSE keyword (`FROM`,
+  `WHERE`, `ON`, `,`) which is itself identifier-shaped, so clause keywords are
+  excluded explicitly. `COMMENT ON` must name an object type, because
+  `JOIN (SELECT …) comment ON a.id = …` is legal read-only SQL. There is no `;`
+  anchor: statements are split on `;` before this runs. The
+  allowlist depends on locating statement boundaries correctly and that has
+  been defeated four times; the next parser gap should not also be a pass.
+
+  Position, not bare tokens: most of these verbs are **not** Snowflake reserved
+  words, so `SELECT 1 AS CALL`, `AS COPY`, `AS PUT`, `AS REMOVE`, `AS UNLOAD`
+  and `AS EXECUTE` are all legal read-only SQL that a blanket token match
+  rejected. Refusing to generate a legitimate audit file is its own defect.
+  `COMMENT` and `UNDROP` are covered too. Zero false positives across the 30
+  real audit files of the adopting repo — a floor, not a proof: review later
+  found two more false-positive classes (a JOIN alias before `ON`, and a
+  `set_block` expression continuing past a subquery), both now fixed and
+  pinned.
+- **Unsubstituted binds could ship in a rendered file.** A manifest declaring
+  only `:1`/`:2` for a query that also uses `:3` emitted seven live
+  `AND col <= :3` predicates. Every existing gate passed it: the allowlist
+  checks statement roots, provenance checks input hashes, coverage checks
+  claims — none asks whether the output *runs*. `generate` now refuses to write
+  a file with a surviving `:N`, and `check` additionally audits the committed
+  bytes (still import-free), so a hand-edited or pre-guard file is caught
+  without regenerating. `Params:` banner comments stay exempt by construction.
+- **SET blocks that promised a review window they did not control.** Three
+  files declared `start_date`/`end_date`, referenced them zero times (their
+  queries self-anchor on `CURRENT_DATE`/`DATE_TRUNC`), and carried a header
+  telling the reviewer to edit those lines to change the window. The reviewer
+  edits, reruns, gets byte-identical numbers, and signs off believing the
+  window applied — a confidently wrong verification, which is worse than no SET
+  block. The block is now pruned to the variables the body actually references,
+  omitted entirely when none survive, and the header describes what was really
+  emitted.
+
+  Two follow-on fixes to that pruning: variable matching is **case-insensitive**
+  because Snowflake identifiers are (`$START_DATE` is `$start_date`, and
+  matching case-sensitively would prune a SET line that IS used, leaving a
+  dangling reference — a worse failure than the unused line the pruning
+  removes); and it reads masked text, so a `$name` inside a string literal or a
+  quoted identifier no longer counts as a reference.
+
+- **A referenced-but-undeclared session variable could ship.** SET-block pruning
+  removed lines for declared variables a body never referenced; nothing checked
+  the converse. A manifest whose `param_bindings` named a variable absent from
+  `set_block` rendered `WHERE d BETWEEN $window_start AND $window_end` with NO
+  SET block, under a header stating no section references a session variable,
+  and both `generate` and `check` reported success. Pasted into Snowsight that
+  dies on the first block. `generate` and `check` now refuse a `$var` with no
+  `SET` line - the symmetric half of the bind check.
+- **A `SET`-rooted statement escaped both read-only layers.** The tripwire used
+  `search` (first match only) and then skipped the whole statement on the `SET`
+  exemption, while the allowlist's `SET` form is prefix-only - so everything
+  after the `=` was examined by neither, and `SET x = (SELECT 1) DELETE FROM t`
+  passed clean. Not exploitable (Snowflake syntax-errors at the `)`), but it
+  falsified the stated invariant. Now `finditer`, the exemption excuses only the
+  match at offset 0, and the whole expression is scanned for the same reserved
+  verbs and two-token commands the after-paren anchor looks for. To be precise
+  about what that does and does not close: it is a denylist over those forms,
+  so an unlisted command shape (`USE ROLE`, `GET @s`, `COMMIT`) still parses as
+  a valid SET expression. None of those is executable after a `)` in Snowflake,
+  and the root allowlist refuses them as statement roots — but the mechanism is
+  a denylist, not a proof that "verbs nobody listed" are closed.
+- **Path-dependent provenance, and two gates that silently passed.** Three tools
+  filtered on the ABSOLUTE path's components, so a checkout under any dotted
+  directory - a git worktree at `.claude/worktrees/<name>/`, which this
+  project's own guidance recommends - made every file look hidden. Consequences:
+  `sql-review` hashed zero app modules, so provenance differed between a
+  worktree and a clean clone and a contributor saw false `DRIFT`; and
+  `check app-security` and `check schema-refs` scanned NOTHING and reported OK.
+  A gate that passes because it examined zero files is worse than no gate. All
+  three now filter relative to the scan root, or by directory name where no root
+  exists. Each argument carries its own root, so a checkout living under a path
+  segment literally named `venv` or `node_modules` is scanned in full rather
+  than skipped wholesale — while a `.review/` artifact handed over by explicit
+  path is still skipped. Both fixes are mutation-covered: reverting either now
+  fails tests, where before it left the suite green.
+- **A `SET` statement's expression was unchecked past its prefix.** The
+  allowlist's `SET` form was prefix-anchored, so `SET x = (SELECT 1) DELETE
+  FROM t` matched it and every token after the `=` was examined by neither
+  layer. Chasing that with more tripwire verbs fixed one verb at a time; a
+  `SET` statement must now END where its expression ends, which closes the
+  class including verbs nobody listed (`CALL`, `UNLOAD`, `UNSET`). An empty
+  `set_block` value (`SET x = ;`) is rejected at validation, since it was
+  invalid SQL that still read as a definition to the session-variable check.
+- **Snowflake's multi-variable `SET (a, b) = (…)` was falsely refused** — the
+  session-variable check recorded neither name and then reported both as
+  undefined.
+- **`COMMENT ON` matched a JOIN alias.** `JOIN (SELECT …) comment ON a.id =
+  comment.id` is legal read-only SQL; it now requires an object type after
+  `ON`, which a JOIN never has.
+- **Duplicate `fragments` declarations across manifests** were silently
+  accepted with the first reason winning; now reported.
+- **A symlinked app module made provenance environment-dependent** again by
+  hashing whatever the target held in that checkout; the link text is hashed
+  instead.
+
+### Added
+
+- **`fragments` manifest field** — declares a `queries/*.sql` that is a shared
+  CTE inlined via a token and therefore not independently runnable, exempting
+  it from coverage. Without this the gate is unsatisfiable for any repo that
+  factors CTEs into their own files. Exemption is explicit and never inferred
+  from a filename, so it cannot be used to silence the gate by renaming; a
+  declaration whose file no longer exists is itself a finding, and the `reason`
+  renders into the README index.
+
+  Because a fragment declaration *suppresses* a gate, its shape is validated
+  strictly rather than best-effort: a bare list of strings (the form that looks
+  like it works) is an error instead of a silent no-op, `file` must name exactly
+  one file in `queries/` with no path separators or traversal (`../../x.sql`
+  would otherwise reduce to a stem and exempt a different file), `reason` is
+  mandatory, duplicates are rejected, and a query that is both page-claimed and
+  declared a fragment is a contradiction rather than a silent last-wins. That
+  last check works both WITHIN a manifest (rejected at validation) and ACROSS
+  manifests (coverage resolves toward the stricter reading, ignores the
+  exemption, and reports it) - the cross-manifest half was missing in review and
+  produced two contradictory README rows for the same query, one of them reading
+  `Verified: n/a` for a query that feeds a page.
+- **`set_block_note` manifest field** — renders the rationale for the defaults
+  (which source the bounds derive from, why that source and not the calendar,
+  mechanics that bite when editing them) inline above the SET lines, where the
+  auditor actually reads it.
+
 ## [0.6.1] - 2026-09-01
 
 ### Added
