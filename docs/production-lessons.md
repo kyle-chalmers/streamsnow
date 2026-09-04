@@ -261,10 +261,16 @@ through, which is the real lesson: an allowlist is only as good as its ability
 to find statement boundaries, and that is a parsing problem that keeps having
 one more case.
 
-So a write verb in statement-**start** position — at the beginning, or right
-after a `;` or `)` — is now refused with no parsing of its own. That is the
-exact shape every bypass produced, and it holds even when the walker is
-fooled. Note this is not the denylist the paragraph above warns against: as a
+So a write verb in command position is refused independently of the walker.
+Two anchors: at the START of a statement any of them is a command, and right
+after a `)` the reserved words are, plus the non-reserved ones in two-token
+command form (`MERGE INTO`, `TRUNCATE [TABLE]`, `COMMENT ON <object-type>`, …).
+There is no `;` anchor — statements are split on `;` before this runs. It does
+consult small keyword lists rather than being parse-free, because a bare column
+or JOIN alias may legally be named after a non-reserved verb; that is the cost
+of not refusing legitimate SQL. And a masking form left unterminated makes the
+rest of the file unreadable, so it is refused outright rather than passed
+unchecked. Note this is not the denylist the paragraph above warns against: as a
 *sole* guard a denylist fails on the verb nobody listed, but as a second layer
 under an allowlist it costs nothing and catches the parser failure. Position
 matters because most of these verbs are not Snowflake reserved words —

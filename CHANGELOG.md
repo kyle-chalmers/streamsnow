@@ -99,8 +99,14 @@ never surfaces.
   exemption, while the allowlist's `SET` form is prefix-only - so everything
   after the `=` was examined by neither, and `SET x = (SELECT 1) DELETE FROM t`
   passed clean. Not exploitable (Snowflake syntax-errors at the `)`), but it
-  falsified the stated invariant. Now `finditer`, and the exemption excuses only
-  the match at offset 0.
+  falsified the stated invariant. Now `finditer`, the exemption excuses only the
+  match at offset 0, and the whole expression is scanned for the same reserved
+  verbs and two-token commands the after-paren anchor looks for. To be precise
+  about what that does and does not close: it is a denylist over those forms,
+  so an unlisted command shape (`USE ROLE`, `GET @s`, `COMMIT`) still parses as
+  a valid SET expression. None of those is executable after a `)` in Snowflake,
+  and the root allowlist refuses them as statement roots — but the mechanism is
+  a denylist, not a proof that "verbs nobody listed" are closed.
 - **Path-dependent provenance, and two gates that silently passed.** Three tools
   filtered on the ABSOLUTE path's components, so a checkout under any dotted
   directory - a git worktree at `.claude/worktrees/<name>/`, which this
