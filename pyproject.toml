@@ -43,6 +43,15 @@ Issues = "https://github.com/kyle-chalmers/streamsnow/issues"
 [project.scripts]
 streamsnow = "streamsnow.cli:app"
 
+[tool.hatch.build.targets.sdist]
+# Exclude-only: hatchling's default file selection still applies to everything else.
+exclude = [
+  # Deliberately malformed SKILL.md, used by the plugin-validate negative control in CI.
+  # The sdist otherwise sweeps in tests/, and a tool globbing **/SKILL.md across an
+  # extracted tarball would find a skill that fails to parse.
+  "/tests/plugin-validate-negative",
+]
+
 [tool.hatch.build.targets.wheel]
 # The whole streamsnow/ package ships, including the Jinja scaffold templates
 # under streamsnow/_templates/ (non-.py files are included by default).
