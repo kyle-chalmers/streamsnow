@@ -56,7 +56,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import contextlib
 import json
 import re
 from pathlib import Path
@@ -609,14 +608,31 @@ _IGNORED_DIR_NAMES = frozenset(
 def _in_ignored_dir(path: Path, root: Path | None = None) -> bool:
     """True if *path* sits under a directory that never holds reviewable source.
 
-    When *root* is given, only components BELOW it are considered, so the
-    absolute prefix can never influence the decision.
+    Only components BELOW the scan root are considered. Filtering on the
+    ABSOLUTE path's components made a checkout under any matching directory
+    look entirely hidden, so the scan examined nothing and reported OK — a gate
+    that passes because it looked at zero files is worse than no gate.
+
+    With no root, the current working directory is used (pre-commit and CI both
+    invoke from the repo root). If the path is not under either, NOTHING is
+    filtered: erring toward scanning more is the only safe direction here, and
+    a repo that merely LIVES under a path segment named `venv` must still be
+    scanned in full.
     """
-    parts = path.parts
-    if root is not None:
-        with contextlib.suppress(ValueError):
-            parts = path.relative_to(root).parts
-    return any(part in _IGNORED_DIR_NAMES for part in parts)
+    for base in (root, Path.cwd()):
+        if base is None:
+            continue
+        try:
+            return any(p in _IGNORED_DIR_NAMES for p in path.relative_to(base).parts)
+        except ValueError:
+            continue
+    # Not locatable under a root: fall back to matching NAMES anywhere in the
+    # path. That still skips a `.review/` artifact handed over as an absolute
+    # path outside the tree, and is safe for the case that caused this bug -
+    # `.claude/worktrees/<name>/` contains no ignored NAME. The residual gap is
+    # a repo living directly under a directory literally called `venv` or
+    # `node_modules`; callers that know their root pass it and avoid even that.
+    return any(p in _IGNORED_DIR_NAMES for p in path.parts)
 
 
 def _iter_files(root: Path) -> list[Path]:
@@ -636,14 +652,14 @@ def _iter_files(root: Path) -> list[Path]:
     return sorted(out)
 
 
-def scan_paths(paths: list[Path]) -> dict:
+def scan_paths(paths: list[Path], root: Path | None = None) -> dict:
     findings: list[dict] = []
     for p in paths:
         if not p.is_file():
             continue
         # Skip files under a junk dir even when passed explicitly. No root is
         # available here, so this matches directory NAMES (see _in_ignored_dir).
-        if _in_ignored_dir(p):
+        if _in_ignored_dir(p, root):
             continue
         if p.suffix == ".py":
             findings.extend(_scan_python(p))
@@ -660,15 +676,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--format", choices=("md", "json"), default="md")
     args = ap.parse_args(argv)
 
-    files: list[Path] = []
+    # Each argument carries its own root. A directory arg anchors the
+    # junk-directory filter to itself, so a checkout living under a path
+    # segment named `venv` is scanned in full instead of skipped wholesale;
+    # explicitly-named files keep the name-based filter, which is what stops a
+    # `.review/` artifact handed over by path from being scanned.
+    findings: list[dict] = []
     for raw in args.paths or ["apps"]:
-        root = Path(raw)
-        if root.is_dir():
-            files.extend(_iter_files(root))
+        target = Path(raw)
+        if target.is_dir():
+            findings.extend(scan_paths(_iter_files(target), target)["findings"])
         else:
-            files.append(root)
-
-    result = scan_paths(files)
+            findings.extend(scan_paths([target])["findings"])
+    result = {"ok": not findings, "findings": findings}
     if args.format == "json":
         print(json.dumps(result, indent=2))
     elif result["ok"]:

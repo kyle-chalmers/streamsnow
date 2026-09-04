@@ -136,6 +136,7 @@ import hashlib
 import importlib
 import io
 import json
+import os
 import re
 import sys
 import textwrap
@@ -150,7 +151,9 @@ GENERATOR_SCHEMA = 1
 #: to session-variable assignments (see _verify_read_only).
 ALLOWED_ROOTS = frozenset({"SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN"})
 
-_SET_STMT_RE = re.compile(r"^SET\s+[A-Za-z_][A-Za-z0-9_$]*\s*=", re.IGNORECASE)
+# Prefix form, plus Snowflake's documented multi-variable form
+# `SET (a, b) = (expr, expr)`.
+_SET_STMT_RE = re.compile(r"^SET\s+(?:[A-Za-z_][A-Za-z0-9_$]*|\([^)]*\))\s*=", re.IGNORECASE)
 _PROVENANCE_RE = re.compile(
     r"^-- Provenance: schema=(\d+) inputs=([0-9a-f]{16}) output=([0-9a-f]{16})\s*$",
     re.MULTILINE,
@@ -361,6 +364,18 @@ def validate_manifest(m: dict) -> list[str]:
     mode = m.get("mode", "tokens")
     if mode not in ("tokens", "metrics"):
         out.append(f"mode must be 'tokens' (default) or 'metrics' (got {mode!r})")
+    sb = m.get("set_block")
+    if sb is not None:
+        if not isinstance(sb, dict):
+            out.append("set_block must be an object of {variable: expression}")
+        else:
+            for k, v in sb.items():
+                if not isinstance(v, str) or not v.strip():
+                    out.append(
+                        f"set_block[{k!r}] must be a non-empty SQL expression — an empty "
+                        "value renders `SET " + str(k) + " = ;`, which is invalid SQL that "
+                        "still looks like a definition to the session-variable check"
+                    )
     note = m.get("set_block_note")
     if note is not None and not isinstance(note, str):
         out.append(f"set_block_note must be a string (got {type(note).__name__})")
@@ -717,6 +732,11 @@ def _verify_session_vars_defined(text: str) -> list[str]:
     """
     masked = _mask_strings_and_comments(text)
     defined = {m.group(1).lower() for m in re.finditer(r"(?mi)^SET\s+([A-Za-z_]\w*)\s*=", masked)}
+    # Snowflake's documented multi-variable form: `SET (a, b) = (expr, expr)`.
+    # Without this both names read as undefined and a valid hand-edited file
+    # was falsely refused.
+    for m in re.finditer(r"(?mi)^SET\s+\(([^)]*)\)\s*=", masked):
+        defined |= {n.strip().lower() for n in m.group(1).split(",") if n.strip()}
     problems: list[str] = []
     seen: set[str] = set()
     for m in re.finditer(r"\$([A-Za-z_]\w*)\b", masked):
@@ -923,6 +943,41 @@ _WRITE_VERB_AFTER_PAREN_RE = re.compile(
 )
 
 
+def _valid_set_statement(stmt: str) -> bool:
+    """Is *stmt* a COMPLETE `SET <var> = <expr>` and nothing more?
+
+    ``_SET_STMT_RE`` only anchors the prefix, so `SET x = (SELECT 1) DELETE
+    FROM t` matched it and the allowlist accepted the whole statement — every
+    token after the `=` was examined by neither layer. Extending the tripwire's
+    verb list chased that one verb at a time; requiring the statement to END
+    where its expression ends closes the class, including verbs nobody listed.
+
+    Accepts a scalar expression (`CURRENT_DATE`, `DATEADD(...)`) or a single
+    balanced parenthesised expression (`(SELECT MAX(d) FROM t)`) with nothing
+    following it. Callers must pass MASKED text so a `)` inside a literal
+    cannot end the group early.
+    """
+    m = _SET_STMT_RE.match(stmt)
+    if not m:
+        return False
+    rest = stmt[m.end() :].strip()
+    if not rest:
+        return False  # `SET x = ;` — no expression at all
+    if rest.startswith("("):
+        depth, idx = 0, 0
+        while idx < len(rest):
+            depth += rest[idx] == "("
+            depth -= rest[idx] == ")"
+            if depth == 0:
+                break
+            idx += 1
+        if depth != 0:
+            return False  # unbalanced — cannot parse, so not allowed
+        return not rest[idx + 1 :].strip()
+    # Bare expression: no write verb may appear as a token anywhere in it.
+    return not re.search(r"\b(" + "|".join(_WRITE_VERBS) + r")\b", rest, re.IGNORECASE)
+
+
 def _verify_read_only(text: str) -> list[str]:
     """Statement-root allowlist, plus a write-verb tripwire, over the file.
 
@@ -951,7 +1006,7 @@ def _verify_read_only(text: str) -> list[str]:
         hits += [
             (m.start(1), m.group(1).upper()) for m in _WRITE_VERB_AFTER_PAREN_RE.finditer(stmt)
         ]
-        is_set_stmt = bool(_SET_STMT_RE.match(stmt))
+        is_set_stmt = _valid_set_statement(stmt)
         for offset, verb in hits:
             if offset == 0 and verb == "SET" and is_set_stmt:
                 continue  # the one legal write-shaped root; allowlist validates its form
@@ -975,7 +1030,7 @@ def _verify_read_only(text: str) -> list[str]:
             continue
         if root in ALLOWED_ROOTS - {"WITH"}:
             continue
-        if root == "SET" and _SET_STMT_RE.match(stmt):
+        if root == "SET" and _valid_set_statement(stmt):
             continue
         problems.append(f"statement root {root or stmt[:20]!r} is not allowed in review SQL")
     return problems
@@ -1018,7 +1073,19 @@ def _inputs_digest(app: Path, manifest_path: Path, manifest: dict) -> str:
             ):
                 continue
             h.update(f"\nmodule:{py.relative_to(app).as_posix()}\n".encode())
-            h.update(py.read_bytes())
+            # A symlink pointing outside the app would hash whatever that
+            # target happens to contain in THIS checkout, making provenance
+            # environment-dependent again. Hash the link target's text instead:
+            # deterministic everywhere, and a retarget still reads as a change.
+            try:
+                resolved = py.resolve(strict=True)
+                external = not resolved.is_relative_to(app.resolve())
+            except (OSError, RuntimeError):
+                external = True
+            if py.is_symlink() and external:
+                h.update(b"<external-symlink>" + os.readlink(py).encode())
+            else:
+                h.update(py.read_bytes())
     return h.hexdigest()[:16]
 
 
@@ -1227,6 +1294,26 @@ def _stamp_provenance(text: str, inputs: str) -> str:
 # --------------------------------------------------------------------------- #
 # Coverage
 # --------------------------------------------------------------------------- #
+def _duplicate_fragments(app: Path) -> list[str]:
+    """Fragment stems declared by MORE THAN ONE manifest.
+
+    Per-manifest validation rejects a duplicate within one file; across files
+    nothing noticed, and the first manifest's ``reason`` silently won — so the
+    index reported one rationale while another manifest asserted a different
+    one. Ownership of an exemption should be unambiguous.
+    """
+    seen: dict[str, int] = {}
+    for mp in _manifest_paths(app):
+        with contextlib.suppress(ToolError):
+            for entry in load_manifest(mp).get("fragments") or []:
+                if isinstance(entry, dict) and isinstance(entry.get("file"), str):
+                    fname = entry["file"]
+                    if "/" not in fname and "\\" not in fname and fname.endswith(".sql"):
+                        stem = fname[: -len(".sql")]
+                        seen[stem] = seen.get(stem, 0) + 1
+    return sorted(k for k, n in seen.items() if n > 1)
+
+
 def _declared_fragments(app: Path) -> dict[str, str]:
     """Query files a manifest declares as CTE fragments, mapped to the reason.
 
@@ -1530,6 +1617,16 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
             "not both; the exemption is ignored until this is resolved",
         }
         for f in cov.get("fragments_conflicting", [])
+    ]
+    findings += [
+        {
+            "file": f"apps/{app.name}/sql_review/manifests",
+            "line": 1,
+            "detail": f"fragment {f!r} is declared by more than one manifest — the first "
+            "reason silently wins and the index then states only one of them; declare it "
+            "in exactly one manifest",
+        }
+        for f in _duplicate_fragments(app)
     ]
 
     # Cross-manifest collisions read as findings here too, so the gate can
