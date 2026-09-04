@@ -902,7 +902,13 @@ _WRITE_VERB_AT_START_RE = re.compile(r"\A\s*(" + "|".join(_WRITE_VERBS) + r")\b"
 _WRITE_COMMANDS_AFTER_PAREN = (
     r"MERGE\s+INTO",
     r"TRUNCATE\s+TABLE",
-    r"COMMENT\s+ON",
+    # `COMMENT ON` must name an object type. Without that, a subquery aliased
+    # `comment` followed by a JOIN's `ON` — `JOIN (SELECT ...) comment ON
+    # a.id = comment.id` — matched, and legal read-only SQL was refused. A
+    # JOIN's ON is followed by an expression, never by TABLE / VIEW / COLUMN.
+    r"COMMENT\s+ON\s+(?:TABLE|VIEW|COLUMN|SCHEMA|DATABASE|WAREHOUSE|STAGE|"
+    r"SEQUENCE|STREAM|TASK|PIPE|FUNCTION|PROCEDURE|ROLE|USER|INTEGRATION|"
+    r"MATERIALIZED)\b",
     r"COPY\s+INTO",
     r"EXECUTE\s+IMMEDIATE",
     r"UNDROP\s+TABLE",

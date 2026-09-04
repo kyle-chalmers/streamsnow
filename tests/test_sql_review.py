@@ -1446,3 +1446,33 @@ def test_after_paren_anchor_sees_non_reserved_commands_too(sql: str) -> None:
 )
 def test_two_token_commands_do_not_fire_on_bare_aliases(sql: str) -> None:
     assert sr._verify_read_only(sql) == [], f"false positive on: {sql}"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # A subquery aliased with a write-verb name, followed by a JOIN's ON.
+        # `) comment ON a.id = ...` looks exactly like `COMMENT ON`, and this
+        # was a real false positive: legal read-only SQL refused.
+        "SELECT a.x FROM t a JOIN (SELECT 1 AS id) comment ON a.id = comment.id;",
+        "SELECT a.x FROM t a JOIN (SELECT 1 AS id) copy ON a.id = copy.id;",
+        "SELECT a.x FROM t a LEFT JOIN (SELECT 1 AS id) merge ON a.id = merge.id;",
+        "SELECT * FROM (SELECT 1) remove;",
+    ],
+)
+def test_join_alias_named_after_a_write_verb_is_allowed(sql: str) -> None:
+    assert sr._verify_read_only(sql) == [], f"false positive on: {sql}"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "COMMENT ON TABLE t IS 'x';",
+        "WITH x AS (SELECT 1) COMMENT ON TABLE t IS 1;",
+        "WITH x AS (SELECT 1) COMMENT ON VIEW v IS 1;",
+        "WITH x AS (SELECT 1) COMMENT ON COLUMN t.c IS 1;",
+    ],
+)
+def test_real_comment_ddl_is_still_refused(sql: str) -> None:
+    """Narrowing `COMMENT ON` must not lose the DDL it exists to catch."""
+    assert sr._verify_read_only(sql), f"COMMENT DDL slipped through: {sql}"
