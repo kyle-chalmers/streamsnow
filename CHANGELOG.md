@@ -40,9 +40,14 @@ never surfaces.
   RESERVED words are checked, because that is where a bare column alias lives
   (`SELECT MAX(d) comment FROM t` is legal Snowflake, and `comment` is a real
   `INFORMATION_SCHEMA` column). The non-reserved verbs are still covered there
-  in their two-token command form (`MERGE INTO`, `TRUNCATE TABLE`, `COMMENT ON`,
-  `COPY INTO`, …), which a bare alias can never match since an alias is followed
-  by `FROM` / `,` / `;` and never by `INTO` / `TABLE` / `ON`. There is no `;`
+  in their two-token command form (`MERGE INTO`, `TRUNCATE [TABLE]`,
+  `COMMENT ON <object-type>`, `COPY INTO`, `EXECUTE IMMEDIATE|TASK`,
+  `UNDROP TABLE|SCHEMA|DATABASE`, `REMOVE|RM @`, `PUT file://`, and
+  `CALL`/`UNSET` with an argument). Matching the verb plus "any identifier" is
+  NOT sufficient: a bare alias is followed by a CLAUSE keyword (`FROM`,
+  `WHERE`, `ON`, `,`) which is itself identifier-shaped, so clause keywords are
+  excluded explicitly. `COMMENT ON` must name an object type, because
+  `JOIN (SELECT …) comment ON a.id = …` is legal read-only SQL. There is no `;`
   anchor: statements are split on `;` before this runs. The
   allowlist depends on locating statement boundaries correctly and that has
   been defeated four times; the next parser gap should not also be a pass.
@@ -52,7 +57,10 @@ never surfaces.
   and `AS EXECUTE` are all legal read-only SQL that a blanket token match
   rejected. Refusing to generate a legitimate audit file is its own defect.
   `COMMENT` and `UNDROP` are covered too. Zero false positives across the 30
-  real audit files of the adopting repo.
+  real audit files of the adopting repo — a floor, not a proof: review later
+  found two more false-positive classes (a JOIN alias before `ON`, and a
+  `set_block` expression continuing past a subquery), both now fixed and
+  pinned.
 - **Unsubstituted binds could ship in a rendered file.** A manifest declaring
   only `:1`/`:2` for a query that also uses `:3` emitted seven live
   `AND col <= :3` predicates. Every existing gate passed it: the allowlist

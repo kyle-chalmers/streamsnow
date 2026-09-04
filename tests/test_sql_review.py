@@ -1476,3 +1476,140 @@ def test_join_alias_named_after_a_write_verb_is_allowed(sql: str) -> None:
 def test_real_comment_ddl_is_still_refused(sql: str) -> None:
     """Narrowing `COMMENT ON` must not lose the DDL it exists to catch."""
     assert sr._verify_read_only(sql), f"COMMENT DDL slipped through: {sql}"
+
+
+# --------------------------------------------------------------------------- #
+# `set_block` expressions. Requiring the statement to END at the first balanced
+# paren group refused the canonical idiom — anchoring a window to a source's
+# last loaded date, cast or adjusted. The rule is "no write verb in the
+# expression", not "nothing after it".
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "(SELECT MAX(load_date) FROM REPORTING.VW_ORDERS)::DATE",
+        "(SELECT MAX(load_date) FROM REPORTING.VW_ORDERS) - 1",
+        "(SELECT COUNT(*) FROM ANALYTICS.ORDERS) / 2",
+        "(SELECT MAX(v) FROM ANALYTICS.ORDERS) || '-x'",
+        "COALESCE((SELECT MAX(d) FROM ANALYTICS.ORDERS), CURRENT_DATE)",
+        "(SELECT MAX(d) FROM ANALYTICS.ORDERS)",
+        "CURRENT_DATE",
+        "DATEADD('day', -30, CURRENT_DATE)",
+        # An identifier that merely CONTAINS a verb must not trip the scan.
+        "(SELECT MAX(create_date) FROM ANALYTICS.UPDATES)",
+        "(SELECT MAX(d) FROM ANALYTICS.ORDERS WHERE action = 'DELETE')",
+    ],
+)
+def test_legal_set_block_expressions_are_accepted(expr: str) -> None:
+    assert sr._verify_read_only(f"SET end_date = {expr};") == [], f"refused: {expr}"
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "(SELECT 1) DELETE FROM t",
+        "(SELECT 1) CALL MY_PROC()",
+        "(SELECT 1) UNLOAD TO @s",
+        "(SELECT 1) UNSET y",
+        "1 DROP TABLE t",
+        # Wrapping it in outer parens hid the command inside the group.
+        "((SELECT 1) CALL MY_PROC())",
+        "((SELECT 1) DELETE FROM t)",
+    ],
+)
+def test_command_smuggled_into_a_set_expression_is_refused(expr: str) -> None:
+    assert sr._verify_read_only(f"SET x = {expr};"), f"smuggled command passed: {expr}"
+
+
+@pytest.mark.parametrize(
+    ("sql", "why"),
+    [
+        ("WITH x AS (SELECT 1) TRUNCATE ANALYTICS.ORDERS", "TABLE is optional in Snowflake"),
+        ("WITH x AS (SELECT 1) TRUNCATE TABLE t", "explicit TABLE"),
+        ("WITH x AS (SELECT 1) UNDROP SCHEMA ANALYTICS", "UNDROP takes SCHEMA too"),
+        ("WITH x AS (SELECT 1) EXECUTE TASK MY_TASK", "EXECUTE takes TASK too"),
+        ("WITH x AS (SELECT 1) RM @MY_STAGE/f.csv", "RM is REMOVE's alias"),
+        ("WITH x AS (SELECT 1) CALL SYSTEM$ABORT_SESSION(1)", "CALL"),
+        ("WITH x AS (SELECT 1) UNLOAD TO @s", "UNLOAD"),
+        ("WITH x AS (SELECT 1) UNSET my_var", "UNSET"),
+    ],
+)
+def test_after_paren_anchor_covers_every_write_command_form(sql: str, why: str) -> None:
+    masked = sr._mask_strings_and_comments(sql)
+    assert sr._WRITE_VERB_AFTER_PAREN_RE.search(masked), f"tripwire blind to {why}: {sql}"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Bare aliases named after write verbs, followed by a CLAUSE keyword.
+        "SELECT COUNT(*) call FROM ANALYTICS.ORDERS;",
+        "SELECT MAX(d) truncate FROM ANALYTICS.ORDERS;",
+        "SELECT MAX(d) unset FROM ANALYTICS.ORDERS;",
+        "SELECT MAX(d) execute FROM ANALYTICS.ORDERS;",
+        "SELECT MAX(d) undrop FROM ANALYTICS.ORDERS;",
+        "SELECT COUNT(*) call, 1 AS y FROM ANALYTICS.ORDERS;",
+        "SELECT MAX(d) truncate WHERE 1=1;",
+        # A widened pattern must not match a longer identifier.
+        "SELECT f(x) copy INTO_TAB FROM ANALYTICS.ORDERS;",
+    ],
+)
+def test_widened_patterns_do_not_refuse_bare_aliases(sql: str) -> None:
+    assert sr._verify_read_only(sql) == [], f"false positive on: {sql}"
+
+
+def test_symlinked_module_keeps_provenance_checkout_independent(tmp_path: Path) -> None:
+    """Hashing a symlink's TARGET made provenance environment-dependent again."""
+    manifest = {**MANIFEST, "token_strategy": "manifest", "modules": {"data": "data"}}
+    manifest["token_dispatchers"] = {"REGION_FILTER": {"const_attr": "REGION_SQL"}}
+    digests = []
+    for i, payload in enumerate(("AND region = 'West'", "AND region = 'East'")):
+        root = tmp_path / f"c{i}" / "repo"
+        app = root / "apps" / SLUG
+        (app / "queries").mkdir(parents=True)
+        (app / "snowflake.yml").write_text("definition_version: 2\n")
+        (app / "queries" / "revenue_daily.sql").write_text(QUERY)
+        outside = tmp_path / f"c{i}" / "outside.py"
+        outside.write_text(f'REGION_SQL = "{payload}"\n')
+        # A RELATIVE link, which is what git stores and what a real repo has.
+        (app / "data.py").symlink_to(Path("../../../outside.py"))
+        md = app / "sql_review" / "manifests"
+        md.mkdir(parents=True)
+        (md / "revenue.json").write_text(json.dumps(manifest, indent=2))
+        digests.append(sr._inputs_digest(app, md / "revenue.json", manifest))
+    assert digests[0] == digests[1], (
+        "provenance still depends on what the symlink target holds in this checkout"
+    )
+
+
+@pytest.mark.parametrize("value", ["", "   ", None, 5])
+def test_empty_or_non_string_set_block_value_is_rejected(value) -> None:
+    """`set_block: {"x": ""}` renders `SET x = ;`.
+
+    That is invalid SQL which nonetheless looked like a definition to the
+    session-variable check, so it satisfied its own guard. Rejected at
+    validation, where the author can see it.
+    """
+    m = {
+        "schema_version": 1,
+        "feature": "revenue",
+        "app": SLUG,
+        "pages": [{"name": "Overview", "queries": ["revenue_daily"]}],
+        "query_specs": {"revenue_daily": {}},
+        "set_block": {"start_date": value},
+    }
+    assert [p for p in sr.validate_manifest(m) if "set_block" in p], f"accepted {value!r}"
+
+
+def test_valid_set_block_values_are_accepted() -> None:
+    m = {
+        "schema_version": 1,
+        "feature": "revenue",
+        "app": SLUG,
+        "pages": [{"name": "Overview", "queries": ["revenue_daily"]}],
+        "query_specs": {"revenue_daily": {}},
+        "set_block": {"start_date": "CURRENT_DATE", "end_date": "(SELECT MAX(d) FROM t)"},
+    }
+    assert [p for p in sr.validate_manifest(m) if "set_block" in p] == []

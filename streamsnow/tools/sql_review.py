@@ -919,21 +919,35 @@ _WRITE_VERB_AT_START_RE = re.compile(r"\A\s*(" + "|".join(_WRITE_VERBS) + r")\b"
 # traded away exactly the coverage it is for. A bare alias is followed by
 # FROM / `,` / `;`, never by INTO / TABLE / ON / IMMEDIATE, so these cannot fire
 # on `SELECT COUNT(*) merge FROM t`.
+# A bare column/table alias is followed by a CLAUSE keyword, so the "verb needs
+# an argument" patterns below must exclude those. Without this,
+# `SELECT COUNT(*) call FROM t` matched `CALL <identifier>` (FROM is
+# identifier-shaped) and legal SQL was refused.
+_NOT_CLAUSE = (
+    r"(?!(?:FROM|WHERE|GROUP|ORDER|JOIN|ON|LIMIT|OFFSET|HAVING|UNION|EXCEPT|"
+    r"INTERSECT|QUALIFY|WINDOW|AS|USING|INNER|LEFT|RIGHT|FULL|CROSS|LATERAL|"
+    r"AND|OR|IS|NOT|NULL|END|THEN|ELSE|WHEN)\b)"
+)
+
 _WRITE_COMMANDS_AFTER_PAREN = (
-    r"MERGE\s+INTO",
-    r"TRUNCATE\s+TABLE",
-    # `COMMENT ON` must name an object type. Without that, a subquery aliased
-    # `comment` followed by a JOIN's `ON` — `JOIN (SELECT ...) comment ON
-    # a.id = comment.id` — matched, and legal read-only SQL was refused. A
-    # JOIN's ON is followed by an expression, never by TABLE / VIEW / COLUMN.
+    r"MERGE\s+INTO\b",
+    # `TABLE` is OPTIONAL in Snowflake's TRUNCATE, so match the bare form too.
+    r"TRUNCATE\s+(?:TABLE\s+)?" + _NOT_CLAUSE + r"[A-Za-z_\"]",
     r"COMMENT\s+ON\s+(?:TABLE|VIEW|COLUMN|SCHEMA|DATABASE|WAREHOUSE|STAGE|"
     r"SEQUENCE|STREAM|TASK|PIPE|FUNCTION|PROCEDURE|ROLE|USER|INTEGRATION|"
     r"MATERIALIZED)\b",
-    r"COPY\s+INTO",
-    r"EXECUTE\s+IMMEDIATE",
-    r"UNDROP\s+TABLE",
-    r"REMOVE\s+@",
+    r"COPY\s+INTO\b",
+    # UNDROP takes TABLE / SCHEMA / DATABASE; EXECUTE takes IMMEDIATE / TASK.
+    r"UNDROP\s+(?:TABLE|SCHEMA|DATABASE)\b",
+    r"EXECUTE\s+(?:IMMEDIATE|TASK)\b",
+    # `RM` is REMOVE's documented alias; both take a stage reference.
+    r"(?:REMOVE|RM)\s+@",
     r"PUT\s+file://",
+    # CALL / UNLOAD / UNSET need an argument, which a bare alias never has:
+    # an alias is followed by FROM / `,` / `;`, never by an identifier.
+    r"CALL\s+" + _NOT_CLAUSE + r"[A-Za-z_\"$]",
+    r"UNLOAD\s+(?:TO\s+)?@",
+    r"UNSET\s+" + _NOT_CLAUSE + r"[A-Za-z_\"]",
 )
 _WRITE_VERB_AFTER_PAREN_RE = re.compile(
     r"(?<=\))\s*("
@@ -944,18 +958,23 @@ _WRITE_VERB_AFTER_PAREN_RE = re.compile(
 
 
 def _valid_set_statement(stmt: str) -> bool:
-    """Is *stmt* a COMPLETE `SET <var> = <expr>` and nothing more?
+    """Is *stmt* a `SET <var> = <expr>` with no command smuggled after it?
 
     ``_SET_STMT_RE`` only anchors the prefix, so `SET x = (SELECT 1) DELETE
     FROM t` matched it and the allowlist accepted the whole statement — every
     token after the `=` was examined by neither layer. Extending the tripwire's
-    verb list chased that one verb at a time; requiring the statement to END
-    where its expression ends closes the class, including verbs nobody listed.
+    verb list chased that one verb at a time; checking the whole expression
+    closes the class, including verbs nobody listed.
 
-    Accepts a scalar expression (`CURRENT_DATE`, `DATEADD(...)`) or a single
-    balanced parenthesised expression (`(SELECT MAX(d) FROM t)`) with nothing
-    following it. Callers must pass MASKED text so a `)` inside a literal
-    cannot end the group early.
+    An earlier attempt required the statement to END at the first balanced
+    paren group, which refused the canonical idiom
+    `SET end_date = (SELECT MAX(load_date) FROM V)::DATE` — and `- 1`, `/ 2`,
+    `|| '…'`. Anchoring a window to a source's last loaded date, cast or
+    adjusted, is the main reason `set_block` exists. So a leading group may be
+    followed by more expression; what it may NOT contain is a write verb.
+
+    Callers must pass MASKED text: a `)` or a verb-shaped word inside a literal
+    must not affect the result.
     """
     m = _SET_STMT_RE.match(stmt)
     if not m:
@@ -963,18 +982,12 @@ def _valid_set_statement(stmt: str) -> bool:
     rest = stmt[m.end() :].strip()
     if not rest:
         return False  # `SET x = ;` — no expression at all
-    if rest.startswith("("):
-        depth, idx = 0, 0
-        while idx < len(rest):
-            depth += rest[idx] == "("
-            depth -= rest[idx] == ")"
-            if depth == 0:
-                break
-            idx += 1
-        if depth != 0:
-            return False  # unbalanced — cannot parse, so not allowed
-        return not rest[idx + 1 :].strip()
-    # Bare expression: no write verb may appear as a token anywhere in it.
+    # Scan the WHOLE expression, not just what follows a leading paren group:
+    # wrapping the smuggled command in outer parens (`((SELECT 1) CALL p())`)
+    # otherwise hid it inside the group and got past both layers. A write verb
+    # has no place anywhere in a session-variable expression, and identifiers
+    # that merely contain one (`UPDATES`, `create_date`) do not match on a word
+    # boundary. Literals are already masked.
     return not re.search(r"\b(" + "|".join(_WRITE_VERBS) + r")\b", rest, re.IGNORECASE)
 
 
@@ -1083,7 +1096,15 @@ def _inputs_digest(app: Path, manifest_path: Path, manifest: dict) -> str:
             except (OSError, RuntimeError):
                 external = True
             if py.is_symlink() and external:
-                h.update(b"<external-symlink>" + os.readlink(py).encode())
+                # Hash the LINK, never the target's bytes: those are whatever
+                # this machine happens to have outside the repo. A relative
+                # link (what git stores) is identical in every checkout. An
+                # absolute link is machine-specific by nature, so only its
+                # basename is hashed — still deterministic for a given repo,
+                # and a retarget to a different file is still a change.
+                link = os.readlink(py)
+                stable = link if not os.path.isabs(link) else "<abs>/" + os.path.basename(link)
+                h.update(b"<external-symlink>" + stable.encode())
             else:
                 h.update(py.read_bytes())
     return h.hexdigest()[:16]

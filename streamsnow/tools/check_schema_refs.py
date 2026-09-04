@@ -318,7 +318,11 @@ def main(argv: list[str] | None = None) -> int:
         target = Path(raw)
         root = target if target.is_dir() else None
         findings.extend(check_paths(_iter_files(target), policy, root)["findings"])
-    result = {"ok": not findings, "findings": findings}
+    # Keep check_paths' full output contract. Rebuilding this dict from just
+    # `findings` dropped `denylist`, which the md success branch below prints
+    # and JSON consumers read — so every CLEAN run tracebacked with
+    # KeyError: 'denylist', and no test noticed because none called main().
+    result = {"ok": not findings, "findings": findings, "denylist": list(policy.schema_deny)}
     if args.format == "json":
         print(json.dumps(result, indent=2))
     else:
