@@ -25,7 +25,16 @@ public or cutting the first PyPI release:
 
 ## Cut a release
 
-1. Bump `version` in `pyproject.toml` (and note changes in `CHANGELOG.md`).
+1. Bump the version in **lockstep across four files**, and note the changes in
+   `CHANGELOG.md`:
+   - `pyproject.toml`
+   - `.claude-plugin/plugin.json`
+   - `streamsnow/__init__.py` (the `__version__` fallback)
+   - `uv.lock` (run `uv lock`, then `uv lock --check` to confirm)
+
+   A plugin-only install reads `plugin.json`, a pip install reads the wheel
+   metadata, and `streamsnow --version` reads `__init__.py`, so a partial bump
+   makes them disagree about what is installed.
 2. Ensure `main` is green (lint-and-test, privacy-gate, wheel-smoke).
 3. Tag and push. Use the fully-qualified refspec:
    ```bash

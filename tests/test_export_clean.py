@@ -18,7 +18,16 @@ def test_detects_proprietary_term(tmp_path):
 
 
 def test_detects_ticket_prefix_and_personal_path(tmp_path):
-    (tmp_path / "c.py").write_text("# tracked in DI-1339\nP = '/Users/someone/secret/x'\n")
+    # The ticket id is COMPOSED at runtime rather than written as a literal.
+    # DENY_PATTERNS names real internal prefixes (`\bDI-\d{2,}\b`), so the test
+    # needs that prefix to prove DI- detection - but this file sits in the
+    # gate's own _SKIP_FILES, so the gate structurally cannot see its own
+    # fixtures, and it ships in every sdist. A literal here would publish a real
+    # internal ticket id to PyPI via the very tool meant to prevent that.
+    # Composing it keeps the detection honest and leaves no ticket-shaped
+    # string in the released source.
+    ticket = "DI" + "-1339"
+    (tmp_path / "c.py").write_text(f"# tracked in {ticket}\nP = '/Users/someone/secret/x'\n")
     res = scan_tree(tmp_path)
     matches = {f["match"] for f in res["findings"]}
     assert not res["ok"]

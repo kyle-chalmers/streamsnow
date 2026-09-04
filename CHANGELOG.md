@@ -34,10 +34,13 @@ never surfaces.
   passed. Dollar quotes are now consumed before `"` is treated as a delimiter.
 
   Four bypasses in one hand-rolled masker is a pattern, so there is now a
-  second, independent layer: a write verb in statement-START position (at the
-  beginning, or right after a `;` or `)`) is refused with no parsing of its
-  own. That is the shape every bypass produced — the verb surfacing after a
-  mis-parsed CTE close — and it holds even when the walker is fooled. The
+  second, independent layer: a write verb in command position is refused with no
+  parsing of its own. Two anchors, deliberately different — at the START of a
+  statement ANY of these verbs is a command, while right after a `)` only
+  RESERVED words are checked, because that is where a bare column alias lives
+  (`SELECT MAX(d) comment FROM t` is legal Snowflake, and `comment` is a real
+  `INFORMATION_SCHEMA` column). There is no `;` anchor: statements are split on
+  `;` before this runs. The
   allowlist depends on locating statement boundaries correctly and that has
   been defeated four times; the next parser gap should not also be a pass.
 
@@ -72,6 +75,32 @@ never surfaces.
   removes); and it reads masked text, so a `$name` inside a string literal or a
   quoted identifier no longer counts as a reference.
 
+- **A referenced-but-undeclared session variable could ship.** SET-block pruning
+  removed lines for declared variables a body never referenced; nothing checked
+  the converse. A manifest whose `param_bindings` named a variable absent from
+  `set_block` rendered `WHERE d BETWEEN $window_start AND $window_end` with NO
+  SET block, under a header stating no section references a session variable,
+  and both `generate` and `check` reported success. Pasted into Snowsight that
+  dies on the first block. `generate` and `check` now refuse a `$var` with no
+  `SET` line - the symmetric half of the bind check.
+- **A `SET`-rooted statement escaped both read-only layers.** The tripwire used
+  `search` (first match only) and then skipped the whole statement on the `SET`
+  exemption, while the allowlist's `SET` form is prefix-only - so everything
+  after the `=` was examined by neither, and `SET x = (SELECT 1) DELETE FROM t`
+  passed clean. Not exploitable (Snowflake syntax-errors at the `)`), but it
+  falsified the stated invariant. Now `finditer`, and the exemption excuses only
+  the match at offset 0.
+- **Path-dependent provenance, and two gates that silently passed.** Three tools
+  filtered on the ABSOLUTE path's components, so a checkout under any dotted
+  directory - a git worktree at `.claude/worktrees/<name>/`, which this
+  project's own guidance recommends - made every file look hidden. Consequences:
+  `sql-review` hashed zero app modules, so provenance differed between a
+  worktree and a clean clone and a contributor saw false `DRIFT`; and
+  `check app-security` and `check schema-refs` scanned NOTHING and reported OK.
+  A gate that passes because it examined zero files is worse than no gate. All
+  three now filter relative to the scan root, or by directory name where no root
+  exists.
+
 ### Added
 
 - **`fragments` manifest field** — declares a `queries/*.sql` that is a shared
@@ -88,7 +117,12 @@ never surfaces.
   one file in `queries/` with no path separators or traversal (`../../x.sql`
   would otherwise reduce to a stem and exempt a different file), `reason` is
   mandatory, duplicates are rejected, and a query that is both page-claimed and
-  declared a fragment is a contradiction rather than a silent last-wins.
+  declared a fragment is a contradiction rather than a silent last-wins. That
+  last check works both WITHIN a manifest (rejected at validation) and ACROSS
+  manifests (coverage resolves toward the stricter reading, ignores the
+  exemption, and reports it) - the cross-manifest half was missing in review and
+  produced two contradictory README rows for the same query, one of them reading
+  `Verified: n/a` for a query that feeds a page.
 - **`set_block_note` manifest field** — renders the rationale for the defaults
   (which source the bounds derive from, why that source and not the calendar,
   mechanics that bite when editing them) inline above the SET lines, where the

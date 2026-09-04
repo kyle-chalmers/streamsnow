@@ -697,6 +697,41 @@ def _mask_strings_and_comments(text: str) -> str:
     return "".join(out)
 
 
+def _verify_session_vars_defined(text: str) -> list[str]:
+    """Every ``$var`` the body references must have a ``SET`` line in the file.
+
+    The symmetric half of the SET-block pruning. Pruning removes SET lines for
+    DECLARED variables the body never references; nothing checked the converse,
+    that every variable the body DOES reference was declared. A manifest whose
+    ``param_bindings`` name a variable absent from ``set_block`` therefore
+    rendered binds into undefined session variables, pruned the SET block to
+    empty because neither declared name was referenced, and emitted a header
+    stating "no section below takes a bind param or references a session
+    variable" — with generate returning 0 and check reporting clean.
+
+    Pasted into Snowsight that file dies on the first block with "Session
+    variable '$WINDOW_START' does not exist". A confidently wrong verification
+    is the exact failure this release exists to remove, so the check runs over
+    the final text: it catches an undeclared variable and any future pruning
+    mistake alike, without trusting the manifest.
+    """
+    masked = _mask_strings_and_comments(text)
+    defined = {m.group(1).lower() for m in re.finditer(r"(?mi)^SET\s+([A-Za-z_]\w*)\s*=", masked)}
+    problems: list[str] = []
+    seen: set[str] = set()
+    for m in re.finditer(r"\$([A-Za-z_]\w*)\b", masked):
+        name = m.group(1)
+        key = name.lower()
+        if key in defined or key in seen:
+            continue
+        seen.add(key)
+        problems.append(
+            f"session variable ${name} is referenced but never SET — declare it in the "
+            "manifest's set_block (param_bindings must point at a declared variable)"
+        )
+    return problems
+
+
 def _verify_binds_bound(text: str) -> list[str]:
     """Every ``:N`` bind must have been substituted in executable lines.
 
@@ -808,17 +843,20 @@ def _with_terminal_verb(stmt: str) -> str:
 # structural parser mis-read where a statement began or ended. A recurring
 # class like that says the next parser gap should not also be a pass.
 #
-# The tripwire fires on a write verb sitting in STATEMENT-START position in
-# masked text — at the beginning, or right after a `;` or a `)`. That is
-# exactly the shape every bypass produced (the verb surfaced after a
-# mis-parsed CTE close), and it needs no parse of its own.
+# Two anchors, deliberately different:
 #
-# Position matters because most of these verbs are NOT Snowflake reserved
-# words: `SELECT 1 AS CALL`, `AS COPY`, `AS PUT`, `AS REMOVE`, `AS UNLOAD` and
-# `AS EXECUTE` are all legal read-only SQL. A blanket token match rejected
-# them, and refusing to generate a legitimate audit file is its own defect.
-# Suffix names (`CALLBACK_TS`, `COPY_COUNT`, `COMPUTED_PUT_RATIO`) never match
-# anyway, because of the word boundary, and quoted identifiers are masked.
+# * At the START of a statement, ANY of these verbs is a command. Nothing legal
+#   in a read-only file begins with one.
+# * Right after a `)`, only RESERVED words are checked. That is the shape every
+#   bypass produced (the verb surfacing after a mis-parsed CTE close), but it is
+#   also where a bare column alias lives — `SELECT MAX(d) comment FROM t` is
+#   legal Snowflake, and `comment` is a real INFORMATION_SCHEMA column this
+#   project's own discovery query selects. A reserved word cannot be a bare
+#   alias, so the split keeps the bypass coverage without refusing valid SQL.
+#   (`AS <verb>` and `"<verb>"` are always fine — masked or clearly an alias.)
+#
+# There is no `;` anchor: _split_statements strips `;` before this runs, so one
+# would be dead code.
 _WRITE_VERBS = (
     "INSERT",
     "UPDATE",
@@ -841,10 +879,21 @@ _WRITE_VERBS = (
     "UNSET",
     "SET",
 )
-# `(?<=[;)])` / start-of-text, allowing whitespace between.
-_WRITE_VERB_RE = re.compile(
-    r"(?:(?<=;)|(?<=\))|\A)\s*(" + "|".join(_WRITE_VERBS) + r")\b",
-    re.IGNORECASE,
+# Snowflake reserved words: cannot appear as a bare (unquoted, un-AS'd) alias.
+_WRITE_VERBS_RESERVED = (
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "ALTER",
+    "CREATE",
+    "GRANT",
+    "REVOKE",
+    "SET",
+)
+_WRITE_VERB_AT_START_RE = re.compile(r"\A\s*(" + "|".join(_WRITE_VERBS) + r")\b", re.IGNORECASE)
+_WRITE_VERB_AFTER_PAREN_RE = re.compile(
+    r"(?<=\))\s*(" + "|".join(_WRITE_VERBS_RESERVED) + r")\b", re.IGNORECASE
 )
 
 
@@ -865,18 +914,26 @@ def _verify_read_only(text: str) -> list[str]:
     problems: list[str] = []
     masked_all = _mask_strings_and_comments(text)
     for stmt in _split_statements(masked_all):
-        m = _WRITE_VERB_RE.search(stmt)
-        if not m:
-            continue
-        verb = m.group(1).upper()
-        # `SET <var> = <expr>;` is the one legal write-shaped root here, and the
-        # allowlist already validates its exact form; don't double-report it.
-        if verb == "SET" and _SET_STMT_RE.match(stmt):
-            continue
-        problems.append(
-            f"write verb {verb!r} in statement-start position — audit files are "
-            "read-only. If this is an identifier rather than a command, quote it."
-        )
+        hits: list[tuple[int, str]] = []
+        m0 = _WRITE_VERB_AT_START_RE.search(stmt)
+        if m0:
+            hits.append((m0.start(1), m0.group(1).upper()))
+        # finditer, not search: a `search` that matched the leading `SET` and
+        # then `continue`d on the SET exemption left EVERYTHING after the `=`
+        # examined by neither layer, so `SET x = (SELECT 1) DELETE FROM t`
+        # passed both. The SET exemption may only excuse the match at offset 0.
+        hits += [
+            (m.start(1), m.group(1).upper()) for m in _WRITE_VERB_AFTER_PAREN_RE.finditer(stmt)
+        ]
+        is_set_stmt = bool(_SET_STMT_RE.match(stmt))
+        for offset, verb in hits:
+            if offset == 0 and verb == "SET" and is_set_stmt:
+                continue  # the one legal write-shaped root; allowlist validates its form
+            problems.append(
+                f"write verb {verb!r} in command position — audit files are "
+                "read-only. If this is an identifier rather than a command, "
+                "quote it or introduce it with AS."
+            )
     for line in text.splitlines():
         if line.lstrip().startswith("-- Provenance:"):
             problems.append("a review body line may not start with '-- Provenance:'")
@@ -922,7 +979,17 @@ def _inputs_digest(app: Path, manifest_path: Path, manifest: dict) -> str:
         # import closure without importing is not worth the failure mode of
         # missing one file and reporting a stale render as clean forever.
         for py in sorted(app.rglob("*.py")):
-            if any(part.startswith(".") or part == "__pycache__" for part in py.parts):
+            # Relative to the app dir, NOT the absolute path: filtering on
+            # absolute components meant a checkout under any dotted directory
+            # (a worktree at `.claude/worktrees/<name>/`) skipped every module,
+            # so the digest silently omitted the app closure. Provenance then
+            # depended on WHERE the repo was checked out - the same commit
+            # hashed differently in a worktree and a clean clone, so a
+            # contributor saw false DRIFT - and locally this disabled the very
+            # guarantee the loop exists for.
+            if any(
+                part.startswith(".") or part == "__pycache__" for part in py.relative_to(app).parts
+            ):
                 continue
             h.update(f"\nmodule:{py.relative_to(app).as_posix()}\n".encode())
             h.update(py.read_bytes())
@@ -1109,7 +1176,9 @@ def render_review_file(
     text = (
         "\n".join(line.rstrip() for line in "\n".join(prefix + parts).splitlines()).rstrip() + "\n"
     )
-    problems = _verify_read_only(text) + _verify_binds_bound(text)
+    problems = (
+        _verify_read_only(text) + _verify_binds_bound(text) + _verify_session_vars_defined(text)
+    )
     if problems:
         raise ToolError(
             f"refusing to write {manifest['feature']!r} review SQL: " + "; ".join(problems)
@@ -1170,11 +1239,21 @@ def coverage(app: Path) -> dict:
     all_queries = {p.stem for p in _query_files(app)}
     fragments = _declared_fragments(app)
     exempt = all_queries & set(fragments)
+    # A query claimed by a page in ONE manifest and declared a fragment in
+    # ANOTHER is a contradiction. Per-manifest validation cannot see it, since
+    # it only checks the manifest in hand. Left alone, the query was both
+    # claimed and exempt and cmd_index emitted two conflicting README rows for
+    # it, the fragment row reading `Verified: n/a` — so a reviewer could read a
+    # page-feeding query as out of scope. Resolve toward COVERAGE (the stricter
+    # reading) and report it, rather than silently honouring the exemption.
+    conflicting = exempt & claimed
+    exempt -= conflicting
     return {
         "queries": sorted(all_queries),
         "claimed": sorted(all_queries & claimed),
         "uncovered": sorted(all_queries - claimed - exempt),
         "fragments": sorted(exempt),
+        "fragments_conflicting": sorted(conflicting),
         "fragment_reasons": {k: fragments[k] for k in sorted(exempt)},
         # A fragment declared but absent from queries/ is a stale declaration —
         # surfaced so a deleted fragment cannot quietly keep its exemption.
@@ -1304,7 +1383,9 @@ def render_metrics_file(app: Path, manifest: dict) -> str:
     text = (
         "\n".join(line.rstrip() for line in "\n".join(prefix + parts).splitlines()).rstrip() + "\n"
     )
-    problems = _verify_read_only(text) + _verify_binds_bound(text)
+    problems = (
+        _verify_read_only(text) + _verify_binds_bound(text) + _verify_session_vars_defined(text)
+    )
     if problems:
         raise ToolError(
             f"refusing to write {manifest['feature']!r} metrics review SQL: " + "; ".join(problems)
@@ -1414,6 +1495,16 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
         }
         for f in cov.get("fragments_missing", [])
     ]
+    findings += [
+        {
+            "file": f"apps/{app.name}/sql_review/manifests",
+            "line": 1,
+            "detail": f"query {f!r} is claimed by a page in one manifest and declared a "
+            "fragment in another — a query is either runnable or an inlined fragment, "
+            "not both; the exemption is ignored until this is resolved",
+        }
+        for f in cov.get("fragments_conflicting", [])
+    ]
 
     # Cross-manifest collisions read as findings here too, so the gate can
     # never report clean while one manifest's trail overwrites another's.
@@ -1465,7 +1556,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
             # Only the bind audit here. The read-only allowlist already runs over
             # committed bodies in the provenance pass below; re-running it made
             # one planted DELETE report three times, which buries a real finding.
-            for detail in _verify_binds_bound(body):
+            for detail in _verify_binds_bound(body) + _verify_session_vars_defined(body):
                 findings.append(
                     {
                         "file": f"apps/{app.name}/sql_review/{rf.name}",

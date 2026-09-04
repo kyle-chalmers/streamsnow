@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import json
 import re
 from pathlib import Path
@@ -580,6 +581,44 @@ def _scan_sql(path: Path) -> list[dict]:
 # --------------------------------------------------------------------------- #
 
 
+# Directory names that never hold reviewable source. Matched by NAME, never by
+# scanning the absolute path's components: filtering on absolute parts meant a
+# checkout living under ANY dotted directory (a git worktree at
+# `.claude/worktrees/<name>/` is the common case, and this project's own
+# guidance recommends exactly that) made every file look hidden, so the scan
+# silently examined nothing and reported OK. A gate that passes because it
+# looked at zero files is worse than no gate. Name-matching cannot be poisoned
+# by where the repo lives, and errs toward scanning MORE rather than less.
+_IGNORED_DIR_NAMES = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        ".review",
+        ".ruff_cache",
+        ".pytest_cache",
+        ".mypy_cache",
+        "__pycache__",
+        "node_modules",
+    }
+)
+
+
+def _in_ignored_dir(path: Path, root: Path | None = None) -> bool:
+    """True if *path* sits under a directory that never holds reviewable source.
+
+    When *root* is given, only components BELOW it are considered, so the
+    absolute prefix can never influence the decision.
+    """
+    parts = path.parts
+    if root is not None:
+        with contextlib.suppress(ValueError):
+            parts = path.relative_to(root).parts
+    return any(part in _IGNORED_DIR_NAMES for part in parts)
+
+
 def _iter_files(root: Path) -> list[Path]:
     """Yield real ``.py``/``.sql`` app files under ``root``, skipping dotted dirs.
 
@@ -591,7 +630,7 @@ def _iter_files(root: Path) -> list[Path]:
     for p in root.rglob("*"):
         if p.suffix not in (".py", ".sql") or not p.is_file():
             continue
-        if any(part.startswith(".") or part == "__pycache__" for part in p.parts):
+        if _in_ignored_dir(p, root):
             continue
         out.append(p)
     return sorted(out)
@@ -602,8 +641,9 @@ def scan_paths(paths: list[Path]) -> dict:
     for p in paths:
         if not p.is_file():
             continue
-        # Skip files living under a dotted/cache dir even when passed explicitly.
-        if any(part.startswith(".") or part == "__pycache__" for part in p.parts):
+        # Skip files under a junk dir even when passed explicitly. No root is
+        # available here, so this matches directory NAMES (see _in_ignored_dir).
+        if _in_ignored_dir(p):
             continue
         if p.suffix == ".py":
             findings.extend(_scan_python(p))

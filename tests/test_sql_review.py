@@ -1253,3 +1253,157 @@ def test_malformed_pages_with_a_valid_fragment_reports_not_crashes(pages) -> Non
     }
     problems = sr.validate_manifest(m)  # must not raise
     assert problems, "malformed pages reported no problem at all"
+
+
+# --------------------------------------------------------------------------- #
+# Final-audit findings. A mutation run showed that deleting the write-verb
+# tripwire entirely caused ZERO test failures: every existing case asserted on
+# `_verify_read_only`'s aggregate verdict, which the statement-root allowlist
+# already satisfied. These bind to the second layer directly.
+# --------------------------------------------------------------------------- #
+
+
+def test_tripwire_fires_independently_of_the_allowlist() -> None:
+    """Bind to the layer itself, so removing it fails a test.
+
+    Each bypass is fed to the tripwire regexes directly. The allowlist cannot
+    mask the result because it is not consulted here.
+    """
+    for sql in (
+        "WITH x AS (SELECT 1) DELETE FROM t",
+        'WITH x AS (SELECT 1 AS "x) SELECT y") DELETE FROM t',
+        "WITH x AS (SELECT $$ ) SELECT y $$) DELETE FROM t",
+    ):
+        masked = sr._mask_strings_and_comments(sql)
+        assert sr._WRITE_VERB_AFTER_PAREN_RE.search(masked), f"tripwire blind to: {sql}"
+    assert sr._WRITE_VERB_AT_START_RE.search("DELETE FROM t")
+    assert sr._WRITE_VERB_AT_START_RE.search("COMMENT ON TABLE t IS 'x'")
+
+
+def test_set_rooted_statement_does_not_escape_both_layers() -> None:
+    """`SET x = (SELECT 1) DELETE FROM t` passed BOTH layers.
+
+    The tripwire used `search` (first match only) and then skipped the whole
+    statement on the SET exemption, while the allowlist's SET form is a
+    prefix-only regex — so everything after the `=` was examined by neither.
+    """
+    assert sr._verify_read_only("SET x = (SELECT 1) DELETE FROM t;")
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Bare (un-AS'd, unquoted) column aliases after a `)`. Legal Snowflake:
+        # these verbs are not reserved words. `comment` is a real
+        # INFORMATION_SCHEMA.TABLES column that discovery queries select.
+        "SELECT MAX(d) comment FROM ANALYTICS.ORDERS;",
+        "SELECT LISTAGG(x, chr(44)) copy FROM ANALYTICS.ORDERS;",
+        "SELECT IFF(a,b,c) merge FROM ANALYTICS.ORDERS;",
+        "SELECT COUNT(*) call FROM ANALYTICS.ORDERS;",
+    ],
+)
+def test_bare_alias_after_paren_is_not_a_write(sql: str) -> None:
+    """Refusing to generate a legitimate audit file is its own defect."""
+    assert sr._verify_read_only(sql) == [], f"false positive on: {sql}"
+
+
+def test_referenced_but_undeclared_session_var_is_refused(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """param_bindings pointing at an undeclared variable must not ship.
+
+    Pruning removed SET lines for declared-but-unreferenced variables; nothing
+    checked that referenced variables were declared. The result rendered
+    `WHERE d BETWEEN $window_start AND $window_end` with NO SET block, under a
+    header stating no section references a session variable, and both generate
+    and check reported success.
+    """
+    manifest = dict(MANIFEST)
+    manifest["param_bindings"] = {"1": "$window_start", "2": "$window_end"}
+    manifest["token_dispatchers"] = {"REGION_FILTER": {"literal": ""}}
+    (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
+        json.dumps(manifest, indent=2)
+    )
+    assert _generate(repo) != 0
+    err = capsys.readouterr().err
+    assert "referenced but never SET" in err
+    assert not _review_file(repo).exists()
+
+
+def test_check_flags_an_undeclared_session_var_in_committed_text(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    assert _generate(repo) == 0
+    rf = _review_file(repo)
+    rf.write_text(rf.read_text().replace("$start_date", "$window_start"))
+    assert _check(repo) != 0
+    assert "referenced but never SET" in capsys.readouterr().out
+
+
+def test_query_claimed_in_one_manifest_and_a_fragment_in_another_conflicts(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Per-manifest validation cannot see this; coverage must.
+
+    Left alone the query was both claimed AND exempt, and the index emitted two
+    contradictory rows for it - the fragment row reading `Verified: n/a` - so a
+    reviewer could read a page-feeding query as out of scope.
+    """
+    app = repo / "apps" / SLUG
+    (app / "queries" / "orders_daily.sql").write_text(
+        "-- Query: orders_daily\n-- Feeds: Other\n-- Schemas: ANALYTICS.ORDERS\nSELECT 1\n"
+    )
+    md = app / "sql_review" / "manifests"
+    (md / "other.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "feature": "other",
+                "app": SLUG,
+                "pages": [{"name": "Other", "queries": ["orders_daily"]}],
+                "query_specs": {"orders_daily": {}},
+                "fragments": [{"file": "revenue_daily.sql", "reason": "inlined"}],
+            },
+            indent=2,
+        )
+    )
+    cov = sr.coverage(app)
+    assert cov["fragments_conflicting"] == ["revenue_daily"]
+    assert "revenue_daily" not in cov["fragments"], "honoured a contradictory exemption"
+    assert _check(repo) != 0
+    assert "declared a fragment in another" in capsys.readouterr().out
+
+
+def test_provenance_is_independent_of_the_checkout_path(tmp_path: Path) -> None:
+    """The same commit must hash identically wherever it is checked out.
+
+    Module hashing filtered on the ABSOLUTE path's components, so a checkout
+    under any dotted directory - a git worktree at `.claude/worktrees/<name>/`,
+    which this project's own guidance recommends - skipped every app module.
+    Provenance then differed between a worktree and a clean clone, and a
+    contributor saw false DRIFT on files they had not touched.
+    """
+    manifest = {**MANIFEST, "token_strategy": "manifest", "modules": {"data": "data"}}
+    manifest["token_dispatchers"] = {"REGION_FILTER": {"const_attr": "REGION_SQL"}}
+    digests = []
+    for parent in ("plain", ".dotted"):
+        root = tmp_path / parent / "repo"
+        app = root / "apps" / SLUG
+        (app / "queries").mkdir(parents=True)
+        (app / "snowflake.yml").write_text("definition_version: 2\n")
+        (app / "queries" / "revenue_daily.sql").write_text(QUERY)
+        (app / "data.py").write_text("REGION_SQL = \"AND region = 'West'\"\n")
+        md = app / "sql_review" / "manifests"
+        md.mkdir(parents=True)
+        (md / "revenue.json").write_text(json.dumps(manifest, indent=2))
+        digests.append(sr._inputs_digest(app, md / "revenue.json", manifest))
+    assert digests[0] == digests[1], (
+        f"provenance depends on checkout path: plain={digests[0]} dotted={digests[1]}"
+    )
+    # And it must actually hash the module, not silently skip it everywhere.
+    root = tmp_path / "plain" / "repo" / "apps" / SLUG
+    (root / "data.py").write_text("REGION_SQL = \"AND region = 'East'\"\n")
+    assert (
+        sr._inputs_digest(root, root / "sql_review" / "manifests" / "revenue.json", manifest)
+        != (digests[0])
+    ), "an app-module edit did not change the digest"

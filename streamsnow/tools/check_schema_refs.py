@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import json
 import re
 import sys
@@ -199,14 +200,57 @@ def find_denied_refs(
     return sorted(_scan_text(_strip_sql_comments(text), denied, read_exc))
 
 
+# Directory names that never hold reviewable source. Matched by NAME, never by
+# scanning the absolute path's components: filtering on absolute parts meant a
+# checkout living under ANY dotted directory (a git worktree at
+# `.claude/worktrees/<name>/` is the common case, and this project's own
+# guidance recommends exactly that) made every file look hidden, so the scan
+# silently examined nothing and reported OK. A gate that passes because it
+# looked at zero files is worse than no gate. Name-matching cannot be poisoned
+# by where the repo lives, and errs toward scanning MORE rather than less.
+_IGNORED_DIR_NAMES = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        ".review",
+        ".ruff_cache",
+        ".pytest_cache",
+        ".mypy_cache",
+        "__pycache__",
+        "node_modules",
+    }
+)
+
+
+def _in_ignored_dir(path: Path, root: Path | None = None) -> bool:
+    """True if *path* sits under a directory that never holds reviewable source.
+
+    When *root* is given, only components BELOW it are considered, so the
+    absolute prefix can never influence the decision.
+    """
+    parts = path.parts
+    if root is not None:
+        with contextlib.suppress(ValueError):
+            parts = path.relative_to(root).parts
+    return any(part in _IGNORED_DIR_NAMES for part in parts)
+
+
 def _has_dotted_dir(path: Path) -> bool:
-    """True if any directory component of *path* starts with a dot.
+    """True if *path* sits under a directory that never holds reviewable source.
 
     Skips review artifacts (``.review/``), VCS metadata (``.git/``), virtualenvs
-    (``.venv/``), etc. The file's own name is excluded (a leading-dot filename
-    like ``.foo.py`` is still scanned).
+    (``.venv/``) and caches. The file's own name is excluded (a leading-dot
+    filename like ``.foo.py`` is still scanned).
+
+    Matched by directory NAME rather than "any dotted component of the absolute
+    path", which silently skipped EVERY file whenever the checkout lived under a
+    dotted directory - e.g. a git worktree at ``.claude/worktrees/<name>/`` - and
+    turned this governance gate into a no-op that reported clean.
     """
-    return any(part.startswith(".") for part in path.parts[:-1])
+    return _in_ignored_dir(path.parent)
 
 
 def check_paths(paths: list[Path], policy: SchemaPolicy) -> dict:
