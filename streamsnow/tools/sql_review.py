@@ -166,7 +166,7 @@ _TOKEN_RE = re.compile(r"\{([A-Z][A-Z0-9_]*)\}")
 # identifier character. Requiring that excludes `::` casts AND Snowflake
 # semi-structured access with a numeric key (`payload:1`), which would otherwise
 # read as a surviving bind and refuse to generate a perfectly valid file.
-_BIND_RE = re.compile(r"(?<![:\w\"$]):(\d+)\b")
+_BIND_RE = re.compile(r"(?<![:\w\"$\'\)\]]):(\d+)\b")
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _FEATURE_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
@@ -375,6 +375,21 @@ def validate_manifest(m: dict) -> list[str]:
                         f"set_block[{k!r}] must be a non-empty SQL expression — an empty "
                         "value renders `SET " + str(k) + " = ;`, which is invalid SQL that "
                         "still looks like a definition to the session-variable check"
+                    )
+    sv = m.get("set_vars")
+    if sv is not None:
+        if not isinstance(sv, list):
+            out.append("set_vars must be a list of {name, default, comment?} objects")
+        else:
+            for i, e in enumerate(sv):
+                if not isinstance(e, dict):
+                    out.append(f"set_vars[{i}] must be an object with name + default")
+                    continue
+                if not isinstance(e.get("name"), str) or not e["name"].strip():
+                    out.append(f"set_vars[{i}].name is required and must be a string")
+                if not isinstance(e.get("default"), str) or not e["default"].strip():
+                    out.append(
+                        f"set_vars[{i}].default is required and must be a non-empty SQL expression"
                     )
     note = m.get("set_block_note")
     if note is not None and not isinstance(note, str):
@@ -587,6 +602,10 @@ def _set_block(manifest: dict, body: str | None = None) -> str:
             continue
         emitted.append(f"SET {name} = {expr};")
     for sv in manifest.get("set_vars", []):
+        # Defensive: a malformed entry is a validation error, never a traceback
+        # in pre-commit output with a misleading exit code.
+        if not isinstance(sv, dict) or not isinstance(sv.get("name"), str):
+            continue
         if body is not None and not _var_used(sv["name"], body):
             continue
         if sv.get("comment"):
@@ -630,7 +649,7 @@ def _bind_note(has_set_block: bool) -> list[str]:
     ]
 
 
-def _mask_strings_and_comments(text: str) -> str:
+def _mask_with_status(text: str) -> tuple[str, str | None]:
     """Replace string-literal contents and comments with spaces, same length.
 
     Every structural decision downstream (statement splitting, paren
@@ -660,11 +679,14 @@ def _mask_strings_and_comments(text: str) -> str:
     Length and newlines are preserved so nothing shifts.
     """
     out = list(text)
+    unterminated: str | None = None
     i, n = 0, len(text)
     while i < n:
         c = text[i]
         if c == "$" and text[i : i + 2] == "$$":  # dollar-quoted constant
             end = text.find("$$", i + 2)
+            if end == -1:
+                unterminated = "dollar-quoted constant ($$ with no closing $$)"
             end = n if end == -1 else end + 2
             for j in range(i, end):
                 if text[j] != "\n":
@@ -695,6 +717,10 @@ def _mask_strings_and_comments(text: str) -> str:
                 if text[i] != "\n":
                     out[i] = " "
                 i += 1
+            if i >= n:
+                unterminated = (
+                    "string literal" if quote == "'" else "quoted identifier"
+                ) + f" ({quote} with no closing {quote})"
             i += 1
         elif c == "-" and text[i : i + 2] == "--":  # line comment
             while i < n and text[i] != "\n":
@@ -702,6 +728,8 @@ def _mask_strings_and_comments(text: str) -> str:
                 i += 1
         elif c == "/" and text[i : i + 2] == "/*":  # block comment
             end = text.find("*/", i + 2)
+            if end == -1:
+                unterminated = "block comment (/* with no */)"
             end = n if end == -1 else end + 2
             for j in range(i, end):
                 if text[j] != "\n":
@@ -709,7 +737,12 @@ def _mask_strings_and_comments(text: str) -> str:
             i = end
         else:
             i += 1
-    return "".join(out)
+    return "".join(out), unterminated
+
+
+def _mask_strings_and_comments(text: str) -> str:
+    """Masked text only. Callers that must FAIL CLOSED use _mask_with_status."""
+    return _mask_with_status(text)[0]
 
 
 def _verify_session_vars_defined(text: str) -> list[str]:
@@ -739,7 +772,12 @@ def _verify_session_vars_defined(text: str) -> list[str]:
         defined |= {n.strip().lower() for n in m.group(1).split(",") if n.strip()}
     problems: list[str] = []
     seen: set[str] = set()
-    for m in re.finditer(r"\$([A-Za-z_]\w*)\b", masked):
+    # Same lookbehind discipline as _BIND_RE: a `$` that FOLLOWS an identifier
+    # character belongs to that identifier, not to a session variable. Without
+    # it, Snowflake's metadata pseudo-columns (`METADATA$FILENAME`) and system
+    # functions (`SYSTEM$TYPEOF`) read as undeclared variables and legal
+    # read-only SQL was refused outright.
+    for m in re.finditer(r"(?<![\w$])\$([A-Za-z_]\w*)\b", masked):
         name = m.group(1)
         key = name.lower()
         if key in defined or key in seen:
@@ -925,8 +963,10 @@ _WRITE_VERB_AT_START_RE = re.compile(r"\A\s*(" + "|".join(_WRITE_VERBS) + r")\b"
 # identifier-shaped) and legal SQL was refused.
 _NOT_CLAUSE = (
     r"(?!(?:FROM|WHERE|GROUP|ORDER|JOIN|ON|LIMIT|OFFSET|HAVING|UNION|EXCEPT|"
-    r"INTERSECT|QUALIFY|WINDOW|AS|USING|INNER|LEFT|RIGHT|FULL|CROSS|LATERAL|"
-    r"AND|OR|IS|NOT|NULL|END|THEN|ELSE|WHEN)\b)"
+    r"INTERSECT|MINUS|QUALIFY|WINDOW|AS|USING|INNER|LEFT|RIGHT|FULL|CROSS|"
+    r"LATERAL|AND|OR|IS|NOT|NULL|END|THEN|ELSE|WHEN|FETCH|PIVOT|UNPIVOT|"
+    r"SAMPLE|TABLESAMPLE|MATCH_RECOGNIZE|START|CONNECT|AT|BEFORE|CHANGES|"
+    r"WITH|SELECT|VALUES|SET)\b)"
 )
 
 _WRITE_COMMANDS_AFTER_PAREN = (
@@ -982,13 +1022,18 @@ def _valid_set_statement(stmt: str) -> bool:
     rest = stmt[m.end() :].strip()
     if not rest:
         return False  # `SET x = ;` — no expression at all
-    # Scan the WHOLE expression, not just what follows a leading paren group:
-    # wrapping the smuggled command in outer parens (`((SELECT 1) CALL p())`)
-    # otherwise hid it inside the group and got past both layers. A write verb
-    # has no place anywhere in a session-variable expression, and identifiers
-    # that merely contain one (`UPDATES`, `create_date`) do not match on a word
-    # boundary. Literals are already masked.
-    return not re.search(r"\b(" + "|".join(_WRITE_VERBS) + r")\b", rest, re.IGNORECASE)
+    # Scan the WHOLE expression, so wrapping a command in outer parens
+    # (`((SELECT 1) CALL p())`) cannot hide it. But scan for the SAME things
+    # the after-paren anchor looks for — reserved verbs, and non-reserved verbs
+    # only in command form — NOT the bare verb list. Eleven of those verbs are
+    # legal Snowflake identifiers, so a bare-token scan refused
+    # `SET end_date = (SELECT MAX(d) comment FROM t)::DATE`, where `comment` is
+    # a column name. That fragment is accepted in the after-paren position, so
+    # refusing it here contradicted the tool's own pinned behaviour and made
+    # the coverage gate unsatisfiable for the affected app.
+    reserved = r"\b(" + "|".join(_WRITE_VERBS_RESERVED) + r")\b"
+    commands = "|".join(_WRITE_COMMANDS_AFTER_PAREN)
+    return not re.search(reserved + "|" + commands, rest, re.IGNORECASE)
 
 
 def _verify_read_only(text: str) -> list[str]:
@@ -1006,7 +1051,22 @@ def _verify_read_only(text: str) -> list[str]:
     (see ``_WRITE_VERBS``).
     """
     problems: list[str] = []
-    masked_all = _mask_strings_and_comments(text)
+    masked_all, unterminated = _mask_with_status(text)
+    if unterminated:
+        # FAIL CLOSED. Masking runs to end-of-text when a quoting form is left
+        # open, so from that point on the file is spaces and EVERY guard goes
+        # blind — read-only, binds and session variables alike. This is
+        # reachable by ordinary error, not attack: a token literal containing
+        # an apostrophe (`AND last_name = 'O'Brien'`) is enough, and both
+        # generate and check then reported success on a file whose own header
+        # claimed no section referenced a session variable while a section
+        # referenced two undeclared ones. The docstring long claimed this
+        # failed closed; only the WITH path actually did.
+        problems.append(
+            f"unterminated {unterminated} — the rest of the file cannot be "
+            "analysed, so it is refused rather than passed unchecked"
+        )
+        return problems
     for stmt in _split_statements(masked_all):
         hits: list[tuple[int, str]] = []
         m0 = _WRITE_VERB_AT_START_RE.search(stmt)

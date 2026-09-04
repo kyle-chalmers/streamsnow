@@ -1613,3 +1613,164 @@ def test_valid_set_block_values_are_accepted() -> None:
         "set_block": {"start_date": "CURRENT_DATE", "end_date": "(SELECT MAX(d) FROM t)"},
     }
     assert [p for p in sr.validate_manifest(m) if "set_block" in p] == []
+
+
+# --------------------------------------------------------------------------- #
+# Round 8. The recurring failure here is a guard that exists but is not wired,
+# or is pinned one level too shallow — so these bind to CALL PATHS, not to
+# regex constants.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("sql", "form"),
+    [
+        ("SELECT ' ;\nDELETE FROM prod.t;", "string literal"),
+        ('SELECT " ;\nDELETE FROM prod.t;', "quoted identifier"),
+        ("SELECT $$ ;\nDELETE FROM prod.t;", "dollar-quoted constant"),
+        ("SELECT 1 /* ;\nDELETE FROM prod.t;", "block comment"),
+    ],
+)
+def test_unterminated_quoting_fails_closed(sql: str, form: str) -> None:
+    """An open quoting form masks to end-of-text, blinding EVERY guard after it.
+
+    Reachable by ordinary error, not attack: a token literal containing an
+    apostrophe (`AND last_name = 'O'Brien'`) is enough. Both generate and check
+    reported success on a file whose header claimed no section referenced a
+    session variable while a section referenced two undeclared ones.
+    """
+    problems = sr._verify_read_only(sql)
+    assert problems, f"blind after an unterminated {form}"
+    assert "unterminated" in problems[0]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 'ok' FROM ANALYTICS.ORDERS;",
+        'SELECT "col name" FROM ANALYTICS.ORDERS;',
+        "SELECT $$body$$ FROM ANALYTICS.ORDERS;",
+        "SELECT 1 /* note */ FROM ANALYTICS.ORDERS;",
+        "SELECT 'it''s' FROM ANALYTICS.ORDERS;",
+        "SELECT 'it\\'s' FROM ANALYTICS.ORDERS;",
+    ],
+)
+def test_closed_quoting_is_not_flagged_as_unterminated(sql: str) -> None:
+    assert sr._verify_read_only(sql) == [], f"false positive on: {sql}"
+
+
+def test_tripwire_wiring_holds_when_the_walker_is_fooled(monkeypatch) -> None:
+    """Bind to the CALL PATH, not the regex objects.
+
+    The previous test asserted on `_WRITE_VERB_*_RE.search(...)` directly, so
+    disabling the code that CONSULTS them left the suite green — the whole
+    defence-in-depth layer could be deleted by a refactor. Simulating a fooled
+    walker is the contract: the allowlist is satisfied, and the tripwire must
+    still refuse.
+    """
+    monkeypatch.setattr(sr, "_with_terminal_verb", lambda stmt: "SELECT")
+    assert sr._verify_read_only("WITH x AS (SELECT 1) DELETE FROM t;"), (
+        "after-paren anchor is not wired into _verify_read_only"
+    )
+    # The START anchor is inherently redundant with the root allowlist: any
+    # statement beginning with a write verb is already refused by its root. To
+    # bind its WIRING, simulate a compromised allowlist by admitting the root,
+    # so only the tripwire can refuse it.
+    monkeypatch.setattr(sr, "ALLOWED_ROOTS", sr.ALLOWED_ROOTS | {"DELETE"})
+    assert sr._verify_read_only("DELETE FROM t;"), "start anchor is not wired in"
+
+
+@pytest.mark.parametrize(
+    "alias",
+    ["comment", "copy", "merge", "call", "truncate", "unset", "execute", "undrop", "put"],
+)
+def test_legal_alias_inside_a_set_expression_is_accepted(alias: str) -> None:
+    """The same fragment is accepted after `)`; refusing it here contradicted
+    the tool's own pinned behaviour and made the coverage gate unsatisfiable."""
+    sql = f"SET end_date = (SELECT MAX(d) {alias} FROM ANALYTICS.ORDERS)::DATE;"
+    assert sr._verify_read_only(sql) == [], f"refused legal alias {alias!r}"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT METADATA$FILENAME FROM @RAW_FILES/inbound/",
+        "SELECT METADATA$FILE_ROW_NUMBER FROM @RAW_FILES/inbound/",
+        "SELECT SYSTEM$TYPEOF(x) FROM ANALYTICS.ORDERS",
+        "SELECT SYSTEM$CLUSTERING_INFORMATION('ANALYTICS.ORDERS')",
+        "SELECT $1 FROM @RAW_FILES/inbound/",
+    ],
+)
+def test_dollar_inside_an_identifier_is_not_a_session_variable(sql: str) -> None:
+    assert sr._verify_session_vars_defined(sql) == [], f"false positive on: {sql}"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT MAX(d) call FETCH FIRST 1 ROWS ONLY;",
+        "SELECT MAX(d) call MINUS SELECT 1;",
+        "SELECT ROUND(d) truncate FETCH FIRST 1 ROWS ONLY;",
+        "SELECT MAX(d) unset FETCH FIRST 1 ROWS ONLY;",
+        "SELECT * FROM (SELECT a FROM t) call SAMPLE (10);",
+        "SELECT * FROM (SELECT a FROM t) call TABLESAMPLE (10);",
+    ],
+)
+def test_clause_keyword_list_covers_the_less_common_clauses(sql: str) -> None:
+    assert sr._verify_read_only(sql) == [], f"false positive on: {sql}"
+
+
+def test_multi_variable_set_form_is_recognised_both_halves() -> None:
+    """Both halves of the `SET (a, b) = (...)` fix were uncovered."""
+    assert sr._SET_STMT_RE.match("SET (start_date, end_date) = (1, 2)"), "regex half"
+    body = "SET (start_date, end_date) = (1, 2);\nSELECT $start_date, $end_date FROM t;"
+    assert sr._verify_session_vars_defined(body) == [], "definition half"
+
+
+def test_duplicate_fragment_across_manifests_is_reported(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """A named CHANGELOG 'Fixed' item that had no test at all."""
+    app = repo / "apps" / SLUG
+    (app / "queries" / "_shared.sql").write_text(
+        "-- Query: _shared\n-- Feeds: (fragment)\n-- Schemas: ANALYTICS.ORDERS\nSELECT 1\n"
+    )
+    md = app / "sql_review" / "manifests"
+    frag = [{"file": "_shared.sql", "reason": "inlined"}]
+    for name in ("a", "b"):
+        (md / f"{name}.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "feature": name,
+                    "app": SLUG,
+                    "pages": [{"name": "P", "queries": ["revenue_daily"]}],
+                    "query_specs": {"revenue_daily": {}},
+                    "fragments": frag,
+                },
+                indent=2,
+            )
+        )
+    assert sr._duplicate_fragments(app) == ["_shared"]
+    assert _check(repo) != 0
+    assert "declared by more than one manifest" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [{"variable": "cap", "default": "100"}, {"name": "cap"}, {"name": "cap", "default": ""}, "cap"],
+)
+def test_malformed_set_vars_is_a_validation_error_not_a_traceback(entry) -> None:
+    m = {
+        "schema_version": 1,
+        "feature": "revenue",
+        "app": SLUG,
+        "pages": [{"name": "Overview", "queries": ["revenue_daily"]}],
+        "query_specs": {"revenue_daily": {}},
+        "set_vars": [entry],
+    }
+    assert [p for p in sr.validate_manifest(m) if "set_vars" in p], f"accepted {entry!r}"
+    # And rendering must degrade rather than raise if validation is bypassed.
+    assert isinstance(
+        sr._set_block({"set_block": {"d": "CURRENT_DATE"}, "set_vars": [entry]}, "$d"), str
+    )
