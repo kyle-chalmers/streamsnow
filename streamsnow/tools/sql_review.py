@@ -396,6 +396,17 @@ def validate_manifest(m: dict) -> list[str]:
                     out.append(
                         f"set_vars[{i}].default is required and must be a non-empty SQL expression"
                     )
+    # A name declared in BOTH set_block and set_vars renders two `SET x` lines;
+    # the second silently wins, so a reviewer following "edit the SET lines"
+    # edits the first, reruns, sees identical numbers, and concludes the data is
+    # window-stable — the confidently-wrong outcome the SET block exists to avoid.
+    if isinstance(sb, dict) and isinstance(sv, list):
+        sv_names = {e.get("name") for e in sv if isinstance(e, dict)}
+        for dup in sorted(set(sb) & sv_names):
+            out.append(
+                f"{dup!r} is declared in both set_block and set_vars — it would render two "
+                "SET lines and the second silently wins; declare it once"
+            )
     note = m.get("set_block_note")
     if note is not None and not isinstance(note, str):
         out.append(f"set_block_note must be a string (got {type(note).__name__})")
@@ -580,7 +591,7 @@ def _var_used(name: str, body: str) -> bool:
     # SET line is kept and the header promises a reference that is only text.
     return (
         re.search(
-            r"\$" + re.escape(name) + r"\b",
+            r"(?<![\w$])\$" + re.escape(name) + r"\b",
             _mask_strings_and_comments(body),
             re.IGNORECASE,
         )
@@ -752,6 +763,14 @@ def _mask_with_status(text: str) -> tuple[str, str | None]:
                 if text[j] != "\n":
                     out[j] = " "
             i = end
+        elif c == "/" and text[i : i + 2] == "//":  # Snowflake ALSO accepts // comments
+            # Missing this was the sixth masking bypass of the same class: an
+            # apostrophe inside a `//` comment opened a phantom string literal
+            # that ran to the next `'` in the file and hid real SQL — and since
+            # that phantom literal TERMINATES, the fail-closed path never fired.
+            while i < n and text[i] != "\n":
+                out[i] = " "
+                i += 1
         else:
             i += 1
     return "".join(out), unterminated
@@ -982,32 +1001,35 @@ _NOT_CLAUSE = (
     r"(?!(?:FROM|WHERE|GROUP|ORDER|JOIN|ON|LIMIT|OFFSET|HAVING|UNION|EXCEPT|"
     r"INTERSECT|MINUS|QUALIFY|WINDOW|AS|USING|INNER|LEFT|RIGHT|FULL|CROSS|"
     r"LATERAL|AND|OR|IS|NOT|NULL|END|THEN|ELSE|WHEN|FETCH|PIVOT|UNPIVOT|"
-    r"SAMPLE|TABLESAMPLE|MATCH_RECOGNIZE|START|CONNECT|AT|BEFORE|CHANGES|"
+    r"SAMPLE|TABLESAMPLE|MATCH_RECOGNIZE|START|CONNECT|AT|BEFORE|CHANGES|NATURAL|ASOF|"
     r"WITH|SELECT|VALUES|SET)\b)"
 )
 
 _WRITE_COMMANDS_AFTER_PAREN = (
     r"MERGE\s+INTO\b",
     # `TABLE` is OPTIONAL in Snowflake's TRUNCATE, so match the bare form too.
-    r"TRUNCATE\s+(?:TABLE\s+)?" + _NOT_CLAUSE + r"[A-Za-z_\"]",
+    # The trailing identifier check is a LOOKAHEAD so the reported verb is
+    # `TRUNCATE`, not `TRUNCATE N`.
+    r"TRUNCATE\s+(?:IF\s+EXISTS\s+)?(?:TABLE\s+)?" + _NOT_CLAUSE + r"(?=[A-Za-z_\"])",
     r"COMMENT\s+(?:IF\s+EXISTS\s+)?ON\s+(?:TABLE|VIEW|COLUMN|SCHEMA|DATABASE|"
     r"WAREHOUSE|STAGE|SEQUENCE|STREAM|TASK|PIPE|FUNCTION|PROCEDURE|ROLE|USER|"
     r"INTEGRATION|MATERIALIZED|TAG|SHARE|ACCOUNT|ALERT|SECRET|APPLICATION|"
     r"MASKING|ROW|NETWORK|PASSWORD|SESSION|AUTHENTICATION|EXTERNAL|DYNAMIC|"
     r"EVENT|ICEBERG|HYBRID|FILE|NOTEBOOK|STREAMLIT|MODEL|SERVICE|COMPUTE|"
     r"IMAGE|RESOURCE|CONNECTION|LISTING|REPLICATION|FAILOVER|DATA)\b",
-    r"COPY\s+INTO\b",
-    # UNDROP takes TABLE / SCHEMA / DATABASE; EXECUTE takes IMMEDIATE / TASK.
-    r"UNDROP\s+(?:TABLE|SCHEMA|DATABASE)\b",
+    # `COPY FILES INTO` is the stage-to-stage form.
+    r"COPY\s+(?:FILES\s+)?INTO\b",
+    r"UNDROP\s+(?:ICEBERG\s+|DYNAMIC\s+|EXTERNAL\s+|EVENT\s+)?(?:TABLE|SCHEMA|DATABASE)\b",
     r"EXECUTE\s+(?:IMMEDIATE|TASK)\b",
-    # `RM` is REMOVE's documented alias; both take a stage reference.
     r"(?:REMOVE|RM)\s+@",
     r"PUT\s+file://",
-    # CALL / UNLOAD / UNSET need an argument, which a bare alias never has:
-    # an alias is followed by FROM / `,` / `;`, never by an identifier.
-    r"CALL\s+" + _NOT_CLAUSE + r"[A-Za-z_\"$]",
+    # CALL: either a non-clause identifier follows, OR any identifier is
+    # immediately followed by `(` — a procedure named after a clause keyword
+    # (`CALL start()`, `CALL changes()`) is still a call, while the bare alias
+    # `call FROM (SELECT ...)` has a space before its paren and does not match.
+    r"CALL\s+(?:" + _NOT_CLAUSE + r"(?=[A-Za-z_\"$])|(?=[A-Za-z_\"$][\w.$\"]*\())",
     r"UNLOAD\s+(?:TO\s+)?@",
-    r"UNSET\s+" + _NOT_CLAUSE + r"[A-Za-z_\"]",
+    r"UNSET\s+" + _NOT_CLAUSE + r"(?=[A-Za-z_\"])",
 )
 _WRITE_VERB_AFTER_PAREN_RE = re.compile(
     r"(?<=\))\s*("
