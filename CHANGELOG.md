@@ -24,6 +24,21 @@ never been reviewed before publishing.
   validation and rendered `SET bad name = 1;`. It must now be a session-variable
   identifier. A used entry missing `default` also raised `KeyError` in the
   renderer instead of being skipped.
+- **`//` line comments were not masked** — Snowflake accepts them alongside
+  `--`. An apostrophe inside one opened a phantom string literal that ran to the
+  next `'` and hid real SQL from every guard, and because that literal
+  *terminated*, the fail-closed path could not catch it. The sixth masking
+  bypass of the same class. Found by a second review of the shipped commit,
+  before this hotfix was tagged.
+- **`CALL start()` had stopped being a command.** Excluding clause keywords
+  after a verb (to stop refusing bare aliases) also excluded procedures named
+  after them. `CALL` now also matches any identifier immediately followed by
+  `(`, which a bare alias never is.
+- Widened `COPY FILES INTO`, `UNDROP ICEBERG|DYNAMIC|EXTERNAL|EVENT TABLE`,
+  `TRUNCATE IF EXISTS`; `NATURAL`/`ASOF` joins after a bare alias no longer
+  refused; a name declared in both `set_block` and `set_vars` is rejected
+  (it rendered two `SET` lines and the second silently won); tripwire messages
+  now name only the verb; `_var_used` and `_BIND_RE` changes pinned by tests.
 
 ## [0.6.2] - 2026-09-03
 

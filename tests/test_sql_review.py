@@ -1843,3 +1843,109 @@ def test_set_vars_used_entry_missing_default_does_not_raise() -> None:
         {"set_block": {"d": "CURRENT_DATE"}, "set_vars": [{"name": "cap"}]}, "$d $cap"
     )
     assert isinstance(out, str) and "SET d = CURRENT_DATE;" in out
+
+
+# --------------------------------------------------------------------------- #
+# 0.6.3, second pass — from a Fable review of the shipped round-8 commit.
+# --------------------------------------------------------------------------- #
+
+
+def test_double_slash_line_comment_is_masked() -> None:
+    """`//` is a documented Snowflake line comment. Sixth bypass of the class.
+
+    An apostrophe inside one opened a phantom string literal that ran to the
+    next `'` in the file and hid real SQL from every guard — and because the
+    phantom literal TERMINATED, the fail-closed path never fired.
+    """
+    sql = "SELECT 1 // it's\n; DELETE FROM t WHERE x = :1 AND y = $undeclared; -- that's\n"
+    assert sr._verify_read_only(sql), "DELETE hidden behind a // comment"
+    assert sr._verify_binds_bound(sql), ":1 hidden behind a // comment"
+    assert sr._verify_session_vars_defined(sql), "$undeclared hidden behind a // comment"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 1 // it's fine\nFROM ANALYTICS.ORDERS;",
+        "SELECT 'http://x.example/y' FROM ANALYTICS.ORDERS;",  # // inside a literal
+        "SELECT $$a // b$$ FROM ANALYTICS.ORDERS;",  # // inside a $$ body
+        "SELECT a / b FROM ANALYTICS.ORDERS;",  # a lone slash is division
+    ],
+)
+def test_double_slash_handling_does_not_refuse_legal_sql(sql: str) -> None:
+    assert sr._verify_read_only(sql) == [], f"false positive on: {sql}"
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "CALL start()",
+        "CALL changes()",
+        "CALL sample()",
+        "CALL db.sch.p()",
+        "CALL SYSTEM$WAIT(1)",
+        "COPY FILES INTO @s2 FROM @s1",
+        "UNDROP ICEBERG TABLE t",
+        "UNDROP DYNAMIC TABLE t",
+        "TRUNCATE IF EXISTS t",
+    ],
+)
+def test_more_command_forms_are_refused_in_a_set_expression(tail: str) -> None:
+    assert not sr._valid_set_statement(f"SET x = (SELECT 1) {tail}"), f"slipped: {tail}"
+
+
+def test_procedure_named_after_a_clause_keyword_is_still_a_call() -> None:
+    """Round 8's clause exclusion had turned `CALL start()` into a non-command."""
+    masked = sr._mask_strings_and_comments(
+        "WITH c AS (SELECT 1) SELECT * FROM (SELECT 1) CALL start()"
+    )
+    assert sr._WRITE_VERB_AFTER_PAREN_RE.search(masked)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM (SELECT 1 a) call NATURAL JOIN u;",
+        "SELECT * FROM (SELECT 1 a) call ASOF JOIN u MATCH_CONDITION(a.t >= u.t);",
+        "SELECT COUNT(*) call FROM (SELECT 1) x;",  # bare alias, space before paren
+    ],
+)
+def test_bare_alias_before_join_forms_is_legal(sql: str) -> None:
+    assert sr._verify_read_only(sql) == [], f"false positive on: {sql}"
+
+
+def test_tripwire_message_names_only_the_verb() -> None:
+    """The reported verb must be `TRUNCATE`, never `TRUNCATE N` (first char of
+    the identifier captured by the pattern). The allowlist reports first for a
+    WITH statement, so look at the tripwire's own line, not problems[0]."""
+    problems = sr._verify_read_only("WITH x AS (SELECT 1) TRUNCATE t;")
+    tripwire = [p for p in problems if "command position" in p]
+    assert tripwire, problems
+    assert "'TRUNCATE'" in tripwire[0] and "'TRUNCATE N" not in tripwire[0], tripwire
+
+
+def test_name_in_both_set_block_and_set_vars_is_rejected() -> None:
+    m = {
+        "schema_version": 1,
+        "feature": "revenue",
+        "app": SLUG,
+        "pages": [{"name": "Overview", "queries": ["revenue_daily"]}],
+        "query_specs": {"revenue_daily": {}},
+        "set_block": {"start_date": "CURRENT_DATE"},
+        "set_vars": [{"name": "start_date", "default": "CURRENT_DATE"}],
+    }
+    assert [p for p in sr.validate_manifest(m) if "both set_block and set_vars" in p]
+
+
+def test_bind_regex_lookbehind_is_pinned() -> None:
+    """The `'`, `)`, `]` exclusions changed bind detection with no coverage."""
+    for sql in ("d <= :1", "(:1", ",:1", "= :1", "x=:1"):
+        assert sr._BIND_RE.search(sql), f"real bind missed: {sql}"
+    for sql in ("f(a):1", "arr[0]:1", "payload:1", "a::1"):
+        assert not sr._BIND_RE.search(sql), f"non-bind matched: {sql}"
+
+
+def test_var_used_ignores_dollar_inside_an_identifier() -> None:
+    """Mirrors _verify_session_vars_defined: METADATA$FILENAME is not `$filename`."""
+    assert not sr._var_used("filename", "SELECT METADATA$FILENAME FROM @s")
+    assert sr._var_used("filename", "SELECT $filename FROM t")
