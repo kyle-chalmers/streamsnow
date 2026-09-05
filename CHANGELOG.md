@@ -3,6 +3,28 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [0.6.3] - 2026-09-05
+
+Hotfix. Found by reviewing the 0.6.2 round-8 commit after it shipped — it had
+never been reviewed before publishing.
+
+### Fixed
+
+- **`x$$y` was refused as an unterminated dollar-quote.** Snowflake permits `$`
+  inside unquoted identifiers, so `x$$y` is a legal column name; 0.6.2's
+  fail-closed guard treated every `$$` as a constant opener and refused the
+  whole file. A `$$` now opens a constant only when it does not continue an
+  identifier. The closing `$$` is unchanged, since a body may end in an
+  identifier character (`$$abc$$`).
+- **`COMMENT IF EXISTS ON …` and `COMMENT ON TAG|SHARE|MASKING POLICY|…`
+  slipped past the SET-expression scan.** The command pattern omitted the
+  documented optional `IF EXISTS` and most object types. Not executable after a
+  `)` in Snowflake, but it falsified the stated invariant. Pattern widened.
+- **`set_vars.name` accepted any non-blank string**, so `"bad name"` passed
+  validation and rendered `SET bad name = 1;`. It must now be a session-variable
+  identifier. A used entry missing `default` also raised `KeyError` in the
+  renderer instead of being skipped.
+
 ## [0.6.2] - 2026-09-03
 
 Everything here came out of adopting 0.6.1 on a real 5-app repo with 231

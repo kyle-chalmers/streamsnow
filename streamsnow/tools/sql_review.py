@@ -385,8 +385,13 @@ def validate_manifest(m: dict) -> list[str]:
                 if not isinstance(e, dict):
                     out.append(f"set_vars[{i}] must be an object with name + default")
                     continue
-                if not isinstance(e.get("name"), str) or not e["name"].strip():
-                    out.append(f"set_vars[{i}].name is required and must be a string")
+                name = e.get("name")
+                if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_]\w*", name):
+                    out.append(
+                        f"set_vars[{i}].name must be a session-variable identifier "
+                        f"([A-Za-z_][A-Za-z0-9_]*); got {name!r} — anything else renders "
+                        "invalid SQL like `SET bad name = 1;`"
+                    )
                 if not isinstance(e.get("default"), str) or not e["default"].strip():
                     out.append(
                         f"set_vars[{i}].default is required and must be a non-empty SQL expression"
@@ -604,8 +609,12 @@ def _set_block(manifest: dict, body: str | None = None) -> str:
     for sv in manifest.get("set_vars", []):
         # Defensive: a malformed entry is a validation error, never a traceback
         # in pre-commit output with a misleading exit code.
-        if not isinstance(sv, dict) or not isinstance(sv.get("name"), str):
-            continue
+        if (
+            not isinstance(sv, dict)
+            or not isinstance(sv.get("name"), str)
+            or not isinstance(sv.get("default"), str)
+        ):
+            continue  # a used entry with no default raised KeyError here
         if body is not None and not _var_used(sv["name"], body):
             continue
         if sv.get("comment"):
@@ -683,7 +692,15 @@ def _mask_with_status(text: str) -> tuple[str, str | None]:
     i, n = 0, len(text)
     while i < n:
         c = text[i]
-        if c == "$" and text[i : i + 2] == "$$":  # dollar-quoted constant
+        # A `$$` only OPENS a dollar-quoted constant when it does not continue an
+        # identifier: Snowflake permits `$` inside unquoted identifiers, so
+        # `x$$y` is a legal column name. Treating every `$$` as an opener made
+        # the fail-closed guard refuse that file as "unterminated" — a false
+        # positive that blocks generating a legitimate audit trail. The CLOSING
+        # `$$` keeps a plain find(): a body may legitimately end in an
+        # identifier character (`$$abc$$`).
+        prev_is_ident = i > 0 and (text[i - 1].isalnum() or text[i - 1] in "_$")
+        if c == "$" and text[i : i + 2] == "$$" and not prev_is_ident:  # dollar-quoted constant
             end = text.find("$$", i + 2)
             if end == -1:
                 unterminated = "dollar-quoted constant ($$ with no closing $$)"
@@ -973,9 +990,12 @@ _WRITE_COMMANDS_AFTER_PAREN = (
     r"MERGE\s+INTO\b",
     # `TABLE` is OPTIONAL in Snowflake's TRUNCATE, so match the bare form too.
     r"TRUNCATE\s+(?:TABLE\s+)?" + _NOT_CLAUSE + r"[A-Za-z_\"]",
-    r"COMMENT\s+ON\s+(?:TABLE|VIEW|COLUMN|SCHEMA|DATABASE|WAREHOUSE|STAGE|"
-    r"SEQUENCE|STREAM|TASK|PIPE|FUNCTION|PROCEDURE|ROLE|USER|INTEGRATION|"
-    r"MATERIALIZED)\b",
+    r"COMMENT\s+(?:IF\s+EXISTS\s+)?ON\s+(?:TABLE|VIEW|COLUMN|SCHEMA|DATABASE|"
+    r"WAREHOUSE|STAGE|SEQUENCE|STREAM|TASK|PIPE|FUNCTION|PROCEDURE|ROLE|USER|"
+    r"INTEGRATION|MATERIALIZED|TAG|SHARE|ACCOUNT|ALERT|SECRET|APPLICATION|"
+    r"MASKING|ROW|NETWORK|PASSWORD|SESSION|AUTHENTICATION|EXTERNAL|DYNAMIC|"
+    r"EVENT|ICEBERG|HYBRID|FILE|NOTEBOOK|STREAMLIT|MODEL|SERVICE|COMPUTE|"
+    r"IMAGE|RESOURCE|CONNECTION|LISTING|REPLICATION|FAILOVER|DATA)\b",
     r"COPY\s+INTO\b",
     # UNDROP takes TABLE / SCHEMA / DATABASE; EXECUTE takes IMMEDIATE / TASK.
     r"UNDROP\s+(?:TABLE|SCHEMA|DATABASE)\b",

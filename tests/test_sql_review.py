@@ -1774,3 +1774,72 @@ def test_malformed_set_vars_is_a_validation_error_not_a_traceback(entry) -> None
     assert isinstance(
         sr._set_block({"set_block": {"d": "CURRENT_DATE"}, "set_vars": [entry]}, "$d"), str
     )
+
+
+# --------------------------------------------------------------------------- #
+# 0.6.3 hotfix — found by reviewing the SHIPPED 0.6.2 round-8 commit.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # `$` is legal inside an unquoted Snowflake identifier, so `x$$y` is a
+        # column name, not an unterminated dollar-quote. The fail-closed guard
+        # refused this whole file.
+        "SELECT x$$y FROM ANALYTICS.ORDERS;",
+        "SELECT a$$ FROM ANALYTICS.ORDERS;",
+        "SELECT t.col$$1 FROM ANALYTICS.ORDERS t;",
+        # A real dollar-quote after punctuation/space must still work.
+        "SELECT ($$body$$) FROM ANALYTICS.ORDERS;",
+        "SELECT $$abc$$ FROM ANALYTICS.ORDERS;",
+    ],
+)
+def test_dollar_inside_identifier_is_not_a_dollar_quote(sql: str) -> None:
+    _, unterminated = sr._mask_with_status(sql)
+    assert unterminated is None, f"falsely unterminated: {sql}"
+    assert sr._verify_read_only(sql) == [], f"refused legal SQL: {sql}"
+
+
+def test_real_unterminated_dollar_quote_still_fails_closed() -> None:
+    assert sr._verify_read_only("SELECT $$ ;\nDELETE FROM t;")
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "COMMENT IF EXISTS ON TABLE t IS 'x'",
+        "COMMENT ON TAG t1 IS 'x'",
+        "COMMENT ON MASKING POLICY p IS 'x'",
+        "COMMENT ON DYNAMIC TABLE dt IS 'x'",
+        "COMMENT ON SHARE s IS 'x'",
+    ],
+)
+def test_comment_command_forms_are_refused_in_a_set_expression(tail: str) -> None:
+    assert not sr._valid_set_statement(f"SET x = (SELECT 1) {tail}"), f"slipped: {tail}"
+    assert sr._verify_read_only(f"SET x = (SELECT 1) {tail};")
+
+
+def test_join_alias_comment_before_on_is_still_legal() -> None:
+    sql = "SELECT a.x FROM t a JOIN (SELECT 1 AS id) comment ON a.id = comment.id;"
+    assert sr._verify_read_only(sql) == []
+
+
+@pytest.mark.parametrize("name", ["bad name", "1st", "a-b", "x.y", "", "$x"])
+def test_set_vars_name_must_be_an_identifier(name: str) -> None:
+    m = {
+        "schema_version": 1,
+        "feature": "revenue",
+        "app": SLUG,
+        "pages": [{"name": "Overview", "queries": ["revenue_daily"]}],
+        "query_specs": {"revenue_daily": {}},
+        "set_vars": [{"name": name, "default": "1"}],
+    }
+    assert [p for p in sr.validate_manifest(m) if "set_vars" in p], f"accepted {name!r}"
+
+
+def test_set_vars_used_entry_missing_default_does_not_raise() -> None:
+    out = sr._set_block(
+        {"set_block": {"d": "CURRENT_DATE"}, "set_vars": [{"name": "cap"}]}, "$d $cap"
+    )
+    assert isinstance(out, str) and "SET d = CURRENT_DATE;" in out
