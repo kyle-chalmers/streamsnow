@@ -1112,14 +1112,18 @@ def _verify_read_only(text: str) -> list[str]:
     for stmt in _split_statements(masked_all):
         hits: list[tuple[int, str]] = []
         m0 = _WRITE_VERB_AT_START_RE.search(stmt)
+        # Report the VERB only: multi-token patterns (`COMMENT IF EXISTS ON`,
+        # `MERGE INTO`) and the whitespace consumed before a lookahead would
+        # otherwise surface as 'TRUNCATE ' or 'COMMENT IF EXISTS ON TABLE'.
         if m0:
-            hits.append((m0.start(1), m0.group(1).upper()))
+            hits.append((m0.start(1), m0.group(1).split()[0].upper()))
         # finditer, not search: a `search` that matched the leading `SET` and
         # then `continue`d on the SET exemption left EVERYTHING after the `=`
         # examined by neither layer, so `SET x = (SELECT 1) DELETE FROM t`
         # passed both. The SET exemption may only excuse the match at offset 0.
         hits += [
-            (m.start(1), m.group(1).upper()) for m in _WRITE_VERB_AFTER_PAREN_RE.finditer(stmt)
+            (m.start(1), m.group(1).split()[0].upper())
+            for m in _WRITE_VERB_AFTER_PAREN_RE.finditer(stmt)
         ]
         is_set_stmt = _valid_set_statement(stmt)
         for offset, verb in hits:
