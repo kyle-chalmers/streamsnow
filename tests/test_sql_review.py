@@ -1934,7 +1934,7 @@ def test_name_in_both_set_block_and_set_vars_is_rejected() -> None:
         "set_block": {"start_date": "CURRENT_DATE"},
         "set_vars": [{"name": "start_date", "default": "CURRENT_DATE"}],
     }
-    assert [p for p in sr.validate_manifest(m) if "both set_block and set_vars" in p]
+    assert [p for p in sr.validate_manifest(m) if "collides with" in p]
 
 
 def test_bind_regex_lookbehind_is_pinned() -> None:
@@ -1949,3 +1949,44 @@ def test_var_used_ignores_dollar_inside_an_identifier() -> None:
     """Mirrors _verify_session_vars_defined: METADATA$FILENAME is not `$filename`."""
     assert not sr._var_used("filename", "SELECT METADATA$FILENAME FROM @s")
     assert sr._var_used("filename", "SELECT $filename FROM t")
+
+
+@pytest.mark.parametrize(
+    ("set_block", "sv_name"),
+    [
+        (None, "start_date"),  # collides with the IMPLICIT default
+        (None, "END_DATE"),  # implicit default, case-different
+        ({"start_date": "CURRENT_DATE"}, "START_DATE"),  # explicit, case-different
+        ({"start_date": "CURRENT_DATE"}, "start_date"),  # explicit, same case
+    ],
+)
+def test_set_vars_collision_covers_defaults_and_case(set_block, sv_name) -> None:
+    """Snowflake session-variable names are case-insensitive, and an absent
+    set_block still renders _DEFAULT_SET - both were missed."""
+    m = {
+        "schema_version": 1,
+        "feature": "revenue",
+        "app": SLUG,
+        "pages": [{"name": "Overview", "queries": ["revenue_daily"]}],
+        "query_specs": {"revenue_daily": {}},
+        "set_vars": [{"name": sv_name, "default": "1"}],
+    }
+    if set_block is not None:
+        m["set_block"] = set_block
+    assert [p for p in sr.validate_manifest(m) if "collides" in p], f"accepted {sv_name!r}"
+    # Even if validation were bypassed, the renderer must never emit two SETs.
+    out = sr._set_block(m, f"$start_date $end_date ${sv_name}")
+    names = [ln.split()[1].lower() for ln in out.splitlines() if ln.startswith("SET ")]
+    assert len(names) == len(set(names)), out
+
+
+def test_distinct_set_vars_name_is_not_a_collision() -> None:
+    m = {
+        "schema_version": 1,
+        "feature": "revenue",
+        "app": SLUG,
+        "pages": [{"name": "Overview", "queries": ["revenue_daily"]}],
+        "query_specs": {"revenue_daily": {}},
+        "set_vars": [{"name": "cap", "default": "100"}],
+    }
+    assert [p for p in sr.validate_manifest(m) if "collides" in p] == []

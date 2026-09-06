@@ -37,7 +37,10 @@ never been reviewed before publishing.
 - Widened `COPY FILES INTO`, `UNDROP ICEBERG|DYNAMIC|EXTERNAL|EVENT TABLE`,
   `TRUNCATE IF EXISTS`; `NATURAL`/`ASOF` joins after a bare alias no longer
   refused; a name declared in both `set_block` and `set_vars` is rejected
-  (it rendered two `SET` lines and the second silently won); tripwire messages
+  (it rendered two `SET` lines and the second silently won) — including against
+  the implicit default `set_block` and case-insensitively, since session-variable
+  names are, and the renderer itself now never emits a second `SET` for one
+  name; tripwire messages
   now name only the verb; `_var_used` and `_BIND_RE` changes pinned by tests.
 
 ## [0.6.2] - 2026-09-03

@@ -400,13 +400,25 @@ def validate_manifest(m: dict) -> list[str]:
     # the second silently wins, so a reviewer following "edit the SET lines"
     # edits the first, reruns, sees identical numbers, and concludes the data is
     # window-stable — the confidently-wrong outcome the SET block exists to avoid.
-    if isinstance(sb, dict) and isinstance(sv, list):
-        sv_names = {e.get("name") for e in sv if isinstance(e, dict)}
-        for dup in sorted(set(sb) & sv_names):
-            out.append(
-                f"{dup!r} is declared in both set_block and set_vars — it would render two "
-                "SET lines and the second silently wins; declare it once"
-            )
+    # Compare against the EFFECTIVE set_block - when it is absent the renderer
+    # uses _DEFAULT_SET (start_date, end_date), so a set_vars entry named
+    # start_date collided with an implicit default the first version of this
+    # check never saw. Case-insensitive because Snowflake session-variable
+    # names are: `start_date` and `START_DATE` are the same variable.
+    effective_sb = sb if isinstance(sb, dict) else _DEFAULT_SET
+    if isinstance(sv, list):
+        sb_lower = {str(k).lower(): k for k in effective_sb}
+        for e in sv:
+            if not isinstance(e, dict) or not isinstance(e.get("name"), str):
+                continue
+            hit = sb_lower.get(e["name"].lower())
+            if hit is not None:
+                where = "set_block" if isinstance(sb, dict) else "the default set_block"
+                out.append(
+                    f"{e['name']!r} in set_vars collides with {hit!r} in {where} "
+                    "(session-variable names are case-insensitive) — it would render two "
+                    "SET lines and the second silently wins; declare it once"
+                )
     note = m.get("set_block_note")
     if note is not None and not isinstance(note, str):
         out.append(f"set_block_note must be a string (got {type(note).__name__})")
@@ -617,6 +629,7 @@ def _set_block(manifest: dict, body: str | None = None) -> str:
         if body is not None and not _var_used(name, body):
             continue
         emitted.append(f"SET {name} = {expr};")
+    emitted_names = {name.lower() for name in pairs}
     for sv in manifest.get("set_vars", []):
         # Defensive: a malformed entry is a validation error, never a traceback
         # in pre-commit output with a misleading exit code.
@@ -626,6 +639,8 @@ def _set_block(manifest: dict, body: str | None = None) -> str:
             or not isinstance(sv.get("default"), str)
         ):
             continue  # a used entry with no default raised KeyError here
+        if sv["name"].lower() in emitted_names:
+            continue  # validation rejects this; never render a second SET for one name
         if body is not None and not _var_used(sv["name"], body):
             continue
         if sv.get("comment"):
