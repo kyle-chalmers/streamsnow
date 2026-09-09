@@ -385,12 +385,40 @@ def validate_manifest(m: dict) -> list[str]:
                 if not isinstance(e, dict):
                     out.append(f"set_vars[{i}] must be an object with name + default")
                     continue
-                if not isinstance(e.get("name"), str) or not e["name"].strip():
-                    out.append(f"set_vars[{i}].name is required and must be a string")
+                name = e.get("name")
+                if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_]\w*", name):
+                    out.append(
+                        f"set_vars[{i}].name must be a session-variable identifier "
+                        f"([A-Za-z_][A-Za-z0-9_]*); got {name!r} — anything else renders "
+                        "invalid SQL like `SET bad name = 1;`"
+                    )
                 if not isinstance(e.get("default"), str) or not e["default"].strip():
                     out.append(
                         f"set_vars[{i}].default is required and must be a non-empty SQL expression"
                     )
+    # A name declared in BOTH set_block and set_vars renders two `SET x` lines;
+    # the second silently wins, so a reviewer following "edit the SET lines"
+    # edits the first, reruns, sees identical numbers, and concludes the data is
+    # window-stable — the confidently-wrong outcome the SET block exists to avoid.
+    # Compare against the EFFECTIVE set_block - when it is absent the renderer
+    # uses _DEFAULT_SET (start_date, end_date), so a set_vars entry named
+    # start_date collided with an implicit default the first version of this
+    # check never saw. Case-insensitive because Snowflake session-variable
+    # names are: `start_date` and `START_DATE` are the same variable.
+    effective_sb = sb if isinstance(sb, dict) else _DEFAULT_SET
+    if isinstance(sv, list):
+        sb_lower = {str(k).lower(): k for k in effective_sb}
+        for e in sv:
+            if not isinstance(e, dict) or not isinstance(e.get("name"), str):
+                continue
+            hit = sb_lower.get(e["name"].lower())
+            if hit is not None:
+                where = "set_block" if isinstance(sb, dict) else "the default set_block"
+                out.append(
+                    f"{e['name']!r} in set_vars collides with {hit!r} in {where} "
+                    "(session-variable names are case-insensitive) — it would render two "
+                    "SET lines and the second silently wins; declare it once"
+                )
     note = m.get("set_block_note")
     if note is not None and not isinstance(note, str):
         out.append(f"set_block_note must be a string (got {type(note).__name__})")
@@ -575,7 +603,7 @@ def _var_used(name: str, body: str) -> bool:
     # SET line is kept and the header promises a reference that is only text.
     return (
         re.search(
-            r"\$" + re.escape(name) + r"\b",
+            r"(?<![\w$])\$" + re.escape(name) + r"\b",
             _mask_strings_and_comments(body),
             re.IGNORECASE,
         )
@@ -601,11 +629,18 @@ def _set_block(manifest: dict, body: str | None = None) -> str:
         if body is not None and not _var_used(name, body):
             continue
         emitted.append(f"SET {name} = {expr};")
+    emitted_names = {name.lower() for name in pairs}
     for sv in manifest.get("set_vars", []):
         # Defensive: a malformed entry is a validation error, never a traceback
         # in pre-commit output with a misleading exit code.
-        if not isinstance(sv, dict) or not isinstance(sv.get("name"), str):
-            continue
+        if (
+            not isinstance(sv, dict)
+            or not isinstance(sv.get("name"), str)
+            or not isinstance(sv.get("default"), str)
+        ):
+            continue  # a used entry with no default raised KeyError here
+        if sv["name"].lower() in emitted_names:
+            continue  # validation rejects this; never render a second SET for one name
         if body is not None and not _var_used(sv["name"], body):
             continue
         if sv.get("comment"):
@@ -683,7 +718,15 @@ def _mask_with_status(text: str) -> tuple[str, str | None]:
     i, n = 0, len(text)
     while i < n:
         c = text[i]
-        if c == "$" and text[i : i + 2] == "$$":  # dollar-quoted constant
+        # A `$$` only OPENS a dollar-quoted constant when it does not continue an
+        # identifier: Snowflake permits `$` inside unquoted identifiers, so
+        # `x$$y` is a legal column name. Treating every `$$` as an opener made
+        # the fail-closed guard refuse that file as "unterminated" — a false
+        # positive that blocks generating a legitimate audit trail. The CLOSING
+        # `$$` keeps a plain find(): a body may legitimately end in an
+        # identifier character (`$$abc$$`).
+        prev_is_ident = i > 0 and (text[i - 1].isalnum() or text[i - 1] in "_$")
+        if c == "$" and text[i : i + 2] == "$$" and not prev_is_ident:  # dollar-quoted constant
             end = text.find("$$", i + 2)
             if end == -1:
                 unterminated = "dollar-quoted constant ($$ with no closing $$)"
@@ -735,6 +778,14 @@ def _mask_with_status(text: str) -> tuple[str, str | None]:
                 if text[j] != "\n":
                     out[j] = " "
             i = end
+        elif c == "/" and text[i : i + 2] == "//":  # Snowflake ALSO accepts // comments
+            # Missing this was the sixth masking bypass of the same class: an
+            # apostrophe inside a `//` comment opened a phantom string literal
+            # that ran to the next `'` in the file and hid real SQL — and since
+            # that phantom literal TERMINATES, the fail-closed path never fired.
+            while i < n and text[i] != "\n":
+                out[i] = " "
+                i += 1
         else:
             i += 1
     return "".join(out), unterminated
@@ -965,29 +1016,35 @@ _NOT_CLAUSE = (
     r"(?!(?:FROM|WHERE|GROUP|ORDER|JOIN|ON|LIMIT|OFFSET|HAVING|UNION|EXCEPT|"
     r"INTERSECT|MINUS|QUALIFY|WINDOW|AS|USING|INNER|LEFT|RIGHT|FULL|CROSS|"
     r"LATERAL|AND|OR|IS|NOT|NULL|END|THEN|ELSE|WHEN|FETCH|PIVOT|UNPIVOT|"
-    r"SAMPLE|TABLESAMPLE|MATCH_RECOGNIZE|START|CONNECT|AT|BEFORE|CHANGES|"
+    r"SAMPLE|TABLESAMPLE|MATCH_RECOGNIZE|START|CONNECT|AT|BEFORE|CHANGES|NATURAL|ASOF|"
     r"WITH|SELECT|VALUES|SET)\b)"
 )
 
 _WRITE_COMMANDS_AFTER_PAREN = (
     r"MERGE\s+INTO\b",
     # `TABLE` is OPTIONAL in Snowflake's TRUNCATE, so match the bare form too.
-    r"TRUNCATE\s+(?:TABLE\s+)?" + _NOT_CLAUSE + r"[A-Za-z_\"]",
-    r"COMMENT\s+ON\s+(?:TABLE|VIEW|COLUMN|SCHEMA|DATABASE|WAREHOUSE|STAGE|"
-    r"SEQUENCE|STREAM|TASK|PIPE|FUNCTION|PROCEDURE|ROLE|USER|INTEGRATION|"
-    r"MATERIALIZED)\b",
-    r"COPY\s+INTO\b",
-    # UNDROP takes TABLE / SCHEMA / DATABASE; EXECUTE takes IMMEDIATE / TASK.
-    r"UNDROP\s+(?:TABLE|SCHEMA|DATABASE)\b",
+    # The trailing identifier check is a LOOKAHEAD so the reported verb is
+    # `TRUNCATE`, not `TRUNCATE N`.
+    r"TRUNCATE\s+(?:IF\s+EXISTS\s+)?(?:TABLE\s+)?" + _NOT_CLAUSE + r"(?=[A-Za-z_\"])",
+    r"COMMENT\s+(?:IF\s+EXISTS\s+)?ON\s+(?:TABLE|VIEW|COLUMN|SCHEMA|DATABASE|"
+    r"WAREHOUSE|STAGE|SEQUENCE|STREAM|TASK|PIPE|FUNCTION|PROCEDURE|ROLE|USER|"
+    r"INTEGRATION|MATERIALIZED|TAG|SHARE|ACCOUNT|ALERT|SECRET|APPLICATION|"
+    r"MASKING|ROW|NETWORK|PASSWORD|SESSION|AUTHENTICATION|EXTERNAL|DYNAMIC|"
+    r"EVENT|ICEBERG|HYBRID|FILE|NOTEBOOK|STREAMLIT|MODEL|SERVICE|COMPUTE|"
+    r"IMAGE|RESOURCE|CONNECTION|LISTING|REPLICATION|FAILOVER|DATA)\b",
+    # `COPY FILES INTO` is the stage-to-stage form.
+    r"COPY\s+(?:FILES\s+)?INTO\b",
+    r"UNDROP\s+(?:ICEBERG\s+|DYNAMIC\s+|EXTERNAL\s+|EVENT\s+)?(?:TABLE|SCHEMA|DATABASE)\b",
     r"EXECUTE\s+(?:IMMEDIATE|TASK)\b",
-    # `RM` is REMOVE's documented alias; both take a stage reference.
     r"(?:REMOVE|RM)\s+@",
     r"PUT\s+file://",
-    # CALL / UNLOAD / UNSET need an argument, which a bare alias never has:
-    # an alias is followed by FROM / `,` / `;`, never by an identifier.
-    r"CALL\s+" + _NOT_CLAUSE + r"[A-Za-z_\"$]",
+    # CALL: either a non-clause identifier follows, OR any identifier is
+    # immediately followed by `(` — a procedure named after a clause keyword
+    # (`CALL start()`, `CALL changes()`) is still a call, while the bare alias
+    # `call FROM (SELECT ...)` has a space before its paren and does not match.
+    r"CALL\s+(?:" + _NOT_CLAUSE + r"(?=[A-Za-z_\"$])|(?=[A-Za-z_\"$][\w.$\"]*\())",
     r"UNLOAD\s+(?:TO\s+)?@",
-    r"UNSET\s+" + _NOT_CLAUSE + r"[A-Za-z_\"]",
+    r"UNSET\s+" + _NOT_CLAUSE + r"(?=[A-Za-z_\"])",
 )
 _WRITE_VERB_AFTER_PAREN_RE = re.compile(
     r"(?<=\))\s*("
@@ -1070,14 +1127,18 @@ def _verify_read_only(text: str) -> list[str]:
     for stmt in _split_statements(masked_all):
         hits: list[tuple[int, str]] = []
         m0 = _WRITE_VERB_AT_START_RE.search(stmt)
+        # Report the VERB only: multi-token patterns (`COMMENT IF EXISTS ON`,
+        # `MERGE INTO`) and the whitespace consumed before a lookahead would
+        # otherwise surface as 'TRUNCATE ' or 'COMMENT IF EXISTS ON TABLE'.
         if m0:
-            hits.append((m0.start(1), m0.group(1).upper()))
+            hits.append((m0.start(1), m0.group(1).split()[0].upper()))
         # finditer, not search: a `search` that matched the leading `SET` and
         # then `continue`d on the SET exemption left EVERYTHING after the `=`
         # examined by neither layer, so `SET x = (SELECT 1) DELETE FROM t`
         # passed both. The SET exemption may only excuse the match at offset 0.
         hits += [
-            (m.start(1), m.group(1).upper()) for m in _WRITE_VERB_AFTER_PAREN_RE.finditer(stmt)
+            (m.start(1), m.group(1).split()[0].upper())
+            for m in _WRITE_VERB_AFTER_PAREN_RE.finditer(stmt)
         ]
         is_set_stmt = _valid_set_statement(stmt)
         for offset, verb in hits:
