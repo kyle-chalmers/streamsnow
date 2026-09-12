@@ -12,7 +12,16 @@ stage-copy/git deploys upload the whole app dir and don't read the list):
 
 - every deployable file on disk (``*.py``, ``*.sql``, ``pyproject.toml``,
   ``environment.yml``, ``.streamlit/config.toml``) must be covered by an entry
-  (exact path, parent-directory entry, or glob);
+  (exact path, parent-directory entry, or glob) — unless the repo's
+  ``streamsnow.config.yaml`` names it under ``deploy.artifact_exclude`` because
+  its deploy pipeline ships that file by another step (the generated stage-copy
+  workflow uploads ``.streamlit/config.toml`` in its own loop; a fleet with a
+  hand-rolled deploy did the same and failed this check on every app). The
+  exclusion is typed at config load: exact relative paths, no globs, never
+  ``streamlit_app.py``, never anything under ``pages/`` or ``queries/``, never
+  ``*.py``/``*.sql`` — so it can drop *demand* for a config file but can never
+  turn the gate into an opt-out for code. A listed-and-excluded file is still
+  checked for staleness;
 - every entry must resolve to at least one existing path.
 
 ``--fix`` repairs the drift instead of reporting it, as a minimal edit rather
@@ -50,6 +59,8 @@ import re
 from pathlib import Path
 
 import yaml
+
+from ..config import ConfigError, find_config, load_config
 
 _DEPLOYABLE_SUFFIXES = (".py", ".sql")
 _DEPLOYABLE_NAMES = ("pyproject.toml", "environment.yml")
@@ -229,8 +240,15 @@ def _splice_artifacts(text: str, new_entries: list[str]) -> str | None:
     return "".join(lines[: i + 1] + items + lines[j:])
 
 
-def fix_app(app_dir: Path) -> dict:
+def _excluded(rel: str, exclude: tuple[str, ...]) -> bool:
+    return rel in exclude
+
+
+def fix_app(app_dir: Path, exclude: tuple[str, ...] = ()) -> dict:
     """Repair one app's artifacts drift in place (see module docstring).
+
+    ``exclude`` is ``deploy.artifact_exclude`` from config: paths never
+    appended by the fixer (they ship by another deploy step).
 
     Returns ``{"ok", "changed", "detail", "artifacts"}``. ``ok`` is False only
     when a fix was needed but couldn't be applied safely; a manifest with
@@ -277,7 +295,9 @@ def fix_app(app_dir: Path) -> dict:
 
     kept = [e for e in entries if _entry_exists(app_dir, e)]
     files = _deployable_files(app_dir) + _asset_files(app_dir)
-    additions = sorted({f for f in files if not any(_covers(e, f) for e in kept)})
+    additions = sorted(
+        {f for f in files if not _excluded(f, exclude) and not any(_covers(e, f) for e in kept)}
+    )
     new_entries = kept + additions
     if new_entries == entries:
         return {"ok": True, "changed": False, "detail": "already in sync", "artifacts": entries}
@@ -313,7 +333,8 @@ def fix_app(app_dir: Path) -> dict:
     }
 
 
-def check_app(app_dir: Path) -> dict:
+def check_app(app_dir: Path, exclude: tuple[str, ...] = ()) -> dict:
+    """Check one app. ``exclude`` is ``deploy.artifact_exclude`` from config."""
     yml = app_dir / "snowflake.yml"
     findings: list[dict] = []
     if not yml.is_file():
@@ -329,13 +350,18 @@ def check_app(app_dir: Path) -> dict:
         return {"ok": True, "findings": []}
 
     for rel in _deployable_files(app_dir):
+        if _excluded(rel, exclude):
+            continue  # shipped by another deploy step, declared in config
         if not any(_covers(e, rel) for e in entries):
             findings.append(
                 {
                     "file": str(yml),
                     "detail": f"{rel} exists on disk but no artifacts entry covers it — "
                     "local dev reads disk while a manifest-driven deploy reads this list, "
-                    "so the file silently goes missing in the deployed app",
+                    "so the file silently goes missing in the deployed app. Add it to "
+                    "artifacts:, or — only for a non-code file your pipeline uploads "
+                    "separately — list it under deploy.artifact_exclude in "
+                    "streamsnow.config.yaml",
                 }
             )
     for entry in entries:
@@ -367,12 +393,29 @@ def _app_dirs_for(paths: list[Path]) -> list[Path]:
     return sorted(roots)
 
 
-def scan_paths(paths: list[Path], fix: bool = False) -> dict:
+def _exclude_for(app_dir: Path, config: Path | None) -> tuple[str, ...]:
+    """``deploy.artifact_exclude`` for the repo an app sits in, or ``()``.
+
+    Config is optional here: the check is meaningful without one (the fleet
+    ran it from pre-commit on file paths), so a missing or invalid config just
+    means no exclusions — the config check owns reporting that.
+    """
+    cfg_path = config or find_config(app_dir)
+    if cfg_path is None:
+        return ()
+    try:
+        return load_config(cfg_path).deploy.artifact_exclude
+    except ConfigError:
+        return ()
+
+
+def scan_paths(paths: list[Path], fix: bool = False, config: Path | None = None) -> dict:
     findings: list[dict] = []
     fixed: list[dict] = []
     for app_dir in _app_dirs_for(paths):
+        exclude = _exclude_for(app_dir, config)
         if fix:
-            fix_result = fix_app(app_dir)
+            fix_result = fix_app(app_dir, exclude)
             if not fix_result["ok"]:
                 findings.append(
                     {"file": str(app_dir / "snowflake.yml"), "detail": fix_result["detail"]}
@@ -381,7 +424,7 @@ def scan_paths(paths: list[Path], fix: bool = False) -> dict:
                 fixed.append(
                     {"file": str(app_dir / "snowflake.yml"), "detail": fix_result["detail"]}
                 )
-        findings.extend(check_app(app_dir)["findings"])
+        findings.extend(check_app(app_dir, exclude)["findings"])
     result: dict = {"ok": not findings, "findings": findings}
     if fixed:
         result["fixed"] = fixed
@@ -400,9 +443,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Rewrite each app's artifacts list to match disk (drop stale entries, "
         "append uncovered files) before checking.",
     )
+    ap.add_argument(
+        "--config",
+        help="Path to streamsnow.config.yaml (default: discover from each app dir); "
+        "supplies deploy.artifact_exclude.",
+    )
     args = ap.parse_args(argv)
 
-    result = scan_paths([Path(raw) for raw in (args.paths or ["apps"])], fix=args.fix)
+    result = scan_paths(
+        [Path(raw) for raw in (args.paths or ["apps"])],
+        fix=args.fix,
+        config=Path(args.config) if args.config else None,
+    )
     if args.format == "json":
         print(json.dumps(result, indent=2))
     else:

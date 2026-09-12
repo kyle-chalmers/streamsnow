@@ -119,8 +119,17 @@ Verbs
                       queries (JSON to stdout; ``--write`` persists skeletons).
                       Exit 1 = gaps exist.
 ``generate <slug>``   render review files (+ provenance) from manifests.
-``check <slug>``      import-free freshness + coverage gate. Exit 1 = drift
-                      or uncovered queries.
+``check <slug>``      import-free freshness + coverage gate. Every finding
+                      carries a ``kind`` (coverage | fragment | collision |
+                      orphan | bind | provenance | readonly). Correctness
+                      kinds always exit 1; ``coverage`` follows
+                      ``sql_review.coverage`` in streamsnow.config.yaml
+                      (``warn`` default → reported, exit 0; ``fail`` → exit 1),
+                      so pre-commit and CI can run the drift check before a
+                      fleet has backfilled every manifest. A production fleet
+                      had to filter coverage by matching finding *text* to get
+                      that behaviour; the kind field and the config switch
+                      replace that.
 ``index <slug>``      rebuild the README.md coverage table (tool owns the
                       table; the lineage narrative around it is authored by
                       the review recipe and preserved).
@@ -142,6 +151,8 @@ import sys
 import textwrap
 from datetime import UTC, datetime
 from pathlib import Path
+
+from ..config import ConfigError, find_config, load_config
 
 #: Bumped when the rendered-file format changes shape — makes every prior
 #: file read as drift, which is correct: format changes need a regenerate.
@@ -174,6 +185,26 @@ _FEATURE_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 class ToolError(RuntimeError):
     """Cannot proceed — reported on stderr with exit 2."""
+
+
+# Finding kinds. ``coverage`` is the only policy-controlled one; the rest mean
+# the committed audit trail does not match what the app runs, and are never
+# downgraded.
+KIND_COVERAGE = "coverage"
+KIND_FRAGMENT = "fragment"
+KIND_COLLISION = "collision"
+KIND_ORPHAN = "orphan"
+KIND_BIND = "bind"
+KIND_PROVENANCE = "provenance"
+KIND_READONLY = "readonly"
+CORRECTNESS_KINDS = (
+    KIND_FRAGMENT,
+    KIND_COLLISION,
+    KIND_ORPHAN,
+    KIND_BIND,
+    KIND_PROVENANCE,
+    KIND_READONLY,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -1732,6 +1763,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
     cov = coverage(app)
     findings += [
         {
+            "kind": KIND_COVERAGE,
             "file": f"apps/{app.name}/queries/{q}.sql",
             "line": 1,
             "detail": "query not claimed by any sql_review manifest — every UI-feeding "
@@ -1742,6 +1774,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
 
     findings += [
         {
+            "kind": KIND_FRAGMENT,
             "file": f"apps/{app.name}/sql_review/manifests",
             "line": 1,
             "detail": f"manifest declares fragment {f!r} but queries/{f}.sql does not "
@@ -1752,6 +1785,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
     ]
     findings += [
         {
+            "kind": KIND_FRAGMENT,
             "file": f"apps/{app.name}/sql_review/manifests",
             "line": 1,
             "detail": f"query {f!r} is claimed by a page in one manifest and declared a "
@@ -1762,6 +1796,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
     ]
     findings += [
         {
+            "kind": KIND_FRAGMENT,
             "file": f"apps/{app.name}/sql_review/manifests",
             "line": 1,
             "detail": f"fragment {f!r} is declared by more than one manifest — the first "
@@ -1778,6 +1813,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
         if len(owner_list) > 1:
             findings.append(
                 {
+                    "kind": KIND_COLLISION,
                     "file": f"apps/{app.name}/sql_review/{fname}",
                     "line": 1,
                     "detail": "output collision — produced by "
@@ -1794,6 +1830,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
             if stray.name not in expected:
                 findings.append(
                     {
+                        "kind": KIND_ORPHAN,
                         "file": f"apps/{app.name}/sql_review/{stray.name}",
                         "line": 1,
                         "detail": "orphaned review file — no current manifest produces it; "
@@ -1824,6 +1861,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
             for detail in _verify_binds_bound(body) + _verify_session_vars_defined(body):
                 findings.append(
                     {
+                        "kind": KIND_BIND,
                         "file": f"apps/{app.name}/sql_review/{rf.name}",
                         "line": 1,
                         "detail": detail,
@@ -1834,7 +1872,14 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
         try:
             manifest = load_manifest(mp)
         except ToolError as exc:
-            findings.append({"file": str(mp.relative_to(repo)), "line": 1, "detail": str(exc)})
+            findings.append(
+                {
+                    "kind": KIND_PROVENANCE,
+                    "file": str(mp.relative_to(repo)),
+                    "line": 1,
+                    "detail": str(exc),
+                }
+            )
             continue
         inputs = _inputs_digest(app, mp, manifest)
         for fname in _manifest_outputs(manifest):
@@ -1843,6 +1888,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
             if not out.is_file():
                 findings.append(
                     {
+                        "kind": KIND_PROVENANCE,
                         "file": rel,
                         "line": 1,
                         "detail": "review file missing — run "
@@ -1856,16 +1902,24 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
                 # A structured finding, never a traceback: the gate runs
                 # inside pre-commit/CI/validate and must stay exit-1-shaped.
                 findings.append(
-                    {"file": rel, "line": 1, "detail": f"unreadable review file ({exc})"}
+                    {
+                        "kind": KIND_PROVENANCE,
+                        "file": rel,
+                        "line": 1,
+                        "detail": f"unreadable review file ({exc})",
+                    }
                 )
                 continue
             record, problem = parse_provenance(text)
             if record is None:
-                findings.append({"file": rel, "line": 1, "detail": problem})
+                findings.append(
+                    {"kind": KIND_PROVENANCE, "file": rel, "line": 1, "detail": problem}
+                )
                 continue
             if record["inputs"] != inputs:
                 findings.append(
                     {
+                        "kind": KIND_PROVENANCE,
                         "file": rel,
                         "line": 1,
                         "detail": "DRIFT: manifest/template/module inputs changed since "
@@ -1875,6 +1929,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
             if record["output"] != _output_digest(text):
                 findings.append(
                     {
+                        "kind": KIND_PROVENANCE,
                         "file": rel,
                         "line": 1,
                         "detail": "review file body was edited by hand — regenerate (the "
@@ -1888,8 +1943,34 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
                 ln for ln in text.split("\n") if not ln.rstrip("\r").startswith("-- Provenance: ")
             )
             for problem_line in _verify_read_only(body_only):
-                findings.append({"file": rel, "line": 1, "detail": problem_line})
+                findings.append(
+                    {"kind": KIND_READONLY, "file": rel, "line": 1, "detail": problem_line}
+                )
     return findings
+
+
+def coverage_policy(repo: Path) -> str:
+    """``sql_review.coverage`` from the repo's config, ``warn`` when absent.
+
+    A missing or invalid config is not this tool's finding (``streamsnow
+    doctor`` owns that); it just means the default policy applies.
+    """
+    cfg_path = find_config(repo)
+    if cfg_path is None:
+        return "warn"
+    try:
+        return load_config(cfg_path).sql_review.coverage
+    except ConfigError:
+        return "warn"
+
+
+def split_by_policy(findings: list[dict], policy: str) -> tuple[list[dict], list[dict]]:
+    """(hard, soft): findings that fail the gate vs. coverage gaps only reported."""
+    if policy == "fail":
+        return list(findings), []
+    hard = [f for f in findings if f.get("kind") != KIND_COVERAGE]
+    soft = [f for f in findings if f.get("kind") == KIND_COVERAGE]
+    return hard, soft
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -1906,14 +1987,32 @@ def cmd_check(args: argparse.Namespace) -> int:
     findings: list[dict] = []
     for app in apps:
         findings += _check_app(repo, app)
-    result = {"ok": not findings, "findings": findings}
+    policy = coverage_policy(repo)
+    hard, soft = split_by_policy(findings, policy)
+    result = {
+        "ok": not hard,
+        "coverage_policy": policy,
+        "findings": hard,
+        "warnings": soft,
+    }
     if args.format == "json":
         print(json.dumps(result, indent=2))
-    elif result["ok"]:
-        print("sql-review: clean")
     else:
-        for f in findings:
-            print(f"FAIL {f['file']}:{f['line']} {f['detail']}")
+        if hard:
+            print("The committed audit trail does not match what the app runs:")
+            for f in hard:
+                print(f"FAIL [{f.get('kind', '?')}] {f['file']}:{f['line']} {f['detail']}")
+        if soft:
+            print(
+                f"Queries with no human-runnable companion yet (coverage policy: {policy} — "
+                "set sql_review.coverage: fail in streamsnow.config.yaml to gate on these):"
+            )
+            for f in soft:
+                print(f"WARN [{f.get('kind', '?')}] {f['file']}:{f['line']} {f['detail']}")
+        if not hard and not soft:
+            print("sql-review: clean")
+        elif not hard:
+            print(f"sql-review: clean ({len(soft)} coverage warning(s))")
     return 0 if result["ok"] else 1
 
 

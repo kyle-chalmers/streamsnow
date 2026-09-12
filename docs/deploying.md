@@ -79,6 +79,7 @@ Set `deploy.source` in `streamsnow.config.yaml`:
 | Network direction | CI → Snowflake only | Snowflake → GitHub (must be reachable) |
 | One-time objects | an internal stage | API integration + secret (GitHub token) + `GIT REPOSITORY` |
 | Best when | you want the fewest moving parts and no Snowflake→GitHub dependency | you already run a Snowflake `GIT REPOSITORY` workflow |
+| Limits | stage retains every SHA (your rollback surface) | repositories over 2 GB are unsupported ([Git overview](https://docs.snowflake.com/en/developer-guide/git/git-overview)) |
 
 The scaffold renders `deploy.yml` for whichever source your config declares.
 With the default **stage-copy**, Snowflake never reaches out to GitHub, so
@@ -130,8 +131,17 @@ stage-copy upload targets.
   before the first deploy (see one-time setup).
 - **Warehouse** (`runtime: warehouse`): no compute pool or EAI; dependencies come
   from `environment.yml` (Snowflake Anaconda channel). Never pin `python` there —
-  the channel has no exact `python==3.11` build and it breaks `CREATE STREAMLIT`
-  (`validate-app` flags this).
+  a pinned interpreter failed `CREATE STREAMLIT` in production with
+  `Packages not found: python==3.11`, so `validate-app` rejects the line. The
+  official [dependency management](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/dependency-management)
+  example does show `python=3.11`; StreamSnow keeps the stricter rule until the
+  single-`=` form is re-tested against a live app (tracked in the CHANGELOG's
+  Known gaps).
+- **Deploying by hand** with `snow streamlit deploy` instead of the generated
+  workflow? Container apps need Snowflake CLI 3.14 or newer for that command
+  ([snow streamlit deploy](https://docs.snowflake.com/en/developer-guide/snowflake-cli/command-reference/streamlit-commands/deploy));
+  the workflow itself emits `CREATE STREAMLIT` through `snow sql` and has no
+  such floor.
 
 ## Verifying a deploy
 
@@ -158,7 +168,10 @@ streamsnow update --apply    # write the changes
 ```
 
 `update` re-renders `AGENTS.md`, hooks, CI, and `deploy.yml` from your current
-config; it leaves `README` and `.gitignore` alone.
+config; it leaves `README` and `.gitignore` alone. Run it after upgrading
+`streamsnow` across a minor version too — 0.7 moved the generated CI pin to
+`streamsnow>=0.7,<0.8` and added the `sql_review.coverage` policy, and only a
+re-render picks those up.
 
 ## See also
 

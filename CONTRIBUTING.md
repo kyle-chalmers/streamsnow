@@ -2,6 +2,22 @@
 
 Thanks for your interest! StreamSnow is in early, active development.
 
+## Mission first
+
+Every change is judged against the mission, vision and eight principles at the
+top of the [README](README.md). Two of them are worth restating here because
+they decide most reviews: **faithful to a real fleet** (a check that fails a
+well-run production app is a defect in the check until proven otherwise —
+`tests/fixtures/fleet/` is the regression net, extend it when you find a new
+shape) and **leaving should be cheap** (everything StreamSnow writes into a repo
+stays a plain file the repo owns).
+
+## Maintainers
+
+One maintainer today. Co-maintainers are welcome: open an issue describing the
+area you want to own (a check, the scaffolder, a skill), land two reviewed PRs
+there, and ask for write access. Releases follow [RELEASING.md](RELEASING.md).
+
 ## Ground rules
 
 - **One implementation, many consumers.** Validation/scaffolding logic lives in

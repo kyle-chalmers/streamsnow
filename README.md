@@ -24,11 +24,56 @@
 
 > **Status: beta, functional.** The CLI (configure / init / new / doctor /
 > validate-app / preview / check / sql-review / review-gate / review-loop /
-> migrate / nav / deploy-sql / deploy-setup / verify-deploy) and the Claude
-> Code plugin (8 skills + shared recipes, with deprecated aliases for the
-> pre-0.3 names) are implemented and CI-green for both runtimes and both
-> deploy sources. Published on PyPI (`uvx streamsnow` / `pip install
-> streamsnow`); APIs may still evolve toward 1.0.
+> migrate / nav / deploy-sql / deploy-setup / verify-deploy / update) and the
+> Claude Code plugin (8 skills + shared recipes, with deprecated aliases for the
+> pre-0.3 names) are implemented and CI-green for both runtimes and both deploy
+> sources. Published on PyPI (`uvx streamsnow` / `pip install streamsnow`); APIs
+> may still evolve toward 1.0.
+
+## Mission
+
+**StreamSnow aims to let a data team build and ship Streamlit-in-Snowflake apps
+quickly and safely, by turning production lessons into scaffolding and checks
+that people and AI sessions can follow without having to remember them.**
+
+## Vision
+
+**A data professional, with or without an AI assistant, can take a dashboard
+from idea to a governed, verified deployment in Snowflake without learning the
+platform's traps the hard way, and a reviewer with Snowsight can re-run the SQL
+behind the numbers it shows.**
+
+**This is for you if:**
+
+- ✅ you run, or will run, more than one Streamlit app in Snowflake with more
+  than one author
+- ✅ you want Claude Code sessions and humans held to the same governance rules
+- ✅ you want a reviewer to re-run a dashboard's SQL in Snowsight without
+  reading Python
+- ❌ you host Streamlit outside Snowflake, or you want a BI tool, a scheduler,
+  or a data catalog — StreamSnow sits beside those
+
+**Principles** every change is judged against (the rules were already in the
+repo; collecting them here is what keeps future edits aligned):
+
+1. **One implementation, many consumers.** CLI, plugin, pre-commit, and CI call
+   the same code.
+2. **Detection is automated and total; destruction requires explicit committed
+   consent.**
+3. **The backstop asks; it never decides.** The gates are `validate-app` and CI,
+   not the review nudge.
+4. **Org knowledge lives in `streamsnow.config.yaml` and `.streamsnow/overlays/`,
+   never in skills.**
+5. **Every rule names the incident that created it and the mechanism that
+   enforces it.**
+6. **Degrade, don't die.** A missing enabler is named, not refused.
+7. **Faithful to a real fleet.** A check that fails a well-run production app is
+   a defect in the check until proven otherwise; `tests/fixtures/fleet/` is the
+   regression net.
+8. **Leaving should be cheap.** Everything StreamSnow writes into a repo is a
+   plain file the repo keeps; the checks are the only dependency, and the exit
+   path is documented as it actually is ([Distribution → Ownership and
+   exit](docs/distribution.md#ownership-and-exit)).
 
 ## What it is
 
@@ -62,37 +107,67 @@ StreamSnow treats two axes as first-class, configurable options:
 
 | Axis | Options |
 |------|---------|
-| **Runtime** | **Container** (default — full PyPI, local preview matches deploy) or **Warehouse** (instant start, Anaconda channel, no compute-pool cost) |
+| **Runtime** | **Container** (default — GA since March 2026, full PyPI, local preview matches deploy) or **Warehouse** (instant start, Anaconda channel, no compute-pool cost). Snowflake's own comparison: [runtime environments](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/runtime-environments) |
 | **Deploy source** | **Stage-copy** (default — CI uploads to an internal stage) or **Snowflake `GIT REPOSITORY`** (Snowflake pulls from your Git repo) |
 
-## Quickstart (target experience)
+## Quickstart
 
-```bash
-# 0. Check your machine has the prerequisites (Python 3.11+, uv, git, snow CLI)
-uvx streamsnow doctor
+Two lanes; pick the one that matches how you work. Both end at the same governed
+repo, and both need Python 3.11+, `uv`, and `git` (`uvx streamsnow doctor` tells
+you what is missing).
 
-# 1. Install the CLI, then configure + scaffold a governed repo with a starter app
-uv tool install streamsnow   # persistent `streamsnow` on your PATH (uvx runs are one-shot)
-mkdir my-snowflake-apps && cd my-snowflake-apps   # init scaffolds into the current directory (or pass --dir)
-streamsnow init              # runs the config wizard, then scaffolds
-#    (or split it: `streamsnow configure` to set up streamsnow.config.yaml first,
-#     then `streamsnow init` to scaffold)
+### With Claude Code (recommended)
 
-# 2. Connect to Snowflake + create local preview secrets
-snow connection add --connection-name <name> --account <locator> \
-  --user <you> --authenticator externalbrowser   # init prints the exact command
-cp apps/<slug>/.streamlit/secrets.toml.example apps/<slug>/.streamlit/secrets.toml
-
-# 3. Add the Claude Code plugin (inside Claude Code)
+```
 /plugin marketplace add kyle-chalmers/streamsnow
 /plugin install streamsnow@streamsnow
-
-# 4. Build, preview, validate, ship
-streamsnow new marketing campaign-dashboard   # or let /start-app drive the whole flow
-uv venv && uv pip install -e apps/marketing-campaign-dashboard   # install the app's deps first
-uv run streamlit run apps/marketing-campaign-dashboard/streamlit_app.py
-#    /start-app  ->  /preview-app  ->  /validate-app  ->  /review-app  ->  /ship-app
+/start-app --setup
 ```
+
+`/start-app --setup` installs the `streamsnow` CLI if it is missing, runs the
+doctor, walks each missing prerequisite one confirmation at a time, runs the
+five-question `streamsnow configure`, and hands you to `/start-app` to build
+your first app. In a repo that already has Streamlit apps it switches to adopt
+mode (maps onto what exists, writes `MIGRATION.md`, never scaffolds over you).
+
+### CLI only
+
+```bash
+uv tool install streamsnow           # persistent `streamsnow` on your PATH
+mkdir my-snowflake-apps && cd my-snowflake-apps
+streamsnow init                      # 5-question wizard, then a governed scaffold
+snow connection add --connection-name <name> --account <locator> \
+  --user <you> --authenticator externalbrowser --default   # init prints the exact command
+uv tool install pre-commit && pre-commit install
+streamsnow validate-app example-dashboard                 # PASS proves the scaffold is whole
+uv venv && uv pip install -e apps/example-dashboard && streamsnow preview example-dashboard
+```
+
+One connection store: `st.connection("snowflake")` reads the `snow` CLI's default
+connection locally, so the per-app `secrets.toml` is an optional override, not a
+second place to type the same values.
+
+### Upgrading
+
+The two halves upgrade separately, and the plugin half does **not** pick up
+hook or skill changes on its own — an installed copy stays at the version it
+was installed at until you reinstall it.
+
+```
+claude plugin list                       # shows the installed plugin version
+/plugin uninstall streamsnow@streamsnow
+/plugin install streamsnow@streamsnow    # then restart Claude Code
+```
+
+```bash
+uv tool upgrade streamsnow               # the CLI
+streamsnow update                        # dry-run: governance files the new templates would change
+streamsnow update --apply                # re-render AGENTS.md, hooks, CI, deploy.yml
+```
+
+Generated CI pins `streamsnow>=0.7,<0.8`; bump the pin with `update --apply`
+when you move majors. `claude plugin details streamsnow@streamsnow` lists 16
+skills: 8 real ones plus 8 deprecated aliases for the pre-0.3 names.
 
 ## The skills
 
@@ -121,9 +196,11 @@ fully-rendered, paste-runnable `.review.sql` under `apps/<slug>/sql_review/`,
 generated from a per-feature manifest and verified by an import-free freshness
 + coverage gate (`streamsnow sql-review check`). Coverage is keyed to the
 `queries/` convention — the same place the validate gate pushes UI-feeding SQL
-— so SQL inlined in Python sits outside its reach. The gate fails closed in
-pre-commit and the generated CI where those configs are adopted; inside
-`streamsnow validate-app` it warns only in 0.6 (FAIL planned for 0.7). A
+— so SQL inlined in Python sits outside its reach. Drift, hand edits, unbound
+binds and write statements always fail the gate; whether an *uncovered* query
+fails or warns is your repo's call — `sql_review: {coverage: warn | fail}` in
+`streamsnow.config.yaml` (default `warn`, so an adopting fleet backfills on its
+own schedule; new in 0.7, replacing the 0.6 "warn now, FAIL later" promise). A
 person with nothing but Snowsight can trace a covered visual back to the data
 and confirm it — see **[Auditing a visual](docs/auditing-a-visual.md)**. For
 dashboards whose visuals aggregate differently than any single query,
@@ -150,13 +227,13 @@ error never blocks your session; the guards only ever *add* a confirmation or a 
 | Event | Script | What it does |
 |---|---|---|
 | PreToolUse (Bash) | `hooks/deploy_safety.py` | Pauses before destructive Streamlit/SQL commands (`snow streamlit deploy/drop`, `CREATE OR REPLACE / DROP / ALTER STREAMLIT`, stage `REMOVE`, destructive SQL incl. `-f` files / stdin) — `/ship-app` is the sanctioned deploy path |
-| SessionStart | `hooks/session_start.sh` | One-line skills banner inside a StreamSnow repo, and announces which guards are active |
+| SessionStart | `hooks/session_start.sh` | One line inside a StreamSnow repo (plugin version, skills, which guards are active), a one-line `/start-app --setup` nudge in a repo that has Streamlit apps but no config, silence everywhere else |
 | Stop | `hooks/review_gate_stop.py` | Warn-only nudge (a `systemMessage`, never a turn continuation) when a substantive app change ends with no review covering it — points at `/review-app <slug> --auto`. Off-switches: `REVIEW_GATE_OFF=1`, `apps/<slug>/.review/SKIP`, or `review_gate: {enabled: false}` in config |
 
 All hooks are repo-gated on `streamsnow.config.yaml` — zero cost in unrelated repos — and
 declare explicit timeouts so a hung hook can never stall a session. To turn them off, disable
-the plugin (`claude plugin disable streamsnow`). **Upgrading from ≤0.5:** hook additions do not
-reach installed copies automatically — run `/plugin uninstall streamsnow` then reinstall.
+the plugin (`claude plugin disable streamsnow`). Hook additions do not reach installed copies
+automatically — see [Upgrading](#upgrading).
 
 ## How it's organized
 
@@ -195,6 +272,11 @@ code — one implementation, many consumers.
   for confirming any dashboard number against the warehouse, no code required.
 - **[Production lessons](docs/production-lessons.md)** — the incidents behind
   the guardrails, genericized.
+- **[Troubleshooting](docs/troubleshooting.md)** — numbered symptom / cause /
+  fix entries for the first-run and deploy failures people actually hit.
+- **[Official Snowflake docs, by topic](docs/snowflake-docs.md)** — every
+  external docs link the toolkit relies on, with scope, retrieved date, and
+  where StreamSnow deliberately differs.
 - **[Distribution](docs/distribution.md)** — how StreamSnow ships (PyPI CLI +
   plugin) and why there's no separate copy-paste kit.
 - **[Migrating a consumer repo](docs/migrating-a-consumer-repo.md)** — bring a

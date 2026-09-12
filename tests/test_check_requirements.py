@@ -150,3 +150,25 @@ def test_main_exit_codes_and_json(tmp_path, capsys):
     assert '"ok": false' in out
     _write(tmp_path / "apps/bad-app/REQUIREMENTS.md", _GOOD)
     assert check_requirements.main([str(tmp_path / "apps")]) == 0
+
+
+def test_phase_notes_line_is_tolerated_and_phase_stays_exact(tmp_path):
+    """0.7: narrative progress lives on `**Phase notes:**`; the phase value is exact."""
+    p = _write(
+        tmp_path / "apps/acme-sales-dashboard/REQUIREMENTS.md",
+        _GOOD.replace(
+            "**Current phase:** build\n",
+            "**Current phase:** build\n**Phase notes:** pages 3/5 built, QC pending on trends\n",
+        ),
+    )
+    assert check_requirements.check_file(p)["ok"]
+
+
+def test_narrative_in_phase_value_is_flagged_and_points_at_phase_notes(tmp_path):
+    p = _write(
+        tmp_path / "apps/acme-sales-dashboard/REQUIREMENTS.md",
+        _GOOD.replace("**Current phase:** build\n", "**Current phase:** build (pages 3/5)\n"),
+    )
+    res = check_requirements.check_file(p)
+    assert not res["ok"]
+    assert "Phase notes" in res["findings"][0]["detail"]

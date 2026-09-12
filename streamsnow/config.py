@@ -142,6 +142,23 @@ def normalize_account(account: str) -> str:
     return a
 
 
+def _mapping(d: dict, key: str) -> dict:
+    """An optional top-level block that must be a mapping when present.
+
+    ``sql_review: warn`` (a scalar where a block was meant) used to reach
+    ``dict("warn")`` and surface as a bare ``ValueError`` traceback from
+    ``validate-app``, which only catches ``ConfigError``.
+    """
+    value = d.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ConfigError(
+            f"{key} must be a mapping (e.g. `{key}:` followed by indented keys), got {value!r}."
+        )
+    return dict(value)
+
+
 def _require(d: dict, key: str, ctx: str) -> Any:
     if key not in d or d[key] in (None, ""):
         raise ConfigError(f"missing required config value: {ctx}.{key}")
@@ -299,6 +316,63 @@ class GovernanceCfg:
         )
 
 
+# Files an app may deliberately leave out of ``snowflake.yml`` ``artifacts:``
+# because the repo's deploy pipeline ships them another way (the generated
+# stage-copy workflow uploads ``.streamlit/config.toml`` in its own loop, and a
+# fleet with a hand-rolled deploy did the same). The allowlist is deliberately
+# narrow: exact relative paths, no globs, never code — an exclusion that could
+# name ``streamlit_app.py`` or a query would turn the artifacts gate into an
+# opt-out, which is the escape the adversarial review of 0.7 rejected.
+_ARTIFACT_EXCLUDE_SUFFIXES = (".toml", ".md", ".txt", ".png", ".svg", ".jpg", ".jpeg", ".ico")
+_ARTIFACT_EXCLUDE_FORBIDDEN_DIRS = ("pages", "queries")
+SQL_REVIEW_COVERAGE_POLICIES = ("warn", "fail")
+
+
+def validate_artifact_exclude(value: str, field_name: str) -> str:
+    """Return ``value`` if it is an exact, safe, non-code app-relative path."""
+    raw = str(value).strip()
+    if not raw or raw != value:
+        raise ConfigError(f"{field_name!r} = {value!r} must be a bare relative path.")
+    if "\\" in raw or raw.startswith("/") or raw.startswith("~"):
+        raise ConfigError(f"{field_name!r} = {raw!r} must be a forward-slash relative path.")
+    parts = raw.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        raise ConfigError(f"{field_name!r} = {raw!r} may not contain '.', '..' or empty parts.")
+    if any(c in raw for c in "*?["):
+        raise ConfigError(f"{field_name!r} = {raw!r} may not contain glob characters.")
+    if parts[0] in _ARTIFACT_EXCLUDE_FORBIDDEN_DIRS:
+        raise ConfigError(
+            f"{field_name!r} = {raw!r} is under {parts[0]}/ — page and query files are "
+            "always artifacts."
+        )
+    if raw == "streamlit_app.py" or not raw.lower().endswith(_ARTIFACT_EXCLUDE_SUFFIXES):
+        raise ConfigError(
+            f"{field_name!r} = {raw!r} is not an excludable file — only non-code files "
+            f"({', '.join(_ARTIFACT_EXCLUDE_SUFFIXES)}) shipped by another deploy step may be "
+            "left out of artifacts:."
+        )
+    return raw
+
+
+@dataclass(frozen=True)
+class SqlReviewCfg:
+    """The ``sql_review:`` block. ``coverage`` decides whether an uncovered
+    ``queries/*.sql`` fails the gate (``fail``) or is reported as a warning
+    (``warn``, the default so an adopting fleet can backfill). Drift, hand
+    edits, unbound binds and write statements are correctness failures and are
+    never downgraded by this policy."""
+
+    coverage: str = "warn"
+
+    @classmethod
+    def from_dict(cls, d: dict) -> SqlReviewCfg:
+        return cls(
+            coverage=validate_choice(
+                str(d.get("coverage", "warn")), SQL_REVIEW_COVERAGE_POLICIES, "sql_review.coverage"
+            )
+        )
+
+
 @dataclass(frozen=True)
 class DeployCfg:
     source: str = "stage-copy"
@@ -307,15 +381,23 @@ class DeployCfg:
     api_integration_name: str = ""
     secret_name: str = ""
     github_auth_mode: str = "pat"
+    artifact_exclude: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, d: dict) -> DeployCfg:
         source = validate_choice(
             str(d.get("source", "stage-copy")), DEPLOY_SOURCES, "deploy.source"
         )
+        raw_exclude = d.get("artifact_exclude") or []
+        if not isinstance(raw_exclude, list):
+            raise ConfigError("deploy.artifact_exclude must be a list of app-relative paths.")
+        artifact_exclude = tuple(
+            validate_artifact_exclude(str(s), "deploy.artifact_exclude[]") for s in raw_exclude
+        )
         if source == "git-repository":
             return cls(
                 source=source,
+                artifact_exclude=artifact_exclude,
                 git_repository_fqn=validate_fqn(
                     str(_require(d, "git_repository_fqn", "deploy")), "deploy.git_repository_fqn"
                 ),
@@ -333,7 +415,7 @@ class DeployCfg:
                     "deploy.github_auth_mode",
                 ),
             )
-        return cls(source=source)
+        return cls(source=source, artifact_exclude=artifact_exclude)
 
 
 @dataclass(frozen=True)
@@ -344,6 +426,7 @@ class Config:
     governance: GovernanceCfg
     deploy: DeployCfg
     runtime: str = "container"
+    sql_review: SqlReviewCfg = field(default_factory=SqlReviewCfg)
     raw: dict = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
@@ -370,8 +453,9 @@ class Config:
             project=ProjectCfg.from_dict(dict(_require(d, "project", "<root>"))),
             snowflake=snowflake,
             governance=GovernanceCfg.from_dict(dict(_require(d, "governance", "<root>"))),
-            deploy=DeployCfg.from_dict(dict(d.get("deploy", {}))),
+            deploy=DeployCfg.from_dict(_mapping(d, "deploy")),
             runtime=runtime,
+            sql_review=SqlReviewCfg.from_dict(_mapping(d, "sql_review")),
             raw=d,
         )
 

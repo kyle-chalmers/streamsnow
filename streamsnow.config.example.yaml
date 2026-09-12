@@ -49,12 +49,22 @@ deploy:
   # api_integration_name: "GITHUB_API_INTEGRATION"
   # secret_name: "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET"
   # github_auth_mode: "pat"            # pat | github-app
+  # Files your deploy pipeline ships by another step and so may be left out of
+  # each app's snowflake.yml artifacts:. Exact relative paths, non-code only
+  # (.toml/.md/.txt/images); pages/, queries/ and *.py/*.sql are never excludable.
+  # artifact_exclude: [".streamlit/config.toml"]
 
 brand:                                 # optional — neutral defaults if omitted
   theme:
     primary: "#3B82F6"
     background: "#FFFFFF"
   chart_sequence: ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"]
+
+sql_review:                            # optional — the human-runnable SQL audit trail gate
+  coverage: warn                       # warn (default): uncovered queries are reported, not
+                                       # failed — gives an adopting fleet time to backfill.
+                                       # fail: an uncovered queries/*.sql fails validate-app,
+                                       # pre-commit and CI. Drift and hand edits always fail.
 
 review_gate:                           # optional — the warn-only Stop-hook nudge
   enabled: true                        # false disables the nudge repo-wide

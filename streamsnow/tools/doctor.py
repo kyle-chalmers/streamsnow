@@ -17,10 +17,16 @@ Contract — every check returns one dict::
 but *required* when one exists and fails validation — a malformed config must
 never be masked as "not configured yet".
 
-Checks (the same set the CLI covered): Python >= 3.11 (the running
-interpreter — the one that would run the tools), ``git`` and ``uv`` on PATH
-(required), ``snow`` and ``streamlit`` on PATH (optional, preview/deploy
-conveniences), and config presence + validity.
+Checks: Python >= 3.11 (the running interpreter — the one that would run the
+tools), ``git`` and ``uv`` on PATH (required), ``snow`` and ``streamlit`` on
+PATH (optional, preview/deploy conveniences), ``pre-commit`` on PATH (optional
+outside a repo, *required* once a ``streamsnow.config.yaml`` exists — the
+generated hooks are ``language: system`` and a scaffolded repo's first commit
+fails without the executable), config presence + validity, and — only when
+both a config and ``snow`` exist — whether the configured ``snow`` connection
+name has been created (``snow connection list``; never ``connection test``,
+which can open a browser). The connection check is what turns "preview can't
+connect", the most common first-run failure, into a named result.
 
 Detection only: no prompts, no fix execution — hints name the fix, callers own
 the UX. Checks never raise; an unexpected error inside the doctor itself is a
@@ -35,6 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -49,13 +56,15 @@ _MIN_PYTHON = (3, 11)
 _PATH_TOOLS: tuple[tuple[str, str, str], ...] = (
     ("git", REQUIRED, "install git"),
     ("uv", REQUIRED, "install uv — https://docs.astral.sh/uv/"),
-    ("snow", OPTIONAL, "uv tool install snowflake-cli-labs (for preview/deploy diagnostics)"),
+    ("snow", OPTIONAL, "uv tool install snowflake-cli (for preview/deploy diagnostics)"),
     (
         "streamlit",
         OPTIONAL,
         "uv pip install streamlit (in your app environment, for local preview)",
     ),
 )
+_PRE_COMMIT_HINT = "uv tool install pre-commit, then `pre-commit install` in the repo"
+_SNOW_TIMEOUT_S = 5.0
 
 
 def _result(name: str, ok: bool, level: str, detail: dict, hint: str = "") -> dict:
@@ -88,6 +97,81 @@ def check_path_tool(name: str, level: str, hint: str) -> dict:
     )
 
 
+def check_pre_commit(config_present: bool) -> dict:
+    """``pre-commit`` on PATH. Optional on a bare machine; required in a
+    configured repo, whose generated ``.pre-commit-config.yaml`` hooks all run
+    ``streamsnow check …`` via ``language: system``."""
+    res = check_path_tool("pre-commit", REQUIRED if config_present else OPTIONAL, _PRE_COMMIT_HINT)
+    return res
+
+
+def _run(cmd: list[str]) -> tuple[int, str]:
+    """Run a short diagnostic command; never raises (127/"" on any failure)."""
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=_SNOW_TIMEOUT_S, check=False
+        )
+        return proc.returncode, proc.stdout
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return 127, ""
+
+
+def check_snow_connection(cfg_result: dict) -> dict:
+    """Does the ``snow`` connection the config names exist on this machine?
+
+    Optional, and a not-ok "skipped" result (never an omission) when there is
+    no valid config or no ``snow`` — the result list keeps a stable shape so
+    callers iterating it need no special cases. Reads ``snow connection list``
+    only; it never runs ``snow connection test`` (browser/MFA side effects).
+    """
+    name = str(cfg_result.get("detail", {}).get("connection_name") or "")
+    if not cfg_result.get("ok") or not name:
+        return _result(
+            "snow-connection",
+            False,
+            OPTIONAL,
+            {"skipped": "no valid config"},
+            "skipped — no config",
+        )
+    if shutil.which("snow") is None:
+        return _result(
+            "snow-connection",
+            False,
+            OPTIONAL,
+            {"skipped": "snow not on PATH", "connection_name": name},
+            "skipped — snow CLI not installed",
+        )
+    code, out = _run(["snow", "connection", "list", "--format", "json"])
+    names: list[str] = []
+    if code == 0:
+        try:
+            parsed = json.loads(out or "[]")
+        except ValueError:
+            parsed = []
+        for row in parsed if isinstance(parsed, list) else []:
+            if isinstance(row, dict):
+                candidate = row.get("connection_name") or row.get("name")
+                if isinstance(candidate, str):
+                    names.append(candidate)
+    ok = name in names
+    hint = (
+        ""
+        if ok
+        else (
+            f"no snow connection named {name!r} — run: snow connection add "
+            f"--connection-name {name} --account <locator> --user <you> "
+            "--authenticator externalbrowser --default"
+        )
+    )
+    return _result(
+        "snow-connection",
+        ok,
+        OPTIONAL,
+        {"connection_name": name, "found": ok, "known": names},
+        hint,
+    )
+
+
 def check_config(start: Path | None = None) -> dict:
     """Config presence + validity, walking up from ``start`` (default: cwd).
 
@@ -117,7 +201,13 @@ def check_config(start: Path | None = None) -> dict:
         "config",
         True,
         REQUIRED,
-        {"found": True, "path": str(cfg_path), "schema_version": cfg.schema_version},
+        {
+            "found": True,
+            "path": str(cfg_path),
+            "schema_version": cfg.schema_version,
+            "runtime": cfg.runtime,
+            "connection_name": cfg.snowflake.connection_name,
+        },
     )
 
 
@@ -125,7 +215,10 @@ def run_checks(start: Path | None = None) -> list[dict]:
     """Run every check; never raises from an individual check."""
     checks = [check_python()]
     checks += [check_path_tool(name, level, hint) for name, level, hint in _PATH_TOOLS]
-    checks.append(check_config(start))
+    config = check_config(start)
+    checks.append(check_pre_commit(config_present=bool(config["detail"].get("found"))))
+    checks.append(config)
+    checks.append(check_snow_connection(config))
     return checks
 
 

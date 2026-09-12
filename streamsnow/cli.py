@@ -323,7 +323,7 @@ def _connection_hint(cfg: Config) -> str:
         f"--account {cfg.snowflake.account} --user <your_user> "
         f"--authenticator externalbrowser "
         f"--warehouse {cfg.snowflake.objects.default_warehouse} "
-        f"--role {cfg.snowflake.roles.viewer_role}"
+        f"--role {cfg.snowflake.roles.viewer_role} --default"
     )
 
 
@@ -354,10 +354,11 @@ def configure(
     cfg_out.write_text(text)
     console.print(f"[green]✓[/] wrote {cfg_out}")
     console.print(
-        "\nConnect your machine to Snowflake (one-time):\n"
+        "\nConnect your machine to Snowflake (one-time, one store — the snow CLI's\n"
+        "connections.toml is what st.connection('snowflake') reads locally):\n"
         f"  {_connection_hint(cfg)}\n"
-        "\nThen, per app, create local preview secrets (gitignored):\n"
-        "  cp apps/<slug>/.streamlit/secrets.toml.example apps/<slug>/.streamlit/secrets.toml"
+        "\nPer-app apps/<slug>/.streamlit/secrets.toml (gitignored) is an optional override —\n"
+        "copy secrets.toml.example only if an app needs a different role or warehouse."
     )
 
 
@@ -418,11 +419,15 @@ def init(
     console.print(f"[green]✓[/] scaffolded {len(written)} files into {target}")
     console.print(
         f"\nNext:\n"
-        f"  1. streamsnow configure   (if you haven't set your Snowflake env yet)\n"
-        f"  2. cp apps/{app_slug}/.streamlit/secrets.toml.example apps/{app_slug}/.streamlit/secrets.toml\n"
-        f"  3. uv pip install streamsnow && pre-commit install\n"
-        f"  4. streamlit run apps/{app_slug}/streamlit_app.py\n"
-        f"  5. /plugin marketplace add kyle-chalmers/streamsnow  (in Claude Code)"
+        f"  1. {_connection_hint(cfg)}\n"
+        f"     (one-time; st.connection('snowflake') reads this default connection locally.\n"
+        f"      Per-app apps/{app_slug}/.streamlit/secrets.toml is an optional override.)\n"
+        f"  2. uv tool install pre-commit && pre-commit install   (the governance hooks)\n"
+        f"  3. streamsnow validate-app {app_slug}   (PASS proves the scaffold is whole)\n"
+        f"  4. uv venv && uv pip install -e apps/{app_slug} && streamsnow preview {app_slug}\n"
+        f"  5. In Claude Code:  /plugin marketplace add kyle-chalmers/streamsnow\n"
+        f"                      /plugin install streamsnow@streamsnow   then /start-app\n"
+        f"  Add the app to README.md's Apps table."
     )
 
 
@@ -447,6 +452,10 @@ def new(
     if _sql_review_main(["generate", slug, "--dir", str(Path.cwd())]) != 0:
         console.print("[yellow]∘[/] sql_review companion generation failed — see error above")
     console.print(f"[green]✓[/] created app {slug} ({len(written)} files)")
+    console.print(
+        f"Next: streamsnow validate-app {slug}, then add {slug} to README.md's Apps table "
+        "(the index is hand-maintained and the row is the step teams forget)."
+    )
 
 
 @check_app.command("schema-refs")

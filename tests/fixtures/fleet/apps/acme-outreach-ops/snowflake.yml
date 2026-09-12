@@ -1,0 +1,20 @@
+definition_version: 2
+entities:
+  acme_outreach_ops:
+    type: streamlit
+    identifier:
+      name: ACME_OUTREACH_OPS
+      database: DATA_APPS
+      schema: BI_APPS
+    main_file: streamlit_app.py
+    query_warehouse: STREAMLIT_WH
+    title: "Acme Outreach Ops"
+    artifacts:
+      - streamlit_app.py
+      - pages/
+      - queries/
+      - branding.py
+      - sql_loader.py
+      - session.py
+      - .streamlit/config.toml
+      - environment.yml

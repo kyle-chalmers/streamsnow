@@ -208,13 +208,53 @@ def test_regenerating_on_a_later_day_is_not_drift(repo: Path) -> None:
     assert _check(repo) == 0
 
 
-def test_uncovered_query_is_a_hard_finding(repo: Path, capsys: pytest.CaptureFixture) -> None:
+def _set_coverage_policy(repo: Path, policy: str) -> None:
+    """Write a minimal valid streamsnow.config.yaml with the given sql_review policy."""
+    example = Path(__file__).resolve().parent.parent / "streamsnow.config.example.yaml"
+    text = example.read_text().replace("coverage: warn", f"coverage: {policy}")
+    (repo / "streamsnow.config.yaml").write_text(text)
+
+
+def test_uncovered_query_is_a_finding_whose_severity_follows_the_policy(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """0.7: an unclaimed query is `kind: coverage`. Default policy (`warn`, and
+    no config at all) reports it and exits 0 so pre-commit/CI can still run the
+    drift check on a fleet mid-backfill; `coverage: fail` gates on it."""
     _generate(repo)
     (repo / "apps" / SLUG / "queries" / "orders_by_channel.sql").write_text(
         "-- Query: orders_by_channel\n-- Feeds: Channels page\nSELECT 1\n"
     )
+    assert _check(repo) == 0  # no config → warn
+    out = capsys.readouterr().out
+    assert "WARN [coverage]" in out and "not claimed by any sql_review manifest" in out
+    assert "coverage policy: warn" in out
+
+    _set_coverage_policy(repo, "warn")
+    assert _check(repo) == 0
+
+    _set_coverage_policy(repo, "fail")
     assert _check(repo) == 1
-    assert "not claimed by any sql_review manifest" in capsys.readouterr().out
+    assert "FAIL [coverage]" in capsys.readouterr().out
+
+
+def test_check_json_carries_kind_and_policy(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    _generate(repo)
+    capsys.readouterr()  # drain generate's output
+    (repo / "apps" / SLUG / "queries" / "orders_by_channel.sql").write_text("SELECT 1\n")
+    assert sr.main(["check", SLUG, "--dir", str(repo), "--format", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True and payload["coverage_policy"] == "warn"
+    assert payload["findings"] == []
+    assert [w["kind"] for w in payload["warnings"]] == ["coverage"]
+
+
+def test_correctness_findings_fail_regardless_of_policy(repo: Path) -> None:
+    """Drift is never downgraded: warn only softens coverage."""
+    _generate(repo)
+    _set_coverage_policy(repo, "warn")
+    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(QUERY + "-- edited\n")
+    assert _check(repo) == 1
 
 
 def test_missing_review_file_is_a_finding(repo: Path, capsys: pytest.CaptureFixture) -> None:
@@ -951,6 +991,7 @@ def test_undeclared_fragment_still_fails_coverage(repo: Path) -> None:
     _add_fragment(repo, declare=False)
     _generate(repo)
     assert "_region_ctes" in sr.coverage(repo / "apps" / SLUG)["uncovered"]
+    _set_coverage_policy(repo, "fail")
     assert _check(repo) != 0
 
 

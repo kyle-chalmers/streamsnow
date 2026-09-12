@@ -54,8 +54,10 @@ A reference that violates the policy fails the gate before it can merge.
 - **Explicit column lists, never `SELECT *`.** Schema changes break `SELECT *`
   silently; explicit lists fail loudly. (This is a habit StreamSnow's checks
   don't enforce — adopt it anyway.)
-- **Filter in SQL, not in Python.** Streamlit has a ~32 MB WebSocket message
-  limit — push filters into `WHERE` so the returned DataFrame stays small.
+- **Filter in SQL, not in Python.** The warehouse runtime caps a message at
+  32 MB and the container runtime at 200 MB by default
+  ([limitations](https://docs.snowflake.com/en/developer-guide/streamlit/limitations)) —
+  push filters into `WHERE` so the returned DataFrame stays small on either.
 - **Cache every loader, and key it on its filters.** Decorate data loaders with
   `@st.cache_data(ttl=...)` and pass filter values as function arguments so the
   cache key reflects them. `streamsnow check caching` requires a TTL on public

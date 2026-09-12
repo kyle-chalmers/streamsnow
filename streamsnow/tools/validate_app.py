@@ -360,7 +360,7 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
         manifest_problems += _check_environment_yml(app_dir)
     checks.append({"name": "manifest", "ok": not manifest_problems, "findings": manifest_problems})
 
-    arts = check_artifacts.check_app(app_dir)
+    arts = check_artifacts.check_app(app_dir, cfg.deploy.artifact_exclude)
     checks.append({"name": "artifacts", "ok": arts["ok"], "findings": arts["findings"]})
 
     checks.append(
@@ -399,16 +399,23 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     reqs = check_requirements.scan_paths([app_dir])
     checks.append({"name": "requirements", "ok": reqs["ok"], "findings": reqs["findings"]})
 
-    # sql_review freshness + coverage — WARN-ONLY in 0.6 (adopters get one
-    # release to backfill audit trails; planned to become a FAIL in 0.7).
-    # `check` is import-free by design, so it is safe inside this gate.
+    # sql_review freshness + coverage. Correctness findings (drift, hand edits,
+    # unbound binds, write statements, collisions, orphans) always fail: they
+    # mean the committed audit trail lies about what the app runs. Coverage
+    # (an unclaimed queries/*.sql) follows `sql_review.coverage` in config —
+    # `warn` (default) reports it, `fail` gates on it — so an adopting fleet
+    # backfills on its own schedule and flips the switch when ready. `check`
+    # is import-free by design, so it is safe inside this gate.
     sqlr = sql_review._check_app(app_dir.parent.parent, app_dir)
+    policy = cfg.sql_review.coverage
+    hard = [f for f in sqlr if f.get("kind") != sql_review.KIND_COVERAGE or policy == "fail"]
+    soft = [f for f in sqlr if f not in hard]
     checks.append(
         {
-            "name": "sql-review (warn in 0.6 → FAIL in 0.7)",
-            "ok": True,  # deliberately never fails the aggregate this release
-            "findings": [],
-            "warnings": sqlr,
+            "name": f"sql-review (coverage policy: {policy})",
+            "ok": not hard,
+            "findings": hard,
+            "warnings": soft,
         }
     )
 

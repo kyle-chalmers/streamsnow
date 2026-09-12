@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
-from streamsnow.config import Config
+from streamsnow.config import Config, ConfigError
 from streamsnow.scaffolder import scaffold
 from streamsnow.tools import check_artifacts
 
@@ -188,3 +189,92 @@ def test_main_fix_repairs_and_exits_clean(tmp_path, capsys):
     assert "FIXED" in out and "clean" in out
     assert check_artifacts.main([str(app), "--fix", "--format", "json"]) == 0
     assert '"ok": true' in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# 0.7: deploy.artifact_exclude — typed exclusion, never an opt-out for code
+# --------------------------------------------------------------------------- #
+def _cfg_with_exclude(*paths: str) -> Config:
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data.setdefault("deploy", {})["artifact_exclude"] = list(paths)
+    return Config.from_dict(data)
+
+
+def _drop_from_artifacts(app: Path, rel: str) -> None:
+    yml = app / "snowflake.yml"
+    lines = [ln for ln in yml.read_text().splitlines(keepends=True) if f"- {rel}" not in ln]
+    yml.write_text("".join(lines))
+
+
+def test_excluded_config_toml_is_not_demanded(tmp_path):
+    app = _scaffold_app(tmp_path)
+    _drop_from_artifacts(app, ".streamlit/config.toml")
+    assert not check_artifacts.check_app(app)["ok"]  # default: still demanded
+    cfg = _cfg_with_exclude(".streamlit/config.toml")
+    assert check_artifacts.check_app(app, cfg.deploy.artifact_exclude)["ok"]
+
+
+def test_excluded_but_listed_file_is_still_checked_for_staleness(tmp_path):
+    app = _scaffold_app(tmp_path)
+    cfg = _cfg_with_exclude(".streamlit/config.toml")
+    (app / ".streamlit" / "config.toml").unlink()
+    res = check_artifacts.check_app(app, cfg.deploy.artifact_exclude)
+    assert not res["ok"] and "stale" in res["findings"][0]["detail"]
+
+
+def test_fix_never_appends_an_excluded_file(tmp_path):
+    app = _scaffold_app(tmp_path)
+    _drop_from_artifacts(app, ".streamlit/config.toml")
+    cfg = _cfg_with_exclude(".streamlit/config.toml")
+    res = check_artifacts.fix_app(app, cfg.deploy.artifact_exclude)
+    assert res["ok"] and not res["changed"]
+    assert ".streamlit/config.toml" not in _artifacts(app)
+    # And the check agrees the repaired manifest is clean, so --fix cannot
+    # report a false clean while the check disagrees.
+    assert check_artifacts.check_app(app, cfg.deploy.artifact_exclude)["ok"]
+
+
+def test_unlisted_finding_names_the_config_key(tmp_path):
+    app = _scaffold_app(tmp_path)
+    _write(app / "helpers.py", "X = 1\n")
+    res = check_artifacts.check_app(app)
+    assert "deploy.artifact_exclude" in res["findings"][0]["detail"]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "streamlit_app.py",  # entrypoint
+        "helpers.py",  # code
+        "queries/example_metric.sql",  # query
+        "pages/README.md",  # anything under pages/
+        "queries/notes.md",  # anything under queries/
+        "../secrets.toml",  # traversal
+        "/etc/config.toml",  # absolute
+        ".streamlit/*.toml",  # glob
+        ".streamlit\\config.toml",  # backslash
+        " .streamlit/config.toml",  # not bare
+        "notes",  # no excludable suffix
+    ],
+)
+def test_artifact_exclude_rejects_code_traversal_and_globs(bad):
+    with pytest.raises(ConfigError):
+        _cfg_with_exclude(bad)
+
+
+def test_artifact_exclude_accepts_non_code_files():
+    cfg = _cfg_with_exclude(".streamlit/config.toml", "README.md", "assets/logo.png")
+    assert cfg.deploy.artifact_exclude == (".streamlit/config.toml", "README.md", "assets/logo.png")
+
+
+def test_scan_paths_reads_exclusions_from_the_repo_config(tmp_path):
+    app = _scaffold_app(tmp_path)
+    _drop_from_artifacts(app, ".streamlit/config.toml")
+    cfg_path = tmp_path / "streamsnow.config.yaml"
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data["deploy"]["artifact_exclude"] = [".streamlit/config.toml"]
+    cfg_path.write_text(yaml.safe_dump(data))
+    assert check_artifacts.scan_paths([app])["ok"]  # discovered by walking up
+    assert check_artifacts.main([str(app), "--config", str(cfg_path)]) == 0
+    cfg_path.unlink()
+    assert check_artifacts.main([str(app)]) == 1  # no config → no exclusions

@@ -34,7 +34,7 @@ jobs:
         id: gate
         run: |
           if [ -z "$SNOWFLAKE_ACCOUNT" ]; then
-            echo "Deploy secrets not set — skipping (see docs/deploy-setup.md)."
+            echo "Deploy secrets not set — skipping (see https://github.com/kyle-chalmers/streamsnow/blob/main/docs/deploy-setup.md)."
             echo "go=false" >> "$GITHUB_OUTPUT"
           else
             echo "go=true" >> "$GITHUB_OUTPUT"
@@ -46,8 +46,8 @@ jobs:
       - name: Install tooling
         if: steps.gate.outputs.go == 'true'
         run: |
-          uv tool install 'streamsnow>=0.6,<0.7'
-          uv tool install snowflake-cli-labs
+          uv tool install 'streamsnow>=0.7,<0.8'
+          uv tool install snowflake-cli
 
       - name: Deploy changed apps (git-repository)
         if: steps.gate.outputs.go == 'true'
