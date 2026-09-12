@@ -1,0 +1,23 @@
+definition_version: 2
+entities:
+  acme_finance_admin:
+    type: streamlit
+    identifier:
+      name: ACME_FINANCE_ADMIN
+      database: DATA_APPS
+      schema: BI_APPS
+    main_file: streamlit_app.py
+    query_warehouse: STREAMLIT_WH
+    title: "Acme Finance Admin"
+    runtime_name: SYSTEM$ST_CONTAINER_RUNTIME_PY3_11
+    compute_pool: STREAMLIT_POOL
+    external_access_integrations:
+      - PYPI_ACCESS_INTEGRATION
+    artifacts:
+      - streamlit_app.py
+      - pages/
+      - queries/
+      - branding.py
+      - sql_loader.py
+      - .streamlit/config.toml
+      - pyproject.toml

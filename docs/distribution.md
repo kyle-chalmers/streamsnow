@@ -50,6 +50,34 @@ installing `streamsnow` (e.g. a locked-down repo that can't take the dependency)
 the right answer is a CLI feature — a `--vendor` mode that writes the check tools
 into the repo — not a separately maintained copy-paste kit.
 
+## Ownership and exit
+
+A production fleet that evaluated adopting StreamSnow wholesale paused with this
+objection, quoted here because it is fair: finishing the migration would replace
+roughly ten thousand lines of in-tree, readable tooling with "a PyPI package and
+a Claude marketplace maintained by one person on a personal GitHub account.
+Nobody else can patch it." Prose does not fix bus factor. What follows is what
+is actually true today, so a team can decide with open eyes.
+
+- **Maintainer model.** One maintainer, releases cut from `main` by tag
+  ([RELEASING.md](../RELEASING.md)). Co-maintainers are welcome; the
+  [contributing guide](../CONTRIBUTING.md) says how.
+- **Release pinning.** Generated CI installs `streamsnow>=0.7,<0.8`, so a repo
+  never takes a major silently. Stricter shops pin exact (`streamsnow==0.7.0`)
+  and bump on purpose.
+- **Rollback.** `uv tool install streamsnow==<previous>` and
+  `streamsnow update --apply` re-render the governance files from that
+  version's templates. Nothing StreamSnow writes is opaque.
+- **What a repo keeps if it stops.** Every generated file — `AGENTS.md`, the
+  scaffolded apps, `streamsnow.config.yaml`, the CI and deploy workflows,
+  `.streamsnow/overlays/`, the `sql_review/` audit trails — is a plain file the
+  repo owns and can edit. The only dependency is the `streamsnow check …` /
+  `validate-app` / `sql-review` commands the pre-commit and CI configs call.
+- **What does not exist yet.** A `--vendor` mode that writes those check tools
+  into the repo so the dependency can be dropped. It is the planned exit path
+  (see "When to revisit" above), not a shipped one, and this section will say
+  so until it ships.
+
 ## See also
 
 - [Getting started](getting-started.md) — install and scaffold your first app.

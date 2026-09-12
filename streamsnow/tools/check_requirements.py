@@ -15,7 +15,12 @@ This validates exactly what the skills rely on to resume — nothing more:
 2. it carries a ``**Current phase:**`` line whose value is a recognized
    lifecycle phase (``spec``/``scaffold``/``build``/``preview``/``verify``/
    ``ship``/``done``, or ``in-production (backfilled)`` from spec backfill) —
-   an unknown phase can't be routed to any resume target;
+   an unknown phase can't be routed to any resume target. The value is
+   *exact*: narrative ("build (pages 3/5)") goes on an optional
+   ``**Phase notes:**`` line, which this check tolerates and never parses. A
+   production fleet wrote its progress into the phase value itself and failed
+   here on every app; loosening the value to accept suffixes would have made
+   the resume key ambiguous, so the narrative got its own line instead;
 3. a ``Sessions`` heading follows, with at least one ``- `` bullet;
 4. the **last** session line starts with an ISO 8601 timestamp
    (``YYYY-MM-DD`` or ``YYYY-MM-DDTHH:MM[:SS][Z|±HH:MM]``);
@@ -129,7 +134,8 @@ def check_file(path: Path) -> dict:
                     "line": section_line + section.count("\n", 0, phase_match.start()),
                     "detail": f"`**Current phase:** {phase_match.group(1).strip()}` is not a "
                     f"recognized phase — resume routes on it; use one of: "
-                    f"{', '.join(sorted(_PHASES))}",
+                    f"{', '.join(sorted(_PHASES))}. Put progress narrative "
+                    '("pages 3/5", "QC pending") on a `**Phase notes:**` line instead',
                 }
             )
 

@@ -3,6 +3,113 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [0.7.0] - 2026-09-11
+
+The onboarding release. Everything here came from three sources read together:
+a walk through the install path as a first-time user, the production fleet's
+`.streamsnow/MIGRATION.md` (its honest reasons for pausing adoption at 0.6),
+and a fresh read of the official Streamlit-in-Snowflake docs, which Snowflake
+reorganized in early 2026. An adversarial Codex review of the plan removed a
+comment-marker artifact waiver and a phase-suffix parser that would each have
+weakened a gate; both landed as typed config instead.
+
+### Added
+
+- **Mission, vision and eight principles** at the top of the README (and in
+  CONTRIBUTING as the review bar). Two principles are new and come from the
+  fleet's pause: *faithful to a real fleet* and *leaving should be cheap*.
+- **`sql_review: {coverage: warn | fail}`** in `streamsnow.config.yaml`
+  (default `warn`). Every `sql-review check` finding now carries a `kind`
+  (`coverage | fragment | collision | orphan | bind | provenance | readonly`);
+  correctness kinds always fail, coverage follows the policy — in `validate-app`,
+  pre-commit and CI alike. This replaces 0.6's "warn now, FAIL in 0.7" promise
+  with a per-repo switch, and it is the fleet's own design note for the tool
+  (it had been filtering coverage by matching finding *text*).
+- **`deploy.artifact_exclude`**: typed exclusions for non-code files a deploy
+  pipeline ships by another step (`.streamlit/config.toml` in the generated
+  workflow and in the fleet). Exact relative paths only; `streamlit_app.py`,
+  `pages/`, `queries/`, `*.py` and `*.sql` are rejected at config load, so the
+  artifacts gate can never become an opt-out for code.
+- **`**Phase notes:**`** line in §11: progress narrative lives there, and
+  `**Current phase:**` stays the exact value `/start-app` resumes on.
+- **Doctor checks:** `pre-commit` (optional without a config, required once one
+  exists — the generated hooks are `language: system`) and `snow-connection`
+  (does the configured `snow` connection exist; never runs `connection test`).
+  The config result now carries `runtime` and `connection_name`.
+- **`tests/fixtures/fleet/`**: an anonymized three-app repo mirroring the shapes
+  that failed `validate-app` on every real app in MIGRATION.md (pipeline-shipped
+  config.toml, narrative phase notes, a waived narrow session fallback,
+  brace-less `-- Tokens:` headers, a package-qualified glossary helper, a nested
+  page package). All three pass, and a second test keeps the shapes present.
+- **`docs/snowflake-docs.md`**: every official Snowflake / Streamlit docs link
+  the toolkit relies on, as a compatibility matrix with scope, retrieved date
+  and StreamSnow's position where it deliberately differs. Offline registry
+  test (`tests/test_docs_links.py`) plus an opt-in online sweep
+  (`scripts/check_docs_links.py --online`, now in RELEASING.md).
+- **`docs/troubleshooting.md`**: sixteen numbered symptom / cause / fix entries.
+- **Skill/CLI parity test**: every `streamsnow <verb>` a skill or doc cites must
+  exist in the CLI (argparse passthrough groups included).
+- **SessionStart hook test** and a `skills/_shared/page-conventions.md` recipe
+  (the glossary module and four-block page contract the fleet converged on).
+
+### Changed
+
+- **Onboarding is two lanes.** README and getting-started open with *With Claude
+  Code* (three commands, `/start-app --setup` drives everything) and *CLI only*.
+  `--setup` now installs the `streamsnow` CLI itself when missing and requires
+  it before continuing; the `uvx` fallback is gone because every later skill
+  calls bare `streamsnow`.
+- **One connection store.** `snow connection add … --default` is the documented
+  path; `st.connection("snowflake")` reads it locally, and the per-app
+  `secrets.toml` is an optional override. `configure`, `init` and the preview
+  classifier say so.
+- **`streamsnow preview`** launches `<repo>/.venv/bin/streamlit` when it exists
+  (the documented `uv venv && uv pip install -e apps/<slug>` never activates
+  the venv), then PATH.
+- **`/start-app` runs preview, validate and the review procedure itself** at
+  the build/check phases instead of naming them for the user to type; it still
+  stops at the three human checkpoints. Standalone verbs unchanged.
+- **SessionStart banner** prints the plugin version, nudges `/start-app --setup`
+  in a repo that has Streamlit apps but no config (it used to stay silent), and
+  says when the CLI is missing from PATH.
+- **`init`'s Next block** lists both plugin commands, the pre-commit install,
+  `validate-app`, and the README Apps-table reminder; `new` prints the reminder.
+- `snowflake-cli` everywhere (`snowflake-cli-labs` dropped from the doctor hint
+  and both deploy workflow templates); generated CI pins `streamsnow>=0.7,<0.8`.
+- Pre-commit hook `description:` blocks name the incident behind each check.
+- Docs facts refreshed against the reorganized Snowflake docs: container runtime
+  GA (2026-03-09), `get_active_session()` is warehouse-only and not thread-safe
+  on containers, message limits differ by runtime, compute-pool packing, MFA
+  rollout phase 3, `python=3.11` in the official `environment.yml` example vs
+  our incident-backed gate, artifact repositories vs EAI.
+
+### Known gaps
+
+- PyPI access via a **Snowflake artifact repository** (now Snowflake's preferred
+  path) is not emitted; the Snowflake CLI's `snowflake.yml` schema has no field
+  for it yet. The generated EAI keeps working; do not attach both.
+- `environment.yml` `python=3.11` (single `=`, as the official example shows)
+  is still rejected. Re-test against a live warehouse app before relaxing.
+- `check dependency-vulns` scans per-app manifests, not `uv.lock`.
+- Deploy every app on every merge; a changed-apps-only option is planned.
+- No `--vendor` mode yet; the exit path is documented as it is in
+  `docs/distribution.md`.
+- The generated `checks.yml` runs the governance gate, OSV, sql-review and
+  tombstones but not `detect-secrets` or `ruff format` — those run in
+  pre-commit only. `schema_allow` stays a convention; only `schema_deny` is
+  enforced (documented in the generated AGENTS.md).
+- The starter page renders mock numbers until `YOUR_TABLE` is repointed; a
+  fresh scaffold therefore "works" without ever reaching Snowflake. Called
+  out in the generated README.
+- The deploy workflow exposes the Snowflake secrets to every step and pins
+  actions by tag; scoping secrets per step and SHA-pinning are planned.
+
+### Planned (next major)
+
+- Fold `/preview-app` and `/validate-app` into `/start-app` modes and
+  `/audit-lineage` into `/review-app --lineage`; drop the 8 pre-0.3 alias stubs
+  (16 → 5 in the inventory, ~500 always-on tokens saved).
+
 ## [0.6.3] - 2026-09-05
 
 Hotfix. Found by reviewing the 0.6.2 round-8 commit after it shipped — it had

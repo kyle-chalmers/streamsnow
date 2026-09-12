@@ -360,3 +360,25 @@ def test_fresh_scaffold_passes_its_own_validate_gate(tmp_path):
     assert result.exit_code == 0, result.output
     result = runner.invoke(app, ["validate-app", "acme-sales-dashboard", "--dir", str(tmp_path)])
     assert result.exit_code == 0, result.output
+
+
+def test_generated_python_is_format_clean_under_ruff_defaults(tmp_path):
+    """A consumer repo has no [tool.ruff] of its own, so its pre-commit `ruff format`
+    runs at the default line length. A template written at this repo's wider limit
+    made the very first commit in a fresh scaffold fail on `ruff format` (seen in
+    the 0.7 fresh-user run). `--isolated` reproduces the consumer's view."""
+    import shutil
+    import subprocess
+
+    ruff = shutil.which("ruff")
+    if ruff is None:
+        pytest.skip("ruff not on PATH")
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    proc = subprocess.run(
+        [ruff, "format", "--check", "--isolated", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr

@@ -17,66 +17,99 @@ repos:
     hooks:
       # All hooks require the `streamsnow` package on PATH (uv/pip install streamsnow).
       - id: streamsnow-schema-refs
+        description: >-
+          A query against a raw/landing schema compiled locally under a broad personal role and failed deployed under the app owner's grants. Denylist lives in streamsnow.config.yaml (governance.schema_deny).
+          Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
         name: streamsnow check schema-refs (block denied schemas)
         entry: streamsnow check schema-refs
         language: system
         files: ^apps/.*\.(py|sql)$
         pass_filenames: true
       - id: streamsnow-security
+        description: >-
+          Apps are read-only by contract: no network egress, no exec, no write SQL, no string-built SQL. The compensating control for a low-friction merge model.
+          Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
         name: streamsnow check security (no egress/exec/write-SQL)
         entry: streamsnow check security
         language: system
         files: ^apps/.*\.(py|sql)$
         pass_filenames: true
       - id: streamsnow-bind-predicates
+        description: >-
+          Deployed, the Go-driver middleware NULL-binds every positional param when any one is None, so `(:1 IS NULL OR col = :1)` returns zero rows and reports success. Local Python never reproduces it.
+          Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
         name: streamsnow check bind-predicates (Go-driver trap)
         entry: streamsnow check bind-predicates
         language: system
         files: ^apps/.*\.(py|sql)$
         pass_filenames: true
       - id: streamsnow-caching
+        description: >-
+          An uncached loader re-queries Snowflake on every rerun; every data fetch carries @st.cache_data(ttl=...) keyed on its filter arguments.
+          Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
         name: streamsnow check caching (@st.cache_data ttl required)
         entry: streamsnow check caching
         language: system
         files: ^apps/.*\.py$
         pass_filenames: true
       - id: streamsnow-sql-tokens
+        description: >-
+          render_sql substitutes {TOKEN} inside comments too; a token name written in a `--` comment expanded into live SQL on the next line.
+          Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
         name: streamsnow check sql-tokens (no {TOKEN} in SQL comments)
         entry: streamsnow check sql-tokens
         language: system
         files: ^apps/.*\.sql$
         pass_filenames: true
       - id: streamsnow-session-fallback
+        description: >-
+          get_active_session() only exists inside Snowflake; a narrow except let a different local exception type through under uv-resolved snowpark.
+          Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
         name: streamsnow check session-fallback (wrap get_active_session)
         entry: streamsnow check session-fallback
         language: system
         files: ^apps/.*\.py$
         pass_filenames: true
       - id: streamsnow-page-imports
+        description: >-
+          Deployed, only the app root is on sys.path; `streamlit run` also adds the page's own directory, so a bare sibling import passed a full click-through and broke every page in production (2026-08).
+          Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
         name: streamsnow check page-imports (deployed sys.path is app root only)
         entry: streamsnow check page-imports
         language: system
         files: ^apps/.*\.py$
         pass_filenames: true
       - id: streamsnow-artifacts
+        description: >-
+          snowflake.yml artifacts: is what `snow streamlit deploy` uploads (the generated stage-copy workflow uploads the whole app dir, so it is a hand-deploy and drift guard here); a helper missing from it works locally and 404s on a manifest deploy. deploy.artifact_exclude in config names files another pipeline step ships.
+          Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
         name: streamsnow check artifacts (snowflake.yml matches disk)
         entry: streamsnow check artifacts
         language: system
         files: ^apps/
         pass_filenames: true
       - id: streamsnow-path-leaks
+        description: >-
+          A contributor's home-directory path landed in committed docs and was caught only at human review; agent instruction files leak origin paths the same way app code does.
+          Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
         name: streamsnow check path-leaks (no personal absolute paths)
         entry: streamsnow check path-leaks
         language: system
         files: ^apps/.*\.(py|sql|md)$
         pass_filenames: true
       - id: streamsnow-sql-review
+        description: >-
+          Rendered review SQL nobody can re-run rots; the manifest is the editing surface, and provenance hashes turn drift into a named finding. Coverage severity follows sql_review.coverage in config.
+          Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
         name: streamsnow sql-review check (audit trail fresh + complete)
         entry: streamsnow sql-review check
         language: system
         files: ^apps/.*(queries/.*\.sql|sql_review/.*|\.py)$
         pass_filenames: false
       - id: streamsnow-dependency-vulns
+        description: >-
+          OSV scan of every exact pin; a live connector CVE sat in a manifest for weeks before a scan existed. Best-effort offline here, fail-closed in CI.
+          Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
         name: streamsnow check dependency-vulns (OSV, best-effort locally)
         entry: streamsnow check dependency-vulns --best-effort
         language: system

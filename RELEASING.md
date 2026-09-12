@@ -65,3 +65,15 @@ Once public, users add the plugin with:
 /plugin install streamsnow@streamsnow
 ```
 No publish step is required for the plugin — it's served from the public repo.
+
+## Pre-release: official docs link sweep
+
+The link registry test is offline. Before tagging, run the online sweep once so
+a Snowflake docs reorganization does not ship as dead links:
+
+```bash
+uv run python scripts/check_docs_links.py --online
+```
+
+Every URL must answer 200 without redirecting. A 308 means the page moved:
+update `docs/snowflake-docs.md` (and any inline link) to the new canonical path.

@@ -32,6 +32,15 @@ Rules:
 - When a source moves schemas, re-verify: the future grant lives on the schema,
   not the object.
 
+Snowflake's own description of the model:
+[owner's rights](https://docs.snowflake.com/en/developer-guide/streamlit/object-management/owners-rights)
+and the [security guidance](https://docs.snowflake.com/en/developer-guide/streamlit/object-management/security)
+(production apps owned by service roles, never by a person). A third execution
+model, **restricted caller's rights**, exists for the container runtime
+([docs](https://docs.snowflake.com/en/developer-guide/streamlit/features/restricted-callers-rights));
+as of 2026-09-11 the release index lists it GA while the runtime page still says
+preview. StreamSnow's guardrails assume owner's rights and do not adopt it.
+
 ## Expose restricted data through narrow passthrough views
 
 **Symptom:** an app needs one fact that lives in a denied/restricted schema
@@ -103,7 +112,15 @@ different feature support — a feature-compatibility diagnosis is only valid
 relative to the runtime the app actually runs on. Check first; a wrong
 "harmless" fix removes working functionality and entrenches the misdiagnosis.
 
-Related: pin the container app's `streamlit` version to **at least the base
+Related: the two runtimes also differ in what they *support* — message size
+(32 MB vs 200 MB default), cross-session caching, custom components v2 — see
+Snowflake's [limitations](https://docs.snowflake.com/en/developer-guide/streamlit/limitations)
+page before deciding a feature "doesn't work in Snowflake". And never call
+`get_active_session()` from a container app: it is warehouse-only and not
+thread-safe in the shared container process
+([secrets and configuration](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/secrets-and-configuration)).
+
+Pin the container app's `streamlit` version to **at least the base
 image's bundled version**. The base image's launcher passes flags from its own
 Streamlit build; an older pin rejects unknown flags and crash-loops on startup
 while the service still reports healthy (`streamsnow verify-deploy` scans the

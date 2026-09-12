@@ -18,14 +18,33 @@ streamsnow deploy-setup | snow sql --stdin   # or pipe to your admin session
 
 - **stage-copy** (default): creates the internal stage CI uploads to. Container
   apps also need an account-level compute pool + external access integration
-  (admin, one-time — emitted as commented guidance).
+  (admin, one-time — emitted as commented guidance). Sizing note from the
+  [compute pool docs](https://docs.snowflake.com/en/developer-guide/snowpark-container-services/working-with-compute-pool):
+  the pre-provisioned `SYSTEM_COMPUTE_POOL_CPU` packs three apps per node,
+  while a pool you create runs **one app per node**, so size `MIN_NODES` to the
+  apps you expect running at once. A container app's server keeps running until
+  three days pass with no viewer ([billing](https://docs.snowflake.com/en/developer-guide/streamlit/object-management/billing)).
+  PyPI access: Snowflake now prefers a **Snowflake artifact repository** over an
+  external access integration, and configuring both disables the EAI
+  ([external access](https://docs.snowflake.com/en/developer-guide/streamlit/features/external-access)).
+  StreamSnow still emits the EAI because the Snowflake CLI's `snowflake.yml`
+  schema has no artifact-repository field yet; if your account already uses one,
+  do not also attach the EAI.
 - **git-repository**: creates the API integration, the secret holding a GitHub
-  token, and the `GIT REPOSITORY` object, and grants them to the CI role.
+  token, and the `GIT REPOSITORY` object, and grants them to the CI role
+  ([setting up Git](https://docs.snowflake.com/en/developer-guide/git/git-setting-up)).
 
 ## 2. CI auth (key-pair / JWT)
 
-Create a key-pair for a dedicated CI user, register the public key on that
-Snowflake user, and add these **repo secrets**:
+Create a key-pair for a dedicated CI **service user**, register the public key
+on that user, and add these **repo secrets**. Key-pair is the default because
+Snowflake's [MFA rollout](https://docs.snowflake.com/en/user-guide/security-mfa-rollout)
+blocks password authentication for service users in its final phase (Aug–Oct
+2026, account-specific and subject to change); a
+[programmatic access token](https://docs.snowflake.com/en/user-guide/programmatic-access-tokens)
+or the CLI's workload-identity authenticator are the supported alternatives if
+your platform team prefers them (edit the `SNOWFLAKE_AUTHENTICATOR` line in the
+generated workflow). Never a password.
 
 | Secret | Value |
 |---|---|

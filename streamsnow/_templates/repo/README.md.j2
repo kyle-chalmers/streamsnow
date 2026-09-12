@@ -15,13 +15,28 @@ Streamlit-in-Snowflake apps, scaffolded and governed with
 
 ## Local development
 
+One-time, one connection store (`st.connection("snowflake")` reads the `snow` CLI's
+default connection locally, so nothing is typed twice):
+
 ```bash
-uv venv --python 3.11
-uv pip install streamsnow
-cp apps/{{ app_slug }}/.streamlit/secrets.toml.example apps/{{ app_slug }}/.streamlit/secrets.toml
-# edit secrets.toml with your Snowflake connection, then:
-streamlit run apps/{{ app_slug }}/streamlit_app.py
+uv tool install streamsnow snowflake-cli pre-commit
+snow connection add --connection-name {{ connection_name }} --account {{ account }} \
+  --user <you> --authenticator externalbrowser --default
+pre-commit install                                  # the governance hooks
 ```
+
+Per app:
+
+```bash
+uv venv && uv pip install -e apps/{{ app_slug }}      # the app's dependencies, in .venv
+streamsnow validate-app {{ app_slug }}                # PASS/FAIL gate
+streamsnow preview {{ app_slug }}                     # runs .venv/bin/streamlit against live Snowflake
+```
+
+The starter page renders mock numbers until you repoint `queries/example_metric.sql`
+at a real table in an allowed schema; the first real query is the first real
+Snowflake round-trip. `apps/{{ app_slug }}/.streamlit/secrets.toml` (gitignored) is an
+optional override for an app that needs a different role or warehouse.
 
 ## Add an app
 

@@ -1,0 +1,52 @@
+# Official Snowflake and Streamlit documentation, by topic
+
+The one place StreamSnow keeps its links to the official docs, so a reader can
+verify any claim the toolkit makes and a maintainer can see at a glance which
+facts were checked when. Every `docs.snowflake.com` / `docs.streamlit.io` URL
+used anywhere in this repo must appear here (`tests/test_docs_links.py`
+enforces it, offline). Snowflake reorganized the Streamlit-in-Snowflake docs in
+early 2026; the pre-2026 flat paths (`/developer-guide/streamlit/<page>`) now
+only survive via redirect and are not linked.
+
+Rot check (network, opt-in, part of the release checklist in `RELEASING.md`):
+
+```bash
+uv run python scripts/check_docs_links.py --online
+```
+
+## Compatibility matrix
+
+Each row: what StreamSnow relies on, the scope it applies to, the source, when
+it was last read, and StreamSnow's position where the two differ.
+
+| # | Fact | Scope | Source | Retrieved | StreamSnow position |
+|---|------|-------|--------|-----------|---------------------|
+| D1 | The container runtime is generally available (GA) since 2026-03-09, in all commercial regions (not gov or China regions). | container | [Container runtime GA release note](https://docs.snowflake.com/en/release-notes/2026/other/2026-03-09-sis-container-runtime-ga) | 2026-09-11 | Container is the scaffold default. |
+| D2 | `get_active_session()` exists only in the warehouse runtime and is not thread-safe in the container runtime; the recommended connection pattern for both runtimes and for local development is `st.connection("snowflake")`. | both | [Secrets and configuration](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/secrets-and-configuration) | 2026-09-11 | Container apps use `st.connection`; warehouse apps wrap `get_active_session()` in a broad `try/except` with an `st.connection` fallback (`check session-fallback`). |
+| D3 | Deploying a container-runtime app with `snow streamlit deploy` needs Snowflake CLI 3.14.0 or newer. | container, `snow streamlit deploy` only | [snow streamlit deploy](https://docs.snowflake.com/en/developer-guide/snowflake-cli/command-reference/streamlit-commands/deploy) | 2026-09-11 | The generated pipeline emits `CREATE STREAMLIT` SQL through `snow sql`, so no CLI version gate; the note applies to hand deploys. |
+| D4 | PyPI access for container apps is preferably configured through a Snowflake artifact repository; an external access integration (EAI) is the fallback, and configuring both disables the EAI. | container | [Dependency management](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/dependency-management), [External access](https://docs.snowflake.com/en/developer-guide/streamlit/features/external-access) | 2026-09-11 | Snowflake CLI 3.27 has no artifact-repository field on the streamlit entity, so StreamSnow still emits an EAI. Tracked in CHANGELOG "Known gaps". |
+| D5 | Snowflake's MFA rollout blocks password-only authentication for service users in its final phase (Aug to Oct 2026; dates are account-specific and subject to change). | auth | [MFA rollout](https://docs.snowflake.com/en/user-guide/security-mfa-rollout), [Programmatic access tokens](https://docs.snowflake.com/en/user-guide/programmatic-access-tokens) | 2026-09-11 | Local preview defaults to `externalbrowser`; CI uses key-pair (JWT). Never a password. |
+| D6 | `connections.toml` is shared across Snowflake developer tools, and `st.connection("snowflake")` reads its default connection when `secrets.toml` has no `[connections.snowflake]` table. Section headers there omit the `connections.` prefix. | local dev | [Configure connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections), [st.connection](https://docs.streamlit.io/develop/api-reference/connections/st.connection) | 2026-09-11 | One connection store: `snow connection add ... --default`; the per-app `secrets.toml` is an optional override. |
+| D7 | Message size limit is 32 MB on the warehouse runtime and 200 MB by default (configurable) on the container runtime. Cross-session caching, custom components v2 and static file serving are container-only. `st.set_page_config` ignores `page_title`, `page_icon` and `menu_items` when deployed. | both | [Limitations](https://docs.snowflake.com/en/developer-guide/streamlit/limitations) | 2026-09-11 | Filter in SQL regardless of runtime. `set_page_config` stays in the scaffold for local runs. |
+| D8 | The pre-provisioned `SYSTEM_COMPUTE_POOL_CPU` packs three apps per node; any other pool runs one app per node. A container app's server stops after three days without viewers. The warehouse runtime closes its websocket after a default of about 15 minutes of inactivity, configurable via `[snowflake.sleep]` and affected by account settings. | both | [Billing](https://docs.snowflake.com/en/developer-guide/streamlit/object-management/billing), [Working with compute pools](https://docs.snowflake.com/en/developer-guide/snowpark-container-services/working-with-compute-pool) | 2026-09-11 | Recorded in the runtime decision recipe's cost row. |
+| D9 | Git repositories over 2 GB are not supported; a Streamlit created `FROM @repo/...` needs `ALTER STREAMLIT ... ADD LIVE VERSION FROM LAST` before it serves. | git-repository | [Git overview](https://docs.snowflake.com/en/developer-guide/git/git-overview), [Setting up Git](https://docs.snowflake.com/en/developer-guide/git/git-setting-up), [CREATE GIT REPOSITORY](https://docs.snowflake.com/en/sql-reference/sql/create-git-repository) | 2026-09-11 | `streamsnow deploy-sql` emits the live-version statement. |
+| D10 | Restricted caller's rights is a third execution model (container only). The February 2026 release note announced it in preview; the 2026 release index lists it GA on 2026-06-01 while the runtime page still says preview. | container | [Restricted caller's rights](https://docs.snowflake.com/en/developer-guide/streamlit/features/restricted-callers-rights), [2026 release index](https://docs.snowflake.com/en/release-notes/new-features-2026) | 2026-09-11 | Not adopted; owner's rights remains the model the guardrails assume. |
+| D11 | The official `environment.yml` example pins `python=3.11`. | warehouse | [Dependency management](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/dependency-management) | 2026-09-11 | StreamSnow rejects any `python` pin in `environment.yml` (`validate-app`), from a 2026-05 production incident where a pinned interpreter failed `CREATE STREAMLIT` with `Packages not found: python==3.11`. Re-test the single-`=` form against a live warehouse app before relaxing (Known gaps). |
+| D12 | Runtimes: warehouse supports Python 3.9 to 3.11 and a curated Streamlit selection from the Anaconda channel; container is Python 3.11 only with any Streamlit 1.50 or newer from PyPI. | both | [Runtime environments](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/runtime-environments), [About Streamlit in Snowflake](https://docs.snowflake.com/en/developer-guide/streamlit/about-streamlit) | 2026-09-11 | Container apps pin `requires-python = ">=3.11,<3.12"`. |
+| D13 | Deployed apps run with owner's rights: queries execute as the owning role, and viewers need only `USAGE` on the Streamlit object. Snowflake recommends service roles, not people, as production owners. | both | [Owner's rights](https://docs.snowflake.com/en/developer-guide/streamlit/object-management/owners-rights), [Security](https://docs.snowflake.com/en/developer-guide/streamlit/object-management/security), [Privileges](https://docs.snowflake.com/en/developer-guide/streamlit/object-management/privileges) | 2026-09-11 | `snowflake.roles.ci_role` owns and deploys; `viewer_role` gets `USAGE`. See production lessons. |
+
+## Reference pages
+
+- Multipage apps and file layout: [File organization](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/file-organization)
+- Moving an app between runtimes: [Runtime migration](https://docs.snowflake.com/en/developer-guide/streamlit/migrations-and-upgrades/runtime-migration)
+- SQL reference: [CREATE STREAMLIT](https://docs.snowflake.com/en/sql-reference/sql/create-streamlit), [ALTER STREAMLIT](https://docs.snowflake.com/en/sql-reference/sql/alter-streamlit), [SHOW STREAMLITS](https://docs.snowflake.com/en/sql-reference/sql/show-streamlits)
+- Snowflake CLI: [Installation](https://docs.snowflake.com/en/developer-guide/snowflake-cli/installation/installation), [Streamlit apps overview](https://docs.snowflake.com/en/developer-guide/snowflake-cli/streamlit-apps/overview), [Deploy an app](https://docs.snowflake.com/en/developer-guide/snowflake-cli/streamlit-apps/manage-apps/deploy-app), [Project definition files](https://docs.snowflake.com/en/developer-guide/snowflake-cli/project-definitions/about)
+- Streamlit library: [st.cache_data](https://docs.streamlit.io/develop/api-reference/caching-and-state/st.cache_data), [st.navigation](https://docs.streamlit.io/develop/api-reference/navigation/st.navigation)
+
+## Paths not to link
+
+Verified broken or superseded on 2026-09-11: the Snowflake CLI `entity-types`
+project-definition page (404), the Streamlit `app-development/connect-to-snowflake`
+page (404), anything under `/snowflake-cli-v2/` (the retired v2 doc tree), and
+the pre-reorganization flat Streamlit pages that now redirect. The registry
+test fails on any of these.

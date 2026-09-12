@@ -3,9 +3,10 @@
 The one place this decision is explained. Skills link here instead of re-deriving it; if you are
 reading this from a skill, take the answer and go back — don't restate this file to the user.
 
-Both runtimes are fully supported ways to run a Streamlit app in Snowflake. Neither is "the right
-one" in general — the choice is a trade-off, and the repo's configured default is the answer unless
-the app has a concrete reason to differ.
+Both runtimes are fully supported ways to run a Streamlit app in Snowflake (container has been GA
+since March 2026). Neither is "the right one" in general — the choice is a trade-off, and the
+repo's configured default is the answer unless the app has a concrete reason to differ. Sources
+for every fact below, with retrieved dates: `docs/snowflake-docs.md` in the StreamSnow repo.
 
 ## Where the choice lives
 
@@ -24,12 +25,13 @@ match flips your whole understanding of the app.
 | | Container | Warehouse |
 |---|---|---|
 | Dependencies | PyPI, via `pyproject.toml` (PEP 440 pins, `pkg==1.2.3`) | Snowflake Anaconda channel, via `environment.yml` (conda pins, `pkg=1.2.3`); narrower and lags PyPI |
-| Connection pattern | `st.connection("snowflake")` locally **and** deployed | `get_active_session()` deployed; `st.connection` fallback for local runs |
+| Connection pattern | `st.connection("snowflake")` locally **and** deployed — never `get_active_session()`, which is warehouse-only and not thread-safe in the shared process | `get_active_session()` deployed; `st.connection` fallback for local runs |
 | Local preview parity | High — same code path as deployed, so grant gaps surface locally | Lower — `get_active_session()` only exists inside Snowflake |
 | Cold start | 1–3 min (image build/boot on a compute pool) | Effectively instant |
-| Cost model | Compute pool (runs while the pool is up) | Warehouse credits per query |
-| One-time Snowflake setup | Compute pool + external-access integration must exist before first deploy | None beyond the warehouse itself |
-| Shared state | One shared server process across viewers — module-level mutable state needs care | Isolated per-session execution |
+| Cost model | Compute pool; the server keeps running until 3 days pass with no viewer. `SYSTEM_COMPUTE_POOL_CPU` packs 3 apps per node, a custom pool runs 1 app per node | Warehouse credits per query; websocket sleeps after ~15 min idle by default |
+| One-time Snowflake setup | Compute pool + PyPI access (an external-access integration today; Snowflake now prefers an artifact repository, and attaching both disables the EAI) must exist before first deploy | None beyond the warehouse itself |
+| Shared state | One shared server process across viewers — module-level mutable state needs care; `st.cache_*` is shared across sessions | Isolated per-session execution; cache is per session |
+| Platform limits | 200 MB message default (configurable); custom components v2 and static files supported | 32 MB message cap; components v2 and static files unsupported |
 
 ## How to choose
 
@@ -54,8 +56,9 @@ removes working features while fixing nothing.
   with conda pins, and **never pin `python`** there — the warehouse supplies the interpreter, and a
   pinned one breaks the manifest. The validate gate checks the manifest matches the declared runtime.
 - **Connection code.** Container → `conn = st.connection("snowflake")`, and pass `ttl=0` to
-  `conn.query(...)` so the outer `@st.cache_data(ttl=...)` is the single source of truth (otherwise
-  you get double caching and confusing staleness). Warehouse →
+  `conn.query(...)` so the outer `@st.cache_data(ttl=...)` is the single source of truth — Streamlit
+  issue #13644: `conn.query`'s internal cache ignores `params`, so two filters can share one stale
+  result without `ttl=0`. Warehouse →
   `get_active_session()` when deployed, with the commented `st.connection` fallback for local runs —
   the fallback is a conscious local-dev toggle the developer owns; revert it before the PR.
 - **Local preview.** Container apps run locally as-is. A warehouse app raises

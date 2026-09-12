@@ -202,3 +202,36 @@ def test_explicit_missing_config_path_is_a_config_error(tmp_path):
 
     with pytest.raises(ConfigError, match="cannot read config"):
         load_config(tmp_path / "streamsnow.config.yaml")
+
+
+# --------------------------------------------------------------------------- #
+# 0.7: sql_review policy + artifact_exclude are typed blocks, never tracebacks
+# --------------------------------------------------------------------------- #
+def test_sql_review_defaults_to_warn_and_accepts_fail():
+    assert Config.from_dict(_base()).sql_review.coverage == "warn"
+    d = _base()
+    d["sql_review"] = {"coverage": "fail"}
+    assert Config.from_dict(d).sql_review.coverage == "fail"
+
+
+@pytest.mark.parametrize("bad", ["warn", ["warn"], 1, {"coverage": "maybe"}])
+def test_malformed_sql_review_block_is_a_config_error(bad):
+    d = _base()
+    d["sql_review"] = bad
+    with pytest.raises(ConfigError):
+        Config.from_dict(d)
+
+
+@pytest.mark.parametrize("bad", ["stage-copy", ["stage-copy"]])
+def test_scalar_deploy_block_is_a_config_error(bad):
+    d = _base()
+    d["deploy"] = bad
+    with pytest.raises(ConfigError):
+        Config.from_dict(d)
+
+
+def test_artifact_exclude_must_be_a_list():
+    d = _base()
+    d["deploy"]["artifact_exclude"] = ".streamlit/config.toml"
+    with pytest.raises(ConfigError):
+        Config.from_dict(d)

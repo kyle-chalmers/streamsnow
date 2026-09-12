@@ -20,6 +20,7 @@ from streamsnow.tools import (
     check_page_imports,
     check_session_fallback,
     check_sql_tokens,
+    sql_review,
 )
 from streamsnow.tools.check_schema_refs import find_denied_refs
 from streamsnow.tools.validate_app import validate_app
@@ -36,6 +37,18 @@ def _write(p: Path, text: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(text)
     return p
+
+
+def _scaffold_with_trail(cfg: Config, root: Path, slug: str) -> Path:
+    """scaffold() plus the sql_review companion `init`/`new` generate right after it.
+
+    A manifest whose review file was never rendered is a provenance finding
+    (the trail promises a file that does not exist) and, since 0.7, provenance
+    findings fail validate-app regardless of the coverage policy.
+    """
+    scaffold(cfg, root, slug)
+    assert sql_review.main(["generate", slug, "--dir", str(root)]) == 0
+    return root / "apps" / slug
 
 
 def test_security_flags_egress_exec_and_dynamic_sql(tmp_path):
@@ -292,7 +305,7 @@ def test_caching_walk_skips_dotted_dirs(tmp_path):
 
 def test_validate_app_passes_on_scaffold(tmp_path):
     cfg = _cfg()
-    scaffold(cfg, tmp_path, "good-app")
+    _scaffold_with_trail(cfg, tmp_path, "good-app")
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/good-app", policy, cfg)
     assert res["ok"], res["checks"]
@@ -301,8 +314,7 @@ def test_validate_app_passes_on_scaffold(tmp_path):
 def test_validate_app_skips_dotted_tooling_dirs(tmp_path):
     """A REVIEW note under .review/ that quotes a denied schema must NOT trip the gate."""
     cfg = _cfg()
-    scaffold(cfg, tmp_path, "clean-app")
-    app = tmp_path / "apps/clean-app"
+    app = _scaffold_with_trail(cfg, tmp_path, "clean-app")
     # Tooling artifacts that quote denied schemas / dynamic SQL — never app source.
     _write(
         app / ".review/REVIEW-2026-01-01.md",
@@ -805,7 +817,7 @@ def test_manifest_container_pyproject_invalid_toml_fails(tmp_path):
 def test_validate_app_passes_on_warehouse_scaffold(tmp_path):
     # The warehouse scaffold's environment.yml must satisfy the content validation.
     cfg = _warehouse_cfg()
-    scaffold(cfg, tmp_path, "wh-ok-app")
+    _scaffold_with_trail(cfg, tmp_path, "wh-ok-app")
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/wh-ok-app", policy, cfg)
     assert res["ok"], res["checks"]
@@ -1520,3 +1532,74 @@ def test_app_security_cli_clean_run_does_not_crash(tmp_path, monkeypatch, capsys
         assert json.loads(out)["ok"] is True
     else:
         assert "clean" in out
+
+
+# --------------------------------------------------------------------------- #
+# Faithful to a real fleet: the anonymized fixture repo must pass the gate
+# --------------------------------------------------------------------------- #
+FLEET = Path(__file__).resolve().parent / "fixtures" / "fleet"
+FLEET_APPS = sorted(p.name for p in (FLEET / "apps").iterdir() if p.is_dir())
+
+
+def _fleet_cfg() -> Config:
+    return Config.from_dict(yaml.safe_load((FLEET / "streamsnow.config.yaml").read_text()))
+
+
+@pytest.mark.parametrize("slug", FLEET_APPS)
+def test_fleet_fixture_app_passes_validate(slug):
+    """Shapes a production fleet had that a greenfield scaffold never exercises
+    (MIGRATION.md, 2026-09-10): a pipeline-shipped config.toml, narrative phase
+    notes, a waived narrow session fallback, brace-less token headers, a
+    package-qualified glossary helper, a nested page package. A check that
+    fails one of these is a defect in the check until proven otherwise."""
+    cfg = _fleet_cfg()
+    res = validate_app(FLEET / "apps" / slug, SchemaPolicy.from_governance(cfg.governance), cfg)
+    assert res["ok"], [c for c in res["checks"] if not c["ok"]]
+
+
+def test_fleet_fixture_still_covers_the_migration_shapes():
+    """Guard against a later cleanup hollowing the fixture out."""
+    text = {p: p.read_text() for p in FLEET.rglob("*") if p.is_file()}
+    joined = "\n".join(text.values())
+    assert "artifact_exclude" in (FLEET / "streamsnow.config.yaml").read_text()
+    assert "**Phase notes:**" in joined
+    assert "# noqa: session-fallback" in joined
+    assert "-- Tokens: SEGMENT_EXPR" in joined and "{SEGMENT_EXPR}" in joined
+    assert "from pages._glossary import" in joined
+    assert (FLEET / "apps/acme-finance-admin/pages/admin/_hdr.py").exists()
+    assert "from pages.admin._hdr import" in joined
+    assert len(FLEET_APPS) == 3
+
+
+def test_fleet_fixture_has_no_personal_paths_or_secrets():
+    for p in FLEET.rglob("*"):
+        if p.is_file():
+            body = p.read_text()
+            assert "/Users/" not in body and "/home/" not in body, p
+            assert "password" not in body.lower() or "secrets.toml.example" in p.name, p
+
+
+def test_fleet_fixture_coverage_warnings_do_not_fail_under_warn_policy():
+    """The fixture ships no sql_review manifests on purpose: under the default
+    `warn` policy that is a warning, not a FAIL — the fleet's backfill can lag."""
+    cfg = _fleet_cfg()
+    assert cfg.sql_review.coverage == "warn"
+    res = validate_app(
+        FLEET / "apps" / FLEET_APPS[0], SchemaPolicy.from_governance(cfg.governance), cfg
+    )
+    sqlr = next(c for c in res["checks"] if c["name"].startswith("sql-review"))
+    assert sqlr["ok"] and sqlr["warnings"] and not sqlr["findings"]
+    assert "coverage policy: warn" in sqlr["name"]
+
+
+def test_coverage_policy_fail_gates_validate_app(tmp_path):
+    cfg_data = yaml.safe_load(EXAMPLE.read_text())
+    cfg_data["sql_review"] = {"coverage": "fail"}
+    cfg = Config.from_dict(cfg_data)
+    app = _scaffold_with_trail(cfg, tmp_path, "gated-app")
+    _write(app / "queries/orphan.sql", "-- Query: orphan\nSELECT 1\n")
+    res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+    sqlr = next(c for c in res["checks"] if c["name"].startswith("sql-review"))
+    assert not res["ok"] and not sqlr["ok"]
+    assert sqlr["findings"][0]["kind"] == "coverage"
+    assert "coverage policy: fail" in sqlr["name"]

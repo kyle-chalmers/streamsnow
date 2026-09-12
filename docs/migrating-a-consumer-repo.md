@@ -112,6 +112,22 @@ a trial run), **extends** (domain-specific variant → keep, note it in AGENTS.m
    `/apply-review`, `/deep-dive-data`) that point at their replacements. They are removed in the
    next major release, so update muscle memory (and any docs/scripts) before then.
 
+## Adoption knobs added in 0.7
+
+Three findings from a real fleet's adoption attempt became config, not waivers:
+
+- **`deploy.artifact_exclude`** — non-code files your pipeline uploads by another step
+  (`.streamlit/config.toml` is the common one) no longer need to appear in `snowflake.yml`
+  `artifacts:`. Code is never excludable.
+- **`**Phase notes:**`** — progress narrative in §11 goes on its own line; `**Current phase:**`
+  stays the exact value the skills resume on.
+- **`sql_review: {coverage: warn | fail}`** — start on `warn` while the audit-trail backfill runs;
+  drift and hand edits fail either way. Flip to `fail` when coverage is where you want it.
+
+`tests/fixtures/fleet/` in the StreamSnow repo is a three-app repo shaped like a real fleet; if
+`validate-app` fails a well-run app of yours for a reason not covered there, that is a plugin
+defect — open an issue with the finding.
+
 ## Behavioral deltas to expect
 
 - **`REQUIREMENTS.md` §11 is simpler:** a `Current phase` line plus an append-only Sessions log —

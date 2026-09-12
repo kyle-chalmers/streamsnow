@@ -32,11 +32,26 @@ goes missing deployed; a stale entry breaks the deploy. Fix by adding the new fi
 page still imports. Removing the whole `artifacts:` key is valid only if your deploy provably uploads
 the entire app dir (StreamSnow's generated workflows do).
 
+**artifacts, when a file is shipped by another step.** If the repo's deploy pipeline uploads a
+non-code file separately (the generated workflow does this for `.streamlit/config.toml`), list it
+under `deploy.artifact_exclude` in `streamsnow.config.yaml` rather than in `artifacts:`. Only
+non-code files qualify; the entrypoint, `pages/`, `queries/`, `*.py` and `*.sql` are always
+artifacts and the config loader rejects them.
+
+**requirements.** `**Current phase:**` must be an exact lifecycle value. Progress narrative
+("pages 3/5", "QC pending") goes on a `**Phase notes:**` line under it — never appended to the
+phase, which `/start-app` resumes on.
+
 **sql-tokens.** A `{TOKEN}` placeholder appears inside a SQL comment. `render_sql` substitutes
 tokens with comment-unaware `str.replace`, so the token's full SQL expansion lands inside the
 comment and multi-line expansions break out as live SQL (parse errors that only appear at render
 time). Fix by describing the token in prose (`-- agent filter applied here`), never by braces;
 `-- noqa: sql-token` only for a comment that genuinely must show the syntax.
+
+**Waivers, when a rule is knowingly not applied.** `-- noqa: sql-token` on the SQL line and
+`# noqa: session-fallback` on the `get_active_session()` call line suppress those two findings;
+`# noqa: page-imports` on the import statement suppresses that one. A waiver is a decision the
+diff should explain in a nearby comment — never a way to make a red gate green.
 
 **session-fallback.** A `get_active_session()` call isn't wrapped in a broad `try/except`. The call
 raises during local `streamlit run` (it only works inside the deployed runtime), and a narrow
