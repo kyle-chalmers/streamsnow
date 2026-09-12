@@ -18,11 +18,12 @@ The `check schema-refs` guardrail (pre-commit + the generated CI workflow) enfor
 ## Runtime: {{ runtime }}
 
 {% if runtime == 'container' %}
-Container runtime (`{{ runtime_name }}`, Python {{ container_python }}). Dependencies in `pyproject.toml` (PyPI via the `{{ external_access_integration }}` external access integration). Connect with `st.connection("snowflake")` — works identically locally and deployed.
+Container runtime (`{{ runtime_name }}`, Python {{ container_python }}; GA since March 2026). Dependencies in `pyproject.toml` (PyPI via the `{{ external_access_integration }}` external access integration). Connect with `st.connection("snowflake")` — works identically locally and deployed. Never call `get_active_session()` here: it is warehouse-only and not thread-safe in the shared container process.
 {% else %}
-Warehouse runtime. Dependencies in `environment.yml` (Snowflake Anaconda channel — **never pin `python`**). Connect with `get_active_session()` wrapped in a try/except `st.connection` fallback for local dev.
+Warehouse runtime. Dependencies in `environment.yml` (Snowflake Anaconda channel — **never pin `python`**; the official example does, ours failed `CREATE STREAMLIT` on it). Connect with `get_active_session()` wrapped in a broad try/except `st.connection` fallback for local dev.
 {% endif %}
-Query warehouse: `{{ default_warehouse }}`. Deployed apps execute with **owner's rights** — the grants of `{{ ci_role }}` (the deploying role), not `{{ viewer_role }}` and not your personal role. Viewers only need `USAGE` on the app object.
+Runtime facts and their sources: https://docs.snowflake.com/en/developer-guide/streamlit/app-development/runtime-environments
+Query warehouse: `{{ default_warehouse }}`. Deployed apps execute with **owner's rights** — the grants of `{{ ci_role }}` (the deploying role), not `{{ viewer_role }}` and not your personal role. Viewers need `USAGE` on the app object plus `USAGE` on its database and schema — never on the data ([privileges](https://docs.snowflake.com/en/developer-guide/streamlit/object-management/privileges)). Local preview under `{{ viewer_role }}` is narrower than a personal role but is still not the deployed truth: before shipping a new source, verify `{{ ci_role }}` can `SELECT` it.
 
 ## Caching
 

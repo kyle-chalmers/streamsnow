@@ -29,8 +29,10 @@ run the spec phase first ([spec.md](spec.md)) and resume.
    The header is what the checks parse; the placeholder keeps the page rendering during preview.
    Leave `<TODO>` rather than guessing an object name; never pre-fill a denied schema. If two
    sections share a query, reuse the existing `.sql` — don't scaffold a duplicate.
-4. **Generate the page module** `pages/<page>.py`: title + one-line caption, one branded
-   metric/chart stub per §4 section, filters per §7, and one `@st.cache_data(ttl=...)`-wrapped
+4. **Generate the page module** `pages/<page>.py` following the four-block page contract and the
+   single-source metric definitions in [_shared/page-conventions.md](../_shared/page-conventions.md):
+   title + caption, a caption under every subheader, filters per §7, a sources + "Data as of"
+   footer; one branded metric/chart stub per §4 section and one `@st.cache_data(ttl=...)`-wrapped
    loader per query calling the app's `sql_loader`. Match a sibling page's patterns. TTL = repo
    default unless §8 says otherwise (then cite it in a comment). Imports of app-root modules
    (`branding`, `sql_loader`) stay bare; anything you factor out into `pages/` is imported
@@ -104,3 +106,19 @@ return get_active_session().sql(sql, params=[start, end]).to_pandas()
 - **Preview errors loading a query** — the placeholder body was replaced with invalid SQL, or a
   param/token in the loader isn't declared in the `.sql`. Restore the placeholder until the real
   query is ready.
+
+## Build loop
+
+`/start-app` runs these itself between CP1 and CP3; the user only types at the checkpoints.
+
+1. **Preview:** `streamsnow preview start <slug>` (`--json` for the URL and status). It prefers the
+   repo's `.venv/bin/streamlit`; on exit 1 read the classified hint (no default `snow` connection,
+   bad account locator, missing package) before improvising, then `streamsnow preview logs <slug>`.
+   Hand over the root URL and ask for the click-through — that is CP2, not something to skip.
+2. **Validate:** `streamsnow validate-app <slug>`; on FAIL, follow `/validate-app`'s fixing guide
+   and re-run until PASS. Never weaken a rule to get there.
+3. **Review:** follow `/review-app`'s instructions in full for this app ("run" a skill means follow
+   its procedure — there is no skill-invocation tool). Read its overlay first if the repo has one.
+   Report the verdict at CP3; `--auto` only when the user asked for the hands-off loop, because it
+   spends minutes and, with lineage, Snowflake credits.
+4. **Stop the preview** (`streamsnow preview stop <slug>`) once the user is done clicking through.

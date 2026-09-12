@@ -267,3 +267,28 @@ def test_start_launcher_missing_is_tool_error(tmp_path, monkeypatch, capsys):
     rc = preview_app.main(_start_args(repo, _free_port()))
     assert rc == 2
     assert "not found on PATH" in capsys.readouterr().out
+
+
+def test_build_command_prefers_repo_venv_streamlit(tmp_path):
+    """The documented CLI-only setup (`uv venv && uv pip install -e apps/<slug>`)
+    never activates the venv, so PATH `streamlit` is the wrong (or a missing)
+    interpreter. The launcher must find the venv the user just built."""
+    repo = _repo(tmp_path)
+    entry = repo / "apps" / SLUG / "streamlit_app.py"
+    assert preview_app.build_command(entry, 8501)[0] == "streamlit"
+    fake = repo / ".venv" / "bin" / "streamlit"
+    fake.parent.mkdir(parents=True)
+    fake.write_text("#!/bin/sh\n")
+    assert preview_app.build_command(entry, 8501)[0] == str(fake)
+    # An app-local venv wins over nothing but loses to the repo venv.
+    app_fake = repo / "apps" / SLUG / ".venv" / "bin" / "streamlit"
+    app_fake.parent.mkdir(parents=True)
+    app_fake.write_text("#!/bin/sh\n")
+    assert preview_app.build_command(entry, 8501)[0] == str(fake)
+    fake.unlink()
+    assert preview_app.build_command(entry, 8501)[0] == str(app_fake)
+
+
+def test_missing_secrets_hint_names_both_connection_stores():
+    hint = preview_app.classify_log("No secrets files found")["hint"]
+    assert "connections.toml" in hint and "secrets.toml" in hint

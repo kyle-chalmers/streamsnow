@@ -80,6 +80,7 @@ If `REQUIREMENTS.md` already exists (any mode), ask before overwriting and offer
 ## 10. Open Questions — unresolved items, every `(inferred)` marker
 ## 11. Build Progress
 **Current phase:** spec
+**Phase notes:** <optional free text — progress, blockers; the phase value itself stays exact>
 ### Sessions
 - <YYYY-MM-DDTHH:MMZ> — spec written (/start-app). Next: scaffold (`/start-app <slug>`).
 ```
@@ -90,8 +91,9 @@ names the next command. There is no per-page status table — page state is visi
 git; the log records what happened and what's next.
 
 `streamsnow check requirements apps/<slug>` validates exactly this contract — the section exists,
-the phase is a recognized lifecycle value, the last session line carries an ISO timestamp and (for
-a non-terminal phase) a `Next:` hint. It runs inside `streamsnow validate-app`, so a hand-mangled
+the phase is a recognized lifecycle value (exact: `build`, never `build (pages 3/5)` — narrative
+goes on the optional `**Phase notes:**` line), the last session line carries an ISO timestamp and
+(for a non-terminal phase) a `Next:` hint. It runs inside `streamsnow validate-app`, so a hand-mangled
 §11 becomes a named finding instead of a silent failure to resume. Run it after any hand edit to
 the section.
 

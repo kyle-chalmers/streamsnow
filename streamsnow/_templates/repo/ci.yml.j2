@@ -27,7 +27,7 @@ jobs:
       - name: Install tooling
         run: |
           uv tool install ruff
-          uv tool install 'streamsnow>=0.6,<0.7'
+          uv tool install 'streamsnow>=0.7,<0.8'
       - name: Lint
         run: ruff check apps/
       - name: Governance gate (validate every app)

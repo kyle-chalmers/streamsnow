@@ -37,11 +37,11 @@ first script run finishes; data errors surface in the browser and in `logs`, not
    list `apps/*/` and ask. Confirm `apps/<slug>/` exists.
 2. **Verify prereqs once per session** with `streamsnow doctor`; anything missing → offer
    `/start-app --setup` rather than launching into a broken environment.
-3. **Ensure `apps/<slug>/.streamlit/secrets.toml` exists and is real.** Missing or placeholder →
-   copy `secrets.toml.example` and fill the `[connections.snowflake]` table from
-   `streamsnow.config.yaml` (`streamsnow config-get <dotted.path>` reads one value). **Show the
-   values and get explicit confirmation before writing** — credentials are the user's to own; never
-   invent one, never commit the file (it's gitignored).
+3. **Ensure a connection exists.** The default `snow` connection (doctor's `snow-connection`
+   check) is what `st.connection("snowflake")` reads; missing → hand the user the `snow connection
+   add … --default` line from `streamsnow configure`. Only when an app needs a different role or
+   warehouse: copy `secrets.toml.example` and fill `[connections.snowflake]` from config
+   (`streamsnow config-get <path>`), **show the values and confirm before writing**, never commit.
 4. **Pin the query role to the deployed viewer role** (from config), not a broad personal role —
    a wide role hides missing grants, so the app looks fine locally and ships with empty KPIs.
 5. **Launch:** `streamsnow preview start <slug>`. Success prints the URL — open it **verbatim, at
@@ -66,9 +66,9 @@ first script run finishes; data errors surface in the browser and in `logs`, not
 
 ## Troubleshooting
 
-- **Auth failures** → recheck `secrets.toml` against config (locator not hostname; SSO usually needs
-  `authenticator = "externalbrowser"`); re-run `streamsnow configure` if config itself is stale.
-- **Import errors in the log** → stale venv; `uv sync` and relaunch.
+- **Auth failures** → recheck the `snow` connection (or `secrets.toml`) against config: locator not
+  hostname, `externalbrowser` for SSO, never a password; `streamsnow configure` if config is stale.
+- **Import errors in the log** → stale `<repo>/.venv` (the launcher prefers it); `uv pip install -e apps/<slug>`, relaunch.
 - **A cryptic Snowflake error** → [_shared/deploy-error-translator.md](../_shared/deploy-error-translator.md)
   maps common signatures to causes; its role/warehouse/grant diagnoses apply locally too.
 

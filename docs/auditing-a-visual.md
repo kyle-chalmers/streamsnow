@@ -79,9 +79,13 @@ for the person who looks at a chart and asks *"is that number right?"*
 The rendered files are **not** the editing surface — the manifest at
 `apps/<slug>/sql_review/manifests/<feature>.json` is. Edit the manifest (or
 the query templates), then `streamsnow sql-review generate <slug>`. The
-`check` verb keeps coverage complete and renders fresh: every
-`queries/*.sql` must be claimed by a manifest, and an unregenerated change
-reads as DRIFT. It fails closed in pre-commit and the generated CI where
-those configs are adopted; inside `streamsnow validate-app` it warns only in
-0.6 (FAIL planned for 0.7). `/review-app --sql` is the
-assisted path that authors manifests well and live-verifies the README.
+`check` verb keeps the trail honest and, when you ask it to, complete. Every
+finding carries a `kind`. Drift (an unregenerated change), a hand-edited
+rendered file, an unbound `:N`, a write statement, an output collision or an
+orphaned file always fails — in pre-commit, the generated CI and
+`streamsnow validate-app` alike, because each means the committed trail no
+longer describes what the app runs. Whether an *uncovered* `queries/*.sql` (no
+manifest claims it) fails or only warns is your repo's `sql_review.coverage`
+setting: `warn` by default so a fleet backfills on its own schedule, `fail`
+once coverage is where you want it. `/review-app --sql` is the assisted path
+that authors manifests well and live-verifies the README.

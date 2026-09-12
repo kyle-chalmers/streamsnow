@@ -13,9 +13,9 @@ One command owns the app lifecycle: **spec → scaffold → build → preview �
 It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume an interrupted build, tells the user the exact
 next command at each judgment point, and never skips a checkpoint.
 
-> **Wizard, not a runner.** It runs the deterministic `streamsnow` CLI steps and read-only checks
-> itself; for interactive steps (preview click-through, review, ship) it names the exact command,
-> ends its turn, and waits. The win is "less to remember", not "less to type".
+> **Wizard, not a runner.** It runs everything deterministic itself — the `streamsnow` CLI steps,
+> preview launch, validation, and the `/review-app` procedure — and stops only at the three human
+> checkpoints (spec confirmed, pages clicked through, ready to ship). The user types checkpoints.
 
 ## Modes
 
@@ -55,7 +55,8 @@ next command at each judgment point, and never skips a checkpoint.
 6. For each TODO page in §4 order, follow [pages.md](pages.md) — page module, `queries/*.sql` with
    header blocks, `st.navigation` registration — then fill the stubs against the spec. Run the
    matching `streamsnow check` commands as you go; problems are cheapest here.
-7. Tell the user to run `/preview-app <slug>` and click through every page against live Snowflake.
+7. Launch the preview yourself per [pages.md § Build loop](pages.md#build-loop) (`streamsnow
+   preview start <slug>`), hand over the URL, and ask for a click-through of every page.
 8. **CP2:** the user confirms pages render, charts populate, and filters work — the correctness
    check no static gate can make. Block until they answer.
 
@@ -63,7 +64,8 @@ next command at each judgment point, and never skips a checkpoint.
 
 9. Run `streamsnow validate-app <slug>` — the pass/fail check that must be clean before shipping.
    Fix and re-run on any FAIL (`/validate-app` explains each one).
-10. Tell the user to run `/review-app <slug>` (add `--auto` for the hands-off fix loop) until clean.
+10. **Run the review yourself:** follow `/review-app`'s instructions in full for this app (default
+    mode; `--auto` only if the user asked for the hands-off loop). Present its verdict.
 11. **CP3:** validation passes, review is clean, user is ready → hand off to `/ship-app <slug>`
     (a first deploy may need one-time admin DDL from `streamsnow deploy-setup` — surface, don't run).
 

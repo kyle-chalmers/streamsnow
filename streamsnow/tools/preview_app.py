@@ -80,8 +80,9 @@ _LOG_PATTERNS: list[tuple[str, str, str]] = [
     (
         "missing_secrets",
         r"No secrets files found|st\.secrets has no key",
-        "Local runs need .streamlit/secrets.toml (gitignored) with a [connections.snowflake] "
-        "block — create it before previewing",
+        "Local runs need a Snowflake connection: either a default `snow connection add "
+        "... --default` (read from connections.toml) or apps/<slug>/.streamlit/secrets.toml "
+        "(gitignored) with a [connections.snowflake] block — set one up before previewing",
     ),
     (
         "bad_account",
@@ -158,11 +159,32 @@ def tail_lines(path: Path, n: int) -> list[str]:
 # --------------------------------------------------------------------------- #
 # Process / port / state helpers
 # --------------------------------------------------------------------------- #
+def streamlit_executable(entrypoint: Path) -> str:
+    """The ``streamlit`` to launch: a repo- or app-local ``.venv`` first, then PATH.
+
+    The documented CLI-only setup is ``uv venv && uv pip install -e apps/<slug>``,
+    which creates ``.venv`` without activating it — so a bare ``streamlit`` on
+    PATH is either missing or some other interpreter's. Prefer the venv the
+    user just built (repo root, then the app dir), falling back to PATH so an
+    activated environment or a tool install still works.
+    """
+    app_dir = entrypoint.parent
+    repo = app_dir.parent.parent
+    for root in (repo, app_dir):
+        for candidate in (
+            root / ".venv" / "bin" / "streamlit",
+            root / ".venv" / "Scripts" / "streamlit.exe",
+        ):
+            if candidate.is_file():
+                return str(candidate)
+    return "streamlit"
+
+
 def build_command(entrypoint: Path, port: int) -> list[str]:
     """The launch argv. A module-level function so tests can substitute a fake
     server without touching a real Streamlit install."""
     return [
-        "streamlit",
+        streamlit_executable(entrypoint),
         "run",
         str(entrypoint),
         "--server.port",

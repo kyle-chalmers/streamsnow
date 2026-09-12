@@ -40,7 +40,9 @@ def apply_branding() -> None:
     pio.templates.default = "streamsnow_brand"
 
 
-def branded_metric(label: str, value: str, delta: str | None = None, border_color: str | None = None) -> None:
+def branded_metric(
+    label: str, value: str, delta: str | None = None, border_color: str | None = None
+) -> None:
     """A metric card with a brand-colored left border.
 
     label/value/delta/border_color are HTML-escaped before interpolation — the
@@ -50,7 +52,11 @@ def branded_metric(label: str, value: str, delta: str | None = None, border_colo
     """
     color = html.escape(border_color or BRAND_COLORS["primary"])
     label, value = html.escape(label), html.escape(value)
-    delta_html = f'<div style="font-size:0.8rem;color:#6b7280;">{html.escape(delta)}</div>' if delta else ""
+    delta_html = (
+        f'<div style="font-size:0.8rem;color:#6b7280;">{html.escape(delta)}</div>'
+        if delta
+        else ""
+    )
     st.markdown(
         f'<div style="border-left:4px solid {color};padding:0.25rem 0.75rem;margin:0.25rem 0;">'
         f'<div style="font-size:0.8rem;color:#6b7280;">{label}</div>'

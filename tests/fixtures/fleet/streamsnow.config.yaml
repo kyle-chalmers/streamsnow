@@ -1,0 +1,55 @@
+# Anonymized fixture fleet: three Acme apps shaped like a real production
+# monorepo (narrative phase notes, a pipeline-shipped config.toml, a waived
+# session fallback, brace-less token headers, nested page packages).
+# tests/test_validate.py::test_fleet_fixture_app_passes_validate is the
+# regression net for 'faithful to a real fleet'.
+schema_version: 1
+runtime: container
+project:
+  name: Acme Fleet
+  slug: acme-fleet
+snowflake:
+  account: ab12345.us-east-1
+  connection_name: acme
+  objects:
+    app_database: DATA_APPS
+    app_schema: BI_APPS
+    stage_database: DATA_APPS
+    stage_schema: BI_APPS
+    stage_name: STREAMLIT_CODE_STAGE
+    default_warehouse: STREAMLIT_WH
+    allowed_warehouses:
+    - STREAMLIT_WH
+    compute_pool: STREAMLIT_POOL
+    external_access_integration: PYPI_ACCESS_INTEGRATION
+  roles:
+    ci_role: STREAMLIT_CI_ROLE
+    viewer_role: STREAMLIT_APP_ROLE
+governance:
+  database: ANALYTICS_DB
+  schema_allow:
+  - ANALYTICS
+  - REPORTING
+  schema_deny:
+  - RAW
+  - STAGING
+  - BRIDGE
+  read_exceptions: []
+deploy:
+  source: stage-copy
+  artifact_exclude:
+  - .streamlit/config.toml
+brand:
+  theme:
+    primary: '#3B82F6'
+    background: '#FFFFFF'
+  chart_sequence:
+  - '#3B82F6'
+  - '#10B981'
+  - '#F59E0B'
+  - '#EF4444'
+  - '#8B5CF6'
+sql_review:
+  coverage: warn
+review_gate:
+  enabled: true
