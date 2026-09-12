@@ -10,7 +10,7 @@ Every page, in this order:
 
 1. **Title + caption.** `st.title(...)` then one `st.caption(...)` saying what the page answers.
 2. **A caption under every subheader.** `st.subheader(...)` is always followed by `st.caption(...)`
-   naming the grain and the population ("daily, funded loans only"). A definition belongs where the
+   naming the grain and the population ("daily, active accounts only"). A definition belongs where the
    number is, not three inches above it in a paragraph.
 3. **Time controls in one place.** One shared helper (e.g. `pages/_time_controls.py`, imported
    package-qualified) renders the period picker and a `Selected: … · Comparing to: …` line, so
