@@ -22,6 +22,12 @@ from .config import Config, ConfigError
 
 TEMPLATES_DIR = Path(__file__).parent / "_templates"
 
+# The one ruff version a generated repo lints with: rendered into both the
+# pre-commit hook rev and the CI install. CI once installed ruff unpinned, and a
+# newer default rule set failed the untouched scaffold on its first push while
+# the pinned pre-commit hook passed it locally.
+RUFF_VERSION = "0.15.9"
+
 _DEFAULT_CHART_SEQUENCE = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#06B6D4"]
 _HEX = re.compile(r"^#[0-9A-Fa-f]{3,8}$")
 _FONT = re.compile(r"^[A-Za-z0-9 ,'\-]+$")  # font-family list, no quotes/newlines/braces
@@ -149,6 +155,7 @@ def build_context(cfg: Config, app_slug: str) -> dict:
         "read_exceptions": list(cfg.governance.read_exceptions),
         "cache_ttl": int((cfg.raw or {}).get("cache_ttl", 1800)),
         "brand": _validate_brand(brand, theme),
+        "ruff_version": RUFF_VERSION,
     }
 
 

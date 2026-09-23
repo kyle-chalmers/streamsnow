@@ -2,7 +2,7 @@
 # Requires: pip/uv install streamsnow (provides the `streamsnow` CLI).
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.9
+    rev: v{{ ruff_version }}
     hooks:
       - id: ruff-check
         args: [--fix]

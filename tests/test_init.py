@@ -382,3 +382,60 @@ def test_generated_python_is_format_clean_under_ruff_defaults(tmp_path):
         check=False,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def _scaffold_runtime(tmp_path: Path, runtime: str) -> Path:
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    if runtime == "warehouse":
+        data["runtime"] = "warehouse"
+        data["snowflake"]["objects"]["compute_pool"] = ""
+        data["snowflake"]["objects"]["external_access_integration"] = ""
+    root = tmp_path / runtime
+    scaffold(Config.from_dict(data), root, "acme-sales-dashboard")
+    return root
+
+
+def test_generated_ci_pins_the_same_ruff_as_pre_commit(tmp_path):
+    """An unpinned `uv tool install ruff` in CI picked up a newer ruff whose
+    default rule set failed the untouched scaffold on its first push, while the
+    pinned pre-commit hook passed it locally. One version, rendered into both."""
+    import re
+
+    from streamsnow.scaffolder import RUFF_VERSION
+
+    root = _scaffold_runtime(tmp_path, "container")
+    precommit = yaml.safe_load((root / ".pre-commit-config.yaml").read_text())
+    ruff_repo = next(r for r in precommit["repos"] if "ruff-pre-commit" in r["repo"])
+    assert ruff_repo["rev"] == f"v{RUFF_VERSION}"
+    ci = (root / ".github/workflows/checks.yml").read_text()
+    installs = re.findall(r"uv tool install (\S+)", ci)
+    ruff_installs = [i for i in installs if i.strip("'\"").startswith("ruff")]
+    assert ruff_installs == [f"ruff=={RUFF_VERSION}"], installs
+
+
+@pytest.mark.parametrize("runtime", ["container", "warehouse"])
+@pytest.mark.parametrize(
+    "extra",
+    [
+        [],
+        # Rules newer ruff releases enable by default; the templates must not
+        # depend on which default set the consumer's ruff happens to ship.
+        ["--extend-select", "I,C4,BLE,RUF100"],
+    ],
+)
+def test_generated_python_is_lint_clean_under_ruff(tmp_path, runtime, extra):
+    import shutil
+    import subprocess
+
+    ruff = shutil.which("ruff")
+    if ruff is None:
+        pytest.skip("ruff not on PATH")
+    root = _scaffold_runtime(tmp_path, runtime)
+    proc = subprocess.run(
+        [ruff, "check", "--isolated", "--no-cache", *extra, "apps/"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=root,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr

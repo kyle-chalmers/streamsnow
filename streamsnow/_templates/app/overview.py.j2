@@ -6,7 +6,6 @@ table in an allowed schema ({{ schema_allow | join(', ') }}).
 
 import plotly.express as px
 import streamlit as st
-
 from branding import BRAND_CHART_COLORS, branded_metric
 from sql_loader import load_sql
 
@@ -23,7 +22,7 @@ def load_example(start_date: str, end_date: str):
         from snowflake.snowpark.context import get_active_session
 
         session = get_active_session()
-    except Exception:
+    except Exception:  # noqa: BLE001  broad on purpose: see `check session-fallback`
         session = st.connection("snowflake").session()
     return session.sql(sql, params=[start_date, end_date]).to_pandas()
 {% endif %}

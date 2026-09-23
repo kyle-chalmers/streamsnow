@@ -24,12 +24,12 @@ BRAND_CHART_COLORS = [{{ brand.chart_sequence | map('tojson') | join(", ") }}]
 # across all viewers, so module-import mutations must be idempotent.
 if "streamsnow_brand" not in pio.templates:
     pio.templates["streamsnow_brand"] = go.layout.Template(
-        layout=dict(
-            font=dict(family="{{ brand.font }}", color="{{ brand.text_color }}"),
-            colorway=BRAND_CHART_COLORS,
-            paper_bgcolor="{{ brand.background }}",
-            plot_bgcolor="{{ brand.background }}",
-        )
+        layout={
+            "font": {"family": "{{ brand.font }}", "color": "{{ brand.text_color }}"},
+            "colorway": BRAND_CHART_COLORS,
+            "paper_bgcolor": "{{ brand.background }}",
+            "plot_bgcolor": "{{ brand.background }}",
+        }
     )
     pio.templates.default = "streamsnow_brand"
 BRAND_PLOTLY_TEMPLATE = "streamsnow_brand"
