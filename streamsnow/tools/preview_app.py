@@ -55,6 +55,7 @@ import socket
 import subprocess
 import sys
 import time
+import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -178,6 +179,67 @@ def streamlit_executable(entrypoint: Path) -> str:
             if candidate.is_file():
                 return str(candidate)
     return "streamlit"
+
+
+# Container apps are Python 3.11 only; the warehouse runtime tops out at 3.11
+# too, and a newer default interpreter can outrun snowflake-snowpark-python.
+_LOCAL_PYTHON = "3.11"
+_REQUIRES_PY_FLOOR = re.compile(r">=\s*(3\.\d+)")
+_CONDA_PIN = re.compile(r"^([A-Za-z0-9_.\-]+)\s*=\s*([^=<>!~\s]+)$")
+
+
+def _pip_spec(conda_dep: str) -> str:
+    """Translate one environment.yml dependency into a pip requirement.
+
+    Conda pins with a single ``=`` (``streamlit=1.50.0``) become ``==``; other
+    operators pass through. Quoted when it carries an operator, for the shell.
+    """
+    dep = conda_dep.strip()
+    m = _CONDA_PIN.match(dep)
+    if m:
+        dep = f"{m.group(1)}=={m.group(2)}"
+    return f"'{dep}'" if re.search(r"[<>=!~]", dep) else dep
+
+
+def local_install_command(app_dir: Path) -> str:
+    """The one-line local environment setup for an app, matched to its runtime.
+
+    Container apps ship a ``pyproject.toml`` and install editable. Warehouse
+    apps ship only a conda ``environment.yml`` (Snowflake's Anaconda channel),
+    so the documented ``uv pip install -e apps/<slug>`` fails on them with no
+    project file to build; install the listed packages instead.
+    """
+    rel = f"apps/{app_dir.name}"
+    pyproject = app_dir / "pyproject.toml"
+    if pyproject.is_file():
+        py = _LOCAL_PYTHON
+        try:
+            spec = (
+                tomllib.loads(pyproject.read_text()).get("project", {}).get("requires-python", "")
+            )
+            m = _REQUIRES_PY_FLOOR.search(str(spec))
+            if m:
+                py = m.group(1)
+        except (tomllib.TOMLDecodeError, OSError):
+            pass
+        return f"uv venv --python {py} && uv pip install -e {rel}"
+    env = app_dir / "environment.yml"
+    if env.is_file():
+        import yaml
+
+        try:
+            data = yaml.safe_load(env.read_text()) or {}
+        except (yaml.YAMLError, OSError):
+            data = {}
+        deps = [
+            _pip_spec(d)
+            for d in (data.get("dependencies") or [])
+            # The runtime supplies Python; a `python` line is not a package.
+            if isinstance(d, str) and re.split(r"[\s=<>!~]", d.strip(), maxsplit=1)[0] != "python"
+        ]
+        if deps:
+            return f"uv venv --python {_LOCAL_PYTHON} && uv pip install {' '.join(deps)}"
+    return f"uv venv --python {_LOCAL_PYTHON} && uv pip install streamlit (plus the app's deps)"
 
 
 def build_command(entrypoint: Path, port: int) -> list[str]:
@@ -391,8 +453,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         _emit(
             {
                 "status": "error",
-                "message": f"error: {cmd[0]!r} not found on PATH — install it in the local "
-                "environment before previewing",
+                "message": f"error: {cmd[0]!r} not found on PATH — install the app's "
+                "environment before previewing:\n  "
+                f"{local_install_command(entrypoint.parent)}",
+                "install": local_install_command(entrypoint.parent),
             },
             args.json,
         )
