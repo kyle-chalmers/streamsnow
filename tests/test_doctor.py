@@ -20,9 +20,10 @@ def _which_only(*names: str):
     return fake
 
 
-def test_result_contract_shape(tmp_path):
+def test_result_contract_shape(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor.subprocess, "run", _fake_run({}))
     results = doctor.run_checks(start=tmp_path)
-    assert results  # python + 5 tools + config + connection
+    assert results  # python + tools + config + connection + container python
     for r in results:
         assert set(r) == {"name", "ok", "level", "detail", "hint"}
         assert r["level"] in ("required", "optional")
@@ -32,9 +33,11 @@ def test_result_contract_shape(tmp_path):
         "uv",
         "snow",
         "streamlit",
+        "gh",
         "pre-commit",
         "config",
         "snow-connection",
+        "container-python",
     ]
 
 
@@ -241,3 +244,89 @@ def test_no_snowflake_cli_labs_anywhere():
     ]
     offenders = [str(p) for p in targets if "snowflake-cli-labs" in p.read_text()]
     assert not offenders, offenders
+
+
+# --------------------------------------------------------------------------- #
+# 0.7.1: snow must run (not just exist), gh, container Python 3.11, cold snow
+# --------------------------------------------------------------------------- #
+_VERSION = ("snow", "--version")
+_FIND_311 = ("uv", "python", "find")
+
+
+def test_snow_on_path_but_crashing_is_a_failure(tmp_path, monkeypatch):
+    """A Homebrew snow on a newer Python crashed on import (a pyOpenSSL
+    mismatch) and doctor still printed [ok] snow: PATH presence is not a
+    working install."""
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow"))
+    monkeypatch.setattr(doctor.subprocess, "run", _fake_run({_VERSION: (1, "")}))
+    res = doctor.check_snow()
+    assert not res["ok"] and res["level"] == "required"
+    assert res["detail"]["broken"] is True
+    assert "uv tool install snowflake-cli" in res["hint"]
+    text = doctor.render_text([res])
+    assert "[BROKEN ] snow" in text
+
+
+def test_snow_version_timeout_is_broken_and_working_snow_is_ok(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("snow"))
+
+    def slow(*_a, **_k):
+        raise doctor.subprocess.TimeoutExpired(cmd="snow", timeout=15)
+
+    monkeypatch.setattr(doctor.subprocess, "run", slow)
+    assert doctor.check_snow()["detail"]["broken"] is True
+    monkeypatch.setattr(
+        doctor.subprocess, "run", _fake_run({_VERSION: (0, "Snowflake CLI version: 3.27.0\n")})
+    )
+    res = doctor.check_snow()
+    assert res["ok"] and res["detail"]["version"] == "3.27.0"
+
+
+def test_snow_missing_stays_optional(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv"))
+    res = doctor.check_snow()
+    assert not res["ok"] and res["level"] == "optional"
+
+
+def test_snow_probe_timeout_absorbs_a_cold_start():
+    """A cold `snow` start took longer than 5 s, so the first doctor run
+    reported no connections and a re-run found one."""
+    assert doctor._SNOW_TIMEOUT_S >= 15
+
+
+def test_gh_is_an_optional_check_that_names_ship_app(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv"))
+    by_name = {r["name"]: r for r in doctor.run_checks(start=tmp_path)}
+    assert not by_name["gh"]["ok"] and by_name["gh"]["level"] == "optional"
+    assert "/ship-app" in by_name["gh"]["hint"]
+
+
+def _container_cfg(tmp_path):
+    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    return doctor.check_config(start=tmp_path)
+
+
+def test_container_repo_warns_without_a_python_311(tmp_path, monkeypatch):
+    """Doctor passed Python 3.12 while container apps pin >=3.11,<3.12."""
+    cfg = _container_cfg(tmp_path)
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("uv"))
+    monkeypatch.setattr(doctor.subprocess, "run", _fake_run({_FIND_311: (2, "")}))
+    res = doctor.check_container_python(cfg)
+    assert not res["ok"] and res["level"] == "optional"
+    assert "uv python install 3.11" in res["hint"]
+    assert "[warn   ] container-python" in doctor.render_text([res])
+    monkeypatch.setattr(
+        doctor.subprocess, "run", _fake_run({_FIND_311: (0, "/opt/acme/python3.11\n")})
+    )
+    res = doctor.check_container_python(cfg)
+    assert res["ok"] and res["detail"]["path"] == "/opt/acme/python3.11"
+
+
+def test_container_python_skipped_outside_container_repos(tmp_path, monkeypatch):
+    res = doctor.check_container_python(doctor.check_config(start=tmp_path))
+    assert not res["ok"] and "skipped" in res["detail"]
+    data = EXAMPLE.read_text().replace("runtime: container", "runtime: warehouse")
+    data = data.replace('compute_pool: "STREAMLIT_POOL"', 'compute_pool: ""')
+    (tmp_path / "streamsnow.config.yaml").write_text(data)
+    res = doctor.check_container_python(doctor.check_config(start=tmp_path))
+    assert "skipped" in res["detail"]

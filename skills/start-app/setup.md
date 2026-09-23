@@ -25,8 +25,11 @@ Report in one line ("5 checks passed, 2 need attention"), then walk each `ok: fa
 time — propose the fix (start from the check's own `hint`; the table below gives per-OS commands),
 run it on confirmation, then re-run `streamsnow doctor --format json` and confirm that check now
 reads `ok: true` before moving on. Never batch installs. `level` decides severity: a `required`
-failure blocks the build phases (doctor exits 1); an `optional` one (`snow`, `streamlit`,
-`snow-connection`) is offered, skippable. Two checks flip level by context: `config` is `optional`
+failure blocks the build phases (doctor exits 1); an `optional` one (`snow`, `streamlit`, `gh`,
+`snow-connection`, `container-python`) is offered, skippable. `snow` flips to `required` when it
+is on PATH but `snow --version` fails (`BROKEN`): reinstall with `uv tool install snowflake-cli`.
+`gh` is optional here and required later by `/ship-app`. `container-python` warns in a
+container-runtime repo with no Python 3.11 (`uv python install 3.11`). Two checks flip level by context: `config` is `optional`
 when no `streamsnow.config.yaml` exists yet and `required` when one exists but fails validation
 (a malformed config is never masked as "not configured"); `pre-commit` is `optional` on a bare
 machine and `required` once a config exists, because the generated hooks are `language: system`
@@ -39,7 +42,8 @@ skipped and continue. Exit codes: 0 = all required checks pass, 1 = a required c
 | Python 3.11+ (blocker) | runtime for apps + CLI | `brew install python@3.11` | `winget install Python.Python.3.11` / distro pkg or pyenv (hand to the user) |
 | uv (blocker) | env + dependency manager | `brew install uv` | `irm https://astral.sh/uv/install.ps1 \| iex` / `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | git identity (blocker if unset) | commit attribution | `git config user.name/user.email` — prefer repo-local scope on multi-account machines | same |
-| Snowflake CLI `snow` (optional) | `snow sql` diagnostics; the one connection store local preview reads | `brew install snowflake-cli` | `uv tool install snowflake-cli` |
+| Snowflake CLI `snow` (optional) | `snow sql` diagnostics; the one connection store local preview reads | `uv tool install snowflake-cli` (a Homebrew `snow` can break on a newer system Python) | `uv tool install snowflake-cli` |
+| GitHub CLI `gh` (optional; `/ship-app` needs it) | opens the PR and watches CI | `brew install gh`, then `gh auth login` | `winget install GitHub.cli` / distro pkg |
 | pre-commit (required once configured) | runs the governance checks before each commit | `uv tool install pre-commit` | same |
 
 After the repo is configured, `pre-commit install` wires the hooks. In git worktrees a repo-managed
