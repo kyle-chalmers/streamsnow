@@ -98,8 +98,10 @@ it only when asked. Two classic traps either way:
 
 - `account` is a locator (`ab12345.us-west-2`), **not** the full `*.snowflakecomputing.com`
   hostname — the connector appends the suffix, and a doubled one fails auth.
-- Keep `role` at the deployed **viewer role** (from config), not a broad personal role — a wide role
-  hides missing grants locally that then ship as empty dashboards. And never a password:
+- Preview with a role whose data reads match the CI role's (deployed apps run with owner's rights):
+  the viewer role with the opt-in data grants from `deploy-setup --admin` uncommented, or a developer
+  role with the same reads. Not a broad personal role, which hides missing grants locally that then
+  ship as empty dashboards. And never a password:
   Snowflake's MFA rollout retires password-only auth (`externalbrowser` or a programmatic access
   token — see docs/snowflake-docs.md).
 

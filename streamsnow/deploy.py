@@ -244,7 +244,7 @@ def generate_admin_sql(cfg: Config) -> str:
         "-- 2. Roles and the CI service user ----------------------------------------",
         "USE ROLE USERADMIN;",
         f"CREATE ROLE IF NOT EXISTS {ci};      -- deploys and owns the apps (CI)",
-        f"CREATE ROLE IF NOT EXISTS {viewer};  -- opens the apps; local preview role",
+        f"CREATE ROLE IF NOT EXISTS {viewer};  -- opens the apps (no data grants by default)",
         "-- Key-pair auth (no password): generate a key pair, paste the PUBLIC key",
         "-- below, and store the private key as the SNOWFLAKE_PRIVATE_KEY_RAW repo",
         "-- secret. Rename the user freely; SNOWFLAKE_USER must match.",
@@ -280,50 +280,59 @@ def generate_admin_sql(cfg: Config) -> str:
     out += [
         "",
         f"-- Data the apps read: governance database {gov.database}, allowed schemas only",
-        f"-- ({', '.join(gov.schema_allow)}). The CI role needs it because deployed apps run",
-        "-- as their owner; the viewer role gets it too because local preview connects",
-        "-- as the viewer role (drop those lines if viewers must never query directly).",
+        f"-- ({', '.join(gov.schema_allow)}). Only the CI role gets it: deployed apps run with",
+        "-- their owner's rights, so viewers need USAGE on the app, not SELECT on the data.",
     ]
-    normal_grants: list[str] = [
-        f"GRANT USAGE ON DATABASE {gov.database} TO ROLE {r};" for r in both
-    ]
-    for schema in gov.schema_allow:
-        fq = f"{gov.database}.{schema}"
-        for role in both:
-            normal_grants += [
+
+    def _data_grants(role: str) -> list[str]:
+        grants = [f"GRANT USAGE ON DATABASE {gov.database} TO ROLE {role};"]
+        for schema in gov.schema_allow:
+            fq = f"{gov.database}.{schema}"
+            grants += [
                 f"GRANT USAGE ON SCHEMA {fq} TO ROLE {role};",
                 f"GRANT SELECT ON ALL TABLES IN SCHEMA {fq} TO ROLE {role};",
                 f"GRANT SELECT ON ALL VIEWS IN SCHEMA {fq} TO ROLE {role};",
                 f"GRANT SELECT ON FUTURE TABLES IN SCHEMA {fq} TO ROLE {role};",
                 f"GRANT SELECT ON FUTURE VIEWS IN SCHEMA {fq} TO ROLE {role};",
             ]
-    imported = [f"GRANT IMPORTED PRIVILEGES ON DATABASE {gov.database} TO ROLE {r};" for r in both]
+        return grants
+
+    def _imported(role: str) -> str:
+        return f"GRANT IMPORTED PRIVILEGES ON DATABASE {gov.database} TO ROLE {role};"
+
+    viewer_opt_in = [
+        "-- Opt-in only: let the viewer role query this data directly (for example so",
+        "-- local preview can connect as the viewer role). Leave commented for least privilege:",
+    ]
     if shared_gov:
         out += [
             f"-- {gov.database} is a shared database: USAGE + SELECT grants do not apply to it;",
             "-- IMPORTED PRIVILEGES (below, as ACCOUNTADMIN) grants read on the whole share.",
         ]
     else:
-        out += normal_grants
+        out += _data_grants(ci)
+        out += viewer_opt_in + [f"--   {g}" for g in _data_grants(viewer)]
         out += [
             f"-- If {gov.database} is a SHARED database (a Marketplace or data-share import,",
-            "-- e.g. SNOWFLAKE_SAMPLE_DATA), the grants above fail; use these instead,",
-            "-- as ACCOUNTADMIN (they cover the whole share, not just the allowed schemas):",
-            *[f"--   {g}" for g in imported],
+            "-- e.g. SNOWFLAKE_SAMPLE_DATA), the grants above fail; use this instead,",
+            "-- as ACCOUNTADMIN (it covers the whole share, not just the allowed schemas):",
+            f"--   {_imported(ci)}",
         ]
 
     out += ["", "-- 4. Account-level objects -----------------------------------------------"]
     out.append("USE ROLE ACCOUNTADMIN;")
     account: list[str] = []
     if shared_gov:
-        account += imported
+        account.append(_imported(ci))
+        account += viewer_opt_in + [f"--   {_imported(viewer)}"]
     if cfg.runtime == "container":
         eai = o.external_access_integration
         account += [
             "-- PyPI access for the container image build. Uses Snowflake's managed",
             "-- network rule for PyPI. If your account prefers an artifact repository,",
             "-- skip this: configuring both disables the EAI.",
-            f"CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS {eai}",
+            "-- (Snowflake has no IF NOT EXISTS for this statement: skip it on a re-run.)",
+            f"CREATE EXTERNAL ACCESS INTEGRATION {eai}",
             "  ALLOWED_NETWORK_RULES = (snowflake.external_access.pypi_rule)",
             "  ENABLED = TRUE;",
             "-- Without the managed rule, create your own and list it above instead:",

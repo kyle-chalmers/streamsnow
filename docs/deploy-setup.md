@@ -38,10 +38,12 @@ Two things to check before running it:
   `GRANT IMPORTED PRIVILEGES ON DATABASE ...` as `ACCOUNTADMIN`, which covers
   the whole share. The script emits that form automatically for
   `SNOWFLAKE_SAMPLE_DATA` and as a commented alternative otherwise.
-- **Viewer-role data grants.** Deployed apps run with owner's rights (the CI
-  role), so viewers only need `USAGE` on each app. The viewer role also gets the
-  data grants because local preview connects as that role; drop those lines if
-  viewers must never query the data directly.
+- **Viewer-role data grants are opt-in.** Deployed apps run with owner's rights
+  (the CI role), so viewers only need `USAGE` on each app, and the script grants
+  the viewer role no data access by default. The same data grants for the viewer
+  role are printed commented out: uncomment them if you want local preview to
+  connect as the viewer role and mirror what the deployed app reads, or preview
+  with a developer role that has the CI role's reads.
 
 ## 1. One-time Snowflake objects
 

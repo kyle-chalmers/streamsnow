@@ -171,7 +171,7 @@ def test_admin_sql_creates_every_object_a_first_deploy_needs():
 def test_admin_sql_container_objects_custom_pool():
     sql = generate_admin_sql(_cfg())  # example pool is STREAMLIT_POOL
     acct = _stmts(_sections(sql)["ACCOUNTADMIN"])
-    assert "CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS PYPI_ACCESS_INTEGRATION" in acct
+    assert "CREATE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION" in acct
     assert "snowflake.external_access.pypi_rule" in acct
     assert "GRANT USAGE ON INTEGRATION PYPI_ACCESS_INTEGRATION TO ROLE STREAMLIT_CI_ROLE;" in acct
     assert "CREATE COMPUTE POOL IF NOT EXISTS STREAMLIT_POOL" in acct
@@ -257,3 +257,41 @@ def test_cli_deploy_setup_admin_flag(tmp_path):
     assert "USE ROLE USERADMIN;" in res.output
     plain = CliRunner().invoke(app, ["deploy-setup", "--config", str(cfg)])
     assert "USE ROLE USERADMIN;" not in plain.output
+
+
+def test_admin_sql_eai_uses_valid_create_syntax():
+    # Snowflake's CREATE EXTERNAL ACCESS INTEGRATION has no IF NOT EXISTS clause.
+    stmts = _stmts(generate_admin_sql(_cfg()))
+    assert "EXTERNAL ACCESS INTEGRATION IF NOT EXISTS" not in stmts
+    assert "CREATE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION" in stmts
+
+
+def test_admin_sql_viewer_role_gets_no_data_grants_by_default():
+    # Apps run with owner's rights, so viewers need USAGE on the app, not SELECT on data.
+    sql = generate_admin_sql(_cfg())
+    stmts = _stmts(sql)
+    assert "TO ROLE STREAMLIT_APP_ROLE;" in stmts  # app database/schema/warehouse usage stays
+    for line in stmts.splitlines():
+        if "STREAMLIT_APP_ROLE" in line:
+            assert "ANALYTICS_DB" not in line, line
+            assert "SELECT" not in line and "IMPORTED" not in line, line
+    # The viewer data grants are still offered, commented, as an explicit opt-in.
+    assert (
+        "--   GRANT SELECT ON ALL TABLES IN SCHEMA ANALYTICS_DB.ANALYTICS TO ROLE STREAMLIT_APP_ROLE;"
+        in sql
+    )
+
+
+def test_admin_sql_shared_database_imported_privileges_ci_role_only():
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data["governance"]["database"] = "SNOWFLAKE_SAMPLE_DATA"
+    sql = generate_admin_sql(Config.from_dict(data))
+    stmts = _stmts(sql)
+    assert (
+        "GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE_SAMPLE_DATA TO ROLE STREAMLIT_CI_ROLE;"
+        in stmts
+    )
+    assert (
+        "IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE_SAMPLE_DATA TO ROLE STREAMLIT_APP_ROLE"
+        not in stmts
+    )

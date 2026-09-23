@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 
 # Relative to the scanned root. Gitignored: never commit it.
@@ -93,6 +94,7 @@ def load_denylist(path: Path) -> tuple[list[str], list[re.Pattern[str]]]:
     """Parse a local denylist file into (lowercased terms, compiled regexes).
 
     A missing file is an empty list, not an error: CI has no local denylist.
+    An invalid ``re:`` line is skipped with a warning on stderr, never a crash.
     """
     terms: list[str] = []
     patterns: list[re.Pattern[str]] = []
@@ -103,7 +105,11 @@ def load_denylist(path: Path) -> tuple[list[str], list[re.Pattern[str]]]:
         if not line or line.startswith("#"):
             continue
         if line.startswith("re:"):
-            patterns.append(re.compile(line[3:].strip(), re.IGNORECASE))
+            expr = line[3:].strip()
+            try:
+                patterns.append(re.compile(expr, re.IGNORECASE))
+            except re.error as exc:
+                print(f"export-denylist: skipping invalid regex {expr!r}: {exc}", file=sys.stderr)
         else:
             terms.append(line.lower())
     return terms, patterns

@@ -204,9 +204,11 @@ Two things to get right:
 
 The per-app `apps/<slug>/.streamlit/secrets.toml` (gitignored) is an **optional
 override** for an app that needs a different role or warehouse. If you do copy
-`secrets.toml.example`, keep `role` at your config's `snowflake.roles.viewer_role`
-— deployed apps run under the CI role's grants, and a broad personal role hides
-grant gaps locally that then ship as empty dashboards.
+`secrets.toml.example`, use a role whose data reads match the CI role's, since
+deployed apps run under the CI role's grants: either the viewer role with the
+opt-in data grants from `deploy-setup --admin` uncommented, or a developer role
+with the same reads. A broad personal role hides grant gaps locally that then
+ship as empty dashboards.
 
 ### 4. Install the hooks, validate, preview
 
@@ -324,7 +326,7 @@ secrets / `secrets.toml`). The load-bearing sections:
 |---------|------------------|
 | `runtime` | `container` (default) or `warehouse` |
 | `snowflake.objects` | where apps deploy (app database/schema), the warehouse, and container `compute_pool` + `external_access_integration` |
-| `snowflake.roles` | `ci_role` (deploy) and `viewer_role` (preview + deployed access) |
+| `snowflake.roles` | `ci_role` (deploys and owns the apps, reads the data) and `viewer_role` (opens deployed apps; data reads are opt-in) |
 | `governance` | `database`, `schema_allow`, `schema_deny`, `read_exceptions` — the data guardrails. `schema_deny` is what the `schema-refs` check enforces (a denylist); `schema_allow` is the convention the scaffolded queries and docs point at, not an enforced gate |
 | `deploy.source` | `stage-copy` (default) or `git-repository`; `deploy.artifact_exclude` names non-code files your pipeline ships by another step |
 | `sql_review.coverage` | `warn` (default) or `fail` — whether an uncovered query fails `validate-app`, pre-commit and CI |

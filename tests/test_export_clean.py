@@ -109,3 +109,11 @@ def test_repo_tree_is_clean_under_generic_checks():
     """The published tree itself passes (the CI privacy-gate job, as a test)."""
     res = scan_tree(REPO_ROOT, denylist=REPO_ROOT / "does-not-exist.txt")
     assert res["ok"], res["findings"]
+
+
+def test_load_denylist_skips_malformed_regex_instead_of_crashing(tmp_path, capsys):
+    path = _denylist(tmp_path, "good term\nre:(unclosed\nre:ok\\d+\n")
+    terms, patterns = load_denylist(path)
+    assert terms == ["good term"]
+    assert [p.pattern for p in patterns] == ["ok\\d+"]
+    assert "unclosed" in capsys.readouterr().err
