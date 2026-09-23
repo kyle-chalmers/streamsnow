@@ -31,7 +31,13 @@ from .config import (
     ConfigError,
     load_config,
 )
-from .deploy import generate_create_sql, generate_refresh_sql, generate_setup_sql, stage_path
+from .deploy import (
+    generate_admin_sql,
+    generate_create_sql,
+    generate_refresh_sql,
+    generate_setup_sql,
+    stage_path,
+)
 from .scaffolder import APP_ITEMS, GOVERNANCE_ITEMS, REPO_ITEMS, render_item, scaffold
 from .tools import doctor as _doctor
 from .tools.app_nav import main as _app_nav_main
@@ -551,18 +557,27 @@ def doctor(
 @app.command(name="deploy-setup")
 def deploy_setup(
     config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+    admin: bool = typer.Option(
+        False,
+        "--admin",
+        help="Emit the full one-time admin bootstrap: database, schema, warehouse, roles, "
+        "CI service user, grants, and container/git account objects.",
+    ),
 ) -> None:
     """Emit the one-time Snowflake DDL for your configured deploy source.
 
     Pipe to `snow sql --stdin` (with an admin/CI role) to create the stage (or
     the API integration + secret + git repository). Review before running.
+    With --admin, emit everything a first deploy needs, in USE ROLE sections
+    (SYSADMIN, USERADMIN, SECURITYADMIN, ACCOUNTADMIN, then the CI role): the
+    block to hand a Snowflake admin when you cannot create these yourself.
     """
     try:
         cfg = load_config(Path(config) if config else None)
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
-    print(generate_setup_sql(cfg))
+    print(generate_admin_sql(cfg) if admin else generate_setup_sql(cfg))
 
 
 @app.command(name="config-get")

@@ -53,6 +53,14 @@ behind the numbers it shows.**
 - ❌ you host Streamlit outside Snowflake, or you want a BI tool, a scheduler,
   or a data catalog — StreamSnow sits beside those
 
+**Who can use this.** You need a Snowflake account (any edition runs
+Streamlit in Snowflake; masking and row access policies, which StreamSnow does
+not require, need Enterprise) and either a role with `CREATE STREAMLIT` on one
+schema, or a Snowflake admin willing to run the one-time bootstrap that
+`streamsnow deploy-setup --admin` prints (database, schema, warehouse, roles, a
+CI service user and grants; see [Deploy setup](docs/deploy-setup.md)).
+Building and previewing locally needs only a login that can read your data.
+
 **Principles** every change is judged against (the rules were already in the
 repo; collecting them here is what keeps future edits aligned):
 

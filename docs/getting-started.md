@@ -39,6 +39,25 @@ crashes on start, `uv tool install snowflake-cli` gives you a working one;
 `uvx streamsnow doctor` reports all of this in one pass, plus whether the
 `snow` connection your config names exists yet.
 
+### What to ask your Snowflake admin for
+
+Building and previewing an app needs only a Snowflake login that can read the
+data. Shipping one through CI needs one-time objects most people cannot create
+themselves. Run `streamsnow deploy-setup --admin` after `init` and hand the
+output to your admin; it asks for, in plain terms:
+
+- a database, schema and `XSMALL` warehouse for the apps (auto-suspending);
+- two roles: a **CI role** that deploys and owns the apps, and a **viewer role**
+  that opens them;
+- a **CI service user** with key-pair auth (you paste the public key);
+- `CREATE STREAMLIT` (and `CREATE STAGE`) on the app schema for the CI role, and
+  read access to the schemas your apps query;
+- container runtime only: `USAGE` on a PyPI external access integration and on
+  the compute pool (`SYSTEM_COMPUTE_POOL_CPU` exists already).
+
+See [Deploy setup](deploy-setup.md#0-the-admin-bootstrap-deploy-setup---admin)
+for the section-by-section breakdown.
+
 ## Path A — run the example (no Snowflake)
 
 The repo ships a complete, StreamSnow-shaped app wired to deterministic sample

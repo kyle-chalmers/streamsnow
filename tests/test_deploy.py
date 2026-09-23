@@ -9,6 +9,7 @@ import yaml
 
 from streamsnow.config import Config
 from streamsnow.deploy import (
+    generate_admin_sql,
     generate_create_sql,
     generate_refresh_sql,
     generate_setup_sql,
@@ -98,3 +99,161 @@ def test_deploy_rejects_injection_slug_and_sha():
         generate_create_sql(cfg, "bad slug;", sha="abc1234")
     with pytest.raises(ValueError):
         generate_create_sql(cfg, "ok-slug", sha="; DROP TABLE x")
+
+
+# --------------------------------------------------------------------------- #
+# 0.7.1: the admin bootstrap (`deploy-setup --admin`)
+# --------------------------------------------------------------------------- #
+
+
+def _sections(sql: str) -> dict[str, str]:
+    """Split admin SQL on `USE ROLE X;` lines -> {role: body} (last wins)."""
+    out: dict[str, str] = {}
+    role = None
+    for line in sql.splitlines():
+        if line.startswith("USE ROLE "):
+            role = line.removeprefix("USE ROLE ").rstrip(";")
+            out.setdefault(role, "")
+            continue
+        if role:
+            out[role] += line + "\n"
+    return out
+
+
+def _stmts(sql: str) -> str:
+    """Only the executable lines (comments dropped)."""
+    return "\n".join(ln for ln in sql.splitlines() if not ln.lstrip().startswith("--"))
+
+
+def test_admin_sql_creates_every_object_a_first_deploy_needs():
+    sql = generate_admin_sql(_cfg())
+    sec = _sections(sql)
+    assert list(sec)[:4] == ["SYSADMIN", "USERADMIN", "SECURITYADMIN", "ACCOUNTADMIN"]
+    sysadmin = _stmts(sec["SYSADMIN"])
+    assert "CREATE DATABASE IF NOT EXISTS DATA_APPS;" in sysadmin
+    assert "CREATE SCHEMA IF NOT EXISTS DATA_APPS.BI_APPS;" in sysadmin
+    assert "CREATE WAREHOUSE IF NOT EXISTS STREAMLIT_WH" in sysadmin
+    for opt in ("WAREHOUSE_SIZE = XSMALL", "AUTO_SUSPEND = 60", "INITIALLY_SUSPENDED = TRUE"):
+        assert opt in sysadmin
+    useradmin = _stmts(sec["USERADMIN"])
+    assert "CREATE ROLE IF NOT EXISTS STREAMLIT_CI_ROLE;" in useradmin
+    assert "CREATE ROLE IF NOT EXISTS STREAMLIT_APP_ROLE;" in useradmin
+    assert "TYPE = SERVICE" in useradmin
+    assert "RSA_PUBLIC_KEY = '<paste public key>'" in useradmin
+    sec_admin = _stmts(sec["SECURITYADMIN"])
+    for grant in (
+        "GRANT ROLE STREAMLIT_CI_ROLE TO ROLE SYSADMIN;",
+        "GRANT ROLE STREAMLIT_APP_ROLE TO ROLE SYSADMIN;",
+        "GRANT USAGE ON DATABASE DATA_APPS TO ROLE STREAMLIT_CI_ROLE;",
+        "GRANT USAGE ON DATABASE DATA_APPS TO ROLE STREAMLIT_APP_ROLE;",
+        "GRANT USAGE ON SCHEMA DATA_APPS.BI_APPS TO ROLE STREAMLIT_CI_ROLE;",
+        "GRANT USAGE ON SCHEMA DATA_APPS.BI_APPS TO ROLE STREAMLIT_APP_ROLE;",
+        "GRANT USAGE ON WAREHOUSE STREAMLIT_WH TO ROLE STREAMLIT_CI_ROLE;",
+        "GRANT USAGE ON WAREHOUSE STREAMLIT_WH TO ROLE STREAMLIT_APP_ROLE;",
+        "GRANT CREATE STREAMLIT ON SCHEMA DATA_APPS.BI_APPS TO ROLE STREAMLIT_CI_ROLE;",
+        "GRANT CREATE STAGE ON SCHEMA DATA_APPS.BI_APPS TO ROLE STREAMLIT_CI_ROLE;",
+        # governance database: a normal database gets USAGE + SELECT per allowed schema
+        "GRANT USAGE ON DATABASE ANALYTICS_DB TO ROLE STREAMLIT_CI_ROLE;",
+        "GRANT USAGE ON SCHEMA ANALYTICS_DB.ANALYTICS TO ROLE STREAMLIT_CI_ROLE;",
+        "GRANT SELECT ON ALL TABLES IN SCHEMA ANALYTICS_DB.REPORTING TO ROLE STREAMLIT_CI_ROLE;",
+        "GRANT SELECT ON FUTURE VIEWS IN SCHEMA ANALYTICS_DB.ANALYTICS TO ROLE STREAMLIT_CI_ROLE;",
+    ):
+        assert grant in sec_admin, grant
+    # Denied schemas never receive a grant.
+    assert "ANALYTICS_DB.RAW" not in _stmts(sql)
+    assert "IMPORTED PRIVILEGES" in sql  # the shared-database alternative is explained
+    assert "IMPORTED PRIVILEGES" not in _stmts(sql)
+    # The stage itself is created by the CI role that will own it.
+    ci = _stmts(sec["STREAMLIT_CI_ROLE"])
+    assert "CREATE STAGE IF NOT EXISTS DATA_APPS.BI_APPS.STREAMLIT_CODE_STAGE" in ci
+
+
+def test_admin_sql_container_objects_custom_pool():
+    sql = generate_admin_sql(_cfg())  # example pool is STREAMLIT_POOL
+    acct = _stmts(_sections(sql)["ACCOUNTADMIN"])
+    assert "CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS PYPI_ACCESS_INTEGRATION" in acct
+    assert "snowflake.external_access.pypi_rule" in acct
+    assert "GRANT USAGE ON INTEGRATION PYPI_ACCESS_INTEGRATION TO ROLE STREAMLIT_CI_ROLE;" in acct
+    assert "CREATE COMPUTE POOL IF NOT EXISTS STREAMLIT_POOL" in acct
+    assert "GRANT USAGE ON COMPUTE POOL STREAMLIT_POOL TO ROLE STREAMLIT_CI_ROLE;" in acct
+
+
+def test_admin_sql_system_pool_is_never_created():
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data["snowflake"]["objects"]["compute_pool"] = "SYSTEM_COMPUTE_POOL_CPU"
+    sql = generate_admin_sql(Config.from_dict(data))
+    assert "CREATE COMPUTE POOL" not in _stmts(sql)
+    assert "pre-provisioned" in sql
+    assert "GRANT USAGE ON COMPUTE POOL SYSTEM_COMPUTE_POOL_CPU TO ROLE STREAMLIT_CI_ROLE;" in sql
+    # ...and the default (non-admin) output no longer tells anyone to create it.
+    default = generate_setup_sql(Config.from_dict(data))
+    assert "CREATE COMPUTE POOL SYSTEM_COMPUTE_POOL_CPU" not in default
+    assert "pre-provisioned" in default
+
+
+def test_admin_sql_warehouse_runtime_has_no_container_objects():
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data["runtime"] = "warehouse"
+    data["snowflake"]["objects"]["compute_pool"] = ""
+    data["snowflake"]["objects"]["external_access_integration"] = ""
+    sql = _stmts(generate_admin_sql(Config.from_dict(data)))
+    assert "COMPUTE POOL" not in sql and "EXTERNAL ACCESS" not in sql
+
+
+def test_admin_sql_shared_database_uses_imported_privileges():
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data["governance"]["database"] = "SNOWFLAKE_SAMPLE_DATA"
+    data["governance"]["schema_allow"] = ["TPCH_SF1"]
+    sql = generate_admin_sql(Config.from_dict(data))
+    stmts = _stmts(sql)
+    assert (
+        "GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE_SAMPLE_DATA TO ROLE STREAMLIT_CI_ROLE;"
+        in _stmts(_sections(sql)["ACCOUNTADMIN"])
+    )
+    assert "GRANT SELECT ON ALL TABLES IN SCHEMA SNOWFLAKE_SAMPLE_DATA" not in stmts
+
+
+def test_admin_sql_git_repository_source():
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data["deploy"] = {
+        "source": "git-repository",
+        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "api_integration_name": "GITHUB_API_INTEGRATION",
+        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+    }
+    sql = generate_admin_sql(Config.from_dict(data))
+    sec = _sections(sql)
+    acct = _stmts(sec["ACCOUNTADMIN"])
+    assert "CREATE API INTEGRATION IF NOT EXISTS GITHUB_API_INTEGRATION" in acct
+    assert "GRANT USAGE ON INTEGRATION GITHUB_API_INTEGRATION TO ROLE STREAMLIT_CI_ROLE;" in acct
+    grants = _stmts(sec["SECURITYADMIN"])
+    assert "GRANT CREATE SECRET ON SCHEMA DATA_APPS.BI_APPS TO ROLE STREAMLIT_CI_ROLE;" in grants
+    assert (
+        "GRANT CREATE GIT REPOSITORY ON SCHEMA DATA_APPS.BI_APPS TO ROLE STREAMLIT_CI_ROLE;"
+        in grants
+    )
+    ci = _stmts(sec["STREAMLIT_CI_ROLE"])
+    assert "CREATE SECRET IF NOT EXISTS DATA_APPS.BI_APPS.GITHUB_PAT_SECRET" in ci
+    assert "CREATE GIT REPOSITORY IF NOT EXISTS DATA_APPS.BI_APPS.STREAMLIT_REPO" in ci
+    assert "CREATE STAGE" not in _stmts(sql)
+
+
+def test_default_setup_output_is_unchanged_for_stage_copy():
+    """`deploy-setup` without --admin keeps its narrow, CI-role-runnable shape."""
+    stage = generate_setup_sql(_cfg())
+    assert "CREATE ROLE" not in stage and "CREATE USER" not in stage
+    assert "deploy-setup --admin" in stage
+
+
+def test_cli_deploy_setup_admin_flag(tmp_path):
+    from typer.testing import CliRunner
+
+    from streamsnow.cli import app
+
+    cfg = tmp_path / "streamsnow.config.yaml"
+    cfg.write_text(EXAMPLE.read_text())
+    res = CliRunner().invoke(app, ["deploy-setup", "--admin", "--config", str(cfg)])
+    assert res.exit_code == 0, res.output
+    assert "USE ROLE USERADMIN;" in res.output
+    plain = CliRunner().invoke(app, ["deploy-setup", "--config", str(cfg)])
+    assert "USE ROLE USERADMIN;" not in plain.output
