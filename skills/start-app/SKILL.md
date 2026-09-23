@@ -67,7 +67,7 @@ next command at each judgment point, and never skips a checkpoint.
 10. **Run the review yourself:** follow `/review-app`'s instructions in full for this app (default
     mode; `--auto` only if the user asked for the hands-off loop). Present its verdict.
 11. **CP3:** validation passes, review is clean, user is ready → hand off to `/ship-app <slug>`
-    (a first deploy may need one-time admin DDL from `streamsnow deploy-setup` — surface, don't run).
+    (a first deploy may need one-time admin DDL from `streamsnow deploy-setup --admin` — surface, don't run).
 
 ## State — §11 Build Progress
 
