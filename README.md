@@ -50,8 +50,17 @@ behind the numbers it shows.**
 - ✅ you want Claude Code sessions and humans held to the same governance rules
 - ✅ you want a reviewer to re-run a dashboard's SQL in Snowsight without
   reading Python
-- ❌ you host Streamlit outside Snowflake, or you want a BI tool, a scheduler,
-  or a data catalog — StreamSnow sits beside those
+- ❌ you host Streamlit outside Snowflake, or you need a scheduler or a data
+  catalog (StreamSnow does neither)
+- ❌ your dashboards are for people without Snowflake logins (see below)
+
+**Where it fits next to a BI tool.** For internal analytics, meaning dashboards
+your own Snowflake users open inside Snowsight, StreamSnow can replace a BI tool:
+the apps are Python you review like any other code, they run where the data
+lives, and access is Snowflake roles. External or customer-facing analytics is
+a different job. Viewers without Snowflake logins, embedding a dashboard in
+another product, and pixel-perfect scheduled reports all need additional
+customization that StreamSnow does not provide.
 
 **Who can use this.** You need a Snowflake account (any edition runs
 Streamlit in Snowflake; masking and row access policies, which StreamSnow does
