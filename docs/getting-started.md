@@ -31,6 +31,10 @@ Install uv with `brew install uv` (macOS) or see [astral.sh/uv](https://docs.ast
 two ([Snowflake CLI installation](https://docs.snowflake.com/en/developer-guide/snowflake-cli/installation/installation)).
 The container runtime supports **Python 3.11 only**, so apps pin `>=3.11,<3.12`
 ([runtime environments](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/runtime-environments)).
+You do not need 3.11 as your system Python: `uv venv --python 3.11` downloads
+one (or run `uv python install 3.11` ahead of time). If Homebrew's `snow`
+crashes on start, `uv tool install snowflake-cli` gives you a working one;
+`streamsnow doctor` reports a broken `snow` as `BROKEN`.
 
 `uvx streamsnow doctor` reports all of this in one pass, plus whether the
 `snow` connection your config names exists yet.
@@ -190,7 +194,25 @@ grant gaps locally that then ship as empty dashboards.
 ```bash
 uv tool install pre-commit && pre-commit install
 streamsnow validate-app example-dashboard          # PASS proves the scaffold is whole
-uv venv && uv pip install -e apps/example-dashboard # the app's deps, in a repo venv
+```
+
+Then create a local environment with the app's dependencies. The command
+depends on the runtime, because the two runtimes ship different manifests:
+
+```bash
+# container runtime: the app has a pyproject.toml (Python 3.11 only)
+uv venv --python 3.11 && uv pip install -e apps/example-dashboard
+
+# warehouse runtime: the app has an environment.yml for Snowflake's Anaconda
+# channel and no pyproject.toml, so install its packages directly (translate
+# a conda pin like streamlit=1.50.0 to streamlit==1.50.0)
+uv venv --python 3.11 && uv pip install 'streamlit==1.50.0' pandas plotly snowflake-snowpark-python
+```
+
+`init` prints the exact line for your app, and so does `streamsnow preview` if
+it cannot find `streamlit`. Then:
+
+```bash
 streamsnow preview example-dashboard               # run locally vs live Snowflake
 ```
 
