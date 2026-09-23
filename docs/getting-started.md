@@ -226,8 +226,8 @@ uv venv --python 3.11 && uv pip install -e apps/example-dashboard
 
 # warehouse runtime: the app has an environment.yml for Snowflake's Anaconda
 # channel and no pyproject.toml, so install its packages directly (translate
-# a conda pin like streamlit=1.50.0 to streamlit==1.50.0)
-uv venv --python 3.11 && uv pip install 'streamlit==1.50.0' pandas plotly snowflake-snowpark-python
+# a conda pin like streamlit=1.52.2 to streamlit==1.52.2)
+uv venv --python 3.11 && uv pip install 'streamlit==1.52.2' pandas plotly snowflake-snowpark-python
 ```
 
 `init` prints the exact line for your app, and so does `streamsnow preview` if

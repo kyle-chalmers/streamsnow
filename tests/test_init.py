@@ -571,3 +571,74 @@ def test_next_block_explains_preview_role_grants():
 
     assert "no data grants" in PREVIEW_ROLE_NOTE
     assert "CI role" in PREVIEW_ROLE_NOTE
+
+
+def _warehouse_cfg() -> Config:
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data["runtime"] = "warehouse"
+    data["snowflake"]["objects"]["compute_pool"] = ""
+    data["snowflake"]["objects"]["external_access_integration"] = ""
+    return Config.from_dict(data)
+
+
+def test_warehouse_scaffold_pins_newest_supported_streamlit(tmp_path):
+    from streamsnow.scaffolder import WAREHOUSE_STREAMLIT_PIN
+
+    scaffold(_warehouse_cfg(), tmp_path, "sales-overview")
+    env = (tmp_path / "apps/sales-overview/environment.yml").read_text()
+    assert f"streamlit={WAREHOUSE_STREAMLIT_PIN}" in env
+    assert WAREHOUSE_STREAMLIT_PIN == "1.52.2"
+    assert "cosmetic" not in env
+
+
+def test_warehouse_scaffold_ships_dated_osv_allowlist(tmp_path):
+    import datetime as dt
+    import json
+
+    from streamsnow.tools import check_dependency_vulns as cdv
+
+    scaffold(_warehouse_cfg(), tmp_path, "sales-overview")
+    entries = json.loads((tmp_path / "osv_allowlist.json").read_text())
+    ids = {e["id"] for e in entries}
+    assert ids == {
+        "GHSA-7p48-42j8-8846",
+        "PYSEC-2026-2285",
+        "GHSA-vqwp-45wm-r9r5",
+        "PYSEC-2026-212",
+    }
+    for e in entries:
+        assert e["package"] == "streamlit"
+        assert len(e["reason"]) > 40
+    active, expired = cdv.load_allowlist(
+        tmp_path / "osv_allowlist.json", today=dt.date(2026, 9, 23)
+    )
+    assert len(active) == 4 and expired == []
+    # The allowlist expires so the gate fires again and forces a re-check.
+    _, later = cdv.load_allowlist(tmp_path / "osv_allowlist.json", today=dt.date(2027, 1, 1))
+    assert len(later) == 4
+
+
+def test_warehouse_scaffold_passes_the_vuln_gate_with_the_known_advisories(tmp_path, monkeypatch):
+    from streamsnow.scaffolder import WAREHOUSE_STREAMLIT_PIN
+    from streamsnow.tools import check_dependency_vulns as cdv
+
+    scaffold(_warehouse_cfg(), tmp_path, "sales-overview")
+    known = ["GHSA-7p48-42j8-8846", "PYSEC-2026-2285", "GHSA-vqwp-45wm-r9r5", "PYSEC-2026-212"]
+
+    def fake(pins):
+        return [known if (n, v) == ("streamlit", WAREHOUSE_STREAMLIT_PIN) else [] for n, v in pins]
+
+    monkeypatch.setattr(cdv, "query_osv", fake)
+    monkeypatch.chdir(tmp_path)
+    assert cdv.main(["apps"]) == 0
+
+
+def test_container_scaffold_has_no_osv_allowlist(tmp_path):
+    scaffold(load_config(EXAMPLE_CONFIG), tmp_path, "sales-overview")
+    assert not (tmp_path / "osv_allowlist.json").exists()
+
+
+def test_update_never_rewrites_the_osv_allowlist():
+    from streamsnow.scaffolder import GOVERNANCE_ITEMS
+
+    assert all(i.output != "osv_allowlist.json" for i in GOVERNANCE_ITEMS)

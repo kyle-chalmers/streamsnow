@@ -28,6 +28,14 @@ TEMPLATES_DIR = Path(__file__).parent / "_templates"
 # the pinned pre-commit hook passed it locally.
 RUFF_VERSION = "0.15.9"
 
+# Newest Streamlit the warehouse runtime supports (Snowflake's "Supported
+# versions of the Streamlit library in warehouse runtimes" list, checked
+# 2026-09-23). Every version up to it carries two CVEs fixed only in 1.53.1 and
+# 1.54.0, so warehouse repos also get a dated osv_allowlist.json (see
+# repo/osv_allowlist.json.j2). Raise this pin and drop the allowlist entries
+# once Snowflake ships a fixed version for the warehouse runtime.
+WAREHOUSE_STREAMLIT_PIN = "1.52.2"
+
 _DEFAULT_CHART_SEQUENCE = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#06B6D4"]
 _HEX = re.compile(r"^#[0-9A-Fa-f]{3,8}$")
 _FONT = re.compile(r"^[A-Za-z0-9 ,'\-]+$")  # font-family list, no quotes/newlines/braces
@@ -84,6 +92,9 @@ RENDER_MAP: tuple[RenderItem, ...] = (
     ),
     RenderItem("repo/README.md.j2", "README.md"),
     RenderItem("repo/tombstones.yml.j2", "deploy/tombstones.yml"),
+    RenderItem(
+        "repo/osv_allowlist.json.j2", "osv_allowlist.json", lambda c: c.runtime == "warehouse"
+    ),
     RenderItem("app/streamlit_app.py.j2", "apps/{slug}/streamlit_app.py"),
     RenderItem("app/AGENTS.md.j2", "apps/{slug}/AGENTS.md"),
     RenderItem("app/snowflake.yml.j2", "apps/{slug}/snowflake.yml"),
@@ -116,7 +127,9 @@ REPO_ITEMS = tuple(i for i in RENDER_MAP if not i.output.startswith("apps/{slug}
 # user-owned; deploy/tombstones.yml is a REGISTRY users append to — an update
 # re-render would wipe their tombstone entries.
 GOVERNANCE_ITEMS = tuple(
-    i for i in REPO_ITEMS if i.output not in ("README.md", ".gitignore", "deploy/tombstones.yml")
+    i
+    for i in REPO_ITEMS
+    if i.output not in ("README.md", ".gitignore", "deploy/tombstones.yml", "osv_allowlist.json")
 )
 
 
@@ -134,6 +147,7 @@ def build_context(cfg: Config, app_slug: str) -> dict:
         "app_slug": app_slug,
         "app_title": _title_from_slug(app_slug),
         "runtime": cfg.runtime,
+        "warehouse_streamlit_pin": WAREHOUSE_STREAMLIT_PIN,
         "deploy_source": cfg.deploy.source,
         "account": cfg.snowflake.account,
         "connection_name": cfg.snowflake.connection_name,
