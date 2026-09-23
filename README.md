@@ -57,10 +57,10 @@ behind the numbers it shows.**
 **Where it fits next to a BI tool.** For internal analytics, meaning dashboards
 your own Snowflake users open inside Snowsight, StreamSnow can replace a BI tool:
 the apps are Python you review like any other code, they run where the data
-lives, and access is Snowflake roles. External or customer-facing analytics is
+lives, and access is managed with Snowflake roles. External or customer-facing analytics is
 a different job. Viewers without Snowflake logins, embedding a dashboard in
-another product, and pixel-perfect scheduled reports all need additional
-customization that StreamSnow does not provide.
+another product, and pixel-perfect scheduled reports are all possible, but they
+take additional customization beyond what StreamSnow ships today.
 
 **Who can use this.** You need a Snowflake account (any edition runs
 Streamlit in Snowflake; masking and row access policies, which StreamSnow does
@@ -99,7 +99,7 @@ StreamSnow is a **hybrid** of two things that work together:
 1. **A `streamsnow` CLI** (PyPI) — scaffolds a governed Streamlit-in-Snowflake
    monorepo, runs an interactive setup wizard, and vendors the validation
    tools, CI, pre-commit hooks, and branding your repo needs.
-2. **A Claude Code plugin** (marketplace) — ships the skills, subagents, and
+2. **A Claude Code plugin** (marketplace) — ships the skills and
    hooks that turn Claude Code into a domain expert for this stack:
    `/start-app` (the front door), `/preview-app`, `/validate-app`,
    `/review-app`, `/ship-app`, and more.
