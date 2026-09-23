@@ -5,11 +5,18 @@
 StreamSnow was extracted from a private monorepo, so before flipping the repo
 public or cutting the first PyPI release:
 
-1. **Automated scan** — must be clean:
+1. **Automated scan** (must be clean):
    ```bash
    uv run python -m streamsnow.tools.check_export_clean .
    ```
-   (Also runs as the `privacy-gate` CI job on every push.)
+   The committed scanner only knows generic leaks (personal paths, private
+   keys, tokens, real email addresses). Names specific to where you work
+   (employer, internal hosts, table names, ticket prefixes) go in
+   `.streamsnow/export-denylist.txt`, one term per line (`re:` prefix for a
+   regex, `#` for comments). That file is gitignored on purpose: a committed
+   list of names not to leak is itself the leak. The `privacy-gate` CI job runs
+   the generic checks on every push; run the scan locally, with your denylist
+   present, before every release.
 2. **Human review** — skim for anything the scanner can't know is sensitive:
    - real company/people/customer names, internal URLs, ticket IDs, account locators
    - screenshots or example data derived from real systems
@@ -54,7 +61,7 @@ public or cutting the first PyPI release:
 
 Only after the privacy gate passes and you've decided to open it:
 ```bash
-GH_TOKEN="$GITHUB_TOKEN" gh repo edit kyle-chalmers/streamsnow --visibility public --accept-visibility-change-consequences
+GH_TOKEN="$GH_TOKEN" gh repo edit kyle-chalmers/streamsnow --visibility public --accept-visibility-change-consequences
 ```
 
 ## Claude Code plugin marketplace

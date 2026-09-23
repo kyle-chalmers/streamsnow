@@ -19,7 +19,7 @@ Match the failed log against these patterns (case-insensitive — Snowflake iden
 
 | Log signature (substring) | Cause | Fix (one-time, account owner) |
 |---|---|---|
-| `Insufficient privileges`, `does not exist or not authorized`, `Object ... not authorized` on a `BUSINESS_*`/data object | `<ROLE>` lacks a grant on the schema/object the app queries | `GRANT USAGE ON SCHEMA ...; GRANT SELECT ON ... TO ROLE <ROLE>;` — re-run via `streamsnow deploy-setup` output. Then re-deploy by re-running the CI job. |
+| `Insufficient privileges`, `does not exist or not authorized`, `Object ... not authorized` on a schema, table or view the app reads | `<ROLE>` lacks a grant on the schema/object the app queries | `GRANT USAGE ON SCHEMA ...; GRANT SELECT ON ... TO ROLE <ROLE>;` — re-run via `streamsnow deploy-setup` output. Then re-deploy by re-running the CI job. |
 | `Compute pool ... does not exist`, `pool ... not found`, `COMPUTE_POOL` invalid | Container runtime declared in `snowflake.yml` but `<POOL>` was never created | `CREATE COMPUTE POOL <POOL> ...` (see `streamsnow deploy-setup`). Per-invocation infra op — owner runs it. |
 | `External access integration ... does not exist`, `EAI ... not authorized`, PyPI install / network blocked during image build | `<EAI>` missing or not granted; container can't reach PyPI | Create + grant `<EAI>` to `<ROLE>`; ensure the app's `snowflake.yml` references it. `streamsnow deploy-setup` emits the DDL. |
 | `Stage ... does not exist`, `@<STAGE>` not found, `snow stage copy` target error | Code stage `<STAGE>` not created, or wrong FQN in config | Create `<STAGE>` (one-time, `streamsnow deploy-setup`) or correct `snowflake.objects.stage_*` in `streamsnow.config.yaml`. Confirm with `streamsnow stage-path`. |
