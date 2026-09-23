@@ -186,7 +186,7 @@ def check_container_python(cfg_result: dict) -> dict:
             False,
             OPTIONAL,
             {"skipped": "not a container-runtime repo"},
-            "skipped — not a container-runtime repo",
+            "skipped: not a container-runtime repo",
         )
     want = str(detail.get("container_python") or "3.11")
     found = ""
@@ -231,7 +231,7 @@ def check_snow_connection(cfg_result: dict, snow_result: dict | None = None) -> 
             False,
             OPTIONAL,
             {"skipped": "snow is broken", "connection_name": name},
-            "skipped — fix the snow CLI first",
+            "skipped: fix the snow CLI first",
         )
     if shutil.which("snow") is None:
         return _result(

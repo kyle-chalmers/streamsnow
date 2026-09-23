@@ -64,7 +64,7 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
   lost (often in manual conflict resolution) — re-read the diff and correct one or the other before
   opening the PR.
 - Most deploy-run failures resolve to one-time, admin-applied DDL emitted by
-  `streamsnow deploy-setup --admin` — surface the named fix; never run DDL from here.
+  `streamsnow deploy-setup --admin`: surface the named fix; never run DDL from here.
 
 ## Troubleshooting
 

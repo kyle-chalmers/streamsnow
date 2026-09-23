@@ -24,7 +24,7 @@ next command at each judgment point, and never skips a checkpoint.
 - **`--spec [<slug>]`** — write or refresh the requirements spec only, then stop for review. Covers
   brand-new specs, ticket ingestion, and **backfill** (reverse-engineering the spec from an existing
   app's source — automatic when `apps/<slug>/` already has code). Follow [spec.md](spec.md).
-- **`--setup`** — first-time machine + repo setup: prerequisites, then `streamsnow init --no-starter-app`
+- **`--setup`**: first-time machine + repo setup: prerequisites, then `streamsnow init --no-starter-app`
   (config + governed repo files: hooks, CI, .gitignore; no example app). Follow [setup.md](setup.md).
 - **`adopt`** — the repo already has Streamlit apps or its own Claude commands that didn't come from
   StreamSnow. Map onto what exists instead of scaffolding over it, and write a `MIGRATION.md`
@@ -67,7 +67,7 @@ next command at each judgment point, and never skips a checkpoint.
 10. **Run the review yourself:** follow `/review-app`'s instructions in full for this app (default
     mode; `--auto` only if the user asked for the hands-off loop). Present its verdict.
 11. **CP3:** validation passes, review is clean, user is ready → hand off to `/ship-app <slug>`
-    (a first deploy may need one-time admin DDL from `streamsnow deploy-setup --admin` — surface, don't run).
+    (a first deploy may need one-time admin DDL from `streamsnow deploy-setup --admin`: surface it, don't run it).
 
 ## State — §11 Build Progress
 

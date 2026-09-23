@@ -453,7 +453,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _emit(
             {
                 "status": "error",
-                "message": f"error: {cmd[0]!r} not found on PATH — install the app's "
+                "message": f"error: {cmd[0]!r} not found on PATH. Install the app's "
                 "environment before previewing:\n  "
                 f"{local_install_command(entrypoint.parent)}",
                 "install": local_install_command(entrypoint.parent),

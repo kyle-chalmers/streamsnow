@@ -4,8 +4,8 @@ Runs the governance checks (required files, naming, runtime-matched manifest,
 artifacts, schema-refs, app-security, bind-predicates, caching, sql-tokens,
 session-fallback, page-imports, path-leaks, requirements-§11) over
 ``apps/<slug>/`` and returns a single PASS/FAIL. A ``placeholders`` check warns
-(never fails) while a query still reads the scaffold's ``YOUR_TABLE``. No database, no network —
-which is why ``check_dependency_vulns`` (OSV.dev) is deliberately NOT in this
+(never fails) while a query still reads the scaffold's ``YOUR_TABLE``.
+No database, no network, which is why ``check_dependency_vulns`` (OSV.dev) is deliberately NOT in this
 aggregate: it runs as its own pre-commit hook (``--best-effort``) and CI job,
 and the ``/validate-app`` skill shells to it as a separate section. This is
 what the ``/validate-app`` skill and ``/ship-app`` call as the hard gate.
