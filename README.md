@@ -125,9 +125,10 @@ you what is missing).
 ```
 
 `/start-app --setup` installs the `streamsnow` CLI if it is missing, runs the
-doctor, walks each missing prerequisite one confirmation at a time, runs the
-five-question `streamsnow configure`, and hands you to `/start-app` to build
-your first app. In a repo that already has Streamlit apps it switches to adopt
+doctor, walks each missing prerequisite one confirmation at a time, runs
+`streamsnow init --no-starter-app` (the five-question wizard plus the governed
+repo files: `AGENTS.md`, pre-commit hooks, CI, `.gitignore`, README; no example
+app), and hands you to `/start-app` to build your first app. In a repo that already has Streamlit apps it switches to adopt
 mode (maps onto what exists, writes `MIGRATION.md`, never scaffolds over you).
 
 ### CLI only
@@ -140,8 +141,13 @@ snow connection add --connection-name <name> --account <locator> \
   --user <you> --authenticator externalbrowser --default   # init prints the exact command
 uv tool install pre-commit && pre-commit install
 streamsnow validate-app example-dashboard                 # PASS proves the scaffold is whole
-uv venv && uv pip install -e apps/example-dashboard && streamsnow preview example-dashboard
+uv venv --python 3.11 && uv pip install -e apps/example-dashboard   # container runtime
+streamsnow preview example-dashboard
 ```
+
+On the warehouse runtime an app has `environment.yml` instead of `pyproject.toml`,
+so install its packages directly (`init` and `streamsnow preview` print the exact
+line).
 
 One connection store: `st.connection("snowflake")` reads the `snow` CLI's default
 connection locally, so the per-app `secrets.toml` is an optional override, not a

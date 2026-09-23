@@ -24,8 +24,8 @@ next command at each judgment point, and never skips a checkpoint.
 - **`--spec [<slug>]`** — write or refresh the requirements spec only, then stop for review. Covers
   brand-new specs, ticket ingestion, and **backfill** (reverse-engineering the spec from an existing
   app's source — automatic when `apps/<slug>/` already has code). Follow [spec.md](spec.md).
-- **`--setup`** — first-time machine + repo setup: prerequisites, then `streamsnow configure`
-  (≤5 questions; everything else is a commented default in the config). Follow [setup.md](setup.md).
+- **`--setup`** — first-time machine + repo setup: prerequisites, then `streamsnow init --no-starter-app`
+  (config + governed repo files: hooks, CI, .gitignore; no example app). Follow [setup.md](setup.md).
 - **`adopt`** — the repo already has Streamlit apps or its own Claude commands that didn't come from
   StreamSnow. Map onto what exists instead of scaffolding over it, and write a `MIGRATION.md`
   checklist. Follow [adopt.md](adopt.md).

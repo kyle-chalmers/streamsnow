@@ -439,3 +439,98 @@ def test_generated_python_is_lint_clean_under_ruff(tmp_path, runtime, extra):
         cwd=root,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# --------------------------------------------------------------------------- #
+# 0.7.1: the plugin setup path must write the governed repo, not just config
+# --------------------------------------------------------------------------- #
+_REPO_FILES = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    ".github/workflows/checks.yml",
+    ".github/workflows/deploy.yml",
+    "README.md",
+    "deploy/tombstones.yml",
+)
+
+
+def test_init_no_starter_app_writes_repo_files_without_an_app(tmp_path):
+    """`/start-app --setup` used to run only `configure`, and `/start-app` then
+    ran `new`, which writes app files only: a repo with no .gitignore (so a
+    secrets.toml could be committed), no hooks, no CI. `init --no-starter-app`
+    is the setup verb that writes the governed repo and nothing app-shaped."""
+    result = runner.invoke(
+        app, ["init", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path), "--no-starter-app"]
+    )
+    assert result.exit_code == 0, result.output
+    for rel in _REPO_FILES:
+        assert (tmp_path / rel).is_file(), f"missing {rel}"
+    assert not (tmp_path / "apps").exists()
+    readme = (tmp_path / "README.md").read_text()
+    assert "example-dashboard" not in readme
+    assert "apps//" not in readme and "| |" not in readme
+    assert "streamsnow new" in readme
+    assert "secrets.toml" in (tmp_path / ".gitignore").read_text()
+    assert "streamsnow new <domain> <function>" in result.output
+
+
+def test_init_no_starter_app_reuses_an_existing_config(tmp_path):
+    """The setup skill runs `configure` first on some paths; init must reuse it."""
+    assert (
+        runner.invoke(
+            app, ["configure", "--dir", str(tmp_path), "--config", str(EXAMPLE_CONFIG)]
+        ).exit_code
+        == 0
+    )
+    before = (tmp_path / CONFIG_FILENAME).read_text()
+    result = runner.invoke(app, ["init", "--dir", str(tmp_path), "--no-starter-app"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / CONFIG_FILENAME).read_text() == before
+    assert (tmp_path / ".gitignore").is_file()
+    # Re-running is idempotent: existing repo files are left alone.
+    (tmp_path / "README.md").write_text("# mine\n")
+    assert runner.invoke(app, ["init", "--dir", str(tmp_path), "--no-starter-app"]).exit_code == 0
+    assert (tmp_path / "README.md").read_text() == "# mine\n"
+
+
+def test_new_warns_when_repo_governance_files_are_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert (
+        runner.invoke(
+            app, ["configure", "--dir", str(tmp_path), "--config", str(EXAMPLE_CONFIG)]
+        ).exit_code
+        == 0
+    )
+    result = runner.invoke(app, ["new", "sales", "order-trends"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "apps/sales-order-trends/streamlit_app.py").is_file()
+    out = " ".join(result.output.split())
+    assert "streamsnow init --no-starter-app" in out
+    assert ".gitignore" in out and ".pre-commit-config.yaml" in out
+
+    # Once the repo files exist, `new` is quiet about them.
+    assert runner.invoke(app, ["init", "--dir", str(tmp_path), "--no-starter-app"]).exit_code == 0
+    result = runner.invoke(app, ["new", "sales", "region-mix"])
+    assert result.exit_code == 0, result.output
+    assert "--no-starter-app" not in result.output
+
+
+def test_init_next_block_puts_the_plugin_first(tmp_path):
+    """Docs Path B installs the plugin first; the Next: block agrees."""
+    result = runner.invoke(
+        app, ["init", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path), "--app", "a-b"]
+    )
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert out.index("/plugin marketplace add") < out.index("snow connection add")
+    # B8: the starter query is a placeholder until repointed.
+    assert "YOUR_TABLE" in out
+
+
+def test_setup_skill_writes_repo_files_on_a_repo_without_apps():
+    setup = (REPO_ROOT / "skills/start-app/setup.md").read_text()
+    assert "streamsnow init --no-starter-app" in setup
+    skill = (REPO_ROOT / "skills/start-app/SKILL.md").read_text()
+    assert "init --no-starter-app" in skill

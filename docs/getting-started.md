@@ -76,9 +76,12 @@ What `--setup` does, in order, confirming each fix before it runs it:
    your PATH — every later skill calls it, so this is required, not optional.
 2. Runs `streamsnow doctor` and walks each missing prerequisite (Python, uv,
    git identity, `snow`, `pre-commit`) one at a time.
-3. Runs `streamsnow configure`: five questions (runtime, account locator, the
-   database apps query, allowed schemas, deploy source). Everything else is a
-   commented default in `streamsnow.config.yaml`.
+3. Runs `streamsnow init --no-starter-app`: five questions (runtime, account
+   locator, the database apps query, allowed schemas, deploy source), then the
+   governed repo files (`AGENTS.md`, `CLAUDE.md`, pre-commit hooks, CI and deploy
+   workflows, `.gitignore`, `README.md`, `deploy/tombstones.yml`). No example
+   app: `/start-app` scaffolds your real one. Everything else is a commented
+   default in `streamsnow.config.yaml`.
 4. Prints the one-time `snow connection add … --default` command for your
    account and, once you have run it, confirms the connection exists.
 5. Hands you to `/start-app` to spec, scaffold, build, preview, validate,
@@ -118,12 +121,15 @@ streamsnow init              # scaffolds into the current directory — cd to yo
 roles, governance schemas, runtime, and deploy source), then scaffolds a
 governed repo with a starter app under `apps/<slug>/`. To split the steps, run
 `streamsnow configure` first (config only), then `streamsnow init` to scaffold.
+`streamsnow init --no-starter-app` writes the repo files without the example
+app (then `streamsnow new <domain> <function>` adds your first real one).
 
 `init` reuses an existing config and silently skips repo-level files it already
 wrote, but it **errors on the starter app's files** if that app already exists —
 re-run with `--force` to overwrite them, or `--app <slug>` to name a different
 starter app (default `example-dashboard`). Pass `--reconfigure` to re-run the
-wizard. Its closing `Next:` block is the rest of this section.
+wizard. Its closing `Next:` block is the rest of this section; its first step,
+installing the Claude Code plugin, is optional on this path (step 6 below).
 
 A scaffolded app looks like:
 

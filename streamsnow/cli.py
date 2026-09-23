@@ -1,7 +1,8 @@
 """StreamSnow command-line interface.
 
 streamsnow configure      Set up / update streamsnow.config.yaml for your Snowflake env
-streamsnow init           Configure + scaffold a governed repo + starter app
+streamsnow init           Configure + scaffold a governed repo (+ starter app unless
+                          --no-starter-app)
 streamsnow new            Scaffold another app in an existing StreamSnow repo
 streamsnow doctor         Check the local environment for prerequisites
 streamsnow check ...      Run a governance check (e.g. schema-refs)
@@ -48,6 +49,7 @@ from .tools.check_session_fallback import main as _session_fallback_main
 from .tools.check_sql_tokens import main as _sql_tokens_main
 from .tools.check_tombstones import main as _tombstones_main
 from .tools.migrate_app import main as _migrate_main
+from .tools.preview_app import local_install_command
 from .tools.preview_app import main as _preview_main
 from .tools.review_gate import main as _review_gate_main
 from .tools.review_loop import main as _review_loop_main
@@ -373,13 +375,24 @@ def init(
     reconfigure: bool = typer.Option(
         False, "--reconfigure", help="Re-run the config wizard even if a config already exists."
     ),
+    no_starter_app: bool = typer.Option(
+        False,
+        "--no-starter-app",
+        help="Write the governed repo files (AGENTS.md, hooks, CI, .gitignore, README, "
+        "tombstones) without the example app. The setup path for /start-app.",
+    ),
 ) -> None:
-    """Set up a governed repo with a starter app: configure + scaffold.
+    """Set up a governed repo: configure + repo files + a starter app.
 
     Reuses an existing streamsnow.config.yaml unless --reconfigure/--config is
-    given, so re-running init to add the scaffold is safe.
+    given, so re-running init to add the scaffold is safe. Repo-level files that
+    already exist are left alone. --no-starter-app skips the example app, which
+    is what `/start-app --setup` runs before `streamsnow new` builds the real one.
     """
-    _validate_slug(app_slug)
+    if no_starter_app:
+        app_slug = ""
+    else:
+        _validate_slug(app_slug)
     target = directory.resolve()
     target.mkdir(parents=True, exist_ok=True)
     cfg_out = target / CONFIG_FILENAME
@@ -406,7 +419,9 @@ def init(
         repo_written = scaffold(
             cfg, target, app_slug, items=REPO_ITEMS, force=force, skip_existing=True
         )
-        app_written = scaffold(cfg, target, app_slug, items=APP_ITEMS, force=force)
+        app_written = (
+            [] if no_starter_app else scaffold(cfg, target, app_slug, items=APP_ITEMS, force=force)
+        )
     except FileExistsError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
@@ -416,19 +431,47 @@ def init(
     # from commit 1 (static manifest — deterministic, no app imports).
     if app_written and _sql_review_main(["generate", app_slug, "--dir", str(target)]) != 0:
         console.print("[yellow]∘[/] sql_review companion generation failed — see error above")
-    console.print(f"[green]✓[/] scaffolded {len(written)} files into {target}")
-    console.print(
-        f"\nNext:\n"
-        f"  1. {_connection_hint(cfg)}\n"
-        f"     (one-time; st.connection('snowflake') reads this default connection locally.\n"
-        f"      Per-app apps/{app_slug}/.streamlit/secrets.toml is an optional override.)\n"
-        f"  2. uv tool install pre-commit && pre-commit install   (the governance hooks)\n"
-        f"  3. streamsnow validate-app {app_slug}   (PASS proves the scaffold is whole)\n"
-        f"  4. uv venv && uv pip install -e apps/{app_slug} && streamsnow preview {app_slug}\n"
-        f"  5. In Claude Code:  /plugin marketplace add kyle-chalmers/streamsnow\n"
-        f"                      /plugin install streamsnow@streamsnow   then /start-app\n"
-        f"  Add the app to README.md's Apps table."
-    )
+    # soft_wrap: commands in these blocks must stay copy-pasteable on one line.
+    console.print(f"[green]✓[/] scaffolded {len(written)} files into {target}", soft_wrap=True)
+    console.print(_init_next_steps(cfg, target, app_slug or None), soft_wrap=True)
+
+
+def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
+    """The closing Next: block. The plugin comes first, matching docs Path B;
+    CLI-only users skip that step."""
+    lines = [
+        "",
+        "Next:",
+        "  1. Claude Code users: /plugin marketplace add kyle-chalmers/streamsnow",
+        "                        /plugin install streamsnow@streamsnow   then /start-app",
+        "     (CLI only? skip this step.)",
+        f"  2. {_connection_hint(cfg)}",
+        "     (one-time; st.connection('snowflake') reads this default connection locally.",
+        "      Per-app apps/<slug>/.streamlit/secrets.toml is an optional override.)",
+        "  3. uv tool install pre-commit && pre-commit install   (the governance hooks)",
+    ]
+    if app_slug is None:
+        lines += [
+            "  4. streamsnow new <domain> <function>   (or /start-app) to scaffold your first app",
+            "  One-time Snowflake objects for the first deploy: streamsnow deploy-setup --admin",
+            "  (review it, then hand it to your Snowflake admin).",
+        ]
+        return "\n".join(lines)
+    install = local_install_command(target / "apps" / app_slug)
+    lines += [
+        f"  4. Repoint apps/{app_slug}/queries/example_metric.sql at a real table: it reads",
+        "     YOUR_TABLE until you do (validate-app warns about it).",
+        f"  5. streamsnow validate-app {app_slug}   (PASS proves the scaffold is whole)",
+        f"  6. {install}",
+        f"     streamsnow preview {app_slug}",
+        "  Add the app to README.md's Apps table.",
+    ]
+    return "\n".join(lines)
+
+
+def _missing_repo_files(cfg: Config, root: Path) -> list[str]:
+    """Repo-level governed files this config calls for that are not on disk."""
+    return [i.output for i in REPO_ITEMS if i.when(cfg) and not (root / i.output).exists()]
 
 
 @app.command()
@@ -452,6 +495,19 @@ def new(
     if _sql_review_main(["generate", slug, "--dir", str(Path.cwd())]) != 0:
         console.print("[yellow]∘[/] sql_review companion generation failed — see error above")
     console.print(f"[green]✓[/] created app {slug} ({len(written)} files)")
+    # `new` writes app files only. A repo set up with `configure` alone (the
+    # pre-0.7.1 plugin setup path) has no .gitignore, hooks or CI: warn loudly,
+    # because without .gitignore an app's .streamlit/secrets.toml can be committed.
+    missing = _missing_repo_files(cfg, Path.cwd())
+    if missing:
+        console.print(
+            "[yellow]warning:[/] this repo is missing StreamSnow's governed repo files: "
+            f"{', '.join(missing)}.\n"
+            "  Without them there are no pre-commit hooks or CI checks, and nothing "
+            "gitignores .streamlit/secrets.toml.\n"
+            "  Fix: streamsnow init --no-starter-app   (reuses your config; writes only the "
+            "missing files)"
+        )
     console.print(
         f"Next: streamsnow validate-app {slug}, then add {slug} to README.md's Apps table "
         "(the index is hand-maintained and the row is the step teams forget)."

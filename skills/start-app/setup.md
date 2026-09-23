@@ -46,22 +46,45 @@ After the repo is configured, `pre-commit install` wires the hooks. In git workt
 `core.hooksPath` can make it refuse — confirm with the user before unsetting (it's sometimes
 intentional).
 
-## 2 · Repo configuration
+## 2 · Repo configuration + governed repo files
 
-Run `streamsnow configure`. It detects what it can and asks **at most 5 questions** — runtime,
-Snowflake account, the database apps query, the allowed schemas, and the deploy source. Everything
-else (project name, roles, warehouse, schema names, container objects) is written as a sensible
-default with an inline comment saying when to change it; the file is the editing surface, and
-re-running `configure` prefills from it, so re-running is an edit, not a restart.
+First decide which case this is:
 
-- **Don't hand-author `streamsnow.config.yaml` from scratch** — `configure` owns its shape.
-- On a brand-new repo, `streamsnow init` runs configure plus a starter-app scaffold in one shot.
-- If the repo **already has Streamlit apps or its own Claude commands**, stop — that's
+- The repo **already has Streamlit apps or its own Claude commands**: stop, that's
   [adopt mode](adopt.md), which maps onto what exists instead of scaffolding.
+- Otherwise (an empty repo, or one with no `apps/` yet), run:
+
+  ```
+  streamsnow init --no-starter-app
+  ```
+
+  This is the setup verb. It runs the config wizard (or reuses an existing
+  `streamsnow.config.yaml`) and then writes the governed repo files: `AGENTS.md`, `CLAUDE.md`,
+  `.gitignore`, `.pre-commit-config.yaml`, `.github/workflows/`, `README.md` and
+  `deploy/tombstones.yml`. It writes no example app; `/start-app` scaffolds the real one next
+  with `streamsnow new`. **Never run only `streamsnow configure` here**: `configure` writes the
+  config file and nothing else, and `streamsnow new` writes app files only, so a repo set up that
+  way has no hooks, no CI and no `.gitignore` (an app's `.streamlit/secrets.toml` could then be
+  committed). `streamsnow new` warns when those files are missing; the fix is the same command.
+
+The wizard detects what it can and asks **at most 5 questions**: runtime, Snowflake account, the
+database apps query, the allowed schemas, and the deploy source. Everything else (project name,
+roles, warehouse, schema names, container objects) is written as a sensible default with an inline
+comment saying when to change it; the file is the editing surface. To change answers later, run
+`streamsnow configure` (it prefills from the current file, so re-running is an edit, not a
+restart); existing repo files are left alone by a re-run of `init --no-starter-app`.
+
+- **Don't hand-author `streamsnow.config.yaml` from scratch**: the wizard owns its shape.
+- `streamsnow init` without the flag also scaffolds an `example-dashboard` starter app. That is
+  the CLI-only path; in this skill the real app comes from `/start-app`, so pass the flag.
+- The first deploy needs one-time Snowflake objects (database, schema, warehouse, roles, a CI
+  service user, grants). `streamsnow deploy-setup --admin` prints the reviewable DDL; surface it
+  for the user's Snowflake admin, never run it yourself.
 
 ## 3 · Connection (one store, owned by the user)
 
-`streamsnow configure` prints the exact `snow connection add … --default` command for the account.
+`streamsnow init` (and `configure`) print the exact `snow connection add … --default` command for
+the account.
 Have the user run it (it opens a browser for SSO) — never ask for credentials in chat. That writes
 the `snow` CLI's `connections.toml`, which `st.connection("snowflake")` reads locally, so it is the
 only place account details get typed. Then re-run `streamsnow doctor --format json` and confirm the
@@ -89,7 +112,8 @@ it only when asked. Two classic traps either way:
 
 ## Done → next step
 
-Everything green and config written. Branch on intent, and let the user choose:
+Everything green, config written, and the governed repo files on disk (`ls AGENTS.md .gitignore
+.pre-commit-config.yaml` answers). Branch on intent, and let the user choose:
 
 ```
 Building a new dashboard?          → /start-app          (this skill's default mode)
@@ -98,5 +122,5 @@ Porting an external Streamlit app? → /migrate-app
 Just want to run one locally?      → /preview-app <slug>
 ```
 
-This mode never fills in credentials, never touches CI or deploy config, and installs nothing
-without confirmation.
+This mode never fills in credentials, never edits existing CI or deploy config (`init` only
+writes repo files that are missing), and installs nothing without confirmation.
