@@ -52,7 +52,8 @@ behind the numbers it shows.**
   reading Python
 - ❌ you host Streamlit outside Snowflake, or you need a scheduler or a data
   catalog (StreamSnow does neither)
-- ❌ your dashboards are for people without Snowflake logins (see below)
+- ❌ your dashboards are for people without Snowflake logins, out of the box
+  (possible with customization; see below)
 
 **Where it fits next to a BI tool.** For internal analytics, meaning dashboards
 your own Snowflake users open inside Snowsight, StreamSnow can replace a BI tool:

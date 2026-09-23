@@ -38,7 +38,14 @@ from .deploy import (
     generate_setup_sql,
     stage_path,
 )
-from .scaffolder import APP_ITEMS, GOVERNANCE_ITEMS, REPO_ITEMS, render_item, scaffold
+from .scaffolder import (
+    APP_ITEMS,
+    CREATE_IF_MISSING_ITEMS,
+    GOVERNANCE_ITEMS,
+    REPO_ITEMS,
+    render_item,
+    scaffold,
+)
 from .tools import doctor as _doctor
 from .tools.app_nav import main as _app_nav_main
 from .tools.check_app_security import main as _security_main
@@ -687,7 +694,8 @@ def update(
     apply: bool = typer.Option(False, "--apply", help="Write changes (default: dry-run)."),
 ) -> None:
     """Re-render governance files (AGENTS.md, hooks, CI, deploy) from your current
-    config + installed StreamSnow templates. README and .gitignore are left alone.
+    config + installed StreamSnow templates. README and .gitignore are left alone;
+    a missing warehouse-runtime osv_allowlist.json is created, never overwritten.
     Dry-run by default; pass --apply to write."""
     target = directory.resolve()
     try:
@@ -708,6 +716,13 @@ def update(
             if apply:
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_text(new)
+    for item in CREATE_IF_MISSING_ITEMS:
+        out = target / item.output
+        if not item.when(cfg) or out.exists():
+            continue
+        changed.append(f"{item.output} (new)")
+        if apply:
+            out.write_text(render_item(cfg, item, cfg.project.slug))
 
     if not changed:
         console.print("[green]✓[/] governance files already up to date")

@@ -642,3 +642,37 @@ def test_update_never_rewrites_the_osv_allowlist():
     from streamsnow.scaffolder import GOVERNANCE_ITEMS
 
     assert all(i.output != "osv_allowlist.json" for i in GOVERNANCE_ITEMS)
+
+
+def test_update_adds_missing_osv_allowlist_to_existing_warehouse_repo(tmp_path):
+    import json
+
+    cfg = _warehouse_cfg()
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data["runtime"] = "warehouse"
+    data["snowflake"]["objects"]["compute_pool"] = ""
+    data["snowflake"]["objects"]["external_access_integration"] = ""
+    (tmp_path / CONFIG_FILENAME).write_text(yaml.safe_dump(data))
+    scaffold(cfg, tmp_path, "sales-overview")
+    (tmp_path / "osv_allowlist.json").unlink()  # a repo scaffolded before 0.7.1
+
+    dry = runner.invoke(app, ["update", "--dir", str(tmp_path)])
+    assert dry.exit_code == 0, dry.output
+    assert "osv_allowlist.json" in dry.output
+    assert not (tmp_path / "osv_allowlist.json").exists()
+
+    res = runner.invoke(app, ["update", "--dir", str(tmp_path), "--apply"])
+    assert res.exit_code == 0, res.output
+    assert len(json.loads((tmp_path / "osv_allowlist.json").read_text())) == 4
+
+
+def test_update_never_overwrites_an_existing_osv_allowlist(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data["runtime"] = "warehouse"
+    data["snowflake"]["objects"]["compute_pool"] = ""
+    data["snowflake"]["objects"]["external_access_integration"] = ""
+    (tmp_path / CONFIG_FILENAME).write_text(yaml.safe_dump(data))
+    (tmp_path / "osv_allowlist.json").write_text("[]\n")  # the user's own entries
+    res = runner.invoke(app, ["update", "--dir", str(tmp_path), "--apply"])
+    assert res.exit_code == 0, res.output
+    assert (tmp_path / "osv_allowlist.json").read_text() == "[]\n"

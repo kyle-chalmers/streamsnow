@@ -229,7 +229,8 @@ def generate_admin_sql(cfg: Config) -> str:
         f"-- Generated from streamsnow.config.yaml ({cfg.runtime} runtime, "
         f"{cfg.deploy.source} deploy source).",
         "-- Review every statement, then run it once as an account admin (Snowsight",
-        "-- worksheet, or `snow sql --stdin` on an admin connection). Idempotent.",
+        "-- worksheet, or `snow sql --stdin` on an admin connection). Re-runnable except",
+        "-- the external access integration statement (see section 4).",
         "-- Deployed apps run with owner's rights: queries execute as the CI role that",
         "-- deploys them, and viewers need only USAGE on each app.",
         "",

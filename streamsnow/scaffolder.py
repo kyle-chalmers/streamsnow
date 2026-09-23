@@ -123,6 +123,10 @@ RENDER_MAP: tuple[RenderItem, ...] = (
 APP_ITEMS = tuple(i for i in RENDER_MAP if i.output.startswith("apps/{slug}/"))
 # Repo-level files (rendered once per repo; idempotent on re-init).
 REPO_ITEMS = tuple(i for i in RENDER_MAP if not i.output.startswith("apps/{slug}/"))
+# Repo-level files `streamsnow update` creates when missing but never rewrites:
+# they hold the user's own entries (osv_allowlist.json is absent from
+# warehouse repos scaffolded before 0.7.1, which is why update adds it).
+CREATE_IF_MISSING_ITEMS = tuple(i for i in REPO_ITEMS if i.output == "osv_allowlist.json")
 # Governance files re-rendered by `streamsnow update`. README/.gitignore are
 # user-owned; deploy/tombstones.yml is a REGISTRY users append to — an update
 # re-render would wipe their tombstone entries.
