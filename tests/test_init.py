@@ -564,3 +564,10 @@ def test_validate_app_warns_but_passes_on_the_scaffold_placeholder_query(tmp_pat
     )
     check = next(c for c in payload["checks"] if c["name"] == "placeholders")
     assert check["warnings"] == []
+
+
+def test_next_block_explains_preview_role_grants():
+    from streamsnow.cli import PREVIEW_ROLE_NOTE
+
+    assert "no data grants" in PREVIEW_ROLE_NOTE
+    assert "CI role" in PREVIEW_ROLE_NOTE

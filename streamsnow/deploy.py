@@ -208,7 +208,9 @@ def generate_admin_sql(cfg: Config) -> str:
     ``USE ROLE`` sections so each statement runs under the narrowest system
     role that can: SYSADMIN creates objects, USERADMIN creates roles and the
     user, SECURITYADMIN grants, ACCOUNTADMIN handles account-level objects,
-    and the CI role creates what it will own. Idempotent (``IF NOT EXISTS``).
+    and the CI role creates what it will own. Re-runnable (``IF NOT EXISTS``)
+    except the external access integration, which Snowflake cannot guard that
+    way: skip that statement on a re-run.
     """
     o = cfg.snowflake.objects
     ci = cfg.snowflake.roles.ci_role

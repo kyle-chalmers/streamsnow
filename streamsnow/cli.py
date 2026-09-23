@@ -325,6 +325,13 @@ def _read_prefill(cfg_out: Path) -> dict | None:
         return None
 
 
+PREVIEW_ROLE_NOTE = (
+    "Local preview reads data with this role. By default deploy-setup --admin gives the\n"
+    "viewer role no data grants (deployed apps read with the CI role's rights), so either\n"
+    "uncomment its opt-in viewer data grants or swap --role for a role with the CI role's reads."
+)
+
+
 def _connection_hint(cfg: Config) -> str:
     return (
         f"snow connection add --connection-name {cfg.snowflake.connection_name} "
@@ -365,6 +372,7 @@ def configure(
         "\nConnect your machine to Snowflake (one-time, one store — the snow CLI's\n"
         "connections.toml is what st.connection('snowflake') reads locally):\n"
         f"  {_connection_hint(cfg)}\n"
+        f"{PREVIEW_ROLE_NOTE}\n"
         "\nPer-app apps/<slug>/.streamlit/secrets.toml (gitignored) is an optional override —\n"
         "copy secrets.toml.example only if an app needs a different role or warehouse."
     )
@@ -454,6 +462,7 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
         f"  2. {_connection_hint(cfg)}",
         "     (one-time; st.connection('snowflake') reads this default connection locally.",
         "      Per-app apps/<slug>/.streamlit/secrets.toml is an optional override.)",
+        *[f"     {line}" for line in PREVIEW_ROLE_NOTE.splitlines()],
         "  3. uv tool install pre-commit && pre-commit install   (the governance hooks)",
     ]
     if app_slug is None:
