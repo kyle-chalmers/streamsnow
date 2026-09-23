@@ -204,8 +204,11 @@ from there.
 `validate-app` is the deterministic gate: required files, manifest contents,
 naming, and the governance checks (`schema-refs`, `security`,
 `bind-predicates`, `caching`, `sql-tokens`, `session-fallback`,
-`page-imports`, `artifacts`, `path-leaks`, `requirements` — the same names you
-pass to `streamsnow check`). Any **FAIL** must be fixed before shipping. Run an
+`page-imports`, `artifacts`, `path-leaks`, `requirements`, the same names you
+pass to `streamsnow check`). Any **FAIL** must be fixed before shipping. A
+`placeholders` **warning** means a query still reads the starter's
+`YOUR_TABLE`: repoint it (or delete the example app) before you merge, because
+CI deploys every app under `apps/`. Run an
 individual check while iterating with, e.g., `streamsnow check caching
 apps/<slug>`.
 

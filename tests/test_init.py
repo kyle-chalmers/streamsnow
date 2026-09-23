@@ -534,3 +534,33 @@ def test_setup_skill_writes_repo_files_on_a_repo_without_apps():
     assert "streamsnow init --no-starter-app" in setup
     skill = (REPO_ROOT / "skills/start-app/SKILL.md").read_text()
     assert "init --no-starter-app" in skill
+
+
+def test_validate_app_warns_but_passes_on_the_scaffold_placeholder_query(tmp_path):
+    """The starter query reads YOUR_TABLE: it validated clean, then CI deployed an
+    app that cannot run. A WARN (not a FAIL: the fresh scaffold must still pass
+    its own gate) names the file until the query is repointed."""
+    import json as _json
+
+    args = ["init", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path), "--app", "a-b"]
+    assert runner.invoke(app, args).exit_code == 0
+    result = runner.invoke(app, ["validate-app", "a-b", "--dir", str(tmp_path), "--format", "json"])
+    assert result.exit_code == 0, result.output
+    payload = _json.loads(result.output)
+    check = next(c for c in payload["checks"] if c["name"] == "placeholders")
+    assert check["ok"] is True
+    assert any("queries/example_metric.sql" in str(w) for w in check["warnings"])
+
+    md = runner.invoke(app, ["validate-app", "a-b", "--dir", str(tmp_path)])
+    assert md.exit_code == 0
+    assert "YOUR_TABLE" in md.output and "PASS" in md.output
+
+    q = tmp_path / "apps/a-b/queries/example_metric.sql"
+    q.write_text(q.read_text().replace("YOUR_TABLE  -- TODO: replace YOUR_TABLE", "ORDERS"))
+    payload = _json.loads(
+        runner.invoke(
+            app, ["validate-app", "a-b", "--dir", str(tmp_path), "--format", "json"]
+        ).output
+    )
+    check = next(c for c in payload["checks"] if c["name"] == "placeholders")
+    assert check["warnings"] == []
