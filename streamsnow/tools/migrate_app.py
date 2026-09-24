@@ -172,7 +172,7 @@ REPODATA_TTL = 86400  # 24 hours
 # sync with _templates/app/environment.yml.j2 (a version the Anaconda channel
 # actually ships — the channel lags PyPI, so never blindly track the container
 # pin).
-_DEFAULT_STREAMLIT_PIN = "streamlit=1.50.0"
+_DEFAULT_STREAMLIT_PIN = "streamlit=1.52.2"
 
 SELECT_STAR_RE = re.compile(r"(?is)\bSELECT\s+\*\s+FROM\b")
 

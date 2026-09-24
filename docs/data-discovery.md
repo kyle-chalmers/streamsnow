@@ -85,11 +85,14 @@ Scaffolded apps keep SQL out of Python:
 Some tables are restricted by role. If `INFORMATION_SCHEMA.TABLES` doesn't show
 what you expect:
 
-1. **Check the role.** Your `secrets.toml` `role` must be your config's
-   `viewer_role` — the role deployed apps run under. A query that works under a
-   broad personal role but not `viewer_role` will ship as empty/erroring data.
-2. **Request a grant** for `viewer_role` if access is legitimately needed — don't
-   hardcode credentials to work around it. Roles are the enforcement mechanism.
+1. **Check the role.** Deployed apps read with the CI role's grants (owner's
+   rights), so preview with a role whose reads match the CI role's: the viewer
+   role with the opt-in data grants from `deploy-setup --admin` uncommented, or a
+   developer role with the same reads. A query that works under a broad personal
+   role but not under the CI role's grants will ship as empty or erroring data.
+2. **Request a grant** for the CI role (and, if you preview as the viewer role,
+   the viewer role) if access is legitimately needed. Don't hardcode credentials
+   to work around it. Roles are the enforcement mechanism.
 3. **For restricted (e.g. PII) schemas**, don't grant the app role access to the
    whole schema. Instead expose **only the columns you need** through a
    passthrough view in an allowed schema (explicit column list, never `SELECT *`,

@@ -6,10 +6,50 @@ Snowflake on merge to `main`. It **skips automatically while the
 never fails a normal merge before you're ready. Once it is set, the job runs,
 and will fail at authentication if the other secrets below are still missing.
 
+## 0. The admin bootstrap (`deploy-setup --admin`)
+
+A first deploy needs objects most people cannot create themselves: the app
+database and schema, a warehouse, a CI role and a viewer role, a CI service
+user, the grants that tie them together, and (container runtime) a PyPI
+external access integration and compute pool access. `streamsnow deploy-setup
+--admin` prints all of it from your `streamsnow.config.yaml`, as one reviewable
+script split into `USE ROLE` sections, each run by the narrowest system role
+that can:
+
+| Section | Creates or grants |
+|---|---|
+| `SYSADMIN` | app database + schema (and the stage schema if different), an `XSMALL` warehouse (`AUTO_SUSPEND = 60`, `INITIALLY_SUSPENDED`) |
+| `USERADMIN` | `ci_role`, `viewer_role`, and a `TYPE = SERVICE` CI user with an `RSA_PUBLIC_KEY` placeholder (key-pair auth, no password) |
+| `SECURITYADMIN` | both roles to `SYSADMIN`; `USAGE` on the database, schema and warehouse to both roles; `CREATE STREAMLIT` + `CREATE STAGE` on the schema to `ci_role`; `USAGE` + `SELECT` on each allowed governance schema |
+| `ACCOUNTADMIN` | container runtime: the PyPI external access integration (Snowflake's managed `snowflake.external_access.pypi_rule`) and `USAGE` on it and on the compute pool to `ci_role`; `CREATE COMPUTE POOL` only when your pool is not `SYSTEM_COMPUTE_POOL_CPU`, which Snowflake pre-provisions in every account; git-repository: the API integration |
+| `ci_role` | the deploy-source objects it will own: the stage, or the secret + git repository |
+
+```bash
+streamsnow deploy-setup --admin > admin-setup.sql   # review, paste in the public key
+snow sql -f admin-setup.sql -c <admin-connection>   # or run it in a Snowsight worksheet
+```
+
+Two things to check before running it:
+
+- **Governance database grants.** The script grants `USAGE` + `SELECT` (current
+  and future tables and views) on each `governance.schema_allow` schema, never
+  on a denied one. A **shared** database (a Marketplace or data-share import
+  such as `SNOWFLAKE_SAMPLE_DATA`) does not take those grants; it needs
+  `GRANT IMPORTED PRIVILEGES ON DATABASE ...` as `ACCOUNTADMIN`, which covers
+  the whole share. The script emits that form automatically for
+  `SNOWFLAKE_SAMPLE_DATA` and as a commented alternative otherwise.
+- **Viewer-role data grants are opt-in.** Deployed apps run with owner's rights
+  (the CI role), so viewers only need `USAGE` on each app, and the script grants
+  the viewer role no data access by default. The same data grants for the viewer
+  role are printed commented out: uncomment them if you want local preview to
+  connect as the viewer role and mirror what the deployed app reads, or preview
+  with a developer role that has the CI role's reads.
+
 ## 1. One-time Snowflake objects
 
-Generate and review the DDL for your configured deploy source, then run it once
-with an admin (or the CI) role:
+If an admin already ran the bootstrap above, you are done with this step (its
+last section is this output). Otherwise, generate and review the DDL for your
+configured deploy source, then run it once with an admin (or the CI) role:
 
 ```bash
 streamsnow deploy-setup | less        # review first
@@ -18,7 +58,11 @@ streamsnow deploy-setup | snow sql --stdin   # or pipe to your admin session
 
 - **stage-copy** (default): creates the internal stage CI uploads to. Container
   apps also need an account-level compute pool + external access integration
-  (admin, one-time — emitted as commented guidance). Sizing note from the
+  (admin, one-time: emitted as commented guidance here, as real DDL by
+  `--admin`). `SYSTEM_COMPUTE_POOL_CPU` already exists in every account, with
+  `USAGE` granted to `PUBLIC` by default
+  ([compute pools](https://docs.snowflake.com/en/developer-guide/snowpark-container-services/working-with-compute-pool)),
+  so it is never created. Sizing note from the
   [compute pool docs](https://docs.snowflake.com/en/developer-guide/snowpark-container-services/working-with-compute-pool):
   the pre-provisioned `SYSTEM_COMPUTE_POOL_CPU` packs three apps per node,
   while a pool you create runs **one app per node**, so size `MIN_NODES` to the

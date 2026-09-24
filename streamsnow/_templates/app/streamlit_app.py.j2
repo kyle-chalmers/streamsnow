@@ -1,13 +1,13 @@
 """{{ app_title }} — entrypoint. Scaffolded by StreamSnow ({{ runtime }} runtime)."""
 
 import streamlit as st
+from branding import apply_branding
 
 # Deployed in Snowflake, page_title/page_icon are ignored (Snowsight owns the
 # tab); they still apply under `streamlit run`. `layout` applies in both.
+# Importing branding makes no st.* call, so set_page_config is still the first
+# Streamlit command; apply_branding() must run after it.
 st.set_page_config(page_title="{{ app_title }}", page_icon="📊", layout="wide")
-
-from branding import apply_branding  # noqa: E402  (must follow set_page_config)
-
 apply_branding()
 
 nav = st.navigation(

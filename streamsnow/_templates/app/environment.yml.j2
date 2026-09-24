@@ -2,15 +2,17 @@
 # LANDMINE: never pin `python` here — the channel has no exact python==3.11
 # build, so the deploy fails. The runtime supplies Python; list only added deps.
 #
-# Note: the container-runtime base-image floor (see pyproject.toml.j2) does NOT
-# apply to warehouse mode — Snowflake runs its own bundled Streamlit and this
-# conda pin is cosmetic. Keep it to a version the Anaconda channel actually
-# ships (do not blindly track the container pin, or the deploy 404s).
+# The Streamlit pin selects the version Snowflake runs for this app. Warehouse
+# runtimes support only a fixed list of versions (Snowflake docs, "Supported
+# versions of the Streamlit library in warehouse runtimes"), so never track the
+# container pin here or the deploy fails. The newest supported version still has
+# two known CVEs; the repo's osv_allowlist.json records why they are accepted
+# and when to re-check.
 name: sf_env
 channels:
   - snowflake
 dependencies:
-  - streamlit=1.50.0
+  - streamlit={{ warehouse_streamlit_pin }}
   - pandas
   - plotly
   - snowflake-snowpark-python

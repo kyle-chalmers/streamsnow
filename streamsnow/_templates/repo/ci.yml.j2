@@ -26,7 +26,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Install tooling
         run: |
-          uv tool install ruff
+          # Same ruff as the pre-commit hook: an unpinned install tracks ruff's
+          # default rule set, which changes between releases.
+          uv tool install ruff=={{ ruff_version }}
           uv tool install 'streamsnow>=0.7,<0.8'
       - name: Lint
         run: ruff check apps/

@@ -292,3 +292,54 @@ def test_build_command_prefers_repo_venv_streamlit(tmp_path):
 def test_missing_secrets_hint_names_both_connection_stores():
     hint = preview_app.classify_log("No secrets files found")["hint"]
     assert "connections.toml" in hint and "secrets.toml" in hint
+
+
+# --------------------------------------------------------------------------- #
+# 0.7.1: runtime-aware local install hint (warehouse apps have no pyproject)
+# --------------------------------------------------------------------------- #
+_ENV_YML = """\
+name: sf_env
+channels:
+  - snowflake
+dependencies:
+  - streamlit=1.50.0
+  - pandas
+  - plotly>=5
+  - snowflake-snowpark-python
+"""
+
+
+def test_local_install_command_container_app(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "apps" / SLUG / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nrequires-python = ">=3.11,<3.12"\n'
+    )
+    cmd = preview_app.local_install_command(repo / "apps" / SLUG)
+    assert cmd == f"uv venv --python 3.11 && uv pip install -e apps/{SLUG}"
+
+
+def test_local_install_command_warehouse_app(tmp_path):
+    """`uv pip install -e apps/<slug>` fails on a warehouse app (no pyproject):
+    the hint installs environment.yml's packages, conda pins translated to pip."""
+    repo = _repo(tmp_path)
+    (repo / "apps" / SLUG / "environment.yml").write_text(_ENV_YML)
+    cmd = preview_app.local_install_command(repo / "apps" / SLUG)
+    assert "-e apps/" not in cmd
+    assert cmd.startswith("uv venv --python 3.11 && uv pip install ")
+    assert "'streamlit==1.50.0'" in cmd
+    assert "'plotly>=5'" in cmd
+    assert "snowflake-snowpark-python" in cmd and "pandas" in cmd
+
+
+def test_start_warehouse_app_without_streamlit_prints_install_hint(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    (repo / "apps" / SLUG / "environment.yml").write_text(_ENV_YML)
+    monkeypatch.setattr(
+        preview_app,
+        "build_command",
+        lambda entrypoint, port: [str(tmp_path / "no-such-streamlit"), str(port)],
+    )
+    assert preview_app.main(_start_args(repo, _free_port())) == 2
+    out = capsys.readouterr().out
+    assert "uv pip install" in out and "'streamlit==1.50.0'" in out
+    assert "-e apps/" not in out

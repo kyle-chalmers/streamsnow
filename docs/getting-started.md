@@ -31,9 +31,32 @@ Install uv with `brew install uv` (macOS) or see [astral.sh/uv](https://docs.ast
 two ([Snowflake CLI installation](https://docs.snowflake.com/en/developer-guide/snowflake-cli/installation/installation)).
 The container runtime supports **Python 3.11 only**, so apps pin `>=3.11,<3.12`
 ([runtime environments](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/runtime-environments)).
+You do not need 3.11 as your system Python: `uv venv --python 3.11` downloads
+one (or run `uv python install 3.11` ahead of time). If Homebrew's `snow`
+crashes on start, `uv tool install snowflake-cli` gives you a working one;
+`streamsnow doctor` reports a broken `snow` as `BROKEN`.
 
 `uvx streamsnow doctor` reports all of this in one pass, plus whether the
 `snow` connection your config names exists yet.
+
+### What to ask your Snowflake admin for
+
+Building and previewing an app needs only a Snowflake login that can read the
+data. Shipping one through CI needs one-time objects most people cannot create
+themselves. Run `streamsnow deploy-setup --admin` after `init` and hand the
+output to your admin; it asks for, in plain terms:
+
+- a database, schema and `XSMALL` warehouse for the apps (auto-suspending);
+- two roles: a **CI role** that deploys and owns the apps, and a **viewer role**
+  that opens them;
+- a **CI service user** with key-pair auth (you paste the public key);
+- `CREATE STREAMLIT` (and `CREATE STAGE`) on the app schema for the CI role, and
+  read access to the schemas your apps query;
+- container runtime only: `USAGE` on a PyPI external access integration and on
+  the compute pool (`SYSTEM_COMPUTE_POOL_CPU` exists already).
+
+See [Deploy setup](deploy-setup.md#0-the-admin-bootstrap-deploy-setup---admin)
+for the section-by-section breakdown.
 
 ## Path A — run the example (no Snowflake)
 
@@ -76,9 +99,12 @@ What `--setup` does, in order, confirming each fix before it runs it:
    your PATH — every later skill calls it, so this is required, not optional.
 2. Runs `streamsnow doctor` and walks each missing prerequisite (Python, uv,
    git identity, `snow`, `pre-commit`) one at a time.
-3. Runs `streamsnow configure`: five questions (runtime, account locator, the
-   database apps query, allowed schemas, deploy source). Everything else is a
-   commented default in `streamsnow.config.yaml`.
+3. Runs `streamsnow init --no-starter-app`: five questions (runtime, account
+   locator, the database apps query, allowed schemas, deploy source), then the
+   governed repo files (`AGENTS.md`, `CLAUDE.md`, pre-commit hooks, CI and deploy
+   workflows, `.gitignore`, `README.md`, `deploy/tombstones.yml`). No example
+   app: `/start-app` scaffolds your real one. Everything else is a commented
+   default in `streamsnow.config.yaml`.
 4. Prints the one-time `snow connection add … --default` command for your
    account and, once you have run it, confirms the connection exists.
 5. Hands you to `/start-app` to spec, scaffold, build, preview, validate,
@@ -118,12 +144,15 @@ streamsnow init              # scaffolds into the current directory — cd to yo
 roles, governance schemas, runtime, and deploy source), then scaffolds a
 governed repo with a starter app under `apps/<slug>/`. To split the steps, run
 `streamsnow configure` first (config only), then `streamsnow init` to scaffold.
+`streamsnow init --no-starter-app` writes the repo files without the example
+app (then `streamsnow new <domain> <function>` adds your first real one).
 
 `init` reuses an existing config and silently skips repo-level files it already
 wrote, but it **errors on the starter app's files** if that app already exists —
 re-run with `--force` to overwrite them, or `--app <slug>` to name a different
 starter app (default `example-dashboard`). Pass `--reconfigure` to re-run the
-wizard. Its closing `Next:` block is the rest of this section.
+wizard. Its closing `Next:` block is the rest of this section; its first step,
+installing the Claude Code plugin, is optional on this path (step 6 below).
 
 A scaffolded app looks like:
 
@@ -175,16 +204,36 @@ Two things to get right:
 
 The per-app `apps/<slug>/.streamlit/secrets.toml` (gitignored) is an **optional
 override** for an app that needs a different role or warehouse. If you do copy
-`secrets.toml.example`, keep `role` at your config's `snowflake.roles.viewer_role`
-— deployed apps run under the CI role's grants, and a broad personal role hides
-grant gaps locally that then ship as empty dashboards.
+`secrets.toml.example`, use a role whose data reads match the CI role's, since
+deployed apps run under the CI role's grants: either the viewer role with the
+opt-in data grants from `deploy-setup --admin` uncommented, or a developer role
+with the same reads. A broad personal role hides grant gaps locally that then
+ship as empty dashboards.
 
 ### 4. Install the hooks, validate, preview
 
 ```bash
 uv tool install pre-commit && pre-commit install
 streamsnow validate-app example-dashboard          # PASS proves the scaffold is whole
-uv venv && uv pip install -e apps/example-dashboard # the app's deps, in a repo venv
+```
+
+Then create a local environment with the app's dependencies. The command
+depends on the runtime, because the two runtimes ship different manifests:
+
+```bash
+# container runtime: the app has a pyproject.toml (Python 3.11 only)
+uv venv --python 3.11 && uv pip install -e apps/example-dashboard
+
+# warehouse runtime: the app has an environment.yml for Snowflake's Anaconda
+# channel and no pyproject.toml, so install its packages directly (translate
+# a conda pin like streamlit=1.52.2 to streamlit==1.52.2)
+uv venv --python 3.11 && uv pip install 'streamlit==1.52.2' pandas plotly snowflake-snowpark-python
+```
+
+`init` prints the exact line for your app, and so does `streamsnow preview` if
+it cannot find `streamlit`. Then:
+
+```bash
 streamsnow preview example-dashboard               # run locally vs live Snowflake
 ```
 
@@ -198,8 +247,11 @@ from there.
 `validate-app` is the deterministic gate: required files, manifest contents,
 naming, and the governance checks (`schema-refs`, `security`,
 `bind-predicates`, `caching`, `sql-tokens`, `session-fallback`,
-`page-imports`, `artifacts`, `path-leaks`, `requirements` — the same names you
-pass to `streamsnow check`). Any **FAIL** must be fixed before shipping. Run an
+`page-imports`, `artifacts`, `path-leaks`, `requirements`, the same names you
+pass to `streamsnow check`). Any **FAIL** must be fixed before shipping. A
+`placeholders` **warning** means a query still reads the starter's
+`YOUR_TABLE`: repoint it (or delete the example app) before you merge, because
+CI deploys every app under `apps/`. Run an
 individual check while iterating with, e.g., `streamsnow check caching
 apps/<slug>`.
 
@@ -274,7 +326,7 @@ secrets / `secrets.toml`). The load-bearing sections:
 |---------|------------------|
 | `runtime` | `container` (default) or `warehouse` |
 | `snowflake.objects` | where apps deploy (app database/schema), the warehouse, and container `compute_pool` + `external_access_integration` |
-| `snowflake.roles` | `ci_role` (deploy) and `viewer_role` (preview + deployed access) |
+| `snowflake.roles` | `ci_role` (deploys and owns the apps, reads the data) and `viewer_role` (opens deployed apps; data reads are opt-in) |
 | `governance` | `database`, `schema_allow`, `schema_deny`, `read_exceptions` — the data guardrails. `schema_deny` is what the `schema-refs` check enforces (a denylist); `schema_allow` is the convention the scaffolded queries and docs point at, not an enforced gate |
 | `deploy.source` | `stage-copy` (default) or `git-repository`; `deploy.artifact_exclude` names non-code files your pipeline ships by another step |
 | `sql_review.coverage` | `warn` (default) or `fail` — whether an uncovered query fails `validate-app`, pre-commit and CI |

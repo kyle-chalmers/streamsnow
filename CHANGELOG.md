@@ -3,6 +3,74 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [0.7.1] - 2026-09-22
+
+The launch-fix release. An end-to-end run of the install path from an empty
+folder (PyPI package plus the marketplace plugin) found that the build half
+worked and the ship half did not: the plugin setup path never wrote the
+governed repo files, a fresh scaffold failed its own CI, and nothing created
+the Snowflake objects a first deploy needs.
+
+### Added
+
+- **`streamsnow init --no-starter-app`**: the config wizard (or an existing
+  config) plus the governed repo files (`AGENTS.md`, `CLAUDE.md`, `.gitignore`,
+  `.pre-commit-config.yaml`, CI and deploy workflows, `README.md`,
+  `deploy/tombstones.yml`) with no example app. `/start-app --setup` now runs
+  it instead of `configure` alone.
+- **`streamsnow deploy-setup --admin`**: the full, reviewable one-time admin
+  bootstrap derived from `streamsnow.config.yaml`, in `USE ROLE` sections
+  (SYSADMIN, USERADMIN, SECURITYADMIN, ACCOUNTADMIN, then the CI role): app
+  database, schema and `XSMALL` warehouse, CI and viewer roles, a
+  `TYPE = SERVICE` CI user with an `RSA_PUBLIC_KEY` placeholder, grants,
+  governance reads (`USAGE` + `SELECT` per allowed schema, or
+  `IMPORTED PRIVILEGES` for a shared database), and for the container runtime
+  the PyPI external access integration on Snowflake's managed
+  `snowflake.external_access.pypi_rule` plus compute pool `USAGE`.
+  `CREATE COMPUTE POOL` is emitted only for a pool other than the
+  pre-provisioned `SYSTEM_COMPUTE_POOL_CPU`.
+- **`validate-app` `placeholders` check**: a warning (never a failure) while a
+  query still reads the scaffold's `YOUR_TABLE`; CI deploys every app under
+  `apps/`, so the placeholder app used to ship beside the real one.
+- **`doctor`**: `gh` (optional; `/ship-app` needs it) and, in a
+  container-runtime repo, `container-python` (warns when no Python 3.11 is
+  findable; fix: `uv python install 3.11`).
+- **README "Who can use this"** and a getting-started block on what to ask a
+  Snowflake admin for.
+
+### Fixed
+
+- **`streamsnow new` warns when repo files are missing**, naming them and the
+  fix (`streamsnow init --no-starter-app`). Without them there were no hooks or
+  CI, and nothing gitignored `.streamlit/secrets.toml`.
+- **A fresh scaffold failed its own CI.** The generated `checks.yml` installed
+  ruff unpinned while pre-commit pinned v0.15.9; newer ruff defaults flagged
+  `I001`, `RUF100`, `C408` and `BLE001` in the templates. One `RUFF_VERSION`
+  now renders into both files, and the templates are clean under 0.15.9 and
+  current ruff defaults.
+- **`doctor` passed a `snow` that crashes.** It now runs `snow --version`; on
+  PATH but failing is a required `BROKEN` result with the
+  `uv tool install snowflake-cli` hint. The `snow` probe timeout rose from
+  5 s to 15 s, because a cold start reported "no connections".
+- **Local preview install for warehouse apps.** `uv pip install -e apps/<slug>`
+  fails without a `pyproject.toml`; docs, the scaffolded README, `init`'s
+  `Next:` block and `streamsnow preview` now give the runtime-specific line.
+- **`deploy-setup` suggested creating `SYSTEM_COMPUTE_POOL_CPU`**, which
+  Snowflake pre-provisions. The default output keeps its statements and
+  corrects the comment.
+- **`init`'s `Next:` block** lists the plugin install first, matching docs
+  Path B, and names the `YOUR_TABLE` step.
+
+### Changed
+
+- **Privacy gate.** `check_export_clean` holds generic checks only (personal
+  paths, private keys, tokens, email addresses outside reserved example
+  domains) and reads organization-specific terms from a gitignored
+  `.streamsnow/export-denylist.txt`. A committed deny list shipped the names it
+  guarded.
+- **README positioning**: for internal analytics StreamSnow can replace a BI
+  tool; external or customer-facing analytics needs additional customization.
+
 ## [0.7.0] - 2026-09-11
 
 The onboarding release. Everything here came from three sources read together:

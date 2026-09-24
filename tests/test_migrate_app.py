@@ -291,7 +291,7 @@ def test_translate_deps_no_manifest_infers_suggestions_only(tmp_path):
     assert "helpers" not in suggestions and "os" not in suggestions
     # Default env.yml carries only the required deps — suggestions never auto-add.
     deps = yaml.safe_load(out.read_text())["dependencies"]
-    assert deps == ["streamlit=1.50.0", "snowflake-snowpark-python"]
+    assert deps == ["streamlit=1.52.2", "snowflake-snowpark-python"]
 
 
 # --------------------------------------------------------------------------- #

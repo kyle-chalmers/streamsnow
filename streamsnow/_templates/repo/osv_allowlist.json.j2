@@ -1,0 +1,26 @@
+[
+  {
+    "id": "GHSA-7p48-42j8-8846",
+    "package": "streamlit",
+    "reason": "CVE-2026-33682: SSRF in Streamlit before 1.54.0 affecting Windows hosts only. Streamlit in Snowflake runs on Snowflake-managed Linux, and the warehouse runtime supports nothing newer than 1.52.2 (checked 2026-09-23). Re-check at expiry and raise the pin once a fixed version is supported.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "PYSEC-2026-2285",
+    "package": "streamlit",
+    "reason": "Alias of GHSA-7p48-42j8-8846 (CVE-2026-33682): Windows-host-only SSRF, not applicable to Snowflake-managed Linux. Warehouse runtime supports nothing newer than 1.52.2 (checked 2026-09-23).",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "GHSA-vqwp-45wm-r9r5",
+    "package": "streamlit",
+    "reason": "CVE-2026-10804: weak hash in st.cache_data for PIL palette images before 1.53.1; needs local access and high complexity. Low risk inside a Snowflake-hosted app; no fixed version is supported on the warehouse runtime yet (checked 2026-09-23). Avoid caching user-supplied images until the pin moves.",
+    "expires": "2026-12-31"
+  },
+  {
+    "id": "PYSEC-2026-212",
+    "package": "streamlit",
+    "reason": "Alias of GHSA-vqwp-45wm-r9r5 (CVE-2026-10804): weak cache hash, local access and high complexity. No fixed version supported on the warehouse runtime yet (checked 2026-09-23).",
+    "expires": "2026-12-31"
+  }
+]
