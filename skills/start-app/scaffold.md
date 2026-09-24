@@ -57,7 +57,8 @@ Add `--format json` to parse results. These are the same checks `streamsnow vali
 
 ## First app in a fresh Snowflake account
 
-The first deploy needs one-time Snowflake objects (a stage, or an API integration + secret + git
-repository, depending on the configured deploy source). `streamsnow deploy-setup` emits that DDL —
-surface it for the account owner to review and run once with an admin role. Deploys themselves run
+The first deploy needs one-time Snowflake objects: database, schema, warehouse, CI and viewer
+roles, a CI service user, grants, and a stage (or an API integration + secret + git repository).
+`streamsnow deploy-setup --admin` emits all of it in `USE ROLE` sections; surface it for the
+account owner to review and run once. Never run it yourself. Deploys themselves run
 through CI on merge; never run one locally.

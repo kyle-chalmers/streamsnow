@@ -11,7 +11,11 @@ Streamlit-in-Snowflake apps, scaffolded and governed with
 
 | App | Path |
 |-----|------|
+{% if app_slug %}
 | {{ app_title }} | `apps/{{ app_slug }}/` |
+{% else %}
+| _(none yet)_ | `streamsnow new <domain> <function>` adds one |
+{% endif %}
 
 ## Local development
 
@@ -25,18 +29,36 @@ snow connection add --connection-name {{ connection_name }} --account {{ account
 pre-commit install                                  # the governance hooks
 ```
 
+{% set slug = app_slug or '<slug>' %}
 Per app:
 
 ```bash
-uv venv && uv pip install -e apps/{{ app_slug }}      # the app's dependencies, in .venv
-streamsnow validate-app {{ app_slug }}                # PASS/FAIL gate
-streamsnow preview {{ app_slug }}                     # runs .venv/bin/streamlit against live Snowflake
+{% if runtime == 'container' %}
+uv venv --python {{ container_python }} && uv pip install -e apps/{{ slug }}   # the app's pyproject.toml deps, in .venv
+{% else %}
+uv venv --python 3.11                               # then install environment.yml's packages:
+uv pip install streamlit pandas plotly snowflake-snowpark-python   # match the pins in apps/{{ slug }}/environment.yml
+{% endif %}
+streamsnow validate-app {{ slug }}                # PASS/FAIL gate
+streamsnow preview {{ slug }}                     # runs .venv/bin/streamlit against live Snowflake
 ```
 
+{% if runtime == 'warehouse' %}
+Warehouse apps have no `pyproject.toml` (Snowflake installs `environment.yml` from its
+Anaconda channel), so `uv pip install -e` does not apply; if `streamlit` is missing,
+`streamsnow preview` prints the exact install line for the app.
+
+{% endif %}
+{% if app_slug %}
 The starter page renders mock numbers until you repoint `queries/example_metric.sql`
-at a real table in an allowed schema; the first real query is the first real
+at a real table in an allowed schema (it reads `YOUR_TABLE` until then, and
+`validate-app` warns about it); the first real query is the first real
 Snowflake round-trip. `apps/{{ app_slug }}/.streamlit/secrets.toml` (gitignored) is an
 optional override for an app that needs a different role or warehouse.
+{% else %}
+`apps/<slug>/.streamlit/secrets.toml` (gitignored) is an optional override for an app
+that needs a different role or warehouse.
+{% endif %}
 
 ## Add an app
 

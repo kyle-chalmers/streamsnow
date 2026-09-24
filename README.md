@@ -50,8 +50,26 @@ behind the numbers it shows.**
 - ✅ you want Claude Code sessions and humans held to the same governance rules
 - ✅ you want a reviewer to re-run a dashboard's SQL in Snowsight without
   reading Python
-- ❌ you host Streamlit outside Snowflake, or you want a BI tool, a scheduler,
-  or a data catalog — StreamSnow sits beside those
+- ❌ you host Streamlit outside Snowflake, or you need a scheduler or a data
+  catalog (StreamSnow does neither)
+- ❌ your dashboards are for people without Snowflake logins, out of the box
+  (possible with customization; see below)
+
+**Where it fits next to a BI tool.** For internal analytics, meaning dashboards
+your own Snowflake users open inside Snowsight, StreamSnow can replace a BI tool:
+the apps are Python you review like any other code, they run where the data
+lives, and access is managed with Snowflake roles. External or customer-facing analytics is
+a different job. Viewers without Snowflake logins, embedding a dashboard in
+another product, and pixel-perfect scheduled reports are all possible, but they
+take additional customization beyond what StreamSnow ships today.
+
+**Who can use this.** You need a Snowflake account (any edition runs
+Streamlit in Snowflake; masking and row access policies, which StreamSnow does
+not require, need Enterprise) and either a role with `CREATE STREAMLIT` on one
+schema, or a Snowflake admin willing to run the one-time bootstrap that
+`streamsnow deploy-setup --admin` prints (database, schema, warehouse, roles, a
+CI service user and grants; see [Deploy setup](docs/deploy-setup.md)).
+Building and previewing locally needs only a login that can read your data.
 
 **Principles** every change is judged against (the rules were already in the
 repo; collecting them here is what keeps future edits aligned):
@@ -82,7 +100,7 @@ StreamSnow is a **hybrid** of two things that work together:
 1. **A `streamsnow` CLI** (PyPI) — scaffolds a governed Streamlit-in-Snowflake
    monorepo, runs an interactive setup wizard, and vendors the validation
    tools, CI, pre-commit hooks, and branding your repo needs.
-2. **A Claude Code plugin** (marketplace) — ships the skills, subagents, and
+2. **A Claude Code plugin** (marketplace) — ships the skills and
    hooks that turn Claude Code into a domain expert for this stack:
    `/start-app` (the front door), `/preview-app`, `/validate-app`,
    `/review-app`, `/ship-app`, and more.
@@ -125,9 +143,10 @@ you what is missing).
 ```
 
 `/start-app --setup` installs the `streamsnow` CLI if it is missing, runs the
-doctor, walks each missing prerequisite one confirmation at a time, runs the
-five-question `streamsnow configure`, and hands you to `/start-app` to build
-your first app. In a repo that already has Streamlit apps it switches to adopt
+doctor, walks each missing prerequisite one confirmation at a time, runs
+`streamsnow init --no-starter-app` (the five-question wizard plus the governed
+repo files: `AGENTS.md`, pre-commit hooks, CI, `.gitignore`, README; no example
+app), and hands you to `/start-app` to build your first app. In a repo that already has Streamlit apps it switches to adopt
 mode (maps onto what exists, writes `MIGRATION.md`, never scaffolds over you).
 
 ### CLI only
@@ -140,8 +159,13 @@ snow connection add --connection-name <name> --account <locator> \
   --user <you> --authenticator externalbrowser --default   # init prints the exact command
 uv tool install pre-commit && pre-commit install
 streamsnow validate-app example-dashboard                 # PASS proves the scaffold is whole
-uv venv && uv pip install -e apps/example-dashboard && streamsnow preview example-dashboard
+uv venv --python 3.11 && uv pip install -e apps/example-dashboard   # container runtime
+streamsnow preview example-dashboard
 ```
+
+On the warehouse runtime an app has `environment.yml` instead of `pyproject.toml`,
+so install its packages directly (`init` and `streamsnow preview` print the exact
+line).
 
 One connection store: `st.connection("snowflake")` reads the `snow` CLI's default
 connection locally, so the per-app `secrets.toml` is an optional override, not a

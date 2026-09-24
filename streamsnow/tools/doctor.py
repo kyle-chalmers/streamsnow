@@ -18,15 +18,21 @@ but *required* when one exists and fails validation — a malformed config must
 never be masked as "not configured yet".
 
 Checks: Python >= 3.11 (the running interpreter — the one that would run the
-tools), ``git`` and ``uv`` on PATH (required), ``snow`` and ``streamlit`` on
-PATH (optional, preview/deploy conveniences), ``pre-commit`` on PATH (optional
+tools), ``git`` and ``uv`` on PATH (required), ``snow`` (optional when absent,
+but a ``snow`` on PATH must answer ``snow --version``: a Homebrew install that
+crashed on import used to report ``ok`` because only PATH presence was
+checked, so a broken one is a required failure), ``streamlit`` on PATH
+(optional), ``gh`` (optional; ``/ship-app`` needs it), ``pre-commit`` on PATH (optional
 outside a repo, *required* once a ``streamsnow.config.yaml`` exists — the
 generated hooks are ``language: system`` and a scaffolded repo's first commit
 fails without the executable), config presence + validity, and — only when
 both a config and ``snow`` exist — whether the configured ``snow`` connection
 name has been created (``snow connection list``; never ``connection test``,
 which can open a browser). The connection check is what turns "preview can't
-connect", the most common first-run failure, into a named result.
+connect", the most common first-run failure, into a named result. In a
+container-runtime repo, a Python 3.11 interpreter must be findable (the apps
+pin ``>=3.11,<3.12``, so a machine with only 3.12 passed the old doctor and
+then failed ``uv pip install -e``); a miss is a warning with the fix.
 
 Detection only: no prompts, no fix execution — hints name the fix, callers own
 the UX. Checks never raise; an unexpected error inside the doctor itself is a
@@ -40,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -56,15 +63,28 @@ _MIN_PYTHON = (3, 11)
 _PATH_TOOLS: tuple[tuple[str, str, str], ...] = (
     ("git", REQUIRED, "install git"),
     ("uv", REQUIRED, "install uv — https://docs.astral.sh/uv/"),
-    ("snow", OPTIONAL, "uv tool install snowflake-cli (for preview/deploy diagnostics)"),
     (
         "streamlit",
         OPTIONAL,
         "uv pip install streamlit (in your app environment, for local preview)",
     ),
+    (
+        "gh",
+        OPTIONAL,
+        "install the GitHub CLI (brew install gh, then gh auth login); /ship-app requires it",
+    ),
+)
+_SNOW_HINT = "uv tool install snowflake-cli (for preview/deploy diagnostics)"
+_SNOW_BROKEN_HINT = (
+    "snow is on PATH but `snow --version` fails: reinstall it with "
+    "`uv tool install snowflake-cli` (a Homebrew snow can break on a newer system Python)"
 )
 _PRE_COMMIT_HINT = "uv tool install pre-commit, then `pre-commit install` in the repo"
-_SNOW_TIMEOUT_S = 5.0
+# A cold `snow` start was observed above 5 s; at 5 s the first doctor run
+# reported "no connections" and a re-run found one.
+_SNOW_TIMEOUT_S = 15.0
+_TIMEOUT_CODE = 124
+_VERSION_RE = re.compile(r"(\d+\.\d+(?:\.\d+)?)")
 
 
 def _result(name: str, ok: bool, level: str, detail: dict, hint: str = "") -> dict:
@@ -106,17 +126,89 @@ def check_pre_commit(config_present: bool) -> dict:
 
 
 def _run(cmd: list[str]) -> tuple[int, str]:
-    """Run a short diagnostic command; never raises (127/"" on any failure)."""
+    """Run a short diagnostic command; never raises (124 on timeout, 127 on any
+    other failure to run, with empty output)."""
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=_SNOW_TIMEOUT_S, check=False
         )
-        return proc.returncode, proc.stdout
-    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return proc.returncode, proc.stdout or ""
+    except subprocess.TimeoutExpired:
+        return _TIMEOUT_CODE, ""
+    except (OSError, ValueError):
         return 127, ""
 
 
-def check_snow_connection(cfg_result: dict) -> dict:
+def check_snow() -> dict:
+    """``snow`` on PATH *and* answering ``snow --version``.
+
+    Absent is an optional miss. Present but crashing (or hanging past the
+    timeout) is a required failure: every preview/deploy diagnostic and skill
+    that shells to ``snow`` would fail with a traceback instead of a hint.
+    """
+    path = shutil.which("snow")
+    if path is None:
+        return _result("snow", False, OPTIONAL, {"found": False, "path": ""}, _SNOW_HINT)
+    code, out = _run(["snow", "--version"])
+    if code != 0:
+        return _result(
+            "snow",
+            False,
+            REQUIRED,
+            {
+                "found": True,
+                "path": path,
+                "broken": True,
+                "exit_code": code,
+                "timed_out": code == _TIMEOUT_CODE,
+            },
+            _SNOW_BROKEN_HINT,
+        )
+    m = _VERSION_RE.search(out)
+    return _result(
+        "snow",
+        True,
+        OPTIONAL,
+        {"found": True, "path": path, "version": m.group(1) if m else ""},
+    )
+
+
+def check_container_python(cfg_result: dict) -> dict:
+    """In a container-runtime repo: is a Python matching the app pin findable?
+
+    Container apps pin ``>=3.11,<3.12`` (Snowflake's container runtime is 3.11
+    only). A warning, never a gate: ``uv venv --python 3.11`` can download one.
+    """
+    detail = cfg_result.get("detail", {})
+    if not cfg_result.get("ok") or detail.get("runtime") != "container":
+        return _result(
+            "container-python",
+            False,
+            OPTIONAL,
+            {"skipped": "not a container-runtime repo"},
+            "skipped: not a container-runtime repo",
+        )
+    want = str(detail.get("container_python") or "3.11")
+    found = ""
+    if shutil.which("uv") is not None:
+        code, out = _run(["uv", "python", "find", want])
+        if code == 0 and out.strip():
+            found = out.strip().splitlines()[-1]
+    if not found:
+        found = shutil.which(f"python{want}") or ""
+    if found:
+        return _result("container-python", True, OPTIONAL, {"want": want, "path": found})
+    return _result(
+        "container-python",
+        False,
+        OPTIONAL,
+        {"want": want, "path": "", "warn": True},
+        f"container apps pin Python {want} and none was found: uv python install {want} "
+        f"(or let `uv venv --python {want}` download it)",
+    )
+
+
+def check_snow_connection(cfg_result: dict, snow_result: dict | None = None) -> dict:
     """Does the ``snow`` connection the config names exist on this machine?
 
     Optional, and a not-ok "skipped" result (never an omission) when there is
@@ -132,6 +224,14 @@ def check_snow_connection(cfg_result: dict) -> dict:
             OPTIONAL,
             {"skipped": "no valid config"},
             "skipped — no config",
+        )
+    if snow_result is not None and snow_result.get("detail", {}).get("broken"):
+        return _result(
+            "snow-connection",
+            False,
+            OPTIONAL,
+            {"skipped": "snow is broken", "connection_name": name},
+            "skipped: fix the snow CLI first",
         )
     if shutil.which("snow") is None:
         return _result(
@@ -207,6 +307,7 @@ def check_config(start: Path | None = None) -> dict:
             "schema_version": cfg.schema_version,
             "runtime": cfg.runtime,
             "connection_name": cfg.snowflake.connection_name,
+            "container_python": cfg.snowflake.objects.container_python,
         },
     )
 
@@ -214,11 +315,14 @@ def check_config(start: Path | None = None) -> dict:
 def run_checks(start: Path | None = None) -> list[dict]:
     """Run every check; never raises from an individual check."""
     checks = [check_python()]
-    checks += [check_path_tool(name, level, hint) for name, level, hint in _PATH_TOOLS]
+    tools = {name: check_path_tool(name, level, hint) for name, level, hint in _PATH_TOOLS}
+    snow = check_snow()
+    checks += [tools["git"], tools["uv"], snow, tools["streamlit"], tools["gh"]]
     config = check_config(start)
     checks.append(check_pre_commit(config_present=bool(config["detail"].get("found"))))
     checks.append(config)
-    checks.append(check_snow_connection(config))
+    checks.append(check_snow_connection(config, snow))
+    checks.append(check_container_python(config))
     return checks
 
 
@@ -229,15 +333,20 @@ def required_ok(results: list[dict]) -> bool:
 def render_text(results: list[dict]) -> str:
     """Plain-text rendering the CLI can print (or wrap in color itself).
 
-    Marks: ``ok`` passed; ``MISSING`` a required prerequisite is absent/broken;
-    ``skip`` an optional one is absent (informational, does not gate).
+    Marks: ``ok`` passed; ``MISSING`` a required prerequisite is absent;
+    ``BROKEN`` one is present but does not run; ``warn`` an optional check found
+    a problem worth fixing; ``skip`` an optional one is absent (informational).
+    Only MISSING and BROKEN gate.
     """
     lines = []
     for r in results:
+        detail = r.get("detail") or {}
         if r["ok"]:
             mark = "ok     "
+        elif detail.get("broken"):
+            mark = "BROKEN "
         elif r["level"] == OPTIONAL:
-            mark = "skip   "
+            mark = "warn   " if detail.get("warn") else "skip   "
         else:
             mark = "MISSING"
         summary = _summarize(r["detail"])

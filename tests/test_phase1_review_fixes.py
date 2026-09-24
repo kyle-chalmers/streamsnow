@@ -151,9 +151,8 @@ def test_doctor_accepts_format_json(capsys: pytest.CaptureFixture) -> None:
     assert code in (0, 1)
 
 
-# NOTE: the export-gate org-name regression test lives in test_export_clean.py
-# (that file is exempt from the gate's own scan; spelling the terms here would
-# trip the gate on this very file).
+# NOTE: the export-gate tests live in test_export_clean.py. Org-specific names
+# are never spelled in the repo: they live in the gitignored local denylist.
 
 
 # --------------------------------------------------------------------------- #

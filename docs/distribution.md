@@ -12,7 +12,7 @@ source of truth behind both.
    generates a governed repo and app from your config, and runs the checks.
 
 2. **Claude Code plugin** (`/plugin marketplace add kyle-chalmers/streamsnow`).
-   The skills, subagent, and SessionStart hook that make Claude Code a domain
+   The skills and hooks (SessionStart, deploy safety, review nudge) that make Claude Code a domain
    expert for this stack (`/start-app`, `/preview-app`, `/validate-app`,
    `/review-app`, `/ship-app`, …). Served straight from the public repo — no
    publish step, and no install beyond adding the marketplace.

@@ -382,3 +382,297 @@ def test_generated_python_is_format_clean_under_ruff_defaults(tmp_path):
         check=False,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def _scaffold_runtime(tmp_path: Path, runtime: str) -> Path:
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    if runtime == "warehouse":
+        data["runtime"] = "warehouse"
+        data["snowflake"]["objects"]["compute_pool"] = ""
+        data["snowflake"]["objects"]["external_access_integration"] = ""
+    root = tmp_path / runtime
+    scaffold(Config.from_dict(data), root, "acme-sales-dashboard")
+    return root
+
+
+def test_generated_ci_pins_the_same_ruff_as_pre_commit(tmp_path):
+    """An unpinned `uv tool install ruff` in CI picked up a newer ruff whose
+    default rule set failed the untouched scaffold on its first push, while the
+    pinned pre-commit hook passed it locally. One version, rendered into both."""
+    import re
+
+    from streamsnow.scaffolder import RUFF_VERSION
+
+    root = _scaffold_runtime(tmp_path, "container")
+    precommit = yaml.safe_load((root / ".pre-commit-config.yaml").read_text())
+    ruff_repo = next(r for r in precommit["repos"] if "ruff-pre-commit" in r["repo"])
+    assert ruff_repo["rev"] == f"v{RUFF_VERSION}"
+    ci = (root / ".github/workflows/checks.yml").read_text()
+    installs = re.findall(r"uv tool install (\S+)", ci)
+    ruff_installs = [i for i in installs if i.strip("'\"").startswith("ruff")]
+    assert ruff_installs == [f"ruff=={RUFF_VERSION}"], installs
+
+
+@pytest.mark.parametrize("runtime", ["container", "warehouse"])
+@pytest.mark.parametrize(
+    "extra",
+    [
+        [],
+        # Rules newer ruff releases enable by default; the templates must not
+        # depend on which default set the consumer's ruff happens to ship.
+        ["--extend-select", "I,C4,BLE,RUF100"],
+    ],
+)
+def test_generated_python_is_lint_clean_under_ruff(tmp_path, runtime, extra):
+    import shutil
+    import subprocess
+
+    ruff = shutil.which("ruff")
+    if ruff is None:
+        pytest.skip("ruff not on PATH")
+    root = _scaffold_runtime(tmp_path, runtime)
+    proc = subprocess.run(
+        [ruff, "check", "--isolated", "--no-cache", *extra, "apps/"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=root,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# --------------------------------------------------------------------------- #
+# 0.7.1: the plugin setup path must write the governed repo, not just config
+# --------------------------------------------------------------------------- #
+_REPO_FILES = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    ".github/workflows/checks.yml",
+    ".github/workflows/deploy.yml",
+    "README.md",
+    "deploy/tombstones.yml",
+)
+
+
+def test_init_no_starter_app_writes_repo_files_without_an_app(tmp_path):
+    """`/start-app --setup` used to run only `configure`, and `/start-app` then
+    ran `new`, which writes app files only: a repo with no .gitignore (so a
+    secrets.toml could be committed), no hooks, no CI. `init --no-starter-app`
+    is the setup verb that writes the governed repo and nothing app-shaped."""
+    result = runner.invoke(
+        app, ["init", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path), "--no-starter-app"]
+    )
+    assert result.exit_code == 0, result.output
+    for rel in _REPO_FILES:
+        assert (tmp_path / rel).is_file(), f"missing {rel}"
+    assert not (tmp_path / "apps").exists()
+    readme = (tmp_path / "README.md").read_text()
+    assert "example-dashboard" not in readme
+    assert "apps//" not in readme and "| |" not in readme
+    assert "streamsnow new" in readme
+    assert "secrets.toml" in (tmp_path / ".gitignore").read_text()
+    assert "streamsnow new <domain> <function>" in result.output
+
+
+def test_init_no_starter_app_reuses_an_existing_config(tmp_path):
+    """The setup skill runs `configure` first on some paths; init must reuse it."""
+    assert (
+        runner.invoke(
+            app, ["configure", "--dir", str(tmp_path), "--config", str(EXAMPLE_CONFIG)]
+        ).exit_code
+        == 0
+    )
+    before = (tmp_path / CONFIG_FILENAME).read_text()
+    result = runner.invoke(app, ["init", "--dir", str(tmp_path), "--no-starter-app"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / CONFIG_FILENAME).read_text() == before
+    assert (tmp_path / ".gitignore").is_file()
+    # Re-running is idempotent: existing repo files are left alone.
+    (tmp_path / "README.md").write_text("# mine\n")
+    assert runner.invoke(app, ["init", "--dir", str(tmp_path), "--no-starter-app"]).exit_code == 0
+    assert (tmp_path / "README.md").read_text() == "# mine\n"
+
+
+def test_new_warns_when_repo_governance_files_are_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert (
+        runner.invoke(
+            app, ["configure", "--dir", str(tmp_path), "--config", str(EXAMPLE_CONFIG)]
+        ).exit_code
+        == 0
+    )
+    result = runner.invoke(app, ["new", "sales", "order-trends"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "apps/sales-order-trends/streamlit_app.py").is_file()
+    out = " ".join(result.output.split())
+    assert "streamsnow init --no-starter-app" in out
+    assert ".gitignore" in out and ".pre-commit-config.yaml" in out
+
+    # Once the repo files exist, `new` is quiet about them.
+    assert runner.invoke(app, ["init", "--dir", str(tmp_path), "--no-starter-app"]).exit_code == 0
+    result = runner.invoke(app, ["new", "sales", "region-mix"])
+    assert result.exit_code == 0, result.output
+    assert "--no-starter-app" not in result.output
+
+
+def test_init_next_block_puts_the_plugin_first(tmp_path):
+    """Docs Path B installs the plugin first; the Next: block agrees."""
+    result = runner.invoke(
+        app, ["init", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path), "--app", "a-b"]
+    )
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert out.index("/plugin marketplace add") < out.index("snow connection add")
+    # B8: the starter query is a placeholder until repointed.
+    assert "YOUR_TABLE" in out
+
+
+def test_setup_skill_writes_repo_files_on_a_repo_without_apps():
+    setup = (REPO_ROOT / "skills/start-app/setup.md").read_text()
+    assert "streamsnow init --no-starter-app" in setup
+    skill = (REPO_ROOT / "skills/start-app/SKILL.md").read_text()
+    assert "init --no-starter-app" in skill
+
+
+def test_validate_app_warns_but_passes_on_the_scaffold_placeholder_query(tmp_path):
+    """The starter query reads YOUR_TABLE: it validated clean, then CI deployed an
+    app that cannot run. A WARN (not a FAIL: the fresh scaffold must still pass
+    its own gate) names the file until the query is repointed."""
+    import json as _json
+
+    args = ["init", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path), "--app", "a-b"]
+    assert runner.invoke(app, args).exit_code == 0
+    result = runner.invoke(app, ["validate-app", "a-b", "--dir", str(tmp_path), "--format", "json"])
+    assert result.exit_code == 0, result.output
+    payload = _json.loads(result.output)
+    check = next(c for c in payload["checks"] if c["name"] == "placeholders")
+    assert check["ok"] is True
+    assert any("queries/example_metric.sql" in str(w) for w in check["warnings"])
+
+    md = runner.invoke(app, ["validate-app", "a-b", "--dir", str(tmp_path)])
+    assert md.exit_code == 0
+    assert "YOUR_TABLE" in md.output and "PASS" in md.output
+
+    q = tmp_path / "apps/a-b/queries/example_metric.sql"
+    q.write_text(q.read_text().replace("YOUR_TABLE  -- TODO: replace YOUR_TABLE", "ORDERS"))
+    payload = _json.loads(
+        runner.invoke(
+            app, ["validate-app", "a-b", "--dir", str(tmp_path), "--format", "json"]
+        ).output
+    )
+    check = next(c for c in payload["checks"] if c["name"] == "placeholders")
+    assert check["warnings"] == []
+
+
+def test_next_block_explains_preview_role_grants():
+    from streamsnow.cli import PREVIEW_ROLE_NOTE
+
+    assert "no data grants" in PREVIEW_ROLE_NOTE
+    assert "CI role" in PREVIEW_ROLE_NOTE
+
+
+def _warehouse_cfg() -> Config:
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data["runtime"] = "warehouse"
+    data["snowflake"]["objects"]["compute_pool"] = ""
+    data["snowflake"]["objects"]["external_access_integration"] = ""
+    return Config.from_dict(data)
+
+
+def test_warehouse_scaffold_pins_newest_supported_streamlit(tmp_path):
+    from streamsnow.scaffolder import WAREHOUSE_STREAMLIT_PIN
+
+    scaffold(_warehouse_cfg(), tmp_path, "sales-overview")
+    env = (tmp_path / "apps/sales-overview/environment.yml").read_text()
+    assert f"streamlit={WAREHOUSE_STREAMLIT_PIN}" in env
+    assert WAREHOUSE_STREAMLIT_PIN == "1.52.2"
+    assert "cosmetic" not in env
+
+
+def test_warehouse_scaffold_ships_dated_osv_allowlist(tmp_path):
+    import datetime as dt
+    import json
+
+    from streamsnow.tools import check_dependency_vulns as cdv
+
+    scaffold(_warehouse_cfg(), tmp_path, "sales-overview")
+    entries = json.loads((tmp_path / "osv_allowlist.json").read_text())
+    ids = {e["id"] for e in entries}
+    assert ids == {
+        "GHSA-7p48-42j8-8846",
+        "PYSEC-2026-2285",
+        "GHSA-vqwp-45wm-r9r5",
+        "PYSEC-2026-212",
+    }
+    for e in entries:
+        assert e["package"] == "streamlit"
+        assert len(e["reason"]) > 40
+    active, expired = cdv.load_allowlist(
+        tmp_path / "osv_allowlist.json", today=dt.date(2026, 9, 23)
+    )
+    assert len(active) == 4 and expired == []
+    # The allowlist expires so the gate fires again and forces a re-check.
+    _, later = cdv.load_allowlist(tmp_path / "osv_allowlist.json", today=dt.date(2027, 1, 1))
+    assert len(later) == 4
+
+
+def test_warehouse_scaffold_passes_the_vuln_gate_with_the_known_advisories(tmp_path, monkeypatch):
+    from streamsnow.scaffolder import WAREHOUSE_STREAMLIT_PIN
+    from streamsnow.tools import check_dependency_vulns as cdv
+
+    scaffold(_warehouse_cfg(), tmp_path, "sales-overview")
+    known = ["GHSA-7p48-42j8-8846", "PYSEC-2026-2285", "GHSA-vqwp-45wm-r9r5", "PYSEC-2026-212"]
+
+    def fake(pins):
+        return [known if (n, v) == ("streamlit", WAREHOUSE_STREAMLIT_PIN) else [] for n, v in pins]
+
+    monkeypatch.setattr(cdv, "query_osv", fake)
+    monkeypatch.chdir(tmp_path)
+    assert cdv.main(["apps"]) == 0
+
+
+def test_container_scaffold_has_no_osv_allowlist(tmp_path):
+    scaffold(load_config(EXAMPLE_CONFIG), tmp_path, "sales-overview")
+    assert not (tmp_path / "osv_allowlist.json").exists()
+
+
+def test_update_never_rewrites_the_osv_allowlist():
+    from streamsnow.scaffolder import GOVERNANCE_ITEMS
+
+    assert all(i.output != "osv_allowlist.json" for i in GOVERNANCE_ITEMS)
+
+
+def test_update_adds_missing_osv_allowlist_to_existing_warehouse_repo(tmp_path):
+    import json
+
+    cfg = _warehouse_cfg()
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data["runtime"] = "warehouse"
+    data["snowflake"]["objects"]["compute_pool"] = ""
+    data["snowflake"]["objects"]["external_access_integration"] = ""
+    (tmp_path / CONFIG_FILENAME).write_text(yaml.safe_dump(data))
+    scaffold(cfg, tmp_path, "sales-overview")
+    (tmp_path / "osv_allowlist.json").unlink()  # a repo scaffolded before 0.7.1
+
+    dry = runner.invoke(app, ["update", "--dir", str(tmp_path)])
+    assert dry.exit_code == 0, dry.output
+    assert "osv_allowlist.json" in dry.output
+    assert not (tmp_path / "osv_allowlist.json").exists()
+
+    res = runner.invoke(app, ["update", "--dir", str(tmp_path), "--apply"])
+    assert res.exit_code == 0, res.output
+    assert len(json.loads((tmp_path / "osv_allowlist.json").read_text())) == 4
+
+
+def test_update_never_overwrites_an_existing_osv_allowlist(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data["runtime"] = "warehouse"
+    data["snowflake"]["objects"]["compute_pool"] = ""
+    data["snowflake"]["objects"]["external_access_integration"] = ""
+    (tmp_path / CONFIG_FILENAME).write_text(yaml.safe_dump(data))
+    (tmp_path / "osv_allowlist.json").write_text("[]\n")  # the user's own entries
+    res = runner.invoke(app, ["update", "--dir", str(tmp_path), "--apply"])
+    assert res.exit_code == 0, res.output
+    assert (tmp_path / "osv_allowlist.json").read_text() == "[]\n"
