@@ -3,13 +3,16 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
-## [0.7.1] - 2026-09-22
+## [0.7.1] - 2026-09-26
 
 The launch-fix release. An end-to-end run of the install path from an empty
 folder (PyPI package plus the marketplace plugin) found that the build half
 worked and the ship half did not: the plugin setup path never wrote the
 governed repo files, a fresh scaffold failed its own CI, and nothing created
-the Snowflake objects a first deploy needs.
+the Snowflake objects a first deploy needs. A second pass, building a
+dashboard over a historical sample dataset with a key-pair connection, found
+the rest: empty review SQL and empty default dashboards on data that ends in
+the past, a local preview crash, and a starter app that could still ship.
 
 ### Added
 
@@ -29,9 +32,28 @@ the Snowflake objects a first deploy needs.
   `snowflake.external_access.pypi_rule` plus compute pool `USAGE`.
   `CREATE COMPUTE POOL` is emitted only for a pool other than the
   pre-provisioned `SYSTEM_COMPUTE_POOL_CPU`.
-- **`validate-app` `placeholders` check**: a warning (never a failure) while a
-  query still reads the scaffold's `YOUR_TABLE`; CI deploys every app under
-  `apps/`, so the placeholder app used to ship beside the real one.
+- **`validate-app` `placeholders` check**: fails while any authored app file
+  (query, page or `sql_review` manifest) still carries the scaffold's
+  `YOUR_TABLE`. CI deploys every app under `apps/`, so the placeholder app
+  used to ship beside the real one. The starter page carries the token next to
+  its sample numbers, so repointing the query alone does not clear it.
+- **`doctor` `snow-key-file`** (optional, warns): the default `snow`
+  connection uses key-pair auth with no `private_key_file`, the signature of a
+  key named `private_key_path` (see Fixed). Reads parameter names only, never
+  values, and never edits the connection.
+- **`sql-review check` `window` finding** (advisory, never gates under either
+  coverage policy): a manifest with no `set_block` renders the implicit review
+  window, the year ending `CURRENT_DATE`.
+- **`preview logs` ends with a `cause:` line** for a known failure, including
+  ones raised on the first page load after `start` already reported ready.
+- **`examples/tpcds-demo/`**: a small store-sales extract from
+  `SNOWFLAKE_SAMPLE_DATA.TPCDS_SF10TCL` into `STREAMSNOW_DEMO.TPCDS`, about two
+  years with real seasonality, kept small to limit the scan. Its README covers
+  the cost and how to point `/start-app` at any small table instead.
+- **`SECURITY.md`**: report vulnerabilities through GitHub private
+  vulnerability reporting; everything else through issues.
+- **Generated `.gitignore` ignores `.internal/`** (local-only working notes).
+  `.gitignore` is user-owned, so existing repos add the line by hand.
 - **`doctor`**: `gh` (optional; `/ship-app` needs it) and, in a
   container-runtime repo, `container-python` (warns when no Python 3.11 is
   findable; fix: `uv python install 3.11`).
@@ -60,6 +82,51 @@ the Snowflake objects a first deploy needs.
   corrects the comment.
 - **`init`'s `Next:` block** lists the plugin install first, matching docs
   Path B, and names the `YOUR_TABLE` step.
+- **Warehouse apps pin Streamlit 1.52.2** (was 1.50.0), the newest version
+  Snowflake supports in warehouse runtimes. Every supported version carries
+  two Streamlit advisories fixed only in 1.53.1 and 1.54.0, so warehouse repos
+  also get `osv_allowlist.json`: one dated entry per advisory ID, each with its
+  reason, expiring 2026-12-31 for a re-check. `streamsnow update` creates the
+  file in warehouse repos scaffolded before it existed.
+- **Review SQL and default dashboards were empty on historical data.** With no
+  `set_block`, a manifest's review window was the year ending `CURRENT_DATE`,
+  so every per-visual `.review.sql` over data that ends in the past (TPC-DS
+  ends in 2003) returned zero rows while `check` reported clean. The skills now
+  require a window anchored to the source's `MAX(date)`
+  (`review-app/sql-companions.md` step 3, `start-app/pages.md` 8.2), the page
+  conventions say a page's default date range comes from the data's max date,
+  not today, `check` names the implicit default, and the starter manifest
+  shows the anchored form. An explicit `set_block`, including an explicit
+  `CURRENT_DATE`, renders exactly as before.
+- **Local preview crashed with key-pair connections**: `TypeError: Expected
+  bytes, RSAPrivateKey, or EllipticCurvePrivateKey, got <class 'NoneType'>`.
+  `st.connection("snowflake")` opens the default connection through
+  snowflake-connector-python, which reads `private_key_file` but silently drops
+  `private_key_path`, a legacy alias only the `snow` CLI understands, so `snow
+  sql` worked on the same connection. The fix is to rename the key to
+  `private_key_file` (passphrase: `private_key_file_pwd`), which both tools
+  read; `doctor` and `preview logs` now say so (troubleshooting #17).
+- **The wizard's default compute pool is `SYSTEM_COMPUTE_POOL_CPU`** (was
+  `STREAMLIT_POOL`), so `deploy-setup --admin` for a default container config
+  emits no `CREATE COMPUTE POOL`. A pool already named in a config is kept.
+- **`connection_name` defaults to your default `snow` connection** when one
+  exists (was the folder slug), falling back to the slug when `snow` is
+  missing or broken. Users with a working connection from a prior tutorial no
+  longer fail `doctor`'s connection check or get told to add a second
+  `--default` connection; `init` and `configure` only print `snow connection
+  add` when no connection by that name exists.
+- **The starter trio from `streamsnow new`** (`queries/example_metric.sql`, its
+  `sql_review` manifest, `pages/overview.py` with sample numbers) is replaced
+  explicitly by `/start-app`'s build phase, and `new` says they are
+  placeholders.
+- **A fresh `init --no-starter-app` repo failed its own `checks.yml`**: with
+  no `apps/` directory yet, `ruff check apps/` errored and `check tombstones`
+  refused to run. Lint now runs only when `apps/` exists, and tombstones is
+  skipped only while `apps/` is absent both locally and on `origin/main`.
+- **`uv pip install -e apps/<slug>` failed on every fresh container app**
+  (setuptools found `pages/`, `queries/` and `sql_review/` and refused to
+  guess a package). The generated `pyproject.toml` declares `packages = []`;
+  existing apps add the two lines from troubleshooting #18.
 
 ### Changed
 
