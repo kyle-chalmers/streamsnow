@@ -25,8 +25,8 @@ A freshly generated app looks like:
 ```
 apps/<slug>/
   streamlit_app.py         # st.navigation entrypoint, apply_branding()
-  pages/overview.py        # branded metric + Plotly chart + a cached loader
-  queries/example_metric.sql
+  pages/overview.py        # starter placeholder: sample numbers, a Plotly chart, a cached loader
+  queries/example_metric.sql   # starter placeholder: reads YOUR_TABLE
   branding.py  sql_loader.py
   .streamlit/config.toml   .streamlit/secrets.toml.example
   snowflake.yml            pyproject.toml (container) | environment.yml (warehouse)

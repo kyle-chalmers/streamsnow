@@ -159,8 +159,8 @@ A scaffolded app looks like:
 ```
 apps/<slug>/
   streamlit_app.py         # st.navigation entrypoint, apply_branding()
-  pages/overview.py        # branded metric + Plotly chart + a cached loader
-  queries/example_metric.sql
+  pages/overview.py        # starter placeholder: sample numbers, a Plotly chart, a cached loader
+  queries/example_metric.sql   # starter placeholder: reads YOUR_TABLE
   sql_review/              # human-runnable SQL audit trail (streamsnow sql-review)
     manifests/example_metric.json   # the editing surface
     example_metric.review.sql       # generated: paste-runnable in Snowsight
@@ -214,7 +214,7 @@ ship as empty dashboards.
 
 ```bash
 uv tool install pre-commit && pre-commit install
-streamsnow validate-app example-dashboard          # PASS proves the scaffold is whole
+streamsnow validate-app example-dashboard          # FAILS on the starter placeholders until replaced
 ```
 
 Then create a local environment with the app's dependencies. The command
@@ -248,10 +248,13 @@ from there.
 naming, and the governance checks (`schema-refs`, `security`,
 `bind-predicates`, `caching`, `sql-tokens`, `session-fallback`,
 `page-imports`, `artifacts`, `path-leaks`, `requirements`, the same names you
-pass to `streamsnow check`). Any **FAIL** must be fixed before shipping. A
-`placeholders` **warning** means a query still reads the starter's
-`YOUR_TABLE`: repoint it (or delete the example app) before you merge, because
-CI deploys every app under `apps/`. Run an
+pass to `streamsnow check`). Any **FAIL** must be fixed before shipping. The
+`placeholders` check **fails** while any app file still reads the starter's
+`YOUR_TABLE`: the example query, the review window in its `sql_review`
+manifest, and `pages/overview.py`, whose numbers are samples. Replace or
+repoint all three (or delete the example app) before you merge, because CI
+deploys every app under `apps/`; every other check passing is what proves the
+scaffold itself is whole. Run an
 individual check while iterating with, e.g., `streamsnow check caching
 apps/<slug>`.
 

@@ -3,8 +3,8 @@
 Runs the governance checks (required files, naming, runtime-matched manifest,
 artifacts, schema-refs, app-security, bind-predicates, caching, sql-tokens,
 session-fallback, page-imports, path-leaks, requirements-§11) over
-``apps/<slug>/`` and returns a single PASS/FAIL. A ``placeholders`` check warns
-(never fails) while a query still reads the scaffold's ``YOUR_TABLE``.
+``apps/<slug>/`` and returns a single PASS/FAIL. A ``placeholders`` check fails
+while any authored app file still carries the scaffold's ``YOUR_TABLE``.
 No database, no network, which is why ``check_dependency_vulns`` (OSV.dev) is deliberately NOT in this
 aggregate: it runs as its own pre-commit hook (``--best-effort``) and CI job,
 and the ``/validate-app`` skill shells to it as a separate section. This is
@@ -68,10 +68,15 @@ _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 # that IS app source (config.toml lives there), so it is never skipped.
 _KEEP_DOTTED = frozenset({".streamlit"})
 
-# The scaffold's example query reads this placeholder table. It validated clean
-# and deployed beside the real app (CI deploys every apps/*/), where it cannot
-# run. A warning, not a failure: a fresh scaffold must still pass its own gate.
+# The scaffold's starter trio (queries/example_metric.sql, its sql_review
+# manifest, and pages/overview.py with sample numbers) all carry this token until
+# replaced. 0.7.1 made it a warning so a fresh scaffold passed its own gate; the
+# placeholder app then validated clean and deployed beside the real one (CI
+# deploys every apps/*/). It FAILS now: an unfinished scaffold must not ship.
 _PLACEHOLDER_RE = re.compile(r"\bYOUR_TABLE\b")
+# Authored files only. Rendered *.review.sql files repeat their query's text, so
+# scanning them would report every placeholder twice.
+_PLACEHOLDER_SUFFIXES = (".py", ".sql", ".json")
 
 # Container-runtime fields that must be ABSENT in warehouse mode.
 _CONTAINER_ONLY = ("runtime_name", "compute_pool", "external_access_integrations")
@@ -347,21 +352,30 @@ def _check_manifest(app_dir: Path, cfg: Config) -> list[str]:
 
 
 def _check_placeholders(app_dir: Path) -> list[dict]:
-    """Queries that still select from the scaffold placeholder table."""
+    """Authored app files (queries, pages, manifests) still carrying ``YOUR_TABLE``.
+
+    One finding per file, at the first occurrence. The starter page's sample
+    numbers never read the query, so the page carries the token in its caption
+    and loader: repointing the query alone does not clear the gate.
+    """
     found: list[dict] = []
-    for sql in sorted((app_dir / "queries").glob("*.sql")):
+    for path in sorted(_walk_app_files(app_dir)):
+        if path.suffix not in _PLACEHOLDER_SUFFIXES or path.name.endswith(".review.sql"):
+            continue
         try:
-            text = sql.read_text(encoding="utf-8", errors="replace")
+            text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         m = _PLACEHOLDER_RE.search(text)
         if m:
             found.append(
                 {
-                    "file": str(sql.relative_to(app_dir)),
+                    "file": str(path.relative_to(app_dir)),
                     "line": text.count("\n", 0, m.start()) + 1,
-                    "detail": "scaffold placeholder YOUR_TABLE: repoint this query at a real "
-                    "table before shipping (CI deploys every app under apps/)",
+                    "detail": "scaffold placeholder YOUR_TABLE: replace the starter content "
+                    "(repoint the query at a real table, or delete the starter query, its "
+                    "sql_review manifest and pages/overview.py once real pages exist). CI "
+                    "deploys every app under apps/",
                 }
             )
     return found
@@ -447,14 +461,8 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
         }
     )
 
-    checks.append(
-        {
-            "name": "placeholders",
-            "ok": True,
-            "findings": [],
-            "warnings": _check_placeholders(app_dir),
-        }
-    )
+    placeholders = _check_placeholders(app_dir)
+    checks.append({"name": "placeholders", "ok": not placeholders, "findings": placeholders})
 
     return {
         "app": app_dir.name,

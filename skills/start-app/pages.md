@@ -13,7 +13,9 @@ run the spec phase first ([spec.md](spec.md)) and resume.
 
 1. **Resolve target.** Confirm `apps/<slug>/` and its `REQUIREMENTS.md` exist. No spec → backfill
    one first (spec phase, automatic backfill mode). Page already exists as `pages/<page>.py` → stop;
-   overwriting risks losing in-progress work.
+   overwriting risks losing in-progress work. The one exception is the scaffold's own starter
+   `pages/overview.py` (it still contains `YOUR_TABLE`): the first page replaces it, see
+   [Replace the starter trio](#replace-the-starter-trio).
 2. **Detect the runtime** (anchored `runtime_name:` in `snowflake.yml`) — it decides the loader's
    connection pattern below.
 3. **Scaffold the SQL stubs.** For each query the page needs, create `queries/<name>.sql` with the
@@ -71,6 +73,26 @@ run the spec phase first ([spec.md](spec.md)) and resume.
 9. **End of the build phase** (all §4 pages built): `streamsnow sql-review index <slug>` rebuilds
    the `sql_review/README.md` coverage table so it reflects every page's queries; include the
    refreshed README in the final build commit.
+
+## Replace the starter trio
+
+`streamsnow new` leaves three placeholder files. The **first** page built replaces all three, in the
+same commit as that page (step 8), whatever the page is called:
+
+1. **`pages/overview.py`** (sample numbers). If the first §4 page is the landing or overview page,
+   write it into `pages/overview.py`, replacing the starter content entirely. Otherwise create
+   `pages/<page>.py`, put its `st.Page(...)` entry in `streamlit_app.py` in place of the starter's
+   `st.Page("pages/overview.py", ...)` entry (keeping `default=True`: the starter's default was a
+   placeholder, so the default-page gotcha below does not apply), and delete `pages/overview.py`.
+2. **`queries/example_metric.sql`** (reads `YOUR_TABLE`). Delete it once the page's real queries
+   exist. Never repoint it into a real query under the example name.
+3. **`sql_review/manifests/example_metric.json`** and its rendered
+   `sql_review/example_metric.review.sql`. Delete both with the query: `generate` would fail on
+   the missing template, and `check` reports a leftover review file as an orphan.
+
+Then `grep -rn YOUR_TABLE apps/<slug>` must print nothing (the `placeholders` check in
+`validate-app` enforces the same thing, as a FAIL), and `streamsnow sql-review index <slug>` drops
+the example row from the README.
 
 ## Connection pattern by runtime
 

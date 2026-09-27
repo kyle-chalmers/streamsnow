@@ -42,6 +42,13 @@ artifacts and the config loader rejects them.
 ("pages 3/5", "QC pending") goes on a `**Phase notes:**` line under it — never appended to the
 phase, which `/start-app` resumes on.
 
+**placeholders.** An app file (query, page or `sql_review` manifest) still contains the scaffold's
+`YOUR_TABLE`: the starter trio from `streamsnow new` (`queries/example_metric.sql`, its manifest,
+and `pages/overview.py` with sample numbers) was never replaced. Replace it the way
+[start-app's build phase](../start-app/pages.md#replace-the-starter-trio) does, or repoint the
+query and manifest window at a real table and rewrite the page. Never rename the token to dodge
+the check: CI deploys every app under `apps/`, and this is what stops a placeholder app shipping.
+
 **sql-tokens.** A `{TOKEN}` placeholder appears inside a SQL comment. `render_sql` substitutes
 tokens with comment-unaware `str.replace`, so the token's full SQL expansion lands inside the
 comment and multi-line expansions break out as live SQL (parse errors that only appear at render

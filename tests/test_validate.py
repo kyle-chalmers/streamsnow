@@ -51,6 +51,19 @@ def _scaffold_with_trail(cfg: Config, root: Path, slug: str) -> Path:
     return root / "apps" / slug
 
 
+def _finish_starter(app: Path) -> Path:
+    """Repoint the scaffold's placeholder trio the way a user finishes it: the query and
+    its manifest window read a real table, and the starter page loses its sample-number
+    caption. validate-app FAILS (placeholders) until this happens."""
+    for rel in ("queries/example_metric.sql", "sql_review/manifests/example_metric.json"):
+        f = app / rel
+        f.write_text(f.read_text().replace("YOUR_TABLE", "ORDERS"))
+    page = app / "pages/overview.py"
+    page.write_text(page.read_text().replace("YOUR_TABLE", "ORDERS"))
+    assert sql_review.main(["generate", app.name, "--dir", str(app.parent.parent)]) == 0
+    return app
+
+
 def test_security_flags_egress_exec_and_dynamic_sql(tmp_path):
     # dynamic-sql is only a finding when the f-string is the SQL ARGUMENT to a
     # .sql()/.query() call — not a bare assignment (FP class D3).
@@ -305,7 +318,7 @@ def test_caching_walk_skips_dotted_dirs(tmp_path):
 
 def test_validate_app_passes_on_scaffold(tmp_path):
     cfg = _cfg()
-    _scaffold_with_trail(cfg, tmp_path, "good-app")
+    _finish_starter(_scaffold_with_trail(cfg, tmp_path, "good-app"))
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/good-app", policy, cfg)
     assert res["ok"], res["checks"]
@@ -314,7 +327,7 @@ def test_validate_app_passes_on_scaffold(tmp_path):
 def test_validate_app_skips_dotted_tooling_dirs(tmp_path):
     """A REVIEW note under .review/ that quotes a denied schema must NOT trip the gate."""
     cfg = _cfg()
-    app = _scaffold_with_trail(cfg, tmp_path, "clean-app")
+    app = _finish_starter(_scaffold_with_trail(cfg, tmp_path, "clean-app"))
     # Tooling artifacts that quote denied schemas / dynamic SQL — never app source.
     _write(
         app / ".review/REVIEW-2026-01-01.md",
@@ -817,7 +830,7 @@ def test_manifest_container_pyproject_invalid_toml_fails(tmp_path):
 def test_validate_app_passes_on_warehouse_scaffold(tmp_path):
     # The warehouse scaffold's environment.yml must satisfy the content validation.
     cfg = _warehouse_cfg()
-    _scaffold_with_trail(cfg, tmp_path, "wh-ok-app")
+    _finish_starter(_scaffold_with_trail(cfg, tmp_path, "wh-ok-app"))
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/wh-ok-app", policy, cfg)
     assert res["ok"], res["checks"]

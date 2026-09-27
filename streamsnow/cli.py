@@ -520,9 +520,10 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
         return "\n".join(lines)
     install = local_install_command(target / "apps" / app_slug)
     lines += [
-        f"  4. Repoint apps/{app_slug}/queries/example_metric.sql at a real table: it reads",
-        "     YOUR_TABLE until you do (validate-app warns about it).",
-        f"  5. streamsnow validate-app {app_slug}   (PASS proves the scaffold is whole)",
+        f"  4. Replace the starter placeholders in apps/{app_slug}: queries/example_metric.sql",
+        "     and the window in sql_review/manifests/example_metric.json read YOUR_TABLE, and",
+        "     pages/overview.py shows sample numbers. validate-app FAILS until they are gone.",
+        f"  5. streamsnow validate-app {app_slug}   (PASS once step 4 is done)",
         f"  6. {install}",
         f"     streamsnow preview {app_slug}",
         "  Add the app to README.md's Apps table.",
@@ -569,6 +570,12 @@ def new(
             "  Fix: streamsnow init --no-starter-app   (reuses your config; writes only the "
             "missing files)"
         )
+    console.print(
+        "The starter files are placeholders: queries/example_metric.sql, its sql_review "
+        "manifest and pages/overview.py (sample numbers). Replace them with your real pages "
+        "and queries (/start-app does this in its build phase); validate-app FAILS while any "
+        "file still reads YOUR_TABLE."
+    )
     console.print(
         f"Next: streamsnow validate-app {slug}, then add {slug} to README.md's Apps table "
         "(the index is hand-maintained and the row is the step teams forget)."

@@ -32,7 +32,10 @@ st.title("{{ app_title }}")
 st.caption("Starter page scaffolded by StreamSnow. Replace the example with your data.")
 
 st.subheader("Example metric")
-st.caption("Demonstrates branded_metric and a Plotly chart using your brand colors.")
+st.caption(
+    "Sample numbers, not data: replace this page, or wire load_example to a real table "
+    "in place of YOUR_TABLE (validate-app fails until you do)."
+)
 branded_metric("Rows", "1,234", delta="+5.3%")
 
 fig = px.bar(
