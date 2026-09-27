@@ -34,7 +34,9 @@ The container runtime supports **Python 3.11 only**, so apps pin `>=3.11,<3.12`
 You do not need 3.11 as your system Python: `uv venv --python 3.11` downloads
 one (or run `uv python install 3.11` ahead of time). If Homebrew's `snow`
 crashes on start, `uv tool install snowflake-cli` gives you a working one;
-`streamsnow doctor` reports a broken `snow` as `BROKEN`.
+`streamsnow doctor` reports a broken `snow` as `BROKEN`. A `snow` that is
+only slow to start (the first run after the machine idles can take 25 s)
+is a `warn` that asks you to re-run doctor, not a reinstall.
 
 `uvx streamsnow doctor` reports all of this in one pass, plus whether the
 `snow` connection your config names exists yet.

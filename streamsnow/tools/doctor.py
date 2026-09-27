@@ -21,7 +21,9 @@ Checks: Python >= 3.11 (the running interpreter — the one that would run the
 tools), ``git`` and ``uv`` on PATH (required), ``snow`` (optional when absent,
 but a ``snow`` on PATH must answer ``snow --version``: a Homebrew install that
 crashed on import used to report ``ok`` because only PATH presence was
-checked, so a broken one is a required failure), ``streamlit`` on PATH
+checked, so a broken one is a required failure; one that does not answer
+within the timeout is a warning to re-run, since a cold start alone can take
+25 s), ``streamlit`` on PATH
 (optional), ``gh`` (optional; ``/ship-app`` needs it), ``pre-commit`` on PATH (optional
 outside a repo, *required* once a ``streamsnow.config.yaml`` exists — the
 generated hooks are ``language: system`` and a scaffolded repo's first commit
@@ -90,9 +92,14 @@ _SNOW_BROKEN_HINT = (
     "`uv tool install snowflake-cli` (a Homebrew snow can break on a newer system Python)"
 )
 _PRE_COMMIT_HINT = "uv tool install pre-commit, then `pre-commit install` in the repo"
-# A cold `snow` start was observed above 5 s; at 5 s the first doctor run
-# reported "no connections" and a re-run found one.
-_SNOW_TIMEOUT_S = 15.0
+# `snow` probes (`--version`, `connection list`). The first `snow --version`
+# after a Mac sat idle took 24.8 s of wall time on about 1 s of CPU (observed
+# 2026-09-27; 5.9 s and 3.5 s warm), so the 15 s timeout of 0.7.1 reported a
+# healthy snow as BROKEN. At 5 s, before that, the first run reported "no
+# connections". 45 s absorbs the cold start with room to spare.
+_SNOW_TIMEOUT_S = 45.0
+# Every other probe (`uv python find`) is local and fast.
+_PROBE_TIMEOUT_S = 15.0
 _TIMEOUT_CODE = 124
 _VERSION_RE = re.compile(r"(\d+\.\d+(?:\.\d+)?)")
 
@@ -135,13 +142,11 @@ def check_pre_commit(config_present: bool) -> dict:
     return res
 
 
-def _run(cmd: list[str]) -> tuple[int, str]:
+def _run(cmd: list[str], timeout: float = _PROBE_TIMEOUT_S) -> tuple[int, str]:
     """Run a short diagnostic command; never raises (124 on timeout, 127 on any
     other failure to run, with empty output)."""
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=_SNOW_TIMEOUT_S, check=False
-        )
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
         return proc.returncode, proc.stdout or ""
     except subprocess.TimeoutExpired:
         return _TIMEOUT_CODE, ""
@@ -149,29 +154,40 @@ def _run(cmd: list[str]) -> tuple[int, str]:
         return 127, ""
 
 
+def _snow_slow_hint(what: str) -> str:
+    return (
+        f"{what} did not answer within {_SNOW_TIMEOUT_S:.0f}s (a cold start can be slow); "
+        "re-run streamsnow doctor"
+    )
+
+
 def check_snow() -> dict:
     """``snow`` on PATH *and* answering ``snow --version``.
 
-    Absent is an optional miss. Present but crashing (or hanging past the
-    timeout) is a required failure: every preview/deploy diagnostic and skill
-    that shells to ``snow`` would fail with a traceback instead of a hint.
+    Absent is an optional miss. Present but crashing is a required failure:
+    every preview/deploy diagnostic and skill that shells to ``snow`` would fail
+    with a traceback instead of a hint. Present but silent past the timeout is
+    a warning, not BROKEN: a healthy ``snow`` on a cold machine is that slow,
+    and reinstalling it would not help.
     """
     path = shutil.which("snow")
     if path is None:
         return _result("snow", False, OPTIONAL, {"found": False, "path": ""}, _SNOW_HINT)
-    code, out = _run(["snow", "--version"])
+    code, out = _run(["snow", "--version"], timeout=_SNOW_TIMEOUT_S)
+    if code == _TIMEOUT_CODE:
+        return _result(
+            "snow",
+            False,
+            OPTIONAL,
+            {"found": True, "path": path, "timed_out": True, "warn": True},
+            _snow_slow_hint("snow --version"),
+        )
     if code != 0:
         return _result(
             "snow",
             False,
             REQUIRED,
-            {
-                "found": True,
-                "path": path,
-                "broken": True,
-                "exit_code": code,
-                "timed_out": code == _TIMEOUT_CODE,
-            },
+            {"found": True, "path": path, "broken": True, "exit_code": code},
             _SNOW_BROKEN_HINT,
         )
     m = _VERSION_RE.search(out)
@@ -201,7 +217,7 @@ def check_container_python(cfg_result: dict) -> dict:
     want = str(detail.get("container_python") or "3.11")
     found = ""
     if shutil.which("uv") is not None:
-        code, out = _run(["uv", "python", "find", want])
+        code, out = _run(["uv", "python", "find", want], timeout=_PROBE_TIMEOUT_S)
         if code == 0 and out.strip():
             found = out.strip().splitlines()[-1]
     if not found:
@@ -218,6 +234,26 @@ def check_container_python(cfg_result: dict) -> dict:
     )
 
 
+def _list_connections() -> tuple[list[dict] | None, str]:
+    """``(rows, "")`` from ``snow connection list --format json``, or ``(None,
+    why)`` when ``snow`` is absent, fails, times out, or prints anything that is
+    not a JSON list. Never raises."""
+    if shutil.which("snow") is None:
+        return None, "snow CLI not installed"
+    code, out = _run(["snow", "connection", "list", "--format", "json"], timeout=_SNOW_TIMEOUT_S)
+    if code == _TIMEOUT_CODE:
+        return None, _snow_slow_hint("snow connection list")
+    if code != 0:
+        return None, f"snow connection list failed (exit {code})"
+    try:
+        parsed = json.loads(out or "[]")
+    except ValueError:
+        parsed = None
+    if not isinstance(parsed, list):
+        return None, "snow connection list printed something other than a JSON list"
+    return [row for row in parsed if isinstance(row, dict)], ""
+
+
 def snow_connections() -> list[dict] | None:
     """Rows of ``snow connection list --format json``, or None when ``snow`` is
     absent, fails, times out, or prints anything that is not a JSON list.
@@ -225,18 +261,12 @@ def snow_connections() -> list[dict] | None:
     Callers read connection names, ``is_default`` and parameter NAMES; nothing
     here prints a parameter value. Never raises.
     """
-    if shutil.which("snow") is None:
-        return None
-    code, out = _run(["snow", "connection", "list", "--format", "json"])
-    if code != 0:
-        return None
-    try:
-        parsed = json.loads(out or "[]")
-    except ValueError:
-        return None
-    if not isinstance(parsed, list):
-        return None
-    return [row for row in parsed if isinstance(row, dict)]
+    return _list_connections()[0]
+
+
+def _not_checked(name: str, why: str, detail: dict | None = None) -> dict:
+    """A dependent check that could not run: said plainly, never a false finding."""
+    return _result(name, False, OPTIONAL, {"skipped": why, **(detail or {})}, f"not checked: {why}")
 
 
 def _connection_name(row: dict) -> str:
@@ -259,7 +289,10 @@ def default_connection_name(rows: list[dict] | None) -> str | None:
 
 
 def check_snow_connection(
-    cfg_result: dict, snow_result: dict | None = None, rows: list[dict] | None = None
+    cfg_result: dict,
+    snow_result: dict | None = None,
+    rows: list[dict] | None = None,
+    list_error: str = "",
 ) -> dict:
     """Does the ``snow`` connection the config names exist on this machine?
 
@@ -267,6 +300,8 @@ def check_snow_connection(
     no valid config or no ``snow`` — the result list keeps a stable shape so
     callers iterating it need no special cases. Reads ``snow connection list``
     only; it never runs ``snow connection test`` (browser/MFA side effects).
+    ``rows``/``list_error`` carry a listing the caller already ran; a listing
+    that failed or timed out reports "not checked", never "no such connection".
     """
     name = str(cfg_result.get("detail", {}).get("connection_name") or "")
     if not cfg_result.get("ok") or not name:
@@ -293,8 +328,10 @@ def check_snow_connection(
             {"skipped": "snow not on PATH", "connection_name": name},
             "skipped — snow CLI not installed",
         )
+    if rows is None and not list_error:
+        rows, list_error = _list_connections()
     if rows is None:
-        rows = snow_connections() or []
+        return _not_checked("snow-connection", list_error, {"connection_name": name})
     names = [n for n in (_connection_name(row) for row in rows) if n]
     ok = name in names
     add = (
@@ -338,15 +375,19 @@ _KEY_FILE_HINT = (
 )
 
 
-def check_snow_key_file(snow_result: dict | None = None, rows: list[dict] | None = None) -> dict:
+def check_snow_key_file(
+    snow_result: dict | None = None, rows: list[dict] | None = None, list_error: str = ""
+) -> dict:
     """Can the Python connector load the default connection's key-pair key?
 
     Optional and never gating: a warning with the rename, or a not-ok "skipped"
     result when there is no working ``snow`` or no default connection. Reads
-    parameter NAMES from ``snow connection list`` only.
+    parameter NAMES from ``snow connection list`` only. A ``snow --version``
+    that only timed out does not skip it: the listing may still answer.
     """
-    if snow_result is not None and not snow_result.get("ok"):
-        broken = bool(snow_result.get("detail", {}).get("broken"))
+    snow_detail = (snow_result or {}).get("detail", {})
+    if snow_result is not None and not snow_result.get("ok") and not snow_detail.get("timed_out"):
+        broken = bool(snow_detail.get("broken"))
         return _result(
             "snow-key-file",
             False,
@@ -354,8 +395,10 @@ def check_snow_key_file(snow_result: dict | None = None, rows: list[dict] | None
             {"skipped": "snow is broken" if broken else "snow not on PATH"},
             "skipped: fix the snow CLI first" if broken else "skipped: snow CLI not installed",
         )
+    if rows is None and not list_error:
+        rows, list_error = _list_connections()
     if rows is None:
-        rows = snow_connections()
+        return _not_checked("snow-key-file", list_error)
     row = default_connection(rows)
     if row is None:
         return _result(
@@ -438,9 +481,14 @@ def run_checks(start: Path | None = None) -> list[dict]:
     checks.append(check_pre_commit(config_present=bool(config["detail"].get("found"))))
     checks.append(config)
     # One `snow connection list` (a cold start takes seconds) feeds both checks.
-    rows = snow_connections() if snow["ok"] else None
-    checks.append(check_snow_connection(config, snow, rows))
-    checks.append(check_snow_key_file(snow, rows))
+    # A `snow --version` that timed out still gets the listing: the cold start
+    # it waited on has usually finished, and a listing that also fails makes
+    # both checks say "not checked" instead of skipping silently.
+    rows, list_error = None, ""
+    if snow["ok"] or snow["detail"].get("timed_out"):
+        rows, list_error = _list_connections()
+    checks.append(check_snow_connection(config, snow, rows, list_error))
+    checks.append(check_snow_key_file(snow, rows, list_error))
     checks.append(check_container_python(config))
     return checks
 
