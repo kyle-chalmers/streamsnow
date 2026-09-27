@@ -54,7 +54,7 @@ intentional).
 
 First decide which case this is:
 
-- The repo **already has Streamlit apps or its own Claude commands**: stop, that's
+- The repo **already has Streamlit apps or its own agent commands or skills**: stop, that's
   [adopt mode](adopt.md), which maps onto what exists instead of scaffolding.
 - Otherwise (an empty repo, or one with no `apps/` yet), run:
 
@@ -79,6 +79,8 @@ comment saying when to change it; the file is the editing surface. To change ans
 restart); existing repo files are left alone by a re-run of `init --no-starter-app`.
 
 - **Don't hand-author `streamsnow.config.yaml` from scratch**: the wizard owns its shape.
+- **Not in Claude Code?** After `init`, `streamsnow agent-skills install --agent codex` copies these
+  skills into the repo's `.agents/skills/`, where every teammate's Codex finds them; commit it.
 - `streamsnow init` without the flag also scaffolds an `example-dashboard` starter app. That is
   the CLI-only path; in this skill the real app comes from `/start-app`, so pass the flag.
 - The first deploy needs one-time Snowflake objects (database, schema, warehouse, roles, a CI

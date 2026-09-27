@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 # /migrate-app
 
-> **Repo overlay:** if `.streamsnow/overlays/migrate-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+> **Repo overlay:** if `.streamsnow/overlays/migrate-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
 Bring an external Streamlit app into the repo, then conform it to StreamSnow conventions until the
 validation check passes. **Two commits** — the lift (files relocated, only ship blockers scrubbed),

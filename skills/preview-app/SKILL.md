@@ -7,7 +7,7 @@ allowed-tools: [Bash, Read, Write, Edit]
 
 # /preview-app
 
-> **Repo overlay:** if `.streamsnow/overlays/preview-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+> **Repo overlay:** if `.streamsnow/overlays/preview-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
 Launch `apps/<slug>` locally against live Snowflake and open it in the browser — the "see it
 before you ship it" step, ahead of /validate-app and /ship-app. `streamsnow preview` owns the whole

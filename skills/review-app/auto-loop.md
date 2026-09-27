@@ -30,7 +30,7 @@ re-derives its dedup each cycle re-reports findings it already resolved:
 3. **Detect the connection context** (`snow connection list`, or the `snowflake.*` blocks in
    config). Present → `/audit-lineage` joins each cycle (bounded read-only live-DB checks). Absent
    or `--no-lineage` → static-only; say so once and continue — no connection is not a failure.
-4. **Cycle:** run the review pass (and the lineage pass, in parallel Task subagents when in scope),
+4. **Cycle:** run the review pass (and the lineage pass, in parallel subagents when in scope and supported),
    writing `apps/<slug>/.review/review-<ts>.md`. Merge multi-reviewer output with `merge-findings`;
    filter re-reports with `dedup-findings --with-repeats`. **A non-empty `repeats_of_applied` is
    no-convergence** — the same finding returned after its own applied fix, meaning the recipe is
