@@ -20,6 +20,18 @@ Every page, in this order:
 
 When editing a page that does not follow this, fix it in the same PR — atomic, no separate cleanup.
 
+## The default date range comes from the data
+
+A page's default period ends at the data's latest date, not at today. Load it once, cached, from
+the object the page reads (`SELECT MAX(<date_col>) FROM <db>.<schema>.<table>` in its own
+`queries/*.sql`), and derive the default start from it (for example one year before). Pass both
+ends to the date picker's `value=`, and bound its `min_value` / `max_value` by the data too.
+`date.today()` as a default makes every page over data that ends in the past (a historical
+extract, a sample dataset, a feed that stopped loading) open empty, which reads as a broken
+query. Show the anchor in the `Data as of:` footer, so a stale feed is visible rather than
+silent. The page's `sql_review` manifest anchors its `set_block` to the same `MAX(<date_col>)`,
+so the audit trail reviews the range the page shows by default.
+
 ## Single-source metric definitions (the glossary module)
 
 Seven pages once carried ~500 lines of prose each defining the same metrics slightly differently.

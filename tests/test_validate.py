@@ -1603,3 +1603,27 @@ def test_coverage_policy_fail_gates_validate_app(tmp_path):
     assert not res["ok"] and not sqlr["ok"]
     assert sqlr["findings"][0]["kind"] == "coverage"
     assert "coverage policy: fail" in sqlr["name"]
+
+
+def test_implicit_review_window_is_a_validate_warning_never_a_failure(tmp_path):
+    """A manifest with no set_block reviews the year ending today, which returns zero
+    rows for data that ends in the past. validate-app reports it as a sql-review
+    warning under both coverage policies; it never gates."""
+    import json as _json
+
+    for policy in ("warn", "fail"):
+        cfg_data = yaml.safe_load(EXAMPLE.read_text())
+        cfg_data["sql_review"] = {"coverage": policy}
+        cfg = Config.from_dict(cfg_data)
+        root = tmp_path / policy
+        app = _scaffold_with_trail(cfg, root, "window-app")
+        mp = app / "sql_review/manifests/example_metric.json"
+        manifest = _json.loads(mp.read_text())
+        assert "MAX(metric_date)" in manifest["set_block"]["end_date"]  # the starter anchors it
+        del manifest["set_block"], manifest["set_block_note"]
+        mp.write_text(_json.dumps(manifest))
+        assert sql_review.main(["generate", "window-app", "--dir", str(root)]) == 0
+        res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+        sqlr = next(c for c in res["checks"] if c["name"].startswith("sql-review"))
+        assert sqlr["ok"] and not sqlr["findings"], policy
+        assert [w["kind"] for w in sqlr["warnings"]] == ["window"], policy

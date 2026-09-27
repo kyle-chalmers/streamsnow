@@ -51,11 +51,17 @@ run the spec phase first ([spec.md](spec.md)) and resume.
    1. `streamsnow sql-review discover <slug> --write` — proposes (and persists) a skeleton manifest
       under `apps/<slug>/sql_review/manifests/` for each query no manifest claims yet. It never
       overwrites an existing manifest, and exit 1 here just means gaps existed — that's why you ran it.
-   2. **Improve the skeleton's dispatcher literals.** `discover` fills each `{TOKEN}` dispatcher with
-      a `-- TODO: sample fragment for <TOKEN>` placeholder; replace every one with a real sample
-      fragment the page actually renders (e.g. `AND region = 'West'` for a region filter) so the
-      review SQL exercises the query the way the dashboard does. Fix the `description`/`pages`
-      fields if the header's `Feeds` line was still a TODO.
+   2. **Improve the skeleton's dispatcher literals, and anchor its window.** `discover` fills each
+      `{TOKEN}` dispatcher with a `-- TODO: sample fragment for <TOKEN>` placeholder; replace every
+      one with a real sample fragment the page actually renders (e.g. `AND region = 'West'` for a
+      region filter) so the review SQL exercises the query the way the dashboard does. Fix the
+      `description`/`pages` fields if the header's `Feeds` line was still a TODO. Then add a
+      `set_block` whose window ends at the data's latest date, never today:
+      `"end_date": "(SELECT MAX(<date_col>) FROM <db>.<schema>.<table>)::DATE"` and
+      `"start_date": "(SELECT DATEADD('year', -1, MAX(<date_col>)) FROM <db>.<schema>.<table>)::DATE"`
+      (the same object and column the page's default date range reads). The skeleton has none,
+      and the implicit default is the year ending `CURRENT_DATE`, which returns zero rows for any
+      data that ends in the past; `sql-review check` flags it as a `window` warning.
    3. `streamsnow sql-review generate <slug>` — renders the paste-runnable
       `sql_review/<feature>.review.sql` files with provenance lines.
    4. Commit the page module, its `queries/*.sql`, the manifest(s), and the rendered `.review.sql`

@@ -433,10 +433,11 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     # `warn` (default) reports it, `fail` gates on it — so an adopting fleet
     # backfills on its own schedule and flips the switch when ready. `check`
     # is import-free by design, so it is safe inside this gate.
+    # An implicit (CURRENT_DATE) review window is an advisory `window` warning
+    # under every policy; split_by_policy is the one place that rule lives.
     sqlr = sql_review._check_app(app_dir.parent.parent, app_dir)
     policy = cfg.sql_review.coverage
-    hard = [f for f in sqlr if f.get("kind") != sql_review.KIND_COVERAGE or policy == "fail"]
-    soft = [f for f in sqlr if f not in hard]
+    hard, soft = sql_review.split_by_policy(sqlr, policy)
     checks.append(
         {
             "name": f"sql-review (coverage policy: {policy})",
