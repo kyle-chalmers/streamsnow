@@ -13,6 +13,10 @@ moving on. This is required, not optional: there is no `uvx` fallback, because t
 call the bare command. `streamsnow: command not found` after a successful install means the tool
 bin dir is not on PATH yet — have the user re-open the shell.
 
+Report which `streamsnow` answered and its version (`command -v streamsnow`, `streamsnow --version`),
+from the same shell the later steps run in. When the user is testing a source checkout or a pinned
+version that differs from the global install, call that executable by its path for every step.
+
 ## 1 · Machine prerequisites
 
 Run `streamsnow doctor --format json` and read the per-check results — each check is one object:
@@ -36,6 +40,10 @@ machine and `required` once a config exists, because the generated hooks are `la
 and the repo's first commit fails without the executable. If the user declines a fix, mark it
 skipped and continue. Exit codes: 0 = all required checks pass, 1 = a required check failed,
 2 = the doctor itself failed (report the error verbatim).
+
+Skip `doctor` when the user has ruled out inspecting local connection settings: it reads
+`snow connection list` for the `snow-connection` and `snow-key-file` checks. Say it was skipped and
+report the prerequisites, connection readiness included, as unverified.
 
 | Tool | Why | macOS | Windows / Linux |
 |---|---|---|---|

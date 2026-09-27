@@ -12,7 +12,9 @@ with these translations:
   that skill's `SKILL.md` (a sibling folder of this one) and do what it says.
 - **Checkpoints.** A checkpoint is a plain question: ask it, then stop and wait for the answer. In a
   non-interactive run (`codex exec`) a checkpoint the prompt did not answer ends the run there; say
-  which checkpoint and the command that resumes (`$start-app <slug>` reads §11).
+  which checkpoint, what is finished and what is still pending, and the command that resumes
+  (`$start-app <slug>` reads §11). When a later prompt from the user answers that checkpoint, record
+  the answer in §11 and continue from there without asking it again.
 - **Parallel reviewers.** Where a step says "Task" or "subagents", use your agent's own subagents
   if it has them. Otherwise run each reviewer brief yourself, one after another, each against only
   its own brief; the merged report has the same shape either way.
