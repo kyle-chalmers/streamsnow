@@ -823,3 +823,21 @@ def test_container_pyproject_is_dependencies_only(tmp_path):
     assert pyproject["tool"]["setuptools"]["packages"] == []
     # The directories that tripped discovery are all present in a fresh scaffold.
     assert all((app_dir / d).is_dir() for d in ("pages", "queries", "sql_review"))
+
+
+def test_generated_gitignore_ignores_internal_notes(tmp_path):
+    """.internal/ is where local-only working notes live (handoffs, evidence, drafts).
+    A generated repo must never commit it."""
+    import shutil
+    import subprocess
+
+    init = ["init", "--no-starter-app", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path)]
+    assert runner.invoke(app, init).exit_code == 0
+    assert ".internal/" in (tmp_path / ".gitignore").read_text().splitlines()
+    if shutil.which("git") is None:
+        pytest.skip("git not on PATH")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    proc = subprocess.run(
+        ["git", "check-ignore", "-q", ".internal/notes.md"], cwd=tmp_path, check=False
+    )
+    assert proc.returncode == 0  # ignored
