@@ -214,6 +214,51 @@ Pre-0.3 names (`/new-app`, `/refine-requirements`, `/add-page`, `/onboard`,
 `/auto-review-app`, `/sql-review`, `/apply-review`, `/deep-dive-data`) still
 work as deprecated aliases and will be removed in the next major release.
 
+## Use with other agents
+
+The skills are plain `SKILL.md` folders in the open
+[Agent Skills](https://agentskills.io/specification) format, so a coding agent
+other than Claude Code can follow them. OpenAI Codex CLI 0.157.1 is the only
+one tested. The CLI installs them where Codex looks:
+
+```bash
+streamsnow agent-skills install --agent codex               # <repo>/.agents/skills; commit it
+streamsnow agent-skills install --agent codex --scope user  # ~/.agents/skills, every repo on this machine
+streamsnow agent-skills list --agent codex                  # what is installed, and from which version
+```
+
+Then ask Codex for a skill by name (`$start-app`) or in plain words ("use the
+StreamSnow start-app skill to build..."). In a test with `codex exec`, Codex
+found the skills in `.agents/skills`, read the `SKILL.md` files and the recipes
+they link, and finished an offline app build that passed `validate-app`. The
+install is a copy: re-run it after `uv tool upgrade streamsnow`, and put
+repo-specific changes in `.streamsnow/overlays/`, because the command refuses
+to overwrite an edited skill without `--force`.
+
+**The same under any agent:** the `streamsnow` CLI and its checks,
+`validate-app`, the pre-commit hooks and CI. They run outside the agent.
+
+**Different outside Claude Code** (each skill points the agent at
+[skills/_shared/other-agents.md](skills/_shared/other-agents.md)):
+
+- **Skill names.** `/ship-app` is Claude Code's syntax; Codex uses `$ship-app`.
+  The install marks `ship-app` and `migrate-app` explicit-only in Codex
+  (`allow_implicit_invocation: false`), matching their
+  `disable-model-invocation` in Claude Code.
+- **Checkpoints.** A checkpoint is a question the agent stops at. `codex exec`
+  cannot ask you, so a non-interactive run stops at the first checkpoint its
+  prompt does not answer. In the test it stopped at the spec checkpoint, and a
+  second run whose prompt gave that answer resumed from `REQUIREMENTS.md`.
+- **Reviewers.** `/review-app` fans out reviewers as Claude Code subagents; the
+  skill tells an agent without subagents to run the same briefs one after
+  another.
+- **Claude Code only: the plugin hooks** in [Hooks, in full](#hooks-in-full)
+  have no Codex equivalent, so StreamSnow cannot pause a destructive `snow`
+  command, nudge for a review, or print its session-start line there. The
+  skills ask the agent to keep those guards by hand, and in the test Codex ran
+  `streamsnow review-gate classify` itself. Those guards now rest on the agent
+  following the skill; nothing enforces them.
+
 ## The audit trail (new in 0.6)
 
 Every query under `apps/<slug>/queries/` gets a **human-runnable proof**: a

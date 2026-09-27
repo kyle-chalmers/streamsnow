@@ -16,6 +16,16 @@ the past, a local preview crash, and a starter app that could still ship.
 
 ### Added
 
+- **`streamsnow agent-skills install --agent codex`** (and `list`): copies the
+  skills and their shared recipes into `.agents/skills` (repo scope, committed)
+  or `~/.agents/skills` (user scope), where OpenAI Codex CLI finds them
+  (tested with 0.157.1). A manifest keeps a re-run from overwriting edited
+  skills; `ship-app` and `migrate-app` stay explicit-only in Codex, as in
+  Claude Code. The wheel now ships the skills (`streamsnow/_skills`), `init`'s
+  `Next:` block names the Codex install, and `skills/_shared/other-agents.md`
+  covers what reads differently outside Claude Code (skill syntax, subagents,
+  checkpoints, and the plugin hooks, which have no Codex equivalent). README:
+  "Use with other agents".
 - **`streamsnow init --no-starter-app`**: the config wizard (or an existing
   config) plus the governed repo files (`AGENTS.md`, `CLAUDE.md`, `.gitignore`,
   `.pre-commit-config.yaml`, CI and deploy workflows, `README.md`,
