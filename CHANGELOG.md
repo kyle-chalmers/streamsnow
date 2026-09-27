@@ -3,7 +3,7 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
-## [0.7.1] - 2026-09-26
+## [0.7.1] - 2026-09-27
 
 The launch-fix release. An end-to-end run of the install path from an empty
 folder (PyPI package plus the marketplace plugin) found that the build half
