@@ -56,18 +56,30 @@ jobs:
           uv tool install 'streamsnow>=0.7.1,<0.8'
           uv tool install snowflake-cli
 
+      # A repo can have deploy secrets before it has an app (`streamsnow init
+      # --no-starter-app` writes no apps/ directory, and git cannot carry an
+      # empty one). Copying a missing apps/ fails with "No data" (exit 2), and
+      # an unmatched apps/*/ loops once over the literal pattern, so the deploy
+      # and verify steps collect app directories with nullglob and stop cleanly
+      # when there are none.
       - name: Deploy changed apps (stage-copy)
         if: steps.gate.outputs.go == 'true'
         run: |
           set -euo pipefail
+          shopt -s nullglob
+          apps=(apps/*/)
+          if [ "${#apps[@]}" -eq 0 ]; then
+            echo "No app directories under apps/ yet: nothing to deploy."
+            exit 0
+          fi
           STAGE="$(streamsnow stage-path)"
           streamsnow deploy-setup > /tmp/ss-setup.sql && snow sql --temporary-connection -f /tmp/ss-setup.sql
           snow stage copy --temporary-connection "apps/" "$STAGE/commits/$GITHUB_SHA/apps/" --recursive --overwrite
-          for d in apps/*/; do
+          for d in "${apps[@]}"; do
             cfg="${d}.streamlit/config.toml"
             [ -f "$cfg" ] && snow stage copy --temporary-connection "$cfg" "$STAGE/commits/$GITHUB_SHA/apps/$(basename "$d")/.streamlit/" --overwrite
           done
-          for d in apps/*/; do
+          for d in "${apps[@]}"; do
             slug="$(basename "$d")"
             streamsnow deploy-sql "$slug" --sha "$GITHUB_SHA" > "/tmp/ss-$slug.sql"
             snow sql --temporary-connection -f "/tmp/ss-$slug.sql"
@@ -94,7 +106,13 @@ jobs:
         if: steps.gate.outputs.go == 'true'
         run: |
           set -euo pipefail
-          for d in apps/*/; do
+          shopt -s nullglob
+          apps=(apps/*/)
+          if [ "${#apps[@]}" -eq 0 ]; then
+            echo "No app directories under apps/ yet: nothing to verify."
+            exit 0
+          fi
+          for d in "${apps[@]}"; do
             streamsnow verify-deploy "$(basename "$d")" --sha "$GITHUB_SHA" --temporary-connection
           done
 {% endraw %}
