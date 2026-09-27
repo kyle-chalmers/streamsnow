@@ -7,6 +7,7 @@ and that config drives the output + guardrails.
 from __future__ import annotations
 
 import py_compile
+import re
 from pathlib import Path
 
 import pytest
@@ -341,8 +342,9 @@ def test_generated_workflows_pin_a_compatible_streamsnow(tmp_path):
         )
 
 
-def _finish_starter(app_dir: Path) -> None:
-    """Repoint the starter trio at a real table (the CLI-only path's step 4)."""
+def _repoint_starter(app_dir: Path) -> None:
+    """Replace YOUR_TABLE in all three starter files. Not enough on its own: the page's
+    hard-coded sample metric and chart are still on screen."""
     for rel in (
         "queries/example_metric.sql",
         "sql_review/manifests/example_metric.json",
@@ -350,6 +352,29 @@ def _finish_starter(app_dir: Path) -> None:
     ):
         f = app_dir / rel
         f.write_text(f.read_text().replace("YOUR_TABLE", "ORDERS"))
+
+
+# The starter page's sample block, from its marker through the sample chart.
+_STARTER_SAMPLE_BLOCK = re.compile(
+    r"# STREAMSNOW_STARTER_PLACEHOLDER.*?st\.plotly_chart\(fig, use_container_width=True\)\n",
+    re.S,
+)
+
+
+def _finish_starter(app_dir: Path) -> None:
+    """The CLI-only path's step 4: repoint the starter trio at a real table AND render
+    the query's results in place of the page's sample metric and chart."""
+    _repoint_starter(app_dir)
+    page = app_dir / "pages/overview.py"
+    text, n = _STARTER_SAMPLE_BLOCK.subn(
+        'df = load_example("2024-01-01", "2024-12-31")\n'
+        'branded_metric("Rows", f"{int(df[\'N\'].sum()):,}")\n'
+        'fig = px.bar(df, x="DT", y="N", color_discrete_sequence=BRAND_CHART_COLORS)\n'
+        "st.plotly_chart(fig, use_container_width=True)\n",
+        page.read_text(),
+    )
+    assert n == 1, "starter page sample block not found"
+    page.write_text(text)
 
 
 def test_fresh_scaffold_fails_only_on_its_placeholders(tmp_path):
@@ -366,6 +391,14 @@ def test_fresh_scaffold_fails_only_on_its_placeholders(tmp_path):
     result = runner.invoke(app, [*args, "--app", "acme-sales-dashboard"])
     assert result.exit_code == 0, result.output
     validate = ["validate-app", "acme-sales-dashboard", "--dir", str(tmp_path)]
+    result = runner.invoke(app, [*validate, "--format", "json"])
+    assert result.exit_code == 1, result.output
+    failing = [c["name"] for c in _json.loads(result.output)["checks"] if not c["ok"]]
+    assert failing == ["placeholders"]
+
+    # Replacing YOUR_TABLE alone leaves the page's sample numbers: still a FAIL.
+    _repoint_starter(tmp_path / "apps/acme-sales-dashboard")
+    assert sql_review.main(["generate", "acme-sales-dashboard", "--dir", str(tmp_path)]) == 0
     result = runner.invoke(app, [*validate, "--format", "json"])
     assert result.exit_code == 1, result.output
     failing = [c["name"] for c in _json.loads(result.output)["checks"] if not c["ok"]]
@@ -555,35 +588,59 @@ def test_validate_app_fails_on_the_scaffold_placeholders(tmp_path):
     """B8, tightened: the starter query reads YOUR_TABLE. As a warning it validated
     clean and CI deployed an app that cannot run. It is a FAIL now, and it names every
     file of the starter trio: repointing the query alone still leaves the manifest's
-    review window and the page's sample numbers."""
+    review window and the page's sample numbers. The page's sample metric and chart are
+    their own finding, so replacing YOUR_TABLE everywhere does not clear the gate either."""
     import json as _json
 
     args = ["init", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path), "--app", "a-b"]
     assert runner.invoke(app, args).exit_code == 0
     validate = ["validate-app", "a-b", "--dir", str(tmp_path)]
 
-    def placeholder_files() -> list[str]:
+    def placeholder_findings() -> list[tuple[str, str]]:
         out = runner.invoke(app, [*validate, "--format", "json"]).output
         check = next(c for c in _json.loads(out)["checks"] if c["name"] == "placeholders")
         assert check["ok"] is (not check["findings"])
-        return [f["file"] for f in check["findings"]]
+        kinds = {"scaffold placeholder YOUR_TABLE": "token", "starter page sample": "sample"}
+        return [
+            (f["file"], next(k for p, k in kinds.items() if f["detail"].startswith(p)))
+            for f in check["findings"]
+        ]
 
-    assert placeholder_files() == [
-        "pages/overview.py",
-        "queries/example_metric.sql",
-        "sql_review/manifests/example_metric.json",
+    assert placeholder_findings() == [
+        ("pages/overview.py", "token"),
+        ("pages/overview.py", "sample"),
+        ("queries/example_metric.sql", "token"),
+        ("sql_review/manifests/example_metric.json", "token"),
     ]
     md = runner.invoke(app, validate)
     assert md.exit_code == 1
-    assert "YOUR_TABLE" in md.output and "FAIL" in md.output
+    assert "YOUR_TABLE" in md.output and "STREAMSNOW_STARTER_PLACEHOLDER" in md.output
+    assert "FAIL" in md.output
 
     q = tmp_path / "apps/a-b/queries/example_metric.sql"
     q.write_text(q.read_text().replace("YOUR_TABLE  -- TODO: replace YOUR_TABLE", "ORDERS"))
-    assert "queries/example_metric.sql" not in placeholder_files()
+    assert ("queries/example_metric.sql", "token") not in placeholder_findings()
     assert runner.invoke(app, validate).exit_code == 1  # manifest + page still placeholders
 
+    # Every YOUR_TABLE gone, the sample metric and chart still on the page: FAIL.
+    _repoint_starter(tmp_path / "apps/a-b")
+    assert placeholder_findings() == [("pages/overview.py", "sample")]
+    assert runner.invoke(app, validate).exit_code == 1
+
+    # Deleting only the marker comment does not dodge it: the sample values match too,
+    # which is also how a page scaffolded before the marker existed is caught.
+    page = tmp_path / "apps/a-b/pages/overview.py"
+    marked = page.read_text()
+    lines = marked.splitlines(keepends=True)
+    start = next(i for i, ln in enumerate(lines) if "STREAMSNOW_STARTER_PLACEHOLDER" in ln)
+    del lines[start : start + 3]
+    page.write_text("".join(lines))
+    assert "STREAMSNOW_STARTER_PLACEHOLDER" not in page.read_text()
+    assert placeholder_findings() == [("pages/overview.py", "sample")]
+
+    page.write_text(marked)
     _finish_starter(tmp_path / "apps/a-b")
-    assert placeholder_files() == []
+    assert placeholder_findings() == []
 
 
 def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypatch):

@@ -14,7 +14,8 @@ run the spec phase first ([spec.md](spec.md)) and resume.
 1. **Resolve target.** Confirm `apps/<slug>/` and its `REQUIREMENTS.md` exist. No spec → backfill
    one first (spec phase, automatic backfill mode). Page already exists as `pages/<page>.py` → stop;
    overwriting risks losing in-progress work. The one exception is the scaffold's own starter
-   `pages/overview.py` (it still contains `YOUR_TABLE`): the first page replaces it, see
+   `pages/overview.py` (it still contains `YOUR_TABLE` or the `STREAMSNOW_STARTER_PLACEHOLDER`
+   sample block): the first page replaces it, see
    [Replace the starter trio](#replace-the-starter-trio).
 2. **Detect the runtime** (anchored `runtime_name:` in `snowflake.yml`) — it decides the loader's
    connection pattern below.

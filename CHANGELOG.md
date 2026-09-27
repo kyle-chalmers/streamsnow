@@ -34,9 +34,12 @@ the past, a local preview crash, and a starter app that could still ship.
   pre-provisioned `SYSTEM_COMPUTE_POOL_CPU`.
 - **`validate-app` `placeholders` check**: fails while any authored app file
   (query, page or `sql_review` manifest) still carries the scaffold's
-  `YOUR_TABLE`. CI deploys every app under `apps/`, so the placeholder app
-  used to ship beside the real one. The starter page carries the token next to
-  its sample numbers, so repointing the query alone does not clear it.
+  `YOUR_TABLE`, or while the starter page still shows its hard-coded sample
+  metric and chart (marked `STREAMSNOW_STARTER_PLACEHOLDER`; the sample values
+  themselves match too, so pages scaffolded by 0.7.0 are caught). CI deploys
+  every app under `apps/`, so the placeholder app used to ship beside the real
+  one. The sample values never read the query, so replacing `YOUR_TABLE`
+  everywhere does not clear the page on its own.
 - **`doctor` `snow-key-file`** (optional, warns): the default `snow`
   connection uses key-pair auth with no `private_key_file`, the signature of a
   key named `private_key_path` (see Fixed). Reads parameter names only, never

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -52,14 +53,25 @@ def _scaffold_with_trail(cfg: Config, root: Path, slug: str) -> Path:
 
 
 def _finish_starter(app: Path) -> Path:
-    """Repoint the scaffold's placeholder trio the way a user finishes it: the query and
-    its manifest window read a real table, and the starter page loses its sample-number
-    caption. validate-app FAILS (placeholders) until this happens."""
+    """Finish the scaffold's placeholder trio the way a user does: the query and its
+    manifest window read a real table, and the starter page renders the query's results
+    in place of its sample metric and chart. validate-app FAILS (placeholders) until
+    this happens."""
     for rel in ("queries/example_metric.sql", "sql_review/manifests/example_metric.json"):
         f = app / rel
         f.write_text(f.read_text().replace("YOUR_TABLE", "ORDERS"))
     page = app / "pages/overview.py"
-    page.write_text(page.read_text().replace("YOUR_TABLE", "ORDERS"))
+    text, n = re.subn(
+        r"# STREAMSNOW_STARTER_PLACEHOLDER.*?st\.plotly_chart\(fig, use_container_width=True\)\n",
+        'df = load_example("2024-01-01", "2024-12-31")\n'
+        'branded_metric("Rows", f"{int(df[\'N\'].sum()):,}")\n'
+        'fig = px.bar(df, x="DT", y="N", color_discrete_sequence=BRAND_CHART_COLORS)\n'
+        "st.plotly_chart(fig, use_container_width=True)\n",
+        page.read_text(),
+        flags=re.S,
+    )
+    assert n == 1, "starter page sample block not found"
+    page.write_text(text.replace("YOUR_TABLE", "ORDERS"))
     assert sql_review.main(["generate", app.name, "--dir", str(app.parent.parent)]) == 0
     return app
 
