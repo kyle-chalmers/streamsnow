@@ -22,6 +22,7 @@ import yaml
 from rich.console import Console
 
 from . import __version__
+from .agent_skills import main as _agent_skills_main
 from .config import (
     CONFIG_FILENAME,
     DEPLOY_SOURCES,
@@ -528,7 +529,7 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
         "Next:",
         "  1. Claude Code users: /plugin marketplace add kyle-chalmers/streamsnow",
         "                        /plugin install streamsnow@streamsnow   then /start-app",
-        "     (CLI only? skip this step.)",
+        "     (CLI only? skip this step. Codex: streamsnow agent-skills install --agent codex)",
         f"  2. {_connection_hint(cfg, _snow_connections())}",
         "     (one-time; st.connection('snowflake') reads this default connection locally.",
         "      Per-app apps/<slug>/.streamlit/secrets.toml is an optional override.)",
@@ -1061,6 +1062,16 @@ def nav(
     if json_array:
         argv.append("--json-array")
     raise typer.Exit(code=_app_nav_main(argv))
+
+
+@app.command(
+    name="agent-skills",
+    add_help_option=False,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def agent_skills_cmd(ctx: typer.Context) -> None:
+    """Install the skills for other AI coding agents, e.g. Codex (install | list)."""
+    raise typer.Exit(code=_agent_skills_main(list(ctx.args)))
 
 
 if __name__ == "__main__":  # pragma: no cover
