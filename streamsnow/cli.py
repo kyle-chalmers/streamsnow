@@ -729,20 +729,30 @@ def verify_deploy_cmd(
     sha: str = typer.Option(None, "--sha", help="Expected commit SHA (stage-copy source check)."),
     attempts: int = typer.Option(3, "--attempts", help="Retries for cold-start absorption."),
     delay: float = typer.Option(20.0, "--delay", help="Seconds between retries."),
+    temporary_connection: bool = typer.Option(
+        False,
+        "--temporary-connection",
+        help="Pass --temporary-connection to every snow call, so snow connects from "
+        "SNOWFLAKE_* environment variables instead of config.toml (the generated deploy "
+        "workflow passes it in CI). Omit locally to use your default connection.",
+    ),
     config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
     output_format: str = typer.Option("md", "--format"),
 ) -> None:
     """Verify a deployed app actually serves: object exists, live version set,
     version source matches the merge SHA, container logs show no crash loop."""
-    from .verify import verify_app
+    from functools import partial
+
+    from .verify import run_query_snow, verify_app
 
     try:
         cfg = load_config(Path(config) if config else None)
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
+    run_query = partial(run_query_snow, temporary_connection=temporary_connection)
     try:
-        result = verify_app(cfg, slug, sha=sha, attempts=attempts, delay=delay)
+        result = verify_app(cfg, slug, sha=sha, run_query=run_query, attempts=attempts, delay=delay)
     except ValueError as exc:  # invalid slug
         _err(str(exc))
         raise typer.Exit(2) from exc
