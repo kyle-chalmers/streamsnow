@@ -246,7 +246,7 @@ def generate_admin_sql(cfg: Config) -> str:
         "",
         "-- 2. Roles and the CI service user ----------------------------------------",
         "USE ROLE USERADMIN;",
-        f"CREATE ROLE IF NOT EXISTS {ci};      -- deploys and owns the apps (CI)",
+        f"CREATE ROLE IF NOT EXISTS {ci};  -- deploys and owns the apps (CI)",
         f"CREATE ROLE IF NOT EXISTS {viewer};  -- opens the apps (no data grants by default)",
         "-- Key-pair auth (no password): generate a key pair, paste the PUBLIC key",
         "-- below, and store the private key as the SNOWFLAKE_PRIVATE_KEY_RAW repo",

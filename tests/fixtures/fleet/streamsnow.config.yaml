@@ -12,19 +12,19 @@ snowflake:
   account: ab12345.us-east-1
   connection_name: acme
   objects:
-    app_database: DATA_APPS
-    app_schema: BI_APPS
-    stage_database: DATA_APPS
-    stage_schema: BI_APPS
-    stage_name: STREAMLIT_CODE_STAGE
-    default_warehouse: STREAMLIT_WH
+    app_database: STREAMSNOW_APPS
+    app_schema: DASHBOARDS
+    stage_database: STREAMSNOW_APPS
+    stage_schema: DASHBOARDS
+    stage_name: STREAMSNOW_CODE_STAGE
+    default_warehouse: STREAMSNOW_WH
     allowed_warehouses:
-    - STREAMLIT_WH
+    - STREAMSNOW_WH
     compute_pool: STREAMLIT_POOL
     external_access_integration: PYPI_ACCESS_INTEGRATION
   roles:
-    ci_role: STREAMLIT_CI_ROLE
-    viewer_role: STREAMLIT_APP_ROLE
+    ci_role: STREAMSNOW_DEPLOY_ROLE
+    viewer_role: STREAMSNOW_VIEWER_ROLE
 governance:
   database: ANALYTICS_DB
   schema_allow:

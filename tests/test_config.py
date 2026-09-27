@@ -29,16 +29,16 @@ def _base() -> dict:
             "account": "ab12345.us-east-1",
             "connection_name": "acme",
             "objects": {
-                "app_database": "DATA_APPS",
-                "app_schema": "BI_APPS",
-                "stage_database": "DATA_APPS",
-                "stage_schema": "BI_APPS",
-                "default_warehouse": "STREAMLIT_WH",
-                "allowed_warehouses": ["STREAMLIT_WH"],
+                "app_database": "STREAMSNOW_APPS",
+                "app_schema": "DASHBOARDS",
+                "stage_database": "STREAMSNOW_APPS",
+                "stage_schema": "DASHBOARDS",
+                "default_warehouse": "STREAMSNOW_WH",
+                "allowed_warehouses": ["STREAMSNOW_WH"],
                 "compute_pool": "SYSTEM_COMPUTE_POOL_CPU",
                 "external_access_integration": "PYPI_ACCESS_INTEGRATION",
             },
-            "roles": {"ci_role": "STREAMLIT_CI_ROLE", "viewer_role": "STREAMLIT_APP_ROLE"},
+            "roles": {"ci_role": "STREAMSNOW_DEPLOY_ROLE", "viewer_role": "STREAMSNOW_VIEWER_ROLE"},
         },
         "governance": {
             "database": "ANALYTICS_DB",
@@ -107,9 +107,9 @@ def test_git_repository_deploy_valid():
     d = _base()
     d["deploy"] = {
         "source": "git-repository",
-        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
         "api_integration_name": "GITHUB_API_INTEGRATION",
-        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
     }
     cfg = Config.from_dict(d)
     assert cfg.deploy.source == "git-repository"

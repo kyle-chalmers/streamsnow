@@ -143,6 +143,22 @@ the past, a local preview crash, and a starter app that could still ship.
   guarded.
 - **README positioning**: for internal analytics StreamSnow can replace a BI
   tool; external or customer-facing analytics needs additional customization.
+- **Default Snowflake object names are StreamSnow-branded.** The wizard,
+  `streamsnow.config.example.yaml` and the loader now default to
+  `STREAMSNOW_APPS` (app and stage database), `DASHBOARDS` (schema),
+  `STREAMSNOW_WH`, `STREAMSNOW_DEPLOY_ROLE` (whose CI user is
+  `STREAMSNOW_DEPLOY_USER`), `STREAMSNOW_VIEWER_ROLE` and
+  `STREAMSNOW_CODE_STAGE`, so `LIKE 'STREAMSNOW%'` finds every database,
+  warehouse, role, user and stage `deploy-setup --admin` creates.
+  `PYPI_ACCESS_INTEGRATION` is unchanged. Existing repos keep whatever their
+  `streamsnow.config.yaml` says: a name set there wins over the default, and
+  re-running `configure` keeps it. The one default an existing config can
+  inherit is `snowflake.objects.stage_name`, which is optional and which the
+  wizard never wrote: a stage-copy repo without it deploys through
+  `STREAMSNOW_CODE_STAGE` from its next deploy (the deploy's `CREATE STAGE IF
+  NOT EXISTS` creates it, using the CI role's `CREATE STAGE` grant). To keep
+  the stage you have, add `stage_name:` with its name under
+  `snowflake.objects`.
 
 ## [0.7.0] - 2026-09-11
 

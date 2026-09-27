@@ -234,9 +234,9 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
         "Deploy source", DEPLOY_SOURCES, _pf(prefill, "deploy.source", "stage-copy")
     )
     # Everything below ships as a commented default in the written file.
-    app_db = _pf(prefill, "snowflake.objects.app_database", "DATA_APPS")
-    app_schema = _pf(prefill, "snowflake.objects.app_schema", "BI_APPS")
-    warehouse = _pf(prefill, "snowflake.objects.default_warehouse", "STREAMLIT_WH")
+    app_db = _pf(prefill, "snowflake.objects.app_database", "STREAMSNOW_APPS")
+    app_schema = _pf(prefill, "snowflake.objects.app_schema", "DASHBOARDS")
+    warehouse = _pf(prefill, "snowflake.objects.default_warehouse", "STREAMSNOW_WH")
     objects: dict = {
         "app_database": app_db,
         "app_schema": app_schema,
@@ -274,8 +274,10 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
             "connection_name": connection_name,
             "objects": objects,
             "roles": {
-                "ci_role": _pf(prefill, "snowflake.roles.ci_role", "STREAMLIT_CI_ROLE"),
-                "viewer_role": _pf(prefill, "snowflake.roles.viewer_role", "STREAMLIT_APP_ROLE"),
+                "ci_role": _pf(prefill, "snowflake.roles.ci_role", "STREAMSNOW_DEPLOY_ROLE"),
+                "viewer_role": _pf(
+                    prefill, "snowflake.roles.viewer_role", "STREAMSNOW_VIEWER_ROLE"
+                ),
             },
         },
         "governance": {

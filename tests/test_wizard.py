@@ -122,6 +122,33 @@ def test_wizard_defaults_to_the_pre_provisioned_compute_pool(monkeypatch):
     assert cfg_dict["snowflake"]["objects"]["compute_pool"] == "ACME_POOL"
 
 
+def test_wizard_defaults_are_streamsnow_branded(monkeypatch):
+    """Default object names are StreamSnow's own, so an admin finds every database,
+    warehouse, role, user and stage the bootstrap creates with LIKE 'STREAMSNOW%'
+    (the DASHBOARDS schema lives inside STREAMSNOW_APPS; the PyPI integration keeps
+    its descriptive name). The CI user derives from the deploy role."""
+    import re
+
+    from streamsnow.deploy import generate_admin_sql
+
+    cfg_dict, _ = _run_wizard(monkeypatch)
+    o, r = cfg_dict["snowflake"]["objects"], cfg_dict["snowflake"]["roles"]
+    assert (o["app_database"], o["app_schema"]) == ("STREAMSNOW_APPS", "DASHBOARDS")
+    assert (o["stage_database"], o["stage_schema"]) == ("STREAMSNOW_APPS", "DASHBOARDS")
+    assert o["default_warehouse"] == "STREAMSNOW_WH"
+    assert o["allowed_warehouses"] == ["STREAMSNOW_WH"]
+    assert (r["ci_role"], r["viewer_role"]) == ("STREAMSNOW_DEPLOY_ROLE", "STREAMSNOW_VIEWER_ROLE")
+    cfg = Config.from_dict(cfg_dict)
+    assert cfg.snowflake.objects.stage_name == "STREAMSNOW_CODE_STAGE"  # loader default
+    sql = generate_admin_sql(cfg)
+    assert "CREATE USER IF NOT EXISTS STREAMSNOW_DEPLOY_USER" in sql
+    created = re.findall(
+        r"^CREATE (?:DATABASE|WAREHOUSE|ROLE|USER|STAGE) IF NOT EXISTS ([\w.$]+)", sql, re.M
+    )
+    assert len(created) == 6, created
+    assert all(fqn.rsplit(".", 1)[-1].startswith("STREAMSNOW_") for fqn in created), created
+
+
 class _Proc:
     def __init__(self, returncode: int, stdout: str) -> None:
         self.returncode = returncode

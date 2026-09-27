@@ -23,14 +23,14 @@ snowflake:
   account: "ab12345.us-east-1"
   connection_name: "acme"
   objects:
-    app_database: "DATA_APPS"
-    app_schema: "BI_APPS"
-    stage_database: "DATA_APPS"
-    stage_schema: "BI_APPS"
-    default_warehouse: "STREAMLIT_WH"
+    app_database: "STREAMSNOW_APPS"
+    app_schema: "DASHBOARDS"
+    stage_database: "STREAMSNOW_APPS"
+    stage_schema: "DASHBOARDS"
+    default_warehouse: "STREAMSNOW_WH"
   roles:
-    ci_role: "STREAMLIT_CI_ROLE"
-    viewer_role: "STREAMLIT_APP_ROLE"
+    ci_role: "STREAMSNOW_DEPLOY_ROLE"
+    viewer_role: "STREAMSNOW_VIEWER_ROLE"
 governance:
   database: "ANALYTICS_DB"
   schema_allow: ["ANALYTICS", "REPORTING"]
@@ -43,13 +43,13 @@ entities:
     type: streamlit
     identifier:
       name: {name}
-      database: DATA_APPS
-      schema: BI_APPS
+      database: STREAMSNOW_APPS
+      schema: DASHBOARDS
     main_file: streamlit_app.py
 """
 
-SALES_FQN = "DATA_APPS.BI_APPS.ACME_SALES_DASHBOARD"
-CAMPAIGN_FQN = "DATA_APPS.BI_APPS.MARKETING_CAMPAIGN_DASHBOARD"
+SALES_FQN = "STREAMSNOW_APPS.DASHBOARDS.ACME_SALES_DASHBOARD"
+CAMPAIGN_FQN = "STREAMSNOW_APPS.DASHBOARDS.MARKETING_CAMPAIGN_DASHBOARD"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -158,8 +158,8 @@ def test_malformed_registry_exits_2(tmp_path, monkeypatch, capsys):
     cases = [
         "tombstones: {not: a-list}\n",
         "tombstones:\n  - identifier: not..a..valid..fqn\n    reason: x\n    date: 2026-08-31\n",
-        "tombstones:\n  - identifier: DATA_APPS.BI_APPS.GONE\n    reason: x\n    date: yesterday\n",
-        "tombstones:\n  - identifier: DATA_APPS.BI_APPS.GONE\n    reason: x\n    data: 2026-08-31\n",
+        "tombstones:\n  - identifier: STREAMSNOW_APPS.DASHBOARDS.GONE\n    reason: x\n    date: yesterday\n",
+        "tombstones:\n  - identifier: STREAMSNOW_APPS.DASHBOARDS.GONE\n    reason: x\n    data: 2026-08-31\n",
         f"tombstones:\n  - identifier: {SALES_FQN}\n    date: 2026-08-31\n",  # no reason
         "not: [valid\n",  # YAML syntax error
     ]
@@ -191,7 +191,7 @@ def test_missing_base_ref_exits_2(tmp_path, monkeypatch, capsys):
 def test_two_part_identifier_rejected(tmp_path):
     path = _tombstone(
         tmp_path,
-        "tombstones:\n  - identifier: BI_APPS.GONE\n    reason: retired\n    date: 2026-08-31\n",
+        "tombstones:\n  - identifier: DASHBOARDS.GONE\n    reason: retired\n    date: 2026-08-31\n",
     )
     _, errors = load_registry(path)
     assert any("fully-qualified" in e for e in errors)
@@ -210,7 +210,7 @@ def test_drop_sql_output(tmp_path, monkeypatch, capsys):
         f"  - identifier: {SALES_FQN}\n"
         "    reason: renamed to ACME_REVENUE_DASHBOARD\n"
         "    date: 2026-08-31\n"
-        "  - identifier: DATA_APPS.BI_APPS.OLD_INVENTORY_REPORT\n"
+        "  - identifier: STREAMSNOW_APPS.DASHBOARDS.OLD_INVENTORY_REPORT\n"
         "    reason: retired\n"
         "    date: 2026-08-30\n",
     )
@@ -219,7 +219,7 @@ def test_drop_sql_output(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert out.splitlines() == [
         f"DROP STREAMLIT IF EXISTS {SALES_FQN};",
-        "DROP STREAMLIT IF EXISTS DATA_APPS.BI_APPS.OLD_INVENTORY_REPORT;",
+        "DROP STREAMLIT IF EXISTS STREAMSNOW_APPS.DASHBOARDS.OLD_INVENTORY_REPORT;",
     ]
 
 
@@ -291,8 +291,8 @@ def test_namespace_move_requires_tombstones_for_old_fqns(tmp_path, monkeypatch, 
     cfg_path = tmp_path / "streamsnow.config.yaml"
     cfg_path.write_text(
         cfg_path.read_text()
-        .replace('app_database: "DATA_APPS"', 'app_database: "NEW_APPS"')
-        .replace('app_schema: "BI_APPS"', 'app_schema: "NEW_SCHEMA"')
+        .replace('app_database: "STREAMSNOW_APPS"', 'app_database: "NEW_APPS"')
+        .replace('app_schema: "DASHBOARDS"', 'app_schema: "NEW_SCHEMA"')
     )
     monkeypatch.chdir(tmp_path)
     code = main(["--base-ref", "main"])

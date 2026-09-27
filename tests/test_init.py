@@ -207,9 +207,9 @@ def test_git_repository_config_scaffolds_git_deploy_workflow(tmp_path):
     data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
     data["deploy"] = {
         "source": "git-repository",
-        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
         "api_integration_name": "GITHUB_API_INTEGRATION",
-        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
     }
     scaffold(Config.from_dict(data), tmp_path, "g-app")
     deploy = (tmp_path / ".github/workflows/deploy.yml").read_text()
@@ -255,9 +255,9 @@ def test_deploy_workflows_pin_verify_concurrency_and_dotfile_copy(tmp_path):
     data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
     data["deploy"] = {
         "source": "git-repository",
-        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
         "api_integration_name": "GITHUB_API_INTEGRATION",
-        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
     }
     scaffold(Config.from_dict(data), tmp_path / "g", "g-app")
     git_deploy = (tmp_path / "g/.github/workflows/deploy.yml").read_text()
@@ -300,9 +300,9 @@ def test_generated_deploy_workflows_reconcile_tombstones(tmp_path):
     gitdata = dict(data)
     gitdata["deploy"] = {
         "source": "git-repository",
-        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
         "api_integration_name": "GITHUB_API_INTEGRATION",
-        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
     }
     scaffold(Config.from_dict(gitdata), tmp_path / "g", "acme-sales-dashboard")
     git_deploy = (tmp_path / "g" / ".github" / "workflows" / "deploy.yml").read_text()
