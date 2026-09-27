@@ -258,6 +258,10 @@ def plan_install(
     source: Path, dest: Path, agent: AgentTarget, *, force: bool = False
 ) -> InstallPlan:
     plan = InstallPlan(dest=dest, agent=agent)
+    if dest.is_symlink():
+        # A symlinked skills directory (a repo can commit one) would let a valid
+        # entry name delete a folder somewhere else, so refuse rather than follow it.
+        raise AgentSkillsError(f"{dest} is a symbolic link; install into a real directory instead")
     manifest = read_manifest(dest)
     owned = {_check_entry(dest, e) for e in manifest.get("entries") or []}
     recorded: dict[str, str] = manifest.get("files") or {}
@@ -297,6 +301,8 @@ def plan_install(
 
 def apply_install(plan: InstallPlan) -> None:
     dest = plan.dest
+    if dest.is_symlink():
+        raise AgentSkillsError(f"{dest} is a symbolic link; install into a real directory instead")
     dest.mkdir(parents=True, exist_ok=True)
     for entry in plan.updated + plan.removed:
         target = dest / _check_entry(dest, entry)

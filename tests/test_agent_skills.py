@@ -196,6 +196,31 @@ def test_a_manifest_entry_outside_the_skills_folder_is_refused(tmp_path, bad):
     assert (outside / "keep.txt").is_file()
 
 
+def test_a_symlinked_skills_folder_is_refused(tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "start-app").mkdir(parents=True)
+    (elsewhere / "start-app" / "keep.txt").write_text("keep\n")
+    dest = tmp_path / "repo" / ".agents" / "skills"
+    dest.parent.mkdir(parents=True)
+    dest.symlink_to(elsewhere, target_is_directory=True)
+    src = _fake_source(tmp_path / "v1", ["start-app"])
+    with pytest.raises(ags.AgentSkillsError, match="symbolic link"):
+        ags.plan_install(src, dest, CODEX, force=True)
+    assert (elsewhere / "start-app" / "keep.txt").is_file()
+
+
+def test_an_upgrade_that_drops_a_file_is_not_drift(tmp_path):
+    dest = tmp_path / "dest"
+    old = _fake_source(tmp_path / "v1", ["start-app"])
+    (old / "start-app" / "extra.md").write_text("old recipe\n")
+    ags.apply_install(ags.plan_install(old, dest, CODEX))
+    new = _fake_source(tmp_path / "v2", ["start-app"])
+    plan = ags.plan_install(new, dest, CODEX)
+    assert plan.conflicts == []
+    ags.apply_install(plan)
+    assert not (dest / "start-app" / "extra.md").exists()
+
+
 def test_a_file_deleted_inside_an_installed_skill_is_drift(tmp_path):
     dest = tmp_path / "dest"
     src = _fake_source(tmp_path / "v1", ["start-app"])
