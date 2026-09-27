@@ -113,11 +113,14 @@ the past, a local preview crash, and a starter app that could still ship.
   `STREAMLIT_POOL`), so `deploy-setup --admin` for a default container config
   emits no `CREATE COMPUTE POOL`. A pool already named in a config is kept.
 - **`connection_name` defaults to your default `snow` connection** when one
-  exists (was the folder slug), falling back to the slug when `snow` is
-  missing or broken. Users with a working connection from a prior tutorial no
-  longer fail `doctor`'s connection check or get told to add a second
-  `--default` connection; `init` and `configure` only print `snow connection
-  add` when no connection by that name exists.
+  exists and its `account` matches the account you answer (case-insensitive;
+  was the folder slug), falling back to the slug when `snow` is missing or
+  broken, or the default connection is for another account or names none (a
+  one-line note says so, without printing either account). Users with a
+  working connection from a prior tutorial no longer fail `doctor`'s
+  connection check or get told to add a second `--default` connection; `init`
+  and `configure` only print `snow connection add` when no connection by that
+  name exists.
 - **The starter trio from `streamsnow new`** (`queries/example_metric.sql`, its
   `sql_review` manifest, `pages/overview.py` with sample numbers) is replaced
   explicitly by `/start-app`'s build phase, and `new` says they are

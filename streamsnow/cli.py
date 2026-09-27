@@ -164,6 +164,33 @@ def _snow_connections() -> list[dict] | None:
     return _doctor.snow_connections()
 
 
+def _detect_connection_name(account: str, slug: str) -> str:
+    """The default ``snow`` connection's name when it opens ``account``, else ``slug``.
+
+    An existing default connection (a prior tutorial, another project) is what
+    ``st.connection("snowflake")`` already reads locally, so adopting it spares
+    those users a second ``--default`` connection. Adopting it without comparing
+    accounts wrote a config whose connection opens some other account, so the
+    default is used only when its ``account`` parameter matches the answer
+    (case-insensitive). Neither account value is ever printed.
+    """
+    rows = _snow_connections()
+    detected = _doctor.default_connection_name(rows)
+    if not detected:
+        return slug
+    row = _doctor.default_connection(rows) or {}
+    params = row.get("parameters") if isinstance(row.get("parameters"), dict) else {}
+    theirs = params.get("account")
+    if isinstance(theirs, str) and theirs.strip().casefold() == account.strip().casefold():
+        console.print(f"[dim]using your default snow connection {detected!r}[/]")
+        return detected
+    why = "names no account" if not theirs else "is for another account"
+    console.print(
+        f"[dim]default snow connection {detected!r} {why}, so connection_name is {slug!r}[/]"
+    )
+    return slug
+
+
 def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -> dict:
     """Interactive setup wizard: detect first, ask at most 5 questions.
 
@@ -184,23 +211,18 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
     dir_slug = _slugify(directory.name) if directory is not None else "my-dashboards"
     slug = _pf(prefill, "project.slug", dir_slug)
     name = _pf(prefill, "project.name", slug.replace("-", " ").title())
-    # The snow connection: an existing default connection (a prior tutorial, another
-    # project) is what st.connection("snowflake") already reads locally. Defaulting to
-    # the slug instead failed doctor's connection check for exactly those users and
-    # sent them to create a second --default connection. snow is only asked when the
-    # config does not already name one; missing or broken snow falls back to the slug.
-    connection_name = _pf(prefill, "snowflake.connection_name", None)
-    if connection_name is None:
-        detected = _doctor.default_connection_name(_snow_connections())
-        if detected:
-            console.print(f"[dim]using your default snow connection {detected!r}[/]")
-        connection_name = detected or slug
     # The five questions.
     runtime = _prompt_choice("Runtime", RUNTIMES, _pf(prefill, "runtime", "container"))
     account = p(
         "Snowflake account locator (no .snowflakecomputing.com)",
         default=_pf(prefill, "snowflake.account", None),
     )
+    # The snow connection: the default one when it opens this account, else the slug
+    # (see _detect_connection_name). snow is only asked when the config does not
+    # already name a connection; missing or broken snow falls back to the slug.
+    connection_name = _pf(prefill, "snowflake.connection_name", None)
+    if connection_name is None:
+        connection_name = _detect_connection_name(account, slug)
     gov_db = p(
         "Database your apps query", default=_pf(prefill, "governance.database", "ANALYTICS_DB")
     )
@@ -271,7 +293,7 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
 _DEFAULT_COMMENTS: dict[str, str] = {
     "project.name": "display name — edit freely",
     "project.slug": "derived from the directory name",
-    "snowflake.connection_name": "snow CLI connection (your default one when detected)",
+    "snowflake.connection_name": "snow CLI connection (your default one when it is this account)",
     "snowflake.objects.app_database": "where deployed STREAMLIT objects live",
     "snowflake.objects.app_schema": "schema for deployed STREAMLIT objects",
     "snowflake.objects.stage_database": "stage-copy deploys stage code here",

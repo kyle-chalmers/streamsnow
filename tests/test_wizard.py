@@ -147,16 +147,23 @@ def _fake_snow(monkeypatch, list_result, calls=None):
     monkeypatch.setattr(doctor.subprocess, "run", fake_run)
 
 
+# The default connection's account is the wizard's answer ("ab12345.us-east-1" in
+# _run_wizard) in another case: accounts compare case-insensitively.
 _ROWS = [
-    {"connection_name": "other", "is_default": False, "parameters": {"account": "x"}},
-    {"connection_name": "tutorial", "is_default": True, "parameters": {"account": "x"}},
+    {"connection_name": "other", "is_default": False, "parameters": {"account": "zz99999"}},
+    {
+        "connection_name": "tutorial",
+        "is_default": True,
+        "parameters": {"account": "AB12345.US-EAST-1", "user": "u"},
+    },
 ]
 
 
 def test_wizard_defaults_connection_name_to_the_existing_default_connection(monkeypatch):
     """Someone who already has a working default snow connection (a prior tutorial) got
     connection_name = the folder slug, failed doctor's connection check, and was told
-    to create a second --default connection. The existing default is the right answer."""
+    to create a second --default connection. The existing default is the right answer
+    when it opens the account they answered."""
     _fake_snow(monkeypatch, (0, _ROWS))
     cfg_dict, asked = _run_wizard(monkeypatch)
     assert cfg_dict["snowflake"]["connection_name"] == "tutorial"
@@ -170,6 +177,40 @@ def test_wizard_defaults_connection_name_to_the_existing_default_connection(monk
     # ...and the one-time step no longer tells them to add a default connection.
     hint = _connection_hint(cfg, _ROWS)
     assert "snow connection add" not in hint and "already your default" in hint
+
+
+def _default_row(params: dict) -> list[dict]:
+    return [{"connection_name": "tutorial", "is_default": True, "parameters": params}]
+
+
+def test_wizard_ignores_a_default_connection_for_another_account(monkeypatch, capsys):
+    """The default connection was adopted before the account was even asked, so a
+    default left over from another account (a trial, a previous employer) wrote a
+    config whose connection opens the wrong account. A mismatch falls back to the slug
+    with a one-line note, and neither account value is printed."""
+    _fake_snow(monkeypatch, (0, _default_row({"account": "zz99999.eu-west-1", "user": "u"})))
+    cfg_dict, asked = _run_wizard(monkeypatch)
+    assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics"
+    assert cfg_dict["snowflake"]["account"] == "ab12345.us-east-1"
+    assert len(asked) <= 5
+    out = capsys.readouterr().out
+    assert "'tutorial' is for another account" in out
+    assert "zz99999" not in out.lower() and "ab12345" not in out.lower()
+
+
+def test_wizard_ignores_a_default_connection_that_names_no_account(monkeypatch, capsys):
+    """No account parameter (or a non-string one) cannot be shown to match: slug."""
+    for params in ({"user": "u"}, {"account": None}, {"account": ""}):
+        _fake_snow(monkeypatch, (0, _default_row(params)))
+        cfg_dict, _ = _run_wizard(monkeypatch)
+        assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics", params
+        assert "'tutorial' names no account" in capsys.readouterr().out
+    # No parameters mapping at all.
+    _fake_snow(monkeypatch, (0, [{"connection_name": "tutorial", "is_default": True}]))
+    cfg_dict, _ = _run_wizard(monkeypatch)
+    assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics"
+    out = capsys.readouterr().out
+    assert "'tutorial' names no account" in out and "ab12345" not in out.lower()
 
 
 def test_wizard_connection_name_falls_back_to_the_slug(monkeypatch):
