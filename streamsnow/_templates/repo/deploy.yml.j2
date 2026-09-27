@@ -24,7 +24,9 @@ jobs:
       SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
       SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
       SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_RAW }}
-      SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+      # snow reads an encrypted key's passphrase from PRIVATE_KEY_PASSPHRASE
+      # (no SNOWFLAKE_ prefix); unused when the key is unencrypted.
+      PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
       SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
     # Every snow call (and verify-deploy) passes --temporary-connection: the

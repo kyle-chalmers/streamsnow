@@ -318,6 +318,16 @@ def test_deploy_workflows_run_verify_deploy_with_a_temporary_connection(tmp_path
         assert all("--temporary-connection" in line.split() for line in lines), (source, lines)
 
 
+def test_deploy_workflows_hand_snow_the_key_passphrase_by_the_name_it_reads(tmp_path):
+    """snow reads an encrypted key's passphrase from PRIVATE_KEY_PASSPHRASE;
+    a SNOWFLAKE_PRIVATE_KEY_PASSPHRASE variable is ignored, which would fail
+    an encrypted-key deploy. The repo secret keeps its documented name."""
+    for source, workflow in _render_deploy_workflows(tmp_path).items():
+        env = workflow["jobs"]["deploy"]["env"]
+        assert env["PRIVATE_KEY_PASSPHRASE"] == "${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}"
+        assert "SNOWFLAKE_PRIVATE_KEY_PASSPHRASE" not in env, source
+
+
 def test_generated_precommit_enforces_sql_review_and_vulns(tmp_path):
     data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
     scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
