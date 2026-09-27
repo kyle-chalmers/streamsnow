@@ -177,6 +177,34 @@ def test_a_file_added_inside_an_installed_skill_blocks_the_upgrade(tmp_path):
     assert plan.conflicts == ["start-app/team-notes.md was added after the install"]
 
 
+@pytest.mark.parametrize("bad", ["..", "../outside", "/tmp", "a/b", ".", ""])
+def test_a_manifest_entry_outside_the_skills_folder_is_refused(tmp_path, bad):
+    # The manifest is committed with the repo, so a crafted entry must never steer
+    # a --force upgrade into deleting a folder outside the skills directory.
+    dest = tmp_path / "repo" / ".agents" / "skills"
+    src = _fake_source(tmp_path / "v1", ["start-app"])
+    ags.apply_install(ags.plan_install(src, dest, CODEX))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep\n")
+    manifest_path = dest / ags.MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text())
+    manifest["entries"].append(bad)
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ags.AgentSkillsError, match="unsafe entry"):
+        ags.plan_install(src, dest, CODEX, force=True)
+    assert (outside / "keep.txt").is_file()
+
+
+def test_a_file_deleted_inside_an_installed_skill_is_drift(tmp_path):
+    dest = tmp_path / "dest"
+    src = _fake_source(tmp_path / "v1", ["start-app"])
+    ags.apply_install(ags.plan_install(src, dest, CODEX))
+    (dest / "start-app" / "SKILL.md").unlink()
+    plan = ags.plan_install(src, dest, CODEX)
+    assert "start-app/SKILL.md was deleted after the install" in plan.conflicts
+
+
 def test_list_reports_install_state(tmp_path, capsys):
     base = ["--agent", "codex", "--dir", str(tmp_path)]
     assert ags.main(["list", *base]) == 0

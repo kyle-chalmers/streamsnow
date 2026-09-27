@@ -199,6 +199,21 @@ def target_dir(agent: AgentTarget, scope: str, repo: Path, home: Path | None = N
     return (home or Path.home()) / agent.user_dir
 
 
+# A manifest entry names one folder directly inside the skills directory. The
+# manifest is committed with the repo, so an entry is untrusted input: a name
+# like `..` must never steer a --force upgrade into deleting outside it.
+_SAFE_ENTRY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+
+
+def _check_entry(dest: Path, entry: object) -> str:
+    if not isinstance(entry, str) or entry in {".", ".."} or not _SAFE_ENTRY_RE.match(entry):
+        raise AgentSkillsError(
+            f"{dest / MANIFEST_NAME} lists an unsafe entry {entry!r}; "
+            "each entry must be one folder name inside the skills directory"
+        )
+    return entry
+
+
 def read_manifest(dest: Path) -> dict:
     path = dest / MANIFEST_NAME
     if not path.is_file():
@@ -233,6 +248,9 @@ def _drift(dest: Path, entry: str, recorded: dict[str, str]) -> list[str]:
             problems.append(f"{rel} was added after the install")
         elif _sha256(path.read_bytes()) != recorded[rel]:
             problems.append(f"{rel} was edited after the install")
+    for rel in sorted(recorded):
+        if rel.startswith(f"{entry}/") and rel not in on_disk:
+            problems.append(f"{rel} was deleted after the install")
     return problems
 
 
@@ -241,7 +259,7 @@ def plan_install(
 ) -> InstallPlan:
     plan = InstallPlan(dest=dest, agent=agent)
     manifest = read_manifest(dest)
-    owned = set(manifest.get("entries") or [])
+    owned = {_check_entry(dest, e) for e in manifest.get("entries") or []}
     recorded: dict[str, str] = manifest.get("files") or {}
     plan.previous_version = manifest.get("streamsnow_version")
 
@@ -281,7 +299,7 @@ def apply_install(plan: InstallPlan) -> None:
     dest = plan.dest
     dest.mkdir(parents=True, exist_ok=True)
     for entry in plan.updated + plan.removed:
-        target = dest / entry
+        target = dest / _check_entry(dest, entry)
         if target.is_dir() and not target.is_symlink():
             shutil.rmtree(target)
         elif target.exists() or target.is_symlink():
