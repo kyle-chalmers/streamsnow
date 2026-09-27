@@ -37,6 +37,7 @@ def test_result_contract_shape(tmp_path, monkeypatch):
         "pre-commit",
         "config",
         "snow-connection",
+        "snow-key-file",
         "container-python",
     ]
 
@@ -330,6 +331,73 @@ def test_container_python_skipped_outside_container_repos(tmp_path, monkeypatch)
     (tmp_path / "streamsnow.config.yaml").write_text(data)
     res = doctor.check_container_python(doctor.check_config(start=tmp_path))
     assert "skipped" in res["detail"]
+
+
+def _key_rows(**params):
+    return [{"connection_name": "acme", "is_default": True, "parameters": params}]
+
+
+_OK_SNOW = {"name": "snow", "ok": True, "level": "optional", "detail": {"found": True}}
+
+
+def test_snow_key_file_warns_on_key_pair_without_a_connector_readable_key():
+    """snow reads private_key_path (a legacy alias it rewrites to private_key_file);
+    the Python connector behind st.connection drops it and the first page load dies
+    with TypeError: Expected bytes, RSAPrivateKey, ... got NoneType. snow connection
+    list never prints private_key_path, so key-pair auth with no private_key_file IS
+    the signature."""
+    rows = _key_rows(account="x", user="y", authenticator="SNOWFLAKE_JWT")
+    res = doctor.check_snow_key_file(_OK_SNOW, rows)
+    assert not res["ok"] and res["level"] == "optional" and res["detail"]["warn"]
+    assert "private_key_path to private_key_file" in res["hint"]
+    assert "private_key_file_pwd" in res["hint"]
+    assert doctor.required_ok([res])  # a warning, never a gate
+    assert "[warn   ] snow-key-file" in doctor.render_text([res])
+    # private_key_raw is snow-only too: the connector has no such parameter.
+    raw = _key_rows(authenticator="snowflake_jwt", private_key_raw="****")
+    assert not doctor.check_snow_key_file(_OK_SNOW, raw)["ok"]
+
+
+def test_snow_key_file_passes_when_the_connector_can_load_the_key():
+    ok = doctor.check_snow_key_file(
+        _OK_SNOW, _key_rows(authenticator="SNOWFLAKE_JWT", private_key_file="/k.p8")
+    )
+    assert ok["ok"] and ok["detail"]["key_fields"] == ["private_key_file"]
+    sso = doctor.check_snow_key_file(_OK_SNOW, _key_rows(authenticator="externalbrowser"))
+    assert sso["ok"] and sso["detail"]["key_pair"] is False
+
+
+def test_snow_key_file_reads_names_never_values():
+    secret = "acme-raw-key-material"
+    rows = _key_rows(authenticator="SNOWFLAKE_JWT", private_key_raw=secret, user="acme-user")
+    res = doctor.check_snow_key_file(_OK_SNOW, rows)
+    assert secret not in json.dumps(res) and "acme-user" not in json.dumps(res)
+
+
+def test_snow_key_file_skips_without_snow_or_a_default_connection(monkeypatch):
+    missing = {"name": "snow", "ok": False, "level": "optional", "detail": {"found": False}}
+    assert "skipped" in doctor.check_snow_key_file(missing, None)["detail"]
+    broken = {"name": "snow", "ok": False, "level": "required", "detail": {"broken": True}}
+    assert "skipped" in doctor.check_snow_key_file(broken, None)["detail"]
+    no_default = [{"connection_name": "acme", "is_default": False}]
+    res = doctor.check_snow_key_file(_OK_SNOW, no_default)
+    assert "skipped" in res["detail"] and doctor.required_ok([res])
+
+
+def test_run_checks_lists_snow_connections_once(tmp_path, monkeypatch):
+    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow"))
+    seen: list[tuple[str, ...]] = []
+    rows = json.dumps(_key_rows(authenticator="SNOWFLAKE_JWT", private_key_file="/k.p8"))
+
+    def spy(cmd, **_kwargs):
+        seen.append(tuple(cmd[:3]))
+        return _Proc(0, rows if tuple(cmd[:3]) == _LIST else "Snowflake CLI version: 3.27.0")
+
+    monkeypatch.setattr(doctor.subprocess, "run", spy)
+    by_name = {r["name"]: r for r in doctor.run_checks(start=tmp_path)}
+    assert seen.count(_LIST) == 1
+    assert by_name["snow-connection"]["ok"] and by_name["snow-key-file"]["ok"]
 
 
 def test_snow_connection_hint_points_at_an_existing_default_before_adding_one(

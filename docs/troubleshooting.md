@@ -71,6 +71,25 @@ caught it. Runtime-specific facts link to the official page in
   loader's arguments do not see the new SQL text.
 - **Fix:** `streamsnow preview stop <slug>` then `start`.
 
+### 17. Preview crashes with `TypeError: Expected bytes, RSAPrivateKey, ... got NoneType`
+
+- **Symptom:** `streamsnow preview start` reports the app serving, and the first
+  page load fails with that `TypeError` from
+  `snowflake/connector/auth/keypair.py`, while `snow sql` works on the same
+  connection.
+- **Cause:** the default `snow` connection uses key-pair auth and names its key
+  `private_key_path`. The `snow` CLI accepts that name as a legacy alias; the
+  Python connector behind `st.connection("snowflake")` does not, drops it
+  without a warning, and reaches key-pair auth with no key. The connector reads
+  `private_key_file` and `private_key_file_pwd`
+  ([Python connector: connecting](https://docs.snowflake.com/en/developer-guide/python-connector/python-connector-connect)),
+  and `snow` reads `private_key_file` first
+  ([configure connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections)).
+- **Fix:** rename `private_key_path` to `private_key_file` in that connection's
+  entry (a passphrase goes in `private_key_file_pwd`), then restart the preview.
+  `streamsnow doctor` warns about it as `snow-key-file`, and `streamsnow
+  preview logs <slug>` prints the same fix under the traceback.
+
 ## Validate and review
 
 ### 8. `artifacts` fails on `.streamlit/config.toml` although your pipeline uploads it

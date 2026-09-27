@@ -25,7 +25,7 @@ confirmation, safe secrets provisioning, URL surfacing, triage.
   session-outside-Snowflake) into an actionable hint — read it before improvising.
 - `streamsnow preview status <slug>` — running/not-running + live health probe; stale state from a
   crashed preview is cleaned up silently, so a dead run never wedges the next `start`.
-- `streamsnow preview logs <slug> [--lines N]` — tail the launch log (kept after `stop`).
+- `streamsnow preview logs <slug> [--lines N]`: tail the log (kept after `stop`); a `cause:` line names a known failure.
 - `streamsnow preview stop <slug>` — graceful kill, state removed; idempotent.
 
 "Healthy" means **serving**, not "queries succeeded" — the health endpoint answers before the

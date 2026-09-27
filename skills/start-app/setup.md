@@ -26,7 +26,7 @@ time — propose the fix (start from the check's own `hint`; the table below giv
 run it on confirmation, then re-run `streamsnow doctor --format json` and confirm that check now
 reads `ok: true` before moving on. Never batch installs. `level` decides severity: a `required`
 failure blocks the build phases (doctor exits 1); an `optional` one (`snow`, `streamlit`, `gh`,
-`snow-connection`, `container-python`) is offered, skippable. `snow` flips to `required` when it
+`snow-connection`, `snow-key-file`, `container-python`) is offered, skippable. `snow` flips to `required` when it
 is on PATH but `snow --version` fails (`BROKEN`): reinstall with `uv tool install snowflake-cli`.
 `gh` is optional here and required later by `/ship-app`. `container-python` warns in a
 container-runtime repo with no Python 3.11 (`uv python install 3.11`). Two checks flip level by context: `config` is `optional`
@@ -90,7 +90,7 @@ restart); existing repo files are left alone by a re-run of `init --no-starter-a
 **Check before adding anything.** When the machine already has a default `snow` connection (a
 prior tutorial, another project), the wizard writes that name into `snowflake.connection_name`,
 and `init`'s `Next:` block says there is nothing to add. If `streamsnow doctor --format json`
-already reads `snow-connection: ok: true`, skip this step: **do not** have the
+already reads `snow-connection: ok: true`, skip to the key-file check below: **do not** have the
 user run `snow connection add … --default`, which would add a second connection and repoint the
 default every other tool reads. If the check fails but its hint names an existing default
 connection, the usual fix is to set `snowflake.connection_name` to that name (confirm with the
@@ -101,7 +101,14 @@ Only when there is no usable connection: `streamsnow init` (and `configure`) pri
 Have the user run it (it opens a browser for SSO) — never ask for credentials in chat. That writes
 the `snow` CLI's `connections.toml`, which `st.connection("snowflake")` reads locally, so it is the
 only place account details get typed. Then re-run `streamsnow doctor --format json` and confirm the
-`snow-connection` check reads `ok: true`. The per-app `apps/<slug>/.streamlit/secrets.toml`
+`snow-connection` check reads `ok: true`.
+
+**Key-pair connections:** a `snow-key-file` warning means the default connection uses key-pair
+auth with a key name only the `snow` CLI reads (the legacy `private_key_path`). `snow sql` works,
+and local preview then crashes on the first page load with `TypeError: Expected bytes,
+RSAPrivateKey, ...`. Have the user rename `private_key_path` to `private_key_file` in that
+connection's entry (a passphrase goes in `private_key_file_pwd`); both `snow` and the Python
+connector read that name. Never open or edit the connection file yourself. The per-app `apps/<slug>/.streamlit/secrets.toml`
 (gitignored) is an optional override for an app that needs a different role or warehouse — offer
 it only when asked. Two classic traps either way:
 
@@ -124,6 +131,9 @@ it only when asked. Two classic traps either way:
 - **Preview can't connect** — no default `snow` connection (the `snow-connection` doctor check
   says so) or, if a `secrets.toml` override exists, its account format / role / warehouse grant.
   Print the connection error verbatim and have the user recheck.
+- **Preview dies with `TypeError: Expected bytes, RSAPrivateKey, ...`**: the key-pair key is named
+  `private_key_path`; see the key-pair note in step 3 (`streamsnow preview logs` prints the same
+  remedy).
 
 ## Done → next step
 
