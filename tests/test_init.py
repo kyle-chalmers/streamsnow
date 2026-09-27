@@ -707,6 +707,14 @@ def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
     assert result.exit_code == 0, result.output
     assert not [w for c in _json.loads(result.output)["checks"] for w in c.get("warnings", [])]
 
+    # pages.md's documented check for this end state is validate-app. It once said
+    # `grep -rn YOUR_TABLE apps/<slug>` must print nothing, but the app's own AGENTS.md
+    # names the token in its instructions, so this correct app failed that check.
+    assert "YOUR_TABLE" in (a / "AGENTS.md").read_text()
+    pages = (REPO_ROOT / "skills/start-app/pages.md").read_text()
+    assert "grep -rn YOUR_TABLE" not in pages
+    assert "Then `streamsnow validate-app <slug>` must PASS" in pages
+
 
 def test_fresh_no_starter_repo_passes_its_own_checks_workflow(tmp_path):
     """`init --no-starter-app` (the /start-app setup path) writes no apps/ directory,

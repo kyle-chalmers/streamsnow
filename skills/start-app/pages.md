@@ -91,9 +91,11 @@ same commit as that page (step 8), whatever the page is called:
    `sql_review/example_metric.review.sql`. Delete both with the query: `generate` would fail on
    the missing template, and `check` reports a leftover review file as an orphan.
 
-Then `grep -rn YOUR_TABLE apps/<slug>` must print nothing (the `placeholders` check in
-`validate-app` enforces the same thing, as a FAIL), and `streamsnow sql-review index <slug>` drops
-the example row from the README.
+Then `streamsnow validate-app <slug>` must PASS: its `placeholders` check FAILS while any query,
+page or manifest still carries `YOUR_TABLE` or the starter page's sample block. Do not grep the
+app folder for the token instead: the app's own `AGENTS.md` names `YOUR_TABLE` in its
+instructions, so a correct app still matches. `streamsnow sql-review index <slug>` then drops the
+example row from the README.
 
 ## Connection pattern by runtime
 
