@@ -806,3 +806,20 @@ def test_update_never_overwrites_an_existing_osv_allowlist(tmp_path):
     res = runner.invoke(app, ["update", "--dir", str(tmp_path), "--apply"])
     assert res.exit_code == 0, res.output
     assert (tmp_path / "osv_allowlist.json").read_text() == "[]\n"
+
+
+def test_container_pyproject_is_dependencies_only(tmp_path):
+    """The documented local setup is `uv pip install -e apps/<slug>`. With no package
+    list, setuptools' flat-layout discovery found pages/, queries/ and sql_review/ and
+    refused to build ("Multiple top-level packages discovered"), so the first preview
+    of every container app failed at install. An explicit empty package list turns
+    discovery off: the install resolves the dependencies and builds nothing."""
+    import tomllib
+
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    app_dir = tmp_path / "apps/acme-sales-dashboard"
+    pyproject = tomllib.loads((app_dir / "pyproject.toml").read_text())
+    assert pyproject["tool"]["setuptools"]["packages"] == []
+    # The directories that tripped discovery are all present in a fresh scaffold.
+    assert all((app_dir / d).is_dir() for d in ("pages", "queries", "sql_review"))

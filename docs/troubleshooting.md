@@ -90,6 +90,22 @@ caught it. Runtime-specific facts link to the official page in
   `streamsnow doctor` warns about it as `snow-key-file`, and `streamsnow
   preview logs <slug>` prints the same fix under the traceback.
 
+### 18. `uv pip install -e apps/<slug>` fails: "Multiple top-level packages discovered"
+
+- **Symptom:** the local install for a container app stops with
+  `error: Multiple top-level packages discovered in a flat-layout: ['pages',
+  'queries', 'sql_review']`.
+- **Cause:** the app's `pyproject.toml` lists dependencies but no packages, so
+  setuptools' automatic discovery finds several top-level directories and
+  refuses to guess. Apps scaffolded before this was fixed carry that file.
+- **Fix:** add an empty package list to `apps/<slug>/pyproject.toml` (an app is
+  never built as a package; the install only needs its dependencies), then
+  re-run the install:
+  ```toml
+  [tool.setuptools]
+  packages = []
+  ```
+
 ## Validate and review
 
 ### 8. `artifacts` fails on `.streamlit/config.toml` although your pipeline uploads it
