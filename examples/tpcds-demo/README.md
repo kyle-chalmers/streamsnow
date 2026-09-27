@@ -23,7 +23,9 @@ anchor to the latest date in the data rather than today.
 
 1. Replace `<your_dev_role>` with the role your `snow` connection uses.
 2. Run the file in a Snowsight worksheet as `SYSADMIN` (it creates a database, a schema, and a
-   temporary warehouse that it drops at the end).
+   temporary warehouse, `STREAMSNOW_EXTRACT_WH`, that it drops at the end). Its `CREATE WAREHOUSE`
+   fails if a warehouse with that name already exists, so the script never drops one it did not
+   create. If an earlier run stopped partway, drop the leftover warehouse and run it again.
 3. Point the setup wizard at database `STREAMSNOW_DEMO` and schema `TPCDS`.
 
 ## Cost

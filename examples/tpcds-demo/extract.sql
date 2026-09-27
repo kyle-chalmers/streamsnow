@@ -18,7 +18,11 @@
 -- minute minimum on LARGE). The date filter prunes STORE_SALES by its clustering key (SS_SOLD_DATE_SK).
 
 USE ROLE SYSADMIN;
-CREATE WAREHOUSE IF NOT EXISTS STREAMSNOW_EXTRACT_WH
+-- Plain CREATE (no IF NOT EXISTS) on purpose: the last line drops this warehouse, so the script
+-- must fail here if the name is already taken rather than adopt and later drop a warehouse it did
+-- not create. If an earlier run of this script stopped before the end, drop its leftover
+-- STREAMSNOW_EXTRACT_WH yourself first.
+CREATE WAREHOUSE STREAMSNOW_EXTRACT_WH
   WAREHOUSE_SIZE = LARGE AUTO_SUSPEND = 60 AUTO_RESUME = TRUE INITIALLY_SUSPENDED = TRUE
   COMMENT = 'One-time TPC-DS extract for the StreamSnow demo; dropped at the end of this script';
 USE WAREHOUSE STREAMSNOW_EXTRACT_WH;
