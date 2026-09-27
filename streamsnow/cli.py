@@ -204,7 +204,9 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
         "allowed_warehouses": _pf(prefill, "snowflake.objects.allowed_warehouses", [warehouse]),
     }
     if runtime == "container":
-        objects["compute_pool"] = _pf(prefill, "snowflake.objects.compute_pool", "STREAMLIT_POOL")
+        objects["compute_pool"] = _pf(
+            prefill, "snowflake.objects.compute_pool", "SYSTEM_COMPUTE_POOL_CPU"
+        )
         objects["external_access_integration"] = _pf(
             prefill, "snowflake.objects.external_access_integration", "PYPI_ACCESS_INTEGRATION"
         )
@@ -256,7 +258,7 @@ _DEFAULT_COMMENTS: dict[str, str] = {
     "snowflake.objects.stage_schema": "schema for the deploy stage",
     "snowflake.objects.default_warehouse": "warehouse apps query with",
     "snowflake.objects.allowed_warehouses": "warehouses apps may use",
-    "snowflake.objects.compute_pool": "container runtime only",
+    "snowflake.objects.compute_pool": "container only; SYSTEM_COMPUTE_POOL_CPU is pre-provisioned",
     "snowflake.objects.external_access_integration": "container: PyPI access during image build",
     "snowflake.roles.ci_role": "role the CI deploy runs as",
     "snowflake.roles.viewer_role": "role viewers (and local preview) use",

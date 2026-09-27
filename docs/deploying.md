@@ -101,6 +101,8 @@ streamsnow deploy-setup | snow sql --stdin    # then apply
 - **stage-copy**: creates the internal stage CI uploads to. **Container** apps
   also need an account-level `compute_pool` + `external_access_integration`
   (emitted as commented admin guidance — these reach PyPI for dependencies).
+  The wizard defaults `compute_pool` to `SYSTEM_COMPUTE_POOL_CPU`, which already
+  exists in every account, so only the integration is new.
   **Warehouse** apps need neither.
 - **git-repository**: creates the API integration, the secret holding a GitHub
   token, and the `GIT REPOSITORY` object, and grants them to your `ci_role`.

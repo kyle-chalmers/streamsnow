@@ -36,7 +36,7 @@ def test_stage_copy_container_create_sql():
     )
     assert "QUERY_WAREHOUSE = STREAMLIT_WH" in sql
     assert "RUNTIME_NAME = 'SYSTEM$ST_CONTAINER_RUNTIME_PY3_11'" in sql
-    assert "COMPUTE_POOL = STREAMLIT_POOL" in sql
+    assert "COMPUTE_POOL = SYSTEM_COMPUTE_POOL_CPU" in sql
     assert "ADD LIVE VERSION FROM LAST" in sql
     assert (
         "GRANT USAGE ON STREAMLIT DATA_APPS.BI_APPS.SALES_OVERVIEW TO ROLE STREAMLIT_APP_ROLE"
@@ -169,7 +169,9 @@ def test_admin_sql_creates_every_object_a_first_deploy_needs():
 
 
 def test_admin_sql_container_objects_custom_pool():
-    sql = generate_admin_sql(_cfg())  # example pool is STREAMLIT_POOL
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data["snowflake"]["objects"]["compute_pool"] = "STREAMLIT_POOL"  # a pool you create
+    sql = generate_admin_sql(Config.from_dict(data))
     acct = _stmts(_sections(sql)["ACCOUNTADMIN"])
     assert "CREATE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION" in acct
     assert "snowflake.external_access.pypi_rule" in acct

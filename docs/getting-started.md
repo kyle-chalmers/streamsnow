@@ -325,7 +325,7 @@ secrets / `secrets.toml`). The load-bearing sections:
 | Section | What it controls |
 |---------|------------------|
 | `runtime` | `container` (default) or `warehouse` |
-| `snowflake.objects` | where apps deploy (app database/schema), the warehouse, and container `compute_pool` + `external_access_integration` |
+| `snowflake.objects` | where apps deploy (app database/schema), the warehouse, and container `compute_pool` (default `SYSTEM_COMPUTE_POOL_CPU`, which Snowflake pre-provisions) + `external_access_integration` |
 | `snowflake.roles` | `ci_role` (deploys and owns the apps, reads the data) and `viewer_role` (opens deployed apps; data reads are opt-in) |
 | `governance` | `database`, `schema_allow`, `schema_deny`, `read_exceptions` — the data guardrails. `schema_deny` is what the `schema-refs` check enforces (a denylist); `schema_allow` is the convention the scaffolded queries and docs point at, not an enforced gate |
 | `deploy.source` | `stage-copy` (default) or `git-repository`; `deploy.artifact_exclude` names non-code files your pipeline ships by another step |

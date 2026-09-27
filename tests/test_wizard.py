@@ -96,3 +96,22 @@ def test_rendered_yaml_round_trips_and_carries_comments(monkeypatch):
     # The defaulted values are self-documenting in the file.
     assert "#" in text
     assert "viewer" in text.lower()
+
+
+def test_wizard_defaults_to_the_pre_provisioned_compute_pool(monkeypatch):
+    """A first-time container user owns no compute pool. The old STREAMLIT_POOL default
+    made deploy-setup --admin emit a CREATE COMPUTE POOL they had no reason to run (and
+    often no privilege to); SYSTEM_COMPUTE_POOL_CPU exists in every account."""
+    from streamsnow.deploy import generate_admin_sql
+
+    cfg_dict, _ = _run_wizard(monkeypatch)
+    assert cfg_dict["runtime"] == "container"
+    assert cfg_dict["snowflake"]["objects"]["compute_pool"] == "SYSTEM_COMPUTE_POOL_CPU"
+    sql = generate_admin_sql(Config.from_dict(cfg_dict))
+    statements = "\n".join(line for line in sql.splitlines() if not line.startswith("--"))
+    assert "CREATE COMPUTE POOL" not in statements
+    assert "GRANT USAGE ON COMPUTE POOL SYSTEM_COMPUTE_POOL_CPU TO ROLE" in statements
+    # A pool the user already named survives a re-run of the wizard.
+    prefill = {"snowflake": {"objects": {"compute_pool": "ACME_POOL"}}}
+    cfg_dict, _ = _run_wizard(monkeypatch, prefill=prefill)
+    assert cfg_dict["snowflake"]["objects"]["compute_pool"] == "ACME_POOL"

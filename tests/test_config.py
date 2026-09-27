@@ -35,7 +35,7 @@ def _base() -> dict:
                 "stage_schema": "BI_APPS",
                 "default_warehouse": "STREAMLIT_WH",
                 "allowed_warehouses": ["STREAMLIT_WH"],
-                "compute_pool": "STREAMLIT_POOL",
+                "compute_pool": "SYSTEM_COMPUTE_POOL_CPU",
                 "external_access_integration": "PYPI_ACCESS_INTEGRATION",
             },
             "roles": {"ci_role": "STREAMLIT_CI_ROLE", "viewer_role": "STREAMLIT_APP_ROLE"},
@@ -53,7 +53,7 @@ def test_valid_container_config_loads():
     cfg = Config.from_dict(_base())
     assert cfg.runtime == "container"
     assert cfg.deploy.source == "stage-copy"
-    assert cfg.snowflake.objects.compute_pool == "STREAMLIT_POOL"
+    assert cfg.snowflake.objects.compute_pool == "SYSTEM_COMPUTE_POOL_CPU"
     assert "ANALYTICS" in cfg.governance.schema_allow
 
 

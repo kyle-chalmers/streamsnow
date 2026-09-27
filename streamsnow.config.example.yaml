@@ -27,8 +27,10 @@ snowflake:
     # Warehouse the apps query with:
     default_warehouse: "STREAMLIT_WH"
     allowed_warehouses: ["STREAMLIT_WH"]
-    # Container-runtime only (omit/blank for warehouse runtime):
-    compute_pool: "STREAMLIT_POOL"
+    # Container-runtime only (omit/blank for warehouse runtime). SYSTEM_COMPUTE_POOL_CPU is
+    # pre-provisioned in every account, so deploy-setup --admin never creates it; name your
+    # own pool here only if you want dedicated nodes (one app per node).
+    compute_pool: "SYSTEM_COMPUTE_POOL_CPU"
     external_access_integration: "PYPI_ACCESS_INTEGRATION"
 
   roles:

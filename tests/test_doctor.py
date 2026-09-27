@@ -326,7 +326,7 @@ def test_container_python_skipped_outside_container_repos(tmp_path, monkeypatch)
     res = doctor.check_container_python(doctor.check_config(start=tmp_path))
     assert not res["ok"] and "skipped" in res["detail"]
     data = EXAMPLE.read_text().replace("runtime: container", "runtime: warehouse")
-    data = data.replace('compute_pool: "STREAMLIT_POOL"', 'compute_pool: ""')
+    data = data.replace('compute_pool: "SYSTEM_COMPUTE_POOL_CPU"', 'compute_pool: ""')
     (tmp_path / "streamsnow.config.yaml").write_text(data)
     res = doctor.check_container_python(doctor.check_config(start=tmp_path))
     assert "skipped" in res["detail"]
