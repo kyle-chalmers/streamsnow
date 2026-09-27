@@ -24,11 +24,11 @@
 
 > **Status: beta, functional.** The CLI (configure / init / new / doctor /
 > validate-app / preview / check / sql-review / review-gate / review-loop /
-> migrate / nav / deploy-sql / deploy-setup / verify-deploy / update) and the
-> Claude Code plugin (8 skills + shared recipes, with deprecated aliases for the
-> pre-0.3 names) are implemented and CI-green for both runtimes and both deploy
-> sources. Published on PyPI (`uvx streamsnow` / `pip install streamsnow`); APIs
-> may still evolve toward 1.0.
+> migrate / nav / deploy-sql / deploy-setup / verify-deploy / update /
+> agent-skills) and the Claude Code plugin (8 skills + shared recipes, with
+> deprecated aliases for the pre-0.3 names) are implemented and CI-green for
+> both runtimes and both deploy sources. Published on PyPI (`uvx streamsnow` /
+> `pip install streamsnow`); APIs may still evolve toward 1.0.
 
 ## Mission
 
