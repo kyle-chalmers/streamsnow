@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import typer
 
-from streamsnow import cli
+from streamsnow import agent_skills, cli
 from streamsnow.tools import migrate_app, preview_app, review_gate, review_loop, sql_review
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -29,6 +29,7 @@ _PASSTHROUGH = {
     "review-gate": review_gate,
     "review-loop": review_loop,
     "migrate": migrate_app,
+    "agent-skills": agent_skills,
 }
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _CALL_RE = re.compile(r"(?<![\w/.-])streamsnow[ \t]+([a-z][a-z-]*)(?:[ \t]+([a-z][a-z-]*))?")

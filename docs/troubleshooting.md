@@ -71,6 +71,41 @@ caught it. Runtime-specific facts link to the official page in
   loader's arguments do not see the new SQL text.
 - **Fix:** `streamsnow preview stop <slug>` then `start`.
 
+### 17. Preview crashes with `TypeError: Expected bytes, RSAPrivateKey, ... got NoneType`
+
+- **Symptom:** `streamsnow preview start` reports the app serving, and the first
+  page load fails with that `TypeError` from
+  `snowflake/connector/auth/keypair.py`, while `snow sql` works on the same
+  connection.
+- **Cause:** the default `snow` connection uses key-pair auth and names its key
+  `private_key_path`. The `snow` CLI accepts that name as a legacy alias; the
+  Python connector behind `st.connection("snowflake")` does not, drops it
+  without a warning, and reaches key-pair auth with no key. The connector reads
+  `private_key_file` and `private_key_file_pwd`
+  ([Python connector: connecting](https://docs.snowflake.com/en/developer-guide/python-connector/python-connector-connect)),
+  and `snow` reads `private_key_file` first
+  ([configure connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections)).
+- **Fix:** rename `private_key_path` to `private_key_file` in that connection's
+  entry (a passphrase goes in `private_key_file_pwd`), then restart the preview.
+  `streamsnow doctor` warns about it as `snow-key-file`, and `streamsnow
+  preview logs <slug>` prints the same fix under the traceback.
+
+### 18. `uv pip install -e apps/<slug>` fails: "Multiple top-level packages discovered"
+
+- **Symptom:** the local install for a container app stops with
+  `error: Multiple top-level packages discovered in a flat-layout: ['pages',
+  'queries', 'sql_review']`.
+- **Cause:** the app's `pyproject.toml` lists dependencies but no packages, so
+  setuptools' automatic discovery finds several top-level directories and
+  refuses to guess. Apps scaffolded before this was fixed carry that file.
+- **Fix:** add an empty package list to `apps/<slug>/pyproject.toml` (an app is
+  never built as a package; the install only needs its dependencies), then
+  re-run the install:
+  ```toml
+  [tool.setuptools]
+  packages = []
+  ```
+
 ## Validate and review
 
 ### 8. `artifacts` fails on `.streamlit/config.toml` although your pipeline uploads it
@@ -137,6 +172,18 @@ caught it. Runtime-specific facts link to the official page in
 - **Cause:** a Streamlit created `FROM @repo/…` needs `ADD LIVE VERSION FROM
   LAST`; repositories over 2 GB are unsupported ([Git overview](https://docs.snowflake.com/en/developer-guide/git/git-overview)).
 - **Fix:** `streamsnow deploy-sql <slug> --refresh` emits the refresh statements.
+
+### 19. Every CI deploy fails with `Connection default is not configured`
+
+- **Symptom:** the deploy workflow's first `snow` step fails although all the
+  `SNOWFLAKE_*` secrets are set.
+- **Cause:** the runner has no Snowflake CLI `config.toml`, and a `snow` call
+  without `--temporary-connection` looks for a connection named `default`
+  instead of reading the `SNOWFLAKE_*` variables
+  ([temporary connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection)).
+  `deploy.yml` files generated before 0.7.1 omit the flag.
+- **Fix:** `uv tool upgrade streamsnow`, then `streamsnow update --apply` and
+  commit the re-rendered `.github/workflows/deploy.yml`.
 
 ## Plugin
 

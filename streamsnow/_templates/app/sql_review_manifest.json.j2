@@ -8,6 +8,11 @@
   "combos": [
     {"name": "all-default", "description": "default date window, no filters"}
   ],
+  "set_block": {
+    "start_date": "(SELECT DATEADD('year', -1, MAX(metric_date)) FROM {{ gov_database }}.{{ schema_allow[0] }}.YOUR_TABLE)::DATE",
+    "end_date": "(SELECT MAX(metric_date) FROM {{ gov_database }}.{{ schema_allow[0] }}.YOUR_TABLE)::DATE"
+  },
+  "set_block_note": "The window is the last year of data the source actually holds, anchored to its latest metric_date rather than today, so the review returns rows even when the data ends in the past. Repoint YOUR_TABLE here together with queries/example_metric.sql.",
   "pages": [
     {"name": "Overview", "queries": ["example_metric"]}
   ],

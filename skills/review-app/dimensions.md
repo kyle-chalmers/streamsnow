@@ -1,6 +1,7 @@
 # The five reviewer dimensions
 
-Each reviewer is a read-only subagent with a self-contained brief (no conversation context), the
+Each reviewer is a read-only subagent (in an agent without subagents, a sequential pass that sees
+only its brief) with a self-contained brief (no conversation context), the
 detected runtime mode, the load-bearing governance excerpts, a ≤600-word cap, `[file:line]`
 citations, and a severity (critical / should-fix / nice-to-have) on every finding.
 
@@ -59,7 +60,7 @@ breakage, never stylistic opinion.
 - **A reviewer returns empty sections** — it misread scope; re-dispatch just that dimension.
 - **Review flags something validate-app passed** — expected: this tier covers judgment beyond the
   gate's regex/AST reach.
-- **Cross-agent CLI hangs or returns nothing** — that dimension degrades to Claude-only; the recipe
+- **Cross-agent CLI hangs or returns nothing** — that dimension degrades to the host agent's own reviewers; the recipe
   bounds each external call and never aborts the run.
 - **"Nothing to review" in diff mode with real changes** — `origin/main` is stale; fetch per
   [_shared/sync-with-main.md](../_shared/sync-with-main.md) and retry.

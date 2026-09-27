@@ -7,7 +7,7 @@ allowed-tools: [Bash, Read, Edit, Glob, Grep]
 
 # /feedback-app
 
-> **Repo overlay:** if `.streamsnow/overlays/feedback-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+> **Repo overlay:** if `.streamsnow/overlays/feedback-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
 The user-driven counterpart to `/review-app`: instead of reviewers finding issues, the human brings
 them. Free-form feedback (text and/or screenshots) becomes classified items, spec updates where

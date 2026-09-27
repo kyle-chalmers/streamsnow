@@ -246,6 +246,63 @@ def test_classify_log_patterns():
     assert unknown["status"] == "unknown"
 
 
+# The tail of a real preview log (streamlit 1.59.2, snowflake-connector-python 4.7.5) from a
+# default snow connection that names its key-pair key `private_key_path`. The app served
+# first; the error arrived with the first page load.
+KEYPAIR_LOG = """\
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+
+Traceback (most recent call last):
+  File ".venv/lib/python3.11/site-packages/streamlit/connections/snowflake_connection.py", \
+line 667, in _connect
+    return snowflake.connector.connect()
+  File ".venv/lib/python3.11/site-packages/snowflake/connector/auth/keypair.py", line 155, \
+in prepare
+    raise TypeError(
+TypeError: Expected bytes, RSAPrivateKey, or EllipticCurvePrivateKey, got <class 'NoneType'>
+"""
+
+
+def test_classify_keypair_key_not_loaded():
+    hit = preview_app.classify_log(
+        "TypeError: Expected bytes, RSAPrivateKey, or EllipticCurvePrivateKey, "
+        "got <class 'NoneType'>"
+    )
+    assert hit["status"] == "keypair_key_not_loaded"
+    assert "private_key_path" in hit["hint"] and "private_key_file" in hit["hint"]
+    assert "private_key_file_pwd" in hit["hint"]
+    # Older connector wording.
+    older = preview_app.classify_log(
+        "TypeError: Expected bytes or RSAPrivateKey, got <class 'NoneType'>"
+    )
+    assert older["status"] == "keypair_key_not_loaded"
+    # A launch log still reads as ready: classify_log answers "did it start".
+    assert preview_app.classify_log(KEYPAIR_LOG)["status"] == "ready"
+    # The failure classifier looks past the ready banner.
+    assert preview_app.classify_failure(KEYPAIR_LOG)["status"] == "keypair_key_not_loaded"
+    assert preview_app.classify_failure("You can now view your Streamlit app") is None
+
+
+def test_logs_prints_the_remedy_for_a_first_page_load_failure(tmp_path, capsys):
+    """start reports ready before any page runs, so a connection error raised by the
+    first page load was only ever visible as a raw traceback in `preview logs`."""
+    repo = _repo(tmp_path)
+    log = repo / ".streamsnow" / "preview" / f"{SLUG}.log"
+    log.parent.mkdir(parents=True)
+    log.write_text(KEYPAIR_LOG)
+    assert preview_app.main(["logs", SLUG, "--dir", str(repo)]) == 0
+    out = capsys.readouterr().out
+    assert "TypeError: Expected bytes" in out  # the raw tail is still printed
+    assert "cause: keypair_key_not_loaded: " in out
+    assert "Rename private_key_path to private_key_file" in out
+
+    log.write_text("  You can now view your Streamlit app in your browser.\n")
+    assert preview_app.main(["logs", SLUG, "--dir", str(repo)]) == 0
+    assert "cause:" not in capsys.readouterr().out
+
+
 def test_logs_missing_file(tmp_path, capsys):
     repo = _repo(tmp_path)
     assert preview_app.main(["logs", SLUG, "--dir", str(repo)]) == 1

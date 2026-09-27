@@ -63,4 +63,5 @@ you touched and why.
 ## Reporting issues
 
 Open a GitHub issue with the StreamSnow version (`streamsnow --version`), your
-runtime/deploy-source config (redact secrets), and steps to reproduce.
+runtime/deploy-source config (redact secrets), and steps to reproduce. Report a
+security vulnerability privately instead, as [SECURITY.md](SECURITY.md) describes.

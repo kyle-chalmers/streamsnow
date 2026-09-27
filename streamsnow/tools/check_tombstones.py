@@ -39,7 +39,7 @@ Registry schema (``deploy/tombstones.yml``)
 A mapping with a single ``tombstones`` key holding a list of entries::
 
     tombstones:
-      - identifier: DATA_APPS.BI_APPS.ACME_SALES_DASHBOARD
+      - identifier: STREAMSNOW_APPS.DASHBOARDS.ACME_SALES_DASHBOARD
         reason: renamed to ACME_REVENUE_DASHBOARD
         date: 2026-08-31
 

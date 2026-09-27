@@ -17,3 +17,10 @@ dependencies = [
     "plotly>=5,<6",
     "snowflake-snowpark-python",
 ]
+
+# Dependencies only: an app is never built or published as a package. Without this
+# table, the documented local setup (`uv pip install -e apps/{{ app_slug }}`) fails,
+# because setuptools' flat-layout discovery finds pages/, queries/ and sql_review/
+# and refuses to guess which one is the package.
+[tool.setuptools]
+packages = []

@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 # /ship-app
 
-> **Repo overlay:** if `.streamsnow/overlays/ship-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+> **Repo overlay:** if `.streamsnow/overlays/ship-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
 Take a built app from working tree to open PR, gated on validation, then watch CI. **One app at a
 time**; deployment is **CI-only on merge to `main`** — never a local Snowflake deploy. Repo-level

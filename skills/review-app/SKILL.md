@@ -7,7 +7,7 @@ allowed-tools: [Bash, Read, Edit, Glob, Grep, Task]
 
 # /review-app
 
-> **Repo overlay:** if `.streamsnow/overlays/review-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+> **Repo overlay:** if `.streamsnow/overlays/review-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
 Judgment-tier review of `apps/<slug>` — it surfaces what a senior reviewer would flag and (with
 `--fix`) turns findings into atomic per-finding commits. It never blocks a ship; the pass/fail gate
@@ -41,7 +41,7 @@ can't catch.
 5. **Optional diff scope:** for a branch/PR review, pass the changed-file list
    (`git diff --name-only origin/main...HEAD -- apps/<slug>/`) and have reviewers cite only inside
    it. Empty diff → say so and stop. Stale `origin/main` → [_shared/sync-with-main.md](../_shared/sync-with-main.md).
-6. **Fan out the 5 reviewers in parallel** (single message, multiple Task calls) — SQL, data, UI,
+6. **Fan out the 5 reviewers in parallel** (Claude Code: one message, multiple Task calls) — SQL, data, UI,
    runtime, docs — each with a self-contained brief per [dimensions.md](dimensions.md), the runtime
    mode, governance excerpts, a ≤600-word cap, `[file:line]` citations, and a severity on every
    finding. Optional cross-agent reviewers ride along only when configured (force-skip with

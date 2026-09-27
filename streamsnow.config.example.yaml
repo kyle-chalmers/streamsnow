@@ -18,22 +18,24 @@ snowflake:
 
   objects:
     # Where the deployed STREAMLIT objects live:
-    app_database: "DATA_APPS"
-    app_schema: "BI_APPS"
+    app_database: "STREAMSNOW_APPS"
+    app_schema: "DASHBOARDS"
     # Internal stage for stage-copy deploys (CI pushes app source here):
-    stage_database: "DATA_APPS"
-    stage_schema: "BI_APPS"
-    stage_name: "STREAMLIT_CODE_STAGE"
+    stage_database: "STREAMSNOW_APPS"
+    stage_schema: "DASHBOARDS"
+    stage_name: "STREAMSNOW_CODE_STAGE"
     # Warehouse the apps query with:
-    default_warehouse: "STREAMLIT_WH"
-    allowed_warehouses: ["STREAMLIT_WH"]
-    # Container-runtime only (omit/blank for warehouse runtime):
-    compute_pool: "STREAMLIT_POOL"
+    default_warehouse: "STREAMSNOW_WH"
+    allowed_warehouses: ["STREAMSNOW_WH"]
+    # Container-runtime only (omit/blank for warehouse runtime). SYSTEM_COMPUTE_POOL_CPU is
+    # pre-provisioned in every account, so deploy-setup --admin never creates it; name your
+    # own pool here only if you want dedicated nodes (one app per node).
+    compute_pool: "SYSTEM_COMPUTE_POOL_CPU"
     external_access_integration: "PYPI_ACCESS_INTEGRATION"
 
   roles:
-    ci_role: "STREAMLIT_CI_ROLE"       # deploy/owner role used by CI
-    viewer_role: "STREAMLIT_APP_ROLE"  # role granted USAGE on each app; preview role
+    ci_role: "STREAMSNOW_DEPLOY_ROLE"      # deploy/owner role used by CI
+    viewer_role: "STREAMSNOW_VIEWER_ROLE"  # role granted USAGE on each app; preview role
 
 governance:
   database: "ANALYTICS_DB"             # the BI database your apps query
@@ -44,10 +46,10 @@ governance:
 deploy:
   source: "stage-copy"                 # stage-copy (default) | git-repository
   # git-repository only:
-  # git_repository_fqn: "DATA_APPS.BI_APPS.STREAMLIT_REPO"
+  # git_repository_fqn: "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO"
   # git_branch: "main"
   # api_integration_name: "GITHUB_API_INTEGRATION"
-  # secret_name: "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET"
+  # secret_name: "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET"
   # github_auth_mode: "pat"            # pat | github-app
   # Files your deploy pipeline ships by another step and so may be left out of
   # each app's snowflake.yml artifacts:. Exact relative paths, non-code only

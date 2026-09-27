@@ -68,6 +68,10 @@ jobs:
             --config streamsnow.config.example.yaml --dir /tmp/wheel-init --app smoke-app
           test -f /tmp/wheel-init/apps/smoke-app/streamlit_app.py
           test -f /tmp/wheel-init/AGENTS.md
+          # The wheel carries the skills (streamsnow/_skills) that `agent-skills install` copies.
+          /tmp/wheelenv/bin/streamsnow agent-skills install --agent codex --dir /tmp/wheel-init
+          test -f /tmp/wheel-init/.agents/skills/start-app/SKILL.md
+          test -f /tmp/wheel-init/.agents/skills/_shared/overlays.md
           # Run the guardrail from inside the generated repo (config is discovered
           # from cwd) — proves the wheel ships templates AND the check works.
           cd /tmp/wheel-init && /tmp/wheelenv/bin/streamsnow check schema-refs apps

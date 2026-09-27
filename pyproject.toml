@@ -59,6 +59,11 @@ exclude = [
 # under streamsnow/_templates/ (non-.py files are included by default).
 packages = ["streamsnow"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# The skills ship inside the package so `streamsnow agent-skills install` works from a
+# PyPI install; a source checkout reads skills/ directly (see streamsnow/agent_skills.py).
+"skills" = "streamsnow/_skills"
+
 [tool.ruff]
 # Fixture apps are consumer code (bare `from branding import …` is correct there); lint them
 # with the governance checks, not with the package's import rules.

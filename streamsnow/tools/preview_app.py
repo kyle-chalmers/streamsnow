@@ -12,7 +12,9 @@ owns the whole lifecycle so callers never hand-roll ``nohup``/PID bookkeeping:
         process is killed and the log tail is *classified* — the known launch
         failures (missing secrets.toml, bad account locator, missing package,
         port collision, session-outside-Snowflake) each map to an actionable
-        hint instead of a raw traceback.
+        hint instead of a raw traceback. A key-pair connection whose key the
+        Python connector cannot load is classified too, but it only fails on
+        the first page load, so it surfaces through ``logs``.
 
     status <slug> [--dir REPO]
         Running / not-running plus a live health probe. Stale state (the
@@ -25,7 +27,10 @@ owns the whole lifecycle so callers never hand-roll ``nohup``/PID bookkeeping:
         Idempotent: stopping a preview that isn't running succeeds.
 
     logs <slug> [--lines N] [--dir REPO]
-        Tail the captured launch log (kept after ``stop`` for post-mortems).
+        Tail the captured launch log (kept after ``stop`` for post-mortems),
+        then classify it. Some failures only happen once a browser opens the
+        page (a connection opened by the first script run), after ``start``
+        already reported ready, so ``logs`` is where their hint surfaces.
 
 State lives per-repo under ``<repo>/.streamsnow/preview/<slug>.json`` next to
 ``<slug>.log`` — no global state, nothing outside the repo. Recommend adding
@@ -84,6 +89,21 @@ _LOG_PATTERNS: list[tuple[str, str, str]] = [
         "Local runs need a Snowflake connection: either a default `snow connection add "
         "... --default` (read from connections.toml) or apps/<slug>/.streamlit/secrets.toml "
         "(gitignored) with a [connections.snowflake] block — set one up before previewing",
+    ),
+    (
+        "keypair_key_not_loaded",
+        # Raised by snowflake-connector-python's AuthByKeyPair.prepare when a
+        # SNOWFLAKE_JWT connection reaches it with no key. The usual cause: the
+        # default snow connection names its key `private_key_path`, a snow-CLI
+        # alias the connector silently drops. `snow sql` works on the very same
+        # connection, which is what makes this one confusing. Older connectors
+        # word it "Expected bytes or RSAPrivateKey".
+        r"Expected bytes,? (?:or )?RSAPrivateKey[^\n]*got <class 'NoneType'>",
+        "Key-pair connection with no key the Python connector can load: st.connection"
+        "('snowflake') reads your default snow connection through snowflake-connector-python, "
+        "which ignores `private_key_path` (a snow-CLI-only alias). Rename private_key_path to "
+        "private_key_file in that connection's entry (a passphrase goes in private_key_file_pwd); "
+        "snow reads private_key_file too. `streamsnow doctor` flags this as snow-key-file",
     ),
     (
         "bad_account",
@@ -149,6 +169,23 @@ def classify_log(text: str) -> dict[str, Any]:
         "excerpt": "",
         "url": url,
     }
+
+
+def classify_failure(text: str) -> dict[str, Any] | None:
+    """The first known FAILURE in ``text``, ignoring the "ready" banner.
+
+    ``classify_log`` answers "did the launch succeed", so the ready banner wins
+    there. A log read after launch usually has that banner at the top and the
+    real problem (raised on the first page load) below it, so ``logs`` needs
+    the failure patterns alone. None when nothing known matched.
+    """
+    for status, pattern, hint in _LOG_PATTERNS:
+        if status == "ready":
+            continue
+        m = re.search(pattern, text)
+        if m:
+            return {"status": status, "hint": hint, "excerpt": m.group(0)}
+    return None
 
 
 def tail_lines(path: Path, n: int) -> list[str]:
@@ -614,8 +651,12 @@ def cmd_logs(args: argparse.Namespace) -> int:
     if not log_path.is_file():
         print(f"error: no preview log at {log_path}", file=sys.stderr)
         return 1
-    for line in tail_lines(log_path, args.lines):
+    lines = tail_lines(log_path, args.lines)
+    for line in lines:
         print(line)
+    failure = classify_failure("\n".join(lines))
+    if failure:
+        print(f"\ncause: {failure['status']}: {failure['hint']}")
     return 0
 
 

@@ -3,16 +3,29 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
-## [0.7.1] - 2026-09-22
+## [0.7.1] - 2026-09-27
 
 The launch-fix release. An end-to-end run of the install path from an empty
 folder (PyPI package plus the marketplace plugin) found that the build half
 worked and the ship half did not: the plugin setup path never wrote the
 governed repo files, a fresh scaffold failed its own CI, and nothing created
-the Snowflake objects a first deploy needs.
+the Snowflake objects a first deploy needs. A second pass, building a
+dashboard over a historical sample dataset with a key-pair connection, found
+the rest: empty review SQL and empty default dashboards on data that ends in
+the past, a local preview crash, and a starter app that could still ship.
 
 ### Added
 
+- **`streamsnow agent-skills install --agent codex`** (and `list`): copies the
+  skills and their shared recipes into `.agents/skills` (repo scope, committed)
+  or `~/.agents/skills` (user scope), where OpenAI Codex CLI finds them
+  (tested with 0.157.1). A manifest keeps a re-run from overwriting edited
+  skills; `ship-app` and `migrate-app` stay explicit-only in Codex, as in
+  Claude Code. The wheel now ships the skills (`streamsnow/_skills`), `init`'s
+  `Next:` block names the Codex install, and `skills/_shared/other-agents.md`
+  covers what reads differently outside Claude Code (skill syntax, subagents,
+  checkpoints, and the plugin hooks, which have no Codex equivalent). README:
+  "Use with other agents".
 - **`streamsnow init --no-starter-app`**: the config wizard (or an existing
   config) plus the governed repo files (`AGENTS.md`, `CLAUDE.md`, `.gitignore`,
   `.pre-commit-config.yaml`, CI and deploy workflows, `README.md`,
@@ -29,9 +42,31 @@ the Snowflake objects a first deploy needs.
   `snowflake.external_access.pypi_rule` plus compute pool `USAGE`.
   `CREATE COMPUTE POOL` is emitted only for a pool other than the
   pre-provisioned `SYSTEM_COMPUTE_POOL_CPU`.
-- **`validate-app` `placeholders` check**: a warning (never a failure) while a
-  query still reads the scaffold's `YOUR_TABLE`; CI deploys every app under
-  `apps/`, so the placeholder app used to ship beside the real one.
+- **`validate-app` `placeholders` check**: fails while any authored app file
+  (query, page or `sql_review` manifest) still carries the scaffold's
+  `YOUR_TABLE`, or while the starter page still shows its hard-coded sample
+  metric and chart (marked `STREAMSNOW_STARTER_PLACEHOLDER`; the sample values
+  themselves match too, so pages scaffolded by 0.7.0 are caught). CI deploys
+  every app under `apps/`, so the placeholder app used to ship beside the real
+  one. The sample values never read the query, so replacing `YOUR_TABLE`
+  everywhere does not clear the page on its own.
+- **`doctor` `snow-key-file`** (optional, warns): the default `snow`
+  connection uses key-pair auth with no `private_key_file`, the signature of a
+  key named `private_key_path` (see Fixed). Reads parameter names only, never
+  values, and never edits the connection.
+- **`sql-review check` `window` finding** (advisory, never gates under either
+  coverage policy): a manifest with no `set_block` renders the implicit review
+  window, the year ending `CURRENT_DATE`.
+- **`preview logs` ends with a `cause:` line** for a known failure, including
+  ones raised on the first page load after `start` already reported ready.
+- **`examples/tpcds-demo/`**: a small store-sales extract from
+  `SNOWFLAKE_SAMPLE_DATA.TPCDS_SF10TCL` into `STREAMSNOW_DEMO.TPCDS`, about two
+  years with real seasonality, kept small to limit the scan. Its README covers
+  the cost and how to point `/start-app` at any small table instead.
+- **`SECURITY.md`**: report vulnerabilities through GitHub private
+  vulnerability reporting; everything else through issues.
+- **Generated `.gitignore` ignores `.internal/`** (local-only working notes).
+  `.gitignore` is user-owned, so existing repos add the line by hand.
 - **`doctor`**: `gh` (optional; `/ship-app` needs it) and, in a
   container-runtime repo, `container-python` (warns when no Python 3.11 is
   findable; fix: `uv python install 3.11`).
@@ -40,6 +75,18 @@ the Snowflake objects a first deploy needs.
 
 ### Fixed
 
+- **Every first CI deploy failed with `Connection default is not
+  configured`.** Snowflake CLI 3.27.0 run with only `SNOWFLAKE_*` environment
+  variables and no `config.toml` (a GitHub Actions runner) needs
+  `--temporary-connection`, and the generated `deploy.yml` passed no connection
+  flag. Every `snow sql`, `snow stage copy` and `snow git fetch` call in both
+  deploy workflows now passes it; `verify-deploy` gains a
+  `--temporary-connection` option the workflows pass (leave it off locally to
+  use your default connection); and the passphrase secret reaches `snow` as
+  `PRIVATE_KEY_PASSPHRASE`, the only name it reads for an encrypted key. The
+  deploy workflows install `streamsnow>=0.7.1,<0.8`. Existing repos pick this
+  up with `streamsnow update --apply`, which re-renders
+  `.github/workflows/deploy.yml` (troubleshooting #19).
 - **`streamsnow new` warns when repo files are missing**, naming them and the
   fix (`streamsnow init --no-starter-app`). Without them there were no hooks or
   CI, and nothing gitignored `.streamlit/secrets.toml`.
@@ -60,6 +107,54 @@ the Snowflake objects a first deploy needs.
   corrects the comment.
 - **`init`'s `Next:` block** lists the plugin install first, matching docs
   Path B, and names the `YOUR_TABLE` step.
+- **Warehouse apps pin Streamlit 1.52.2** (was 1.50.0), the newest version
+  Snowflake supports in warehouse runtimes. Every supported version carries
+  two Streamlit advisories fixed only in 1.53.1 and 1.54.0, so warehouse repos
+  also get `osv_allowlist.json`: one dated entry per advisory ID, each with its
+  reason, expiring 2026-12-31 for a re-check. `streamsnow update` creates the
+  file in warehouse repos scaffolded before it existed.
+- **Review SQL and default dashboards were empty on historical data.** With no
+  `set_block`, a manifest's review window was the year ending `CURRENT_DATE`,
+  so every per-visual `.review.sql` over data that ends in the past (TPC-DS
+  ends in 2003) returned zero rows while `check` reported clean. The skills now
+  require a window anchored to the source's `MAX(date)`
+  (`review-app/sql-companions.md` step 3, `start-app/pages.md` 8.2), the page
+  conventions say a page's default date range comes from the data's max date,
+  not today, `check` names the implicit default, and the starter manifest
+  shows the anchored form. An explicit `set_block`, including an explicit
+  `CURRENT_DATE`, renders exactly as before.
+- **Local preview crashed with key-pair connections**: `TypeError: Expected
+  bytes, RSAPrivateKey, or EllipticCurvePrivateKey, got <class 'NoneType'>`.
+  `st.connection("snowflake")` opens the default connection through
+  snowflake-connector-python, which reads `private_key_file` but silently drops
+  `private_key_path`, a legacy alias only the `snow` CLI understands, so `snow
+  sql` worked on the same connection. The fix is to rename the key to
+  `private_key_file` (passphrase: `private_key_file_pwd`), which both tools
+  read; `doctor` and `preview logs` now say so (troubleshooting #17).
+- **The wizard's default compute pool is `SYSTEM_COMPUTE_POOL_CPU`** (was
+  `STREAMLIT_POOL`), so `deploy-setup --admin` for a default container config
+  emits no `CREATE COMPUTE POOL`. A pool already named in a config is kept.
+- **`connection_name` defaults to your default `snow` connection** when one
+  exists and its `account` matches the account you answer (case-insensitive;
+  was the folder slug), falling back to the slug when `snow` is missing or
+  broken, or the default connection is for another account or names none (a
+  one-line note says so, without printing either account). Users with a
+  working connection from a prior tutorial no longer fail `doctor`'s
+  connection check or get told to add a second `--default` connection; `init`
+  and `configure` only print `snow connection add` when no connection by that
+  name exists.
+- **The starter trio from `streamsnow new`** (`queries/example_metric.sql`, its
+  `sql_review` manifest, `pages/overview.py` with sample numbers) is replaced
+  explicitly by `/start-app`'s build phase, and `new` says they are
+  placeholders.
+- **A fresh `init --no-starter-app` repo failed its own `checks.yml`**: with
+  no `apps/` directory yet, `ruff check apps/` errored and `check tombstones`
+  refused to run. Lint now runs only when `apps/` exists, and tombstones is
+  skipped only while `apps/` is absent both locally and on `origin/main`.
+- **`uv pip install -e apps/<slug>` failed on every fresh container app**
+  (setuptools found `pages/`, `queries/` and `sql_review/` and refused to
+  guess a package). The generated `pyproject.toml` declares `packages = []`;
+  existing apps add the two lines from troubleshooting #18.
 
 ### Changed
 
@@ -70,6 +165,22 @@ the Snowflake objects a first deploy needs.
   guarded.
 - **README positioning**: for internal analytics StreamSnow can replace a BI
   tool; external or customer-facing analytics needs additional customization.
+- **Default Snowflake object names are StreamSnow-branded.** The wizard,
+  `streamsnow.config.example.yaml` and the loader now default to
+  `STREAMSNOW_APPS` (app and stage database), `DASHBOARDS` (schema),
+  `STREAMSNOW_WH`, `STREAMSNOW_DEPLOY_ROLE` (whose CI user is
+  `STREAMSNOW_DEPLOY_USER`), `STREAMSNOW_VIEWER_ROLE` and
+  `STREAMSNOW_CODE_STAGE`, so `LIKE 'STREAMSNOW%'` finds every database,
+  warehouse, role, user and stage `deploy-setup --admin` creates.
+  `PYPI_ACCESS_INTEGRATION` is unchanged. Existing repos keep whatever their
+  `streamsnow.config.yaml` says: a name set there wins over the default, and
+  re-running `configure` keeps it. The one default an existing config can
+  inherit is `snowflake.objects.stage_name`, which is optional and which the
+  wizard never wrote: a stage-copy repo without it deploys through
+  `STREAMSNOW_CODE_STAGE` from its next deploy (the deploy's `CREATE STAGE IF
+  NOT EXISTS` creates it, using the CI role's `CREATE STAGE` grant). To keep
+  the stage you have, add `stage_name:` with its name under
+  `snowflake.objects`.
 
 ## [0.7.0] - 2026-09-11
 

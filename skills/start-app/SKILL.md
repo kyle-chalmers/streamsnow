@@ -7,7 +7,7 @@ allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion]
 
 # /start-app
 
-> **Repo overlay:** if `.streamsnow/overlays/start-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+> **Repo overlay:** if `.streamsnow/overlays/start-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
 One command owns the app lifecycle: **spec → scaffold → build → preview → verify → ship → done**.
 It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume an interrupted build, tells the user the exact
@@ -26,13 +26,13 @@ next command at each judgment point, and never skips a checkpoint.
   app's source — automatic when `apps/<slug>/` already has code). Follow [spec.md](spec.md).
 - **`--setup`**: first-time machine + repo setup: prerequisites, then `streamsnow init --no-starter-app`
   (config + governed repo files: hooks, CI, .gitignore; no example app). Follow [setup.md](setup.md).
-- **`adopt`** — the repo already has Streamlit apps or its own Claude commands that didn't come from
+- **`adopt`** — the repo already has Streamlit apps or its own agent skills/commands that didn't come from
   StreamSnow. Map onto what exists instead of scaffolding over it, and write a `MIGRATION.md`
   checklist. Follow [adopt.md](adopt.md).
 
 ## Phase 0 — Preflight (degrade, don't die)
 
-1. Run `streamsnow doctor`. Fix-or-skip each failure interactively per [setup.md](setup.md).
+1. Report which `streamsnow` runs and its version, then run `streamsnow doctor` and fix-or-skip each failure interactively per [setup.md](setup.md) §0 and §1 (§1 says when doctor is skipped).
 2. If `streamsnow.config.yaml` is missing, this isn't a governed repo yet — offer `--setup` (or
    `adopt` if the repo already has apps). You can still write a spec without config; note that
    schema choices in §3 stay unverified until the repo is configured.

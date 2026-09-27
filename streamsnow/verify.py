@@ -48,14 +48,23 @@ _START_BANNER = re.compile(r"you can now view your streamlit app", re.IGNORECASE
 _RESTART_LOOP_THRESHOLD = 3
 
 
-def run_query_snow(sql: str) -> list[dict]:
+def run_query_snow(sql: str, *, temporary_connection: bool = False) -> list[dict]:
     """Run one statement via the ``snow`` CLI and return rows as dicts.
 
     ``snow sql --format json`` prints a JSON array of row objects for a single
     statement (an array of arrays for multi-statement input — flattened here).
+
+    ``temporary_connection`` adds ``--temporary-connection``, so ``snow`` builds
+    the connection from ``SNOWFLAKE_*`` environment variables instead of a named
+    connection in ``config.toml``. The generated deploy workflow asks for it
+    because a CI runner has no ``config.toml``; a local run leaves it off and
+    uses the default connection.
     """
+    argv = ["snow", "sql", "-q", sql, "--format", "json"]
+    if temporary_connection:
+        argv.append("--temporary-connection")
     proc = subprocess.run(  # noqa: S603 - sql comes from validated config values
-        ["snow", "sql", "-q", sql, "--format", "json"],
+        argv,
         capture_output=True,
         text=True,
         timeout=120,

@@ -244,12 +244,12 @@ def test_tombstones_honors_custom_apps_dir_on_both_sides(tmp_path: Path) -> None
         "  account: ab12345\n"
         "  connection_name: acme\n"
         "  objects:\n"
-        "    app_database: DATA_APPS\n"
-        "    app_schema: BI_APPS\n"
-        "    stage_database: DATA_APPS\n"
-        "    stage_schema: BI_APPS\n"
-        "    default_warehouse: STREAMLIT_WH\n"
-        "  roles: {ci_role: STREAMLIT_CI_ROLE, viewer_role: STREAMLIT_APP_ROLE}\n"
+        "    app_database: STREAMSNOW_APPS\n"
+        "    app_schema: DASHBOARDS\n"
+        "    stage_database: STREAMSNOW_APPS\n"
+        "    stage_schema: DASHBOARDS\n"
+        "    default_warehouse: STREAMSNOW_WH\n"
+        "  roles: {ci_role: STREAMSNOW_DEPLOY_ROLE, viewer_role: STREAMSNOW_VIEWER_ROLE}\n"
         "governance: {database: ANALYTICS_DB, schema_allow: [ANALYTICS]}\n"
     )
     _git(root, "init", "-q", "-b", "main")

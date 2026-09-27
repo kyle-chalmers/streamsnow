@@ -6,16 +6,23 @@ network. verify_app gets an injected run_query and a no-op sleep.
 
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
+from typer.testing import CliRunner
 
+from streamsnow import verify
+from streamsnow.cli import app
 from streamsnow.config import Config
 from streamsnow.verify import (
     check_exists,
     check_live_version,
     check_service_logs,
     check_version_source,
+    run_query_snow,
     verify_app,
 )
 
@@ -214,3 +221,52 @@ def test_verify_app_service_log_fetch_failure_is_warn_not_fail():
     assert result["ok"], result["checks"]
     logs = next(c for c in result["checks"] if c["name"] == "service-logs")
     assert logs["level"] == "warn"
+
+
+# ---- snow invocation: --temporary-connection -------------------------------
+# CI has SNOWFLAKE_* environment variables and no config.toml, where snow
+# without --temporary-connection fails ("Connection default is not
+# configured"). Locally the flag must stay off so the default connection is used.
+
+
+def _fake_snow(calls: list[list[str]], rows: list[dict] | None = None):
+    def run(argv, **_kwargs):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(rows or []), stderr="")
+
+    return run
+
+
+def test_run_query_snow_adds_temporary_connection_only_when_requested(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(verify.subprocess, "run", _fake_snow(calls))
+
+    run_query_snow("SELECT 1")
+    run_query_snow("SELECT 1", temporary_connection=True)
+
+    assert calls[0] == ["snow", "sql", "-q", "SELECT 1", "--format", "json"]
+    assert calls[1] == [
+        "snow",
+        "sql",
+        "-q",
+        "SELECT 1",
+        "--format",
+        "json",
+        "--temporary-connection",
+    ]
+
+
+@pytest.mark.parametrize("flag", [True, False])
+def test_verify_deploy_threads_temporary_connection_into_every_snow_call(monkeypatch, flag):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(verify.subprocess, "run", _fake_snow(calls, [_healthy_row("abc1234")]))
+    argv = ["verify-deploy", "my-app", "--config", str(EXAMPLE), "--attempts", "1"]
+    if flag:
+        argv.append("--temporary-connection")
+
+    result = CliRunner().invoke(app, argv)
+
+    assert result.exit_code in (0, 1), result.output
+    assert calls, "verify-deploy never called snow"
+    assert all(c[:2] == ["snow", "sql"] for c in calls)
+    assert all(("--temporary-connection" in c) is flag for c in calls), calls

@@ -50,10 +50,11 @@ Anaconda channel), so `uv pip install -e` does not apply; if `streamlit` is miss
 
 {% endif %}
 {% if app_slug %}
-The starter page renders mock numbers until you repoint `queries/example_metric.sql`
-at a real table in an allowed schema (it reads `YOUR_TABLE` until then, and
-`validate-app` warns about it); the first real query is the first real
-Snowflake round-trip. `apps/{{ app_slug }}/.streamlit/secrets.toml` (gitignored) is an
+The starter page renders sample numbers, and `queries/example_metric.sql` (plus the
+review window in its `sql_review` manifest) reads `YOUR_TABLE`. Replace all three with
+real content, or repoint them at a real table in an allowed schema: `validate-app`
+fails while any app file still reads `YOUR_TABLE`, so the placeholder app cannot
+ship. The first real query is the first real Snowflake round-trip. `apps/{{ app_slug }}/.streamlit/secrets.toml` (gitignored) is an
 optional override for an app that needs a different role or warehouse.
 {% else %}
 `apps/<slug>/.streamlit/secrets.toml` (gitignored) is an optional override for an app

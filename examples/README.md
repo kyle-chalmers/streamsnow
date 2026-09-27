@@ -14,6 +14,13 @@ It demonstrates the `st.navigation` entrypoint, branding, and `@st.cache_data`
 loaders — the same patterns `streamsnow init` scaffolds. See its
 [README](sample-dashboard/README.md) for details.
 
+## Demo data in your own account: [`tpcds-demo/`](tpcds-demo/)
+
+A small TPC-DS sales extract (about 43M rows, 2001 and 2002, three stores) built from Snowflake's
+built-in sample data into `STREAMSNOW_DEMO.TPCDS`, so you can run the full setup, build, review and
+ship flow against a real schema. It costs well under a credit to build; see its
+[README](tpcds-demo/README.md).
+
 ## Generate a real, governed app — `streamsnow init`
 
 The sample above is a local demo (no `snowflake.yml`, no queries). For a real,
@@ -25,8 +32,8 @@ A freshly generated app looks like:
 ```
 apps/<slug>/
   streamlit_app.py         # st.navigation entrypoint, apply_branding()
-  pages/overview.py        # branded metric + Plotly chart + a cached loader
-  queries/example_metric.sql
+  pages/overview.py        # starter placeholder: sample numbers, a Plotly chart, a cached loader
+  queries/example_metric.sql   # starter placeholder: reads YOUR_TABLE
   branding.py  sql_loader.py
   .streamlit/config.toml   .streamlit/secrets.toml.example
   snowflake.yml            pyproject.toml (container) | environment.yml (warehouse)

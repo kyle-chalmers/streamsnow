@@ -2,7 +2,7 @@
 
 App-specific context. Inherits the repo rulebook in the top-level `AGENTS.md`.
 
-- **Runtime:** warehouse · **Query warehouse:** `STREAMLIT_WH`
+- **Runtime:** warehouse · **Query warehouse:** `STREAMSNOW_WH`
 - **Data sources:** `ANALYTICS_DB` (schemas: ANALYTICS, REPORTING)
 - **Caching strategy:** default TTL 1800s. Note any per-query deviations here with a reason.
 

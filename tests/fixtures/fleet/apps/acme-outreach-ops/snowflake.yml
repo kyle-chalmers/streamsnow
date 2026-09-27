@@ -4,10 +4,10 @@ entities:
     type: streamlit
     identifier:
       name: ACME_OUTREACH_OPS
-      database: DATA_APPS
-      schema: BI_APPS
+      database: STREAMSNOW_APPS
+      schema: DASHBOARDS
     main_file: streamlit_app.py
-    query_warehouse: STREAMLIT_WH
+    query_warehouse: STREAMSNOW_WH
     title: "Acme Outreach Ops"
     artifacts:
       - streamlit_app.py

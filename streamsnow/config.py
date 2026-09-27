@@ -191,7 +191,7 @@ class SnowflakeObjects:
     app_schema: str
     default_warehouse: str
     allowed_warehouses: tuple[str, ...]
-    stage_name: str = "STREAMLIT_CODE_STAGE"
+    stage_name: str = "STREAMSNOW_CODE_STAGE"
     compute_pool: str = ""
     external_access_integration: str = ""
     runtime_name: str = "SYSTEM$ST_CONTAINER_RUNTIME_PY3_11"
@@ -210,7 +210,7 @@ class SnowflakeObjects:
                 "snowflake.objects.stage_schema",
             ),
             stage_name=vi(
-                str(d.get("stage_name", "STREAMLIT_CODE_STAGE")), "snowflake.objects.stage_name"
+                str(d.get("stage_name", "STREAMSNOW_CODE_STAGE")), "snowflake.objects.stage_name"
             ),
             app_database=vi(
                 str(_require(d, "app_database", "snowflake.objects")),

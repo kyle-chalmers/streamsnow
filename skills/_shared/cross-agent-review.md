@@ -1,17 +1,20 @@
 # cross-agent-review
 
-Purpose: fan one qualitative review prompt to external AI CLIs (`agy`, `codex`) **in parallel** with Claude subagents, then merge all findings into one attributed list. This is a contract that /review-app and /audit-lineage read and follow — not an invocable skill. It never blocks: `streamsnow validate-app` is the only deterministic PASS/FAIL gate; everything here is judgment that a human decides on.
+Purpose: fan one qualitative review prompt to external AI CLIs (`agy`, `codex`) **in parallel** with the host agent's own reviewers (Claude Code: Task subagents), then merge all findings into one attributed list. This is a contract that /review-app and /audit-lineage read and follow — not an invocable skill. It never blocks: `streamsnow validate-app` is the only deterministic PASS/FAIL gate; everything here is judgment that a human decides on.
 
 ## When it runs
 
 Always OFF by default in OSS. A calling skill opts in only when **both** hold:
 
-1. Config enables it — `streamsnow.config.yaml` has `review.cross_agent: true` (absent or `false` → skip entirely, Claude-only).
+1. Config enables it — `streamsnow.config.yaml` has `review.cross_agent: true` (absent or `false` → skip entirely, host-only).
 2. At least one external CLI passes the smoke test below.
 
-If either fails, degrade silently to Claude-only review and emit one line: `cross-agent review off (config disabled | no external CLI found); using Claude reviewers only`. Never error out, never prompt to install anything.
+If either fails, degrade silently to host-only review and emit one line: `cross-agent review off (config disabled | no external CLI found); using host reviewers only`. Never error out, never prompt to install anything.
 
-Honor a caller `--no-cross-agent` flag: skip detection, go Claude-only.
+Honor a caller `--no-cross-agent` flag: skip detection, go host-only.
+
+Never treat the agent you are running in as external: running inside Codex, skip `codex`
+(its reviewers are the host reviewers), and likewise for any other host.
 
 ## Detect + smoke-test each CLI
 
@@ -35,9 +38,9 @@ Only CLIs that set their `*_OK` flag join the fan-out. A CLI that's present but 
 
 ## Fan out the prompt
 
-Build **one** review prompt string (the caller supplies it — the same prompt its Claude subagents get, including the app slug, the dimensions to cover, and the finding format below). Dispatch all reviewers concurrently:
+Build **one** review prompt string (the caller supplies it — the same prompt its host reviewers get, including the app slug, the dimensions to cover, and the finding format below). Dispatch all reviewers concurrently:
 
-- **Claude reviewers** — launch via the Task tool (parallel subagents), one per dimension, exactly as the caller already does.
+- **Host reviewers** — the host agent's parallel subagents (Claude Code: the Task tool), one per dimension, exactly as the caller already does.
 - **`agy`** (if `AGY_OK`) — `run_bounded 180 agy -p "$PROMPT"` (non-interactive print mode).
 - **`codex`** (if `CODEX_OK`) — `run_bounded 180 codex exec "$PROMPT" < /dev/null` (the `< /dev/null` is mandatory).
 
@@ -51,7 +54,7 @@ All reviewers are read-only: they critique source, they do not edit it. Any live
 [SEVERITY] (dimension) finding — file:line — one-line fix
 ```
 
-`SEVERITY` ∈ `BLOCK | FLAG | NICE-TO-HAVE` — the internal names for what user-facing summaries print as critical / should-fix / nice-to-have. Each line carries an attribution tag the merge step adds: `(Claude)`, `(Agy)`, `(Codex)`.
+`SEVERITY` ∈ `BLOCK | FLAG | NICE-TO-HAVE` — the internal names for what user-facing summaries print as critical / should-fix / nice-to-have. Each line carries an attribution tag the merge step adds: the host's own tag (`(Claude)` in Claude Code), plus `(Agy)`, `(Codex)`.
 
 ## Merge + consensus
 

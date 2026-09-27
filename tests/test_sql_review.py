@@ -246,7 +246,9 @@ def test_check_json_carries_kind_and_policy(repo: Path, capsys: pytest.CaptureFi
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True and payload["coverage_policy"] == "warn"
     assert payload["findings"] == []
-    assert [w["kind"] for w in payload["warnings"]] == ["coverage"]
+    # The fixture manifest declares no set_block, so the advisory window warning
+    # rides along with the coverage gap (both soft under `warn`).
+    assert sorted(w["kind"] for w in payload["warnings"]) == ["coverage", "window"]
 
 
 def test_correctness_findings_fail_regardless_of_policy(repo: Path) -> None:
@@ -2031,3 +2033,123 @@ def test_distinct_set_vars_name_is_not_a_collision() -> None:
         "set_vars": [{"name": "cap", "default": "100"}],
     }
     assert [p for p in sr.validate_manifest(m) if "collides" in p] == []
+
+
+# --------------------------------------------------------------------------- #
+# Review window: anchored to the data, not to today
+# --------------------------------------------------------------------------- #
+
+# A historical fact table: the data ends years before today (the shape of any
+# sample dataset or a paused feed). TPC-DS store sales end in 2003.
+HISTORICAL_QUERY = """-- Query: daily_sales
+-- Feeds: Overview page (daily net sales)
+-- Schemas: ANALYTICS_DB.REPORTING
+-- Params: :1 start_date, :2 end_date
+SELECT sold_date, SUM(net_paid) AS net_paid
+FROM ANALYTICS_DB.REPORTING.STORE_SALES
+WHERE sold_date BETWEEN :1 AND :2
+GROUP BY sold_date
+"""
+HISTORICAL_DATES = ("2001-01-02", "2002-06-30", "2003-01-02")  # MAX(sold_date) = 2003-01-02
+ANCHORED_WINDOW = {
+    "start_date": (
+        "(SELECT DATEADD('year', -1, MAX(sold_date)) FROM ANALYTICS_DB.REPORTING.STORE_SALES)::DATE"
+    ),
+    "end_date": "(SELECT MAX(sold_date) FROM ANALYTICS_DB.REPORTING.STORE_SALES)::DATE",
+}
+
+
+def _historical_repo(repo: Path, set_block: dict | None) -> Path:
+    app = repo / "apps" / SLUG
+    (app / "queries" / "revenue_daily.sql").unlink()
+    (app / "queries" / "daily_sales.sql").write_text(HISTORICAL_QUERY)
+    manifest = {
+        "schema_version": 1,
+        "feature": "revenue",
+        "app": SLUG,
+        "pages": [{"name": "Overview", "queries": ["daily_sales"]}],
+        "query_specs": {"daily_sales": {"params_doc": ":1 start_date, :2 end_date"}},
+    }
+    if set_block is not None:
+        manifest["set_block"] = set_block
+    (app / "sql_review" / "manifests" / "revenue.json").write_text(json.dumps(manifest))
+    assert _generate(repo) == 0
+    return _review_file(repo)
+
+
+def _json_check(repo: Path, capsys: pytest.CaptureFixture) -> tuple[int, dict]:
+    capsys.readouterr()
+    rc = sr.main(["check", SLUG, "--dir", str(repo), "--format", "json"])
+    return rc, json.loads(capsys.readouterr().out)
+
+
+def test_implicit_window_misses_historical_data_and_check_says_so(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """The regression: with no set_block the review window is the year ending today,
+    so every section over historical data returned zero rows on paste while check
+    reported clean. The default is kept, but check now names it."""
+    from datetime import date, timedelta
+
+    text = _historical_repo(repo, None).read_text()
+    assert "SET start_date = DATEADD('year', -1, CURRENT_DATE);" in text
+    assert "SET end_date = CURRENT_DATE;" in text
+    # What that window means for this data: not one historical date falls inside it.
+    today = date.today()
+    window = (today - timedelta(days=366), today)
+    assert not [d for d in HISTORICAL_DATES if window[0] <= date.fromisoformat(d) <= window[1]]
+
+    rc, payload = _json_check(repo, capsys)
+    assert rc == 0 and payload["findings"] == []  # advisory, never a failure
+    (warning,) = [w for w in payload["warnings"] if w["kind"] == "window"]
+    assert warning["file"].endswith("sql_review/manifests/revenue.json")
+    assert "CURRENT_DATE" in warning["detail"] and "MAX(<date_col>)" in warning["detail"]
+
+    assert _check(repo) == 0
+    assert "anchored to today" in capsys.readouterr().out
+
+
+def test_implicit_window_never_gates_even_under_coverage_fail(repo: Path) -> None:
+    _historical_repo(repo, None)
+    _set_coverage_policy(repo, "fail")
+    assert _check(repo) == 0
+
+
+def test_data_anchored_window_renders_and_checks_clean(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    text = _historical_repo(repo, ANCHORED_WINDOW).read_text()
+    assert (
+        "SET end_date = (SELECT MAX(sold_date) FROM ANALYTICS_DB.REPORTING.STORE_SALES)::DATE;"
+        in text
+    )
+    assert "CURRENT_DATE" not in text  # the window comes from the data alone
+    rc, payload = _json_check(repo, capsys)
+    assert rc == 0 and payload["findings"] == [] and payload["warnings"] == []
+
+
+def test_explicit_current_date_window_is_the_authors_call(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Callers that set a window explicitly keep today's behavior, byte for byte."""
+    text = _historical_repo(repo, dict(sr._DEFAULT_SET)).read_text()
+    assert "SET end_date = CURRENT_DATE;" in text
+    _, payload = _json_check(repo, capsys)
+    assert payload["warnings"] == []
+
+
+def test_no_window_warning_when_no_section_binds_a_date(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    app = repo / "apps" / SLUG
+    (app / "queries" / "revenue_daily.sql").write_text(
+        "-- Query: revenue_daily\n-- Feeds: Overview\nSELECT COUNT(*) AS n\n"
+        "FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY\n"
+    )
+    manifest = {k: v for k, v in MANIFEST.items() if k != "token_dispatchers"}
+    (app / "sql_review" / "manifests" / "revenue.json").write_text(json.dumps(manifest))
+    assert _generate(repo) == 0
+    text = _review_file(repo).read_text()
+    assert not [ln for ln in text.splitlines() if ln.startswith("SET ")]  # pruned
+    _, payload = _json_check(repo, capsys)
+    assert [w for w in payload["warnings"] if w["kind"] == "window"] == []

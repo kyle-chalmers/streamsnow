@@ -31,7 +31,10 @@ jobs:
           uv tool install ruff=={{ ruff_version }}
           uv tool install 'streamsnow>=0.7,<0.8'
       - name: Lint
-        run: ruff check apps/
+        run: |
+          # A repo with no app yet (`streamsnow init --no-starter-app`) has no apps/
+          # directory: git cannot carry an empty one, and ruff errors on a missing path.
+          if [ -d apps ]; then ruff check apps/; else echo "No apps/ yet: nothing to lint."; fi
       - name: Governance gate (validate every app)
         run: |
           for d in apps/*/; do
@@ -47,4 +50,12 @@ jobs:
       - name: SQL-review audit trail (fresh + complete)
         run: streamsnow sql-review check
       - name: Tombstones (no abandoned deployed objects)
-        run: streamsnow check tombstones --base-ref origin/main
+        run: |
+          # The check refuses a missing apps/ on purpose (an unseen apps dir must never
+          # read as "no apps"). Skip it only when apps/ is absent here AND on the base
+          # branch: nothing has been deployed from this repo, so nothing can be abandoned.
+          if [ ! -d apps ] && [ -z "$(git ls-tree -d origin/main apps 2>/dev/null)" ]; then
+            echo "No apps/ here or on origin/main yet: nothing to tombstone."
+          else
+            streamsnow check tombstones --base-ref origin/main
+          fi

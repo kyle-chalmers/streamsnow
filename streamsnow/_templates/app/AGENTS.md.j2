@@ -8,8 +8,10 @@ App-specific context. Inherits the repo rulebook in the top-level `AGENTS.md`.
 
 ## Pages
 
-- **Overview** (`pages/overview.py`) — starter page; replace the example metric with your real KPIs.
+- **Overview** (`pages/overview.py`): starter page with sample numbers; replace it with your real pages.
 
 ## Queries
 
-- `queries/example_metric.sql` — placeholder; repoint `YOUR_TABLE` at a real object in an allowed schema.
+- `queries/example_metric.sql`: placeholder; repoint `YOUR_TABLE` at a real object in an allowed schema
+  (its `sql_review/manifests/example_metric.json` window reads it too), or delete both once real queries
+  exist. `validate-app` fails while any app file still reads `YOUR_TABLE`.
