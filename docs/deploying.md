@@ -185,7 +185,11 @@ config; it leaves `README` and `.gitignore` alone. Run it after upgrading
 re-render picks those up. 0.7.1 is the same: its `deploy.yml` passes
 `--temporary-connection` to every `snow` call and to `verify-deploy`, and
 installs `streamsnow>=0.7.1,<0.8`, the first release with that
-`verify-deploy` option.
+`verify-deploy` option. 0.7.2's `deploy.yml` skips the deploy and verify
+steps cleanly while `apps/` holds no app directory, and installs
+`streamsnow>=0.7.2,<0.8`, the first release whose `verify-deploy` reads
+`DESCRIBE STREAMLIT` (an older one reports those checks as passed without
+running them).
 
 ## See also
 

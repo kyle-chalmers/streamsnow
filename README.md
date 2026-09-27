@@ -190,7 +190,7 @@ streamsnow update --apply                # re-render AGENTS.md, hooks, CI, deplo
 ```
 
 Generated CI pins `streamsnow>=0.7,<0.8` (the deploy workflow
-`>=0.7.1,<0.8`); bump the pin with `update --apply` when you move majors.
+`>=0.7.2,<0.8`); bump the pin with `update --apply` when you move majors.
 `claude plugin details streamsnow@streamsnow` lists 16 skills: 8 real ones plus
 8 deprecated aliases for the pre-0.3 names.
 
