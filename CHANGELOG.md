@@ -65,6 +65,18 @@ the past, a local preview crash, and a starter app that could still ship.
 
 ### Fixed
 
+- **Every first CI deploy failed with `Connection default is not
+  configured`.** Snowflake CLI 3.27.0 run with only `SNOWFLAKE_*` environment
+  variables and no `config.toml` (a GitHub Actions runner) needs
+  `--temporary-connection`, and the generated `deploy.yml` passed no connection
+  flag. Every `snow sql`, `snow stage copy` and `snow git fetch` call in both
+  deploy workflows now passes it; `verify-deploy` gains a
+  `--temporary-connection` option the workflows pass (leave it off locally to
+  use your default connection); and the passphrase secret reaches `snow` as
+  `PRIVATE_KEY_PASSPHRASE`, the only name it reads for an encrypted key. The
+  deploy workflows install `streamsnow>=0.7.1,<0.8`. Existing repos pick this
+  up with `streamsnow update --apply`, which re-renders
+  `.github/workflows/deploy.yml` (troubleshooting #19).
 - **`streamsnow new` warns when repo files are missing**, naming them and the
   fix (`streamsnow init --no-starter-app`). Without them there were no hooks or
   CI, and nothing gitignored `.streamlit/secrets.toml`.

@@ -173,6 +173,18 @@ caught it. Runtime-specific facts link to the official page in
   LAST`; repositories over 2 GB are unsupported ([Git overview](https://docs.snowflake.com/en/developer-guide/git/git-overview)).
 - **Fix:** `streamsnow deploy-sql <slug> --refresh` emits the refresh statements.
 
+### 19. Every CI deploy fails with `Connection default is not configured`
+
+- **Symptom:** the deploy workflow's first `snow` step fails although all the
+  `SNOWFLAKE_*` secrets are set.
+- **Cause:** the runner has no Snowflake CLI `config.toml`, and a `snow` call
+  without `--temporary-connection` looks for a connection named `default`
+  instead of reading the `SNOWFLAKE_*` variables
+  ([temporary connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection)).
+  `deploy.yml` files generated before 0.7.1 omit the flag.
+- **Fix:** `uv tool upgrade streamsnow`, then `streamsnow update --apply` and
+  commit the re-rendered `.github/workflows/deploy.yml`.
+
 ## Plugin
 
 ### 16. Overlays or the Stop hook seem inert

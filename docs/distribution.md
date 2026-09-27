@@ -62,9 +62,9 @@ is actually true today, so a team can decide with open eyes.
 - **Maintainer model.** One maintainer, releases cut from `main` by tag
   ([RELEASING.md](../RELEASING.md)). Co-maintainers are welcome; the
   [contributing guide](../CONTRIBUTING.md) says how.
-- **Release pinning.** Generated CI installs `streamsnow>=0.7,<0.8`, so a repo
-  never takes a major silently. Stricter shops pin exact (`streamsnow==0.7.0`)
-  and bump on purpose.
+- **Release pinning.** Generated CI installs `streamsnow>=0.7,<0.8` (the deploy
+  workflow `>=0.7.1,<0.8`), so a repo never takes a major silently. Stricter
+  shops pin exact (`streamsnow==0.7.0`) and bump on purpose.
 - **Rollback.** `uv tool install streamsnow==<previous>` and
   `streamsnow update --apply` re-render the governance files from that
   version's templates. Nothing StreamSnow writes is opaque.

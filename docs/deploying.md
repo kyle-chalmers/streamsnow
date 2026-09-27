@@ -14,7 +14,10 @@ CI secret list, see **[Deploy setup](deploy-setup.md)**.
 
 On merge to `main`, the workflow:
 
-1. Authenticates to Snowflake as your `ci_role` (key-pair / JWT).
+1. Authenticates to Snowflake as your `ci_role` (key-pair / JWT) from the
+   `SNOWFLAKE_*` secrets. Every `snow` call, and `verify-deploy`, passes
+   `--temporary-connection`, because the runner has no Snowflake CLI
+   `config.toml` (see [Deploy setup](deploy-setup.md#2-ci-auth-key-pair--jwt)).
 2. Makes the app source available to Snowflake — how depends on your
    **[deploy source](#two-deploy-sources)**.
 3. Runs `CREATE OR REPLACE STREAMLIT` for each app under `apps/` via
@@ -173,7 +176,10 @@ streamsnow update --apply    # write the changes
 config; it leaves `README` and `.gitignore` alone. Run it after upgrading
 `streamsnow` across a minor version too — 0.7 moved the generated CI pin to
 `streamsnow>=0.7,<0.8` and added the `sql_review.coverage` policy, and only a
-re-render picks those up.
+re-render picks those up. 0.7.1 is the same: its `deploy.yml` passes
+`--temporary-connection` to every `snow` call and to `verify-deploy`, and
+installs `streamsnow>=0.7.1,<0.8`, the first release with that
+`verify-deploy` option.
 
 ## See also
 
