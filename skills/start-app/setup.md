@@ -32,6 +32,9 @@ reads `ok: true` before moving on. Never batch installs. `level` decides severit
 failure blocks the build phases (doctor exits 1); an `optional` one (`snow`, `streamlit`, `gh`,
 `snow-connection`, `snow-key-file`, `container-python`) is offered, skippable. `snow` flips to `required` when it
 is on PATH but `snow --version` fails (`BROKEN`): reinstall with `uv tool install snowflake-cli`.
+A `snow --version` that does not answer within 45s is a `warn`, not `BROKEN`: a cold start can
+take that long, so re-run doctor rather than reinstalling; if `snow connection list` is silent too,
+`snow-connection` and `snow-key-file` say "not checked".
 `gh` is optional here and required later by `/ship-app`. `container-python` warns in a
 container-runtime repo with no Python 3.11 (`uv python install 3.11`). Two checks flip level by context: `config` is `optional`
 when no `streamsnow.config.yaml` exists yet and `required` when one exists but fails validation

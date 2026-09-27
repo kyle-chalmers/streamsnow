@@ -224,7 +224,10 @@ def test_snow_checks_never_raise_on_timeout_or_garbage(tmp_path, monkeypatch):
     assert doctor.main([]) in (0, 1)  # never 2: the doctor itself did not crash
     monkeypatch.setattr(doctor.subprocess, "run", _fake_run({_LIST: (0, "not json")}))
     res = doctor.check_snow_connection(doctor.check_config(start=tmp_path))
-    assert not res["ok"] and res["detail"]["known"] == []
+    # Unreadable output is "not checked", never "you have no such connection".
+    assert not res["ok"] and "known" not in res["detail"]
+    assert res["hint"].startswith("not checked:")
+    assert "snow connection add" not in res["hint"]
 
 
 def test_healthy_machine_without_config_still_exits_zero(tmp_path, monkeypatch):
@@ -268,19 +271,109 @@ def test_snow_on_path_but_crashing_is_a_failure(tmp_path, monkeypatch):
     assert "[BROKEN ] snow" in text
 
 
-def test_snow_version_timeout_is_broken_and_working_snow_is_ok(tmp_path, monkeypatch):
+def _scripted_run(script: dict[tuple[str, ...], object], seen: list | None = None):
+    """subprocess.run stand-in keyed on the first three argv tokens: a value is
+    (returncode, stdout), or an exception to raise (e.g. TimeoutExpired)."""
+
+    def fake(cmd, **kwargs):
+        key = tuple(cmd[:3])
+        if seen is not None:
+            seen.append((key, kwargs.get("timeout")))
+        outcome = script.get(key, (127, ""))
+        if isinstance(outcome, Exception):
+            raise outcome
+        return _Proc(*outcome)
+
+    return fake
+
+
+def _cold_start():
+    return doctor.subprocess.TimeoutExpired(cmd="snow", timeout=doctor._SNOW_TIMEOUT_S)
+
+
+def test_snow_version_outcomes_ok_timeout_and_import_error(monkeypatch):
+    """Observed 2026-09-27: the first `snow --version` after the Mac idled took
+    24.8 s (about 1 s of CPU), past 0.7.1's 15 s timeout, and doctor printed
+    `[BROKEN ] snow` with reinstall advice for a healthy install. A timeout is
+    its own state: a warning to re-run. A crash on import stays BROKEN."""
     monkeypatch.setattr(doctor.shutil, "which", _which_only("snow"))
+    outcomes = {
+        "ok": (0, "Snowflake CLI version: 3.27.0\n"),
+        "timeout": _cold_start(),
+        "import-error": (1, ""),  # e.g. a Homebrew snow whose pyOpenSSL import fails
+    }
+    results = {}
+    for label, outcome in outcomes.items():
+        monkeypatch.setattr(doctor.subprocess, "run", _scripted_run({_VERSION: outcome}))
+        results[label] = doctor.check_snow()
 
-    def slow(*_a, **_k):
-        raise doctor.subprocess.TimeoutExpired(cmd="snow", timeout=15)
+    ok = results["ok"]
+    assert ok["ok"] and ok["detail"]["version"] == "3.27.0"
 
-    monkeypatch.setattr(doctor.subprocess, "run", slow)
-    assert doctor.check_snow()["detail"]["broken"] is True
-    monkeypatch.setattr(
-        doctor.subprocess, "run", _fake_run({_VERSION: (0, "Snowflake CLI version: 3.27.0\n")})
-    )
-    res = doctor.check_snow()
-    assert res["ok"] and res["detail"]["version"] == "3.27.0"
+    slow = results["timeout"]
+    assert not slow["ok"] and slow["level"] == "optional"
+    assert slow["detail"]["timed_out"] is True and "broken" not in slow["detail"]
+    assert "did not answer within 45s" in slow["hint"] and "re-run" in slow["hint"]
+    assert "reinstall" not in slow["hint"] and "uv tool install" not in slow["hint"]
+    assert doctor.render_text([slow]).startswith("[warn   ] snow")
+    assert doctor.required_ok([slow])  # a slow snow never fails the doctor
+
+    broken = results["import-error"]
+    assert not broken["ok"] and broken["level"] == "required"
+    assert broken["detail"]["broken"] is True
+    assert "uv tool install snowflake-cli" in broken["hint"]
+    assert doctor.render_text([broken]).startswith("[BROKEN ] snow")
+    assert not doctor.required_ok([broken])
+
+
+def test_snow_timeout_still_runs_the_connection_checks(tmp_path, monkeypatch):
+    """A `snow --version` that only timed out must not cascade into skipped
+    connection checks: the listing usually answers once the cold start is over."""
+    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow", "pre-commit"))
+    rows = json.dumps(_key_rows(authenticator="SNOWFLAKE_JWT", private_key_file="/k.p8"))
+    seen: list = []
+    script = {_VERSION: _cold_start(), _LIST: (0, rows)}
+    monkeypatch.setattr(doctor.subprocess, "run", _scripted_run(script, seen))
+    results = doctor.run_checks(start=tmp_path)
+    by_name = {r["name"]: r for r in results}
+    assert by_name["snow"]["detail"]["timed_out"] is True
+    assert by_name["snow-connection"]["ok"], by_name["snow-connection"]
+    assert by_name["snow-key-file"]["ok"], by_name["snow-key-file"]
+    assert [k for k, _ in seen].count(_LIST) == 1
+    assert doctor.required_ok(results)
+
+
+def test_snow_that_stays_silent_says_the_connection_checks_were_not_checked(tmp_path, monkeypatch):
+    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow", "pre-commit"))
+    seen: list = []
+    script = {_VERSION: _cold_start(), _LIST: _cold_start()}
+    monkeypatch.setattr(doctor.subprocess, "run", _scripted_run(script, seen))
+    results = doctor.run_checks(start=tmp_path)
+    by_name = {r["name"]: r for r in results}
+    for name in ("snow-connection", "snow-key-file"):
+        hint = by_name[name]["hint"]
+        assert hint.startswith("not checked: snow connection list did not answer"), (name, hint)
+        assert "snow connection add" not in hint, name
+    # One listing attempt, not one per dependent check (each can wait 45 s).
+    assert [k for k, _ in seen].count(_LIST) == 1
+    assert doctor.required_ok(results)
+    text = doctor.render_text(results)
+    assert "[warn   ] snow " in text and "BROKEN" not in text
+
+
+def test_snow_probes_wait_out_a_cold_start_and_local_probes_stay_short(tmp_path, monkeypatch):
+    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow", "pre-commit"))
+    seen: list = []
+    script = {_VERSION: (0, "Snowflake CLI version: 3.27.0"), _LIST: (0, "[]")}
+    monkeypatch.setattr(doctor.subprocess, "run", _scripted_run(script, seen))
+    doctor.run_checks(start=tmp_path)
+    timeouts = dict(seen)
+    assert timeouts[_VERSION] >= 45  # the observed cold start took 24.8 s
+    assert timeouts[_LIST] >= timeouts[_VERSION]
+    assert timeouts[_FIND_311] <= 15  # uv python find is local; no need to wait long
 
 
 def test_snow_missing_stays_optional(monkeypatch):
@@ -291,8 +384,8 @@ def test_snow_missing_stays_optional(monkeypatch):
 
 def test_snow_probe_timeout_absorbs_a_cold_start():
     """A cold `snow` start took longer than 5 s, so the first doctor run
-    reported no connections and a re-run found one."""
-    assert doctor._SNOW_TIMEOUT_S >= 15
+    reported no connections and a re-run found one; later one took 24.8 s."""
+    assert doctor._SNOW_TIMEOUT_S >= 45
 
 
 def test_gh_is_an_optional_check_that_names_ship_app(tmp_path, monkeypatch):

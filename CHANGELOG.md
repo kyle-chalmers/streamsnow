@@ -3,6 +3,53 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [0.7.2] - 2026-09-27
+
+Fixes from the first real GitHub Actions deploy and from a `doctor` run on a
+machine that had been idle.
+
+### Fixed
+
+- **`verify-deploy` reported checks it never ran as passed.** Current
+  Snowflake's `SHOW STREAMLITS` returns no version URIs, so on the first real
+  CI deploy the live-version and version-source checks each printed a check
+  mark above "not in SHOW output, skipped". `verify-deploy` still uses
+  `SHOW STREAMLITS` to confirm the app exists, then reads `DESCRIBE STREAMLIT`
+  for the other two: live-version fails when `live_version_location_uri` is
+  empty, and version-source (stage-copy) fails when neither
+  `default_version_source_location_uri` nor `last_version_source_location_uri`
+  contains `/commits/<sha>/`. A check that cannot run now prints
+  `○ <check> (skipped)` with the reason, reports `"status": "skipped"` in
+  `--format json`, and is counted apart from the passes, as in
+  `PASS: store-sales (3 passed; 1 skipped: service-logs)`. Skips still never
+  fail the run, and the container service-log scan stays best-effort. Existing
+  deploy workflows get this on their next run without a re-render: their
+  `streamsnow>=0.7.1,<0.8` pin resolves to the newest 0.7 release.
+- **A repo with deploy secrets but no app failed its deploy.**
+  `streamsnow init --no-starter-app` writes no `apps/` directory, so
+  `snow stage copy "apps/"` stopped the deploy with "No data" (exit 2), and
+  `for d in apps/*/` ran once over the literal pattern. Both deploy workflows
+  now collect app directories with `nullglob`; when there are none, the deploy
+  and verify steps print "No app directories under apps/ yet: nothing to
+  deploy" (or "verify") and exit 0 before any `snow` call. Existing repos
+  re-render `deploy.yml` with `streamsnow update --apply` and commit it.
+- **`doctor` called a slow `snow` broken.** The first `snow --version` after a
+  Mac sat idle took 24.8 s on about 1 s of CPU, past the 15 s probe timeout, so
+  doctor printed `[BROKEN ] snow` with reinstall advice and then skipped the
+  connection checks. The `snow` probes now wait 45 s. A timeout is a warning to
+  re-run doctor, never a failure, and the connection listing still runs once
+  afterwards. If that listing also fails or times out, `snow-connection` and
+  `snow-key-file` say "not checked" with the reason instead of suggesting
+  `snow connection add`. A `snow` that exits non-zero, such as an import crash,
+  is still `BROKEN` with the `uv tool install snowflake-cli` hint.
+
+### Changed
+
+- **The deploy workflows install `streamsnow>=0.7.2,<0.8`** (was `>=0.7.1`),
+  the first release whose `verify-deploy` actually evaluates the live-version
+  and version-source checks. `streamsnow update --apply` writes the new pin
+  along with the no-apps guard.
+
 ## [0.7.1] - 2026-09-27
 
 The launch-fix release. An end-to-end run of the install path from an empty

@@ -741,10 +741,11 @@ def verify_deploy_cmd(
     output_format: str = typer.Option("md", "--format"),
 ) -> None:
     """Verify a deployed app actually serves: object exists, live version set,
-    version source matches the merge SHA, container logs show no crash loop."""
+    version source matches the merge SHA, container logs show no crash loop.
+    A check that cannot run is reported as skipped, never as a pass."""
     from functools import partial
 
-    from .verify import run_query_snow, verify_app
+    from .verify import run_query_snow, summary_line, verify_app
 
     try:
         cfg = load_config(Path(config) if config else None)
@@ -760,12 +761,15 @@ def verify_deploy_cmd(
     if output_format == "json":
         print(json.dumps(result, indent=2))
     else:
+        # A check that could not run gets its own mark and word: a check mark
+        # beside "skipped" read as a pass in CI logs.
+        marks = {"pass": "✓", "fail": "✗", "skipped": "○"}
         for c in result["checks"]:
-            mark = "✓" if c["ok"] else "✗"
-            print(f"  {mark} {c['name']}")
+            label = f"{c['name']} (skipped)" if c["status"] == "skipped" else c["name"]
+            print(f"  {marks[c['status']]} {label}")
             for f in c["findings"]:
                 print(f"      - {f}")
-        print(f"\n{'PASS' if result['ok'] else 'FAIL'}: {result['app']}")
+        print(f"\n{summary_line(result)}")
     raise typer.Exit(code=0 if result["ok"] else 1)
 
 

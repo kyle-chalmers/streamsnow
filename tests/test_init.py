@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import py_compile
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -326,6 +327,126 @@ def test_deploy_workflows_hand_snow_the_key_passphrase_by_the_name_it_reads(tmp_
         env = workflow["jobs"]["deploy"]["env"]
         assert env["PRIVATE_KEY_PASSPHRASE"] == "${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}"
         assert "SNOWFLAKE_PRIVATE_KEY_PASSPHRASE" not in env, source
+
+
+_APP_STEPS = {
+    "stage-copy": ("Deploy changed apps (stage-copy)", "Verify deploy health"),
+    "git-repository": ("Deploy changed apps (git-repository)", "Verify deploy health"),
+}
+
+
+def test_deploy_workflows_guard_against_a_repo_with_no_app_directories(tmp_path):
+    """A repo with deploy secrets and no app yet failed its deploy: `snow stage
+    copy "apps/"` exits 2 with "No data", and an unmatched `for d in apps/*/`
+    runs once with the literal pattern. Every step that walks apps/ must use
+    nullglob and stop with an explanation when there is nothing to walk."""
+    for source, workflow in _render_deploy_workflows(tmp_path).items():
+        steps = {s.get("name"): s.get("run") for s in workflow["jobs"]["deploy"]["steps"]}
+        for name in _APP_STEPS[source]:
+            run = steps[name]
+            assert "shopt -s nullglob" in run, (source, name)
+            assert "apps=(apps/*/)" in run, (source, name)
+            assert 'if [ "${#apps[@]}" -eq 0 ]; then' in run, (source, name)
+            assert "nothing to" in run and "exit 0" in run, (source, name)
+            # The guard comes before any snow or streamsnow call in the step.
+            guard = run.index("exit 0")
+            assert "snow " not in run[:guard], (source, name)
+            # Loops walk the collected array, never the bare glob.
+            assert "for d in apps/*/" not in run, (source, name)
+
+
+def _init_repo(tmp_path: Path, *, source: str, app_slug: str | None) -> Path:
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    if source == "git-repository":
+        data["deploy"] = {
+            "source": "git-repository",
+            "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
+            "api_integration_name": "GITHUB_API_INTEGRATION",
+            "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
+        }
+    cfg_file = tmp_path / "input.config.yaml"
+    cfg_file.write_text(yaml.safe_dump(data))
+    repo = tmp_path / "repo"
+    argv = ["init", "--config", str(cfg_file), "--dir", str(repo)]
+    argv += ["--app", app_slug] if app_slug else ["--no-starter-app"]
+    result = runner.invoke(app, argv)
+    assert result.exit_code == 0, result.output
+    return repo
+
+
+def _run_with_stub_snow(
+    repo: Path, script: str, bin_dir: Path
+) -> tuple[subprocess.CompletedProcess, str]:
+    """Run one workflow step's shell under bash with `snow` stubbed on PATH. The
+    stub logs its arguments and, like the real CLI, fails `stage copy` from a
+    source that does not exist with "No data" (exit 2)."""
+    import os
+
+    bin_dir.mkdir(exist_ok=True)
+    log = bin_dir / "snow.log"
+    log.write_text("")
+    stub = bin_dir / "snow"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "$*" >> "$SNOW_LOG"\n'
+        'if [ "$1" = stage ] && [ ! -e "$4" ]; then echo "No data" >&2; exit 2; fi\n'
+    )
+    stub.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "SNOW_LOG": str(log),
+        "GITHUB_SHA": "0123456789abcdef0123456789abcdef01234567",
+    }
+    proc = subprocess.run(
+        ["bash", "-e", "-c", script], cwd=repo, env=env, capture_output=True, text=True
+    )
+    return proc, log.read_text()
+
+
+@pytest.mark.parametrize("source", ["stage-copy", "git-repository"])
+def test_fresh_no_starter_repo_deploy_workflow_no_ops_without_calling_snow(tmp_path, source):
+    """Run the deploy and verify steps, exactly as written, under bash in an
+    `init --no-starter-app` repo (no apps/ directory) with `snow` stubbed:
+    both exit 0, say why, and never reach snow."""
+    import shutil
+
+    if shutil.which("bash") is None:
+        pytest.skip("needs bash")
+    repo = _init_repo(tmp_path, source=source, app_slug=None)
+    assert not (repo / "apps").exists()
+    workflow = yaml.safe_load((repo / ".github/workflows/deploy.yml").read_text())
+    steps = {s.get("name"): s.get("run") for s in workflow["jobs"]["deploy"]["steps"]}
+    for name in _APP_STEPS[source]:
+        proc, calls = _run_with_stub_snow(repo, steps[name], tmp_path / "bin")
+        assert proc.returncode == 0, (name, proc.stdout, proc.stderr)
+        assert "No app directories under apps/ yet" in proc.stdout, (name, proc.stdout)
+        assert calls == "", (name, calls)
+    # An apps/ holding no app directory (a stray file) is still nothing to deploy.
+    (repo / "apps").mkdir()
+    (repo / "apps" / "README.md").write_text("apps go here\n")
+    proc, calls = _run_with_stub_snow(repo, steps[_APP_STEPS[source][0]], tmp_path / "bin")
+    assert proc.returncode == 0 and calls == "", (proc.stdout, proc.stderr, calls)
+
+
+def test_stage_copy_deploy_step_still_copies_when_an_app_exists(tmp_path):
+    """Control for the no-apps test: with an app present the same step reaches
+    `snow stage copy`, so an empty stub log there means the guard fired."""
+    import shutil
+
+    if shutil.which("bash") is None or shutil.which("streamsnow") is None:
+        pytest.skip("needs bash and streamsnow on PATH (uv run pytest provides both)")
+    repo = _init_repo(tmp_path, source="stage-copy", app_slug="acme-sales")
+    workflow = yaml.safe_load((repo / ".github/workflows/deploy.yml").read_text())
+    steps = {s.get("name"): s.get("run") for s in workflow["jobs"]["deploy"]["steps"]}
+    proc, calls = _run_with_stub_snow(
+        repo, steps["Deploy changed apps (stage-copy)"], tmp_path / "bin"
+    )
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    copies = [c for c in calls.splitlines() if c.startswith("stage copy")]
+    assert any(" apps/ " in f" {c} " for c in copies), calls
+    assert any("apps/acme-sales/.streamlit/config.toml" in c for c in copies), calls
+    assert any(c.startswith("sql") and "/tmp/ss-acme-sales.sql" in c for c in calls.splitlines())
 
 
 def test_generated_precommit_enforces_sql_review_and_vulns(tmp_path):

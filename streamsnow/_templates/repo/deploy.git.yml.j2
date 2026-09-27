@@ -53,17 +53,27 @@ jobs:
       - name: Install tooling
         if: steps.gate.outputs.go == 'true'
         run: |
-          uv tool install 'streamsnow>=0.7.1,<0.8'
+          uv tool install 'streamsnow>=0.7.2,<0.8'
           uv tool install snowflake-cli
 
+      # A repo can have deploy secrets before it has an app (`streamsnow init
+      # --no-starter-app` writes no apps/ directory, and git cannot carry an
+      # empty one), so the deploy and verify steps collect app directories with
+      # nullglob (an unmatched apps/*/ would otherwise loop once over the
+      # literal pattern) and stop cleanly when there are none.
       - name: Deploy changed apps (git-repository)
         if: steps.gate.outputs.go == 'true'
         run: |
           set -euo pipefail
+          shopt -s nullglob
+          apps=(apps/*/)
+          if [ "${#apps[@]}" -eq 0 ]; then
+            echo "No app directories under apps/ yet: nothing to deploy."
+            exit 0
+          fi
           REPO="$(streamsnow config-get deploy.git_repository_fqn)"
           snow git fetch --temporary-connection "$REPO"
-          for d in apps/*/; do
-            [ -d "$d" ] || continue
+          for d in "${apps[@]}"; do
             slug="$(basename "$d")"
             streamsnow deploy-sql "$slug" > "/tmp/ss-$slug.sql"
             snow sql --temporary-connection -f "/tmp/ss-$slug.sql"
@@ -92,8 +102,13 @@ jobs:
         if: steps.gate.outputs.go == 'true'
         run: |
           set -euo pipefail
-          for d in apps/*/; do
-            [ -d "$d" ] || continue
+          shopt -s nullglob
+          apps=(apps/*/)
+          if [ "${#apps[@]}" -eq 0 ]; then
+            echo "No app directories under apps/ yet: nothing to verify."
+            exit 0
+          fi
+          for d in "${apps[@]}"; do
             streamsnow verify-deploy "$(basename "$d")" --temporary-connection
           done
 {% endraw %}
