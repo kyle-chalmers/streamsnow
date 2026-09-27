@@ -330,3 +330,16 @@ def test_container_python_skipped_outside_container_repos(tmp_path, monkeypatch)
     (tmp_path / "streamsnow.config.yaml").write_text(data)
     res = doctor.check_container_python(doctor.check_config(start=tmp_path))
     assert "skipped" in res["detail"]
+
+
+def test_snow_connection_hint_points_at_an_existing_default_before_adding_one(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    cfg = doctor.check_config(start=tmp_path)
+    rows = [{"connection_name": "tutorial", "is_default": True}]
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("snow"))
+    res = doctor.check_snow_connection(cfg, rows=rows)
+    assert not res["ok"]
+    assert "snowflake.connection_name: tutorial" in res["hint"]
+    assert "snow connection add --connection-name acme" in res["hint"]

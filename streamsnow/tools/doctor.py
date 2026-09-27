@@ -208,7 +208,49 @@ def check_container_python(cfg_result: dict) -> dict:
     )
 
 
-def check_snow_connection(cfg_result: dict, snow_result: dict | None = None) -> dict:
+def snow_connections() -> list[dict] | None:
+    """Rows of ``snow connection list --format json``, or None when ``snow`` is
+    absent, fails, times out, or prints anything that is not a JSON list.
+
+    Callers read connection names, ``is_default`` and parameter NAMES; nothing
+    here prints a parameter value. Never raises.
+    """
+    if shutil.which("snow") is None:
+        return None
+    code, out = _run(["snow", "connection", "list", "--format", "json"])
+    if code != 0:
+        return None
+    try:
+        parsed = json.loads(out or "[]")
+    except ValueError:
+        return None
+    if not isinstance(parsed, list):
+        return None
+    return [row for row in parsed if isinstance(row, dict)]
+
+
+def _connection_name(row: dict) -> str:
+    candidate = row.get("connection_name") or row.get("name")
+    return candidate if isinstance(candidate, str) else ""
+
+
+def default_connection(rows: list[dict] | None) -> dict | None:
+    """The row ``snow`` marks ``is_default``, or None."""
+    for row in rows or []:
+        if row.get("is_default") is True and _connection_name(row):
+            return row
+    return None
+
+
+def default_connection_name(rows: list[dict] | None) -> str | None:
+    """Name of the default ``snow`` connection, or None when there is none."""
+    row = default_connection(rows)
+    return _connection_name(row) if row else None
+
+
+def check_snow_connection(
+    cfg_result: dict, snow_result: dict | None = None, rows: list[dict] | None = None
+) -> dict:
     """Does the ``snow`` connection the config names exist on this machine?
 
     Optional, and a not-ok "skipped" result (never an omission) when there is
@@ -241,28 +283,29 @@ def check_snow_connection(cfg_result: dict, snow_result: dict | None = None) -> 
             {"skipped": "snow not on PATH", "connection_name": name},
             "skipped — snow CLI not installed",
         )
-    code, out = _run(["snow", "connection", "list", "--format", "json"])
-    names: list[str] = []
-    if code == 0:
-        try:
-            parsed = json.loads(out or "[]")
-        except ValueError:
-            parsed = []
-        for row in parsed if isinstance(parsed, list) else []:
-            if isinstance(row, dict):
-                candidate = row.get("connection_name") or row.get("name")
-                if isinstance(candidate, str):
-                    names.append(candidate)
+    if rows is None:
+        rows = snow_connections() or []
+    names = [n for n in (_connection_name(row) for row in rows) if n]
     ok = name in names
-    hint = (
-        ""
-        if ok
-        else (
-            f"no snow connection named {name!r} — run: snow connection add "
-            f"--connection-name {name} --account <locator> --user <you> "
-            "--authenticator externalbrowser --default"
-        )
+    add = (
+        f"snow connection add --connection-name {name} --account <locator> --user <you> "
+        "--authenticator externalbrowser --default"
     )
+    existing_default = default_connection_name(rows)
+    if ok:
+        hint = ""
+    elif existing_default:
+        # A working default connection (a prior tutorial, another project) is the
+        # common case. Telling that user to add a second --default connection
+        # silently repoints every other tool that reads the default.
+        hint = (
+            f"no snow connection named {name!r}, but your default snow connection is "
+            f"{existing_default!r}: set snowflake.connection_name: {existing_default} in "
+            "streamsnow.config.yaml to use it (st.connection('snowflake') reads the default "
+            f"locally), or create a new one: {add}"
+        )
+    else:
+        hint = f"no snow connection named {name!r}; run: {add}"
     return _result(
         "snow-connection",
         ok,
@@ -321,7 +364,8 @@ def run_checks(start: Path | None = None) -> list[dict]:
     config = check_config(start)
     checks.append(check_pre_commit(config_present=bool(config["detail"].get("found"))))
     checks.append(config)
-    checks.append(check_snow_connection(config, snow))
+    rows = snow_connections() if snow["ok"] else None
+    checks.append(check_snow_connection(config, snow, rows))
     checks.append(check_container_python(config))
     return checks
 

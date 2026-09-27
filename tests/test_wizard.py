@@ -7,8 +7,13 @@ from pathlib import Path
 import typer
 import yaml
 
-from streamsnow.cli import _prompt_config, _render_config_yaml
+from streamsnow import cli
+from streamsnow.cli import _connection_hint, _prompt_config, _render_config_yaml
 from streamsnow.config import Config
+from streamsnow.tools import doctor
+
+# Captured at import, before tests/conftest.py stubs it per test.
+_REAL_SNOW_CONNECTIONS = cli._snow_connections
 
 
 def _run_wizard(monkeypatch, prefill=None, directory=Path("acme-analytics")):
@@ -115,3 +120,97 @@ def test_wizard_defaults_to_the_pre_provisioned_compute_pool(monkeypatch):
     prefill = {"snowflake": {"objects": {"compute_pool": "ACME_POOL"}}}
     cfg_dict, _ = _run_wizard(monkeypatch, prefill=prefill)
     assert cfg_dict["snowflake"]["objects"]["compute_pool"] == "ACME_POOL"
+
+
+class _Proc:
+    def __init__(self, returncode: int, stdout: str) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def _fake_snow(monkeypatch, list_result, calls=None):
+    """Route the wizard's detection through the real doctor parser over a faked
+    subprocess. ``list_result`` is (returncode, stdout) or an exception to raise."""
+    import json as _json
+
+    monkeypatch.setattr(cli, "_snow_connections", _REAL_SNOW_CONNECTIONS)
+    monkeypatch.setattr(doctor.shutil, "which", lambda tool: f"/opt/acme/bin/{tool}")
+
+    def fake_run(cmd, **_kwargs):
+        if calls is not None:
+            calls.append(list(cmd))
+        if isinstance(list_result, Exception):
+            raise list_result
+        code, out = list_result
+        return _Proc(code, out if isinstance(out, str) else _json.dumps(out))
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+
+
+_ROWS = [
+    {"connection_name": "other", "is_default": False, "parameters": {"account": "x"}},
+    {"connection_name": "tutorial", "is_default": True, "parameters": {"account": "x"}},
+]
+
+
+def test_wizard_defaults_connection_name_to_the_existing_default_connection(monkeypatch):
+    """Someone who already has a working default snow connection (a prior tutorial) got
+    connection_name = the folder slug, failed doctor's connection check, and was told
+    to create a second --default connection. The existing default is the right answer."""
+    _fake_snow(monkeypatch, (0, _ROWS))
+    cfg_dict, asked = _run_wizard(monkeypatch)
+    assert cfg_dict["snowflake"]["connection_name"] == "tutorial"
+    assert len(asked) <= 5  # detected, never asked
+    cfg = Config.from_dict(cfg_dict)
+    # ...so the doctor's connection check passes on the same rows.
+    res = doctor.check_snow_connection(
+        {"ok": True, "detail": {"connection_name": cfg.snowflake.connection_name}}, rows=_ROWS
+    )
+    assert res["ok"]
+    # ...and the one-time step no longer tells them to add a default connection.
+    hint = _connection_hint(cfg, _ROWS)
+    assert "snow connection add" not in hint and "already your default" in hint
+
+
+def test_wizard_connection_name_falls_back_to_the_slug(monkeypatch):
+    no_default = [{"connection_name": "other", "is_default": False}]
+    for result in (
+        (0, no_default),  # connections, none of them the default
+        (0, []),  # no connections at all
+        (1, ""),  # snow on PATH but failing
+        (0, "not json"),  # garbage output
+        (0, {"not": "a list"}),  # wrong shape
+        doctor.subprocess.TimeoutExpired(cmd="snow", timeout=15),  # hung cold start
+        OSError("snow vanished"),
+    ):
+        _fake_snow(monkeypatch, result)
+        cfg_dict, _ = _run_wizard(monkeypatch)
+        assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics", result
+    # snow not installed at all.
+    monkeypatch.setattr(cli, "_snow_connections", _REAL_SNOW_CONNECTIONS)
+    monkeypatch.setattr(doctor.shutil, "which", lambda tool: None)
+    cfg_dict, _ = _run_wizard(monkeypatch)
+    assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics"
+
+
+def test_wizard_keeps_a_configured_connection_name_without_asking_snow(monkeypatch):
+    calls: list[list[str]] = []
+    _fake_snow(monkeypatch, (0, _ROWS), calls)
+    prefill = {"snowflake": {"connection_name": "acme-prod"}}
+    cfg_dict, _ = _run_wizard(monkeypatch, prefill=prefill)
+    assert cfg_dict["snowflake"]["connection_name"] == "acme-prod"
+    assert calls == []  # re-running configure never shells out for a value it has
+
+
+def test_connection_hint_matches_what_snow_already_has():
+    from streamsnow.config import load_config
+
+    cfg = load_config(Path(__file__).resolve().parent.parent / "streamsnow.config.example.yaml")
+    name = cfg.snowflake.connection_name
+    absent = _connection_hint(cfg, None)
+    assert f"snow connection add --connection-name {name}" in absent and "--default" in absent
+    assert _connection_hint(cfg, [{"connection_name": "other", "is_default": True}]) == absent
+    exists = _connection_hint(cfg, [{"connection_name": name, "is_default": False}])
+    assert exists.startswith(f"snow connection set-default {name}")
+    already = _connection_hint(cfg, [{"connection_name": name, "is_default": True}])
+    assert "snow connection add" not in already and "already your default" in already

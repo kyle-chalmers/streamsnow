@@ -87,8 +87,17 @@ restart); existing repo files are left alone by a re-run of `init --no-starter-a
 
 ## 3 · Connection (one store, owned by the user)
 
-`streamsnow init` (and `configure`) print the exact `snow connection add … --default` command for
-the account.
+**Check before adding anything.** When the machine already has a default `snow` connection (a
+prior tutorial, another project), the wizard writes that name into `snowflake.connection_name`,
+and `init`'s `Next:` block says there is nothing to add. If `streamsnow doctor --format json`
+already reads `snow-connection: ok: true`, skip this step: **do not** have the
+user run `snow connection add … --default`, which would add a second connection and repoint the
+default every other tool reads. If the check fails but its hint names an existing default
+connection, the usual fix is to set `snowflake.connection_name` to that name (confirm with the
+user first) rather than create a new one.
+
+Only when there is no usable connection: `streamsnow init` (and `configure`) print the exact
+`snow connection add … --default` command for the account.
 Have the user run it (it opens a browser for SSO) — never ask for credentials in chat. That writes
 the `snow` CLI's `connections.toml`, which `st.connection("snowflake")` reads locally, so it is the
 only place account details get typed. Then re-run `streamsnow doctor --format json` and confirm the

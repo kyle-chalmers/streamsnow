@@ -155,6 +155,15 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return merged
 
 
+def _snow_connections() -> list[dict] | None:
+    """``snow connection list`` rows (None when snow is missing or broken).
+
+    One indirection so the test suite can keep the wizard off the developer's
+    real ``snow`` (tests/conftest.py stubs it).
+    """
+    return _doctor.snow_connections()
+
+
 def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -> dict:
     """Interactive setup wizard: detect first, ask at most 5 questions.
 
@@ -175,6 +184,17 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
     dir_slug = _slugify(directory.name) if directory is not None else "my-dashboards"
     slug = _pf(prefill, "project.slug", dir_slug)
     name = _pf(prefill, "project.name", slug.replace("-", " ").title())
+    # The snow connection: an existing default connection (a prior tutorial, another
+    # project) is what st.connection("snowflake") already reads locally. Defaulting to
+    # the slug instead failed doctor's connection check for exactly those users and
+    # sent them to create a second --default connection. snow is only asked when the
+    # config does not already name one; missing or broken snow falls back to the slug.
+    connection_name = _pf(prefill, "snowflake.connection_name", None)
+    if connection_name is None:
+        detected = _doctor.default_connection_name(_snow_connections())
+        if detected:
+            console.print(f"[dim]using your default snow connection {detected!r}[/]")
+        connection_name = detected or slug
     # The five questions.
     runtime = _prompt_choice("Runtime", RUNTIMES, _pf(prefill, "runtime", "container"))
     account = p(
@@ -229,7 +249,7 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
         "project": {"name": name, "slug": slug},
         "snowflake": {
             "account": account,
-            "connection_name": _pf(prefill, "snowflake.connection_name", slug),
+            "connection_name": connection_name,
             "objects": objects,
             "roles": {
                 "ci_role": _pf(prefill, "snowflake.roles.ci_role", "STREAMLIT_CI_ROLE"),
@@ -251,7 +271,7 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
 _DEFAULT_COMMENTS: dict[str, str] = {
     "project.name": "display name — edit freely",
     "project.slug": "derived from the directory name",
-    "snowflake.connection_name": "snow CLI connection to create/use",
+    "snowflake.connection_name": "snow CLI connection (your default one when detected)",
     "snowflake.objects.app_database": "where deployed STREAMLIT objects live",
     "snowflake.objects.app_schema": "schema for deployed STREAMLIT objects",
     "snowflake.objects.stage_database": "stage-copy deploys stage code here",
@@ -341,9 +361,26 @@ PREVIEW_ROLE_NOTE = (
 )
 
 
-def _connection_hint(cfg: Config) -> str:
+def _connection_hint(cfg: Config, rows: list[dict] | None = None) -> str:
+    """The one-time connection step, given what ``snow connection list`` reported.
+
+    Only a machine with no connection by the configured name gets the
+    ``snow connection add ... --default`` line: re-adding an existing default
+    would fail or, worse, repoint every tool that reads the default.
+    """
+    name = cfg.snowflake.connection_name
+    if _doctor.default_connection_name(rows) == name:
+        return (
+            f"snow connection {name!r} is already your default connection: nothing to add "
+            "(st.connection('snowflake') reads it locally)"
+        )
+    if any((r.get("connection_name") or r.get("name")) == name for r in rows or []):
+        return (
+            f"snow connection set-default {name}   (it exists but is not the default, and "
+            "st.connection('snowflake') reads the default locally)"
+        )
     return (
-        f"snow connection add --connection-name {cfg.snowflake.connection_name} "
+        f"snow connection add --connection-name {name} "
         f"--account {cfg.snowflake.account} --user <your_user> "
         f"--authenticator externalbrowser "
         f"--warehouse {cfg.snowflake.objects.default_warehouse} "
@@ -380,7 +417,7 @@ def configure(
     console.print(
         "\nConnect your machine to Snowflake (one-time, one store — the snow CLI's\n"
         "connections.toml is what st.connection('snowflake') reads locally):\n"
-        f"  {_connection_hint(cfg)}\n"
+        f"  {_connection_hint(cfg, _snow_connections())}\n"
         f"{PREVIEW_ROLE_NOTE}\n"
         "\nPer-app apps/<slug>/.streamlit/secrets.toml (gitignored) is an optional override —\n"
         "copy secrets.toml.example only if an app needs a different role or warehouse."
@@ -468,7 +505,7 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
         "  1. Claude Code users: /plugin marketplace add kyle-chalmers/streamsnow",
         "                        /plugin install streamsnow@streamsnow   then /start-app",
         "     (CLI only? skip this step.)",
-        f"  2. {_connection_hint(cfg)}",
+        f"  2. {_connection_hint(cfg, _snow_connections())}",
         "     (one-time; st.connection('snowflake') reads this default connection locally.",
         "      Per-app apps/<slug>/.streamlit/secrets.toml is an optional override.)",
         *[f"     {line}" for line in PREVIEW_ROLE_NOTE.splitlines()],
