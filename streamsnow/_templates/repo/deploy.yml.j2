@@ -27,6 +27,11 @@ jobs:
       SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
       SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+    # Every snow call (and verify-deploy) passes --temporary-connection: the
+    # runner has no config.toml, so without it the Snowflake CLI looks for a
+    # connection named "default" and fails ("Connection default is not
+    # configured") instead of connecting from the SNOWFLAKE_* variables above
+    # (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection).
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +51,7 @@ jobs:
       - name: Install tooling
         if: steps.gate.outputs.go == 'true'
         run: |
-          uv tool install 'streamsnow>=0.7,<0.8'
+          uv tool install 'streamsnow>=0.7.1,<0.8'
           uv tool install snowflake-cli
 
       - name: Deploy changed apps (stage-copy)
@@ -54,16 +59,16 @@ jobs:
         run: |
           set -euo pipefail
           STAGE="$(streamsnow stage-path)"
-          streamsnow deploy-setup > /tmp/ss-setup.sql && snow sql -f /tmp/ss-setup.sql
-          snow stage copy "apps/" "$STAGE/commits/$GITHUB_SHA/apps/" --recursive --overwrite
+          streamsnow deploy-setup > /tmp/ss-setup.sql && snow sql --temporary-connection -f /tmp/ss-setup.sql
+          snow stage copy --temporary-connection "apps/" "$STAGE/commits/$GITHUB_SHA/apps/" --recursive --overwrite
           for d in apps/*/; do
             cfg="${d}.streamlit/config.toml"
-            [ -f "$cfg" ] && snow stage copy "$cfg" "$STAGE/commits/$GITHUB_SHA/apps/$(basename "$d")/.streamlit/" --overwrite
+            [ -f "$cfg" ] && snow stage copy --temporary-connection "$cfg" "$STAGE/commits/$GITHUB_SHA/apps/$(basename "$d")/.streamlit/" --overwrite
           done
           for d in apps/*/; do
             slug="$(basename "$d")"
             streamsnow deploy-sql "$slug" --sha "$GITHUB_SHA" > "/tmp/ss-$slug.sql"
-            snow sql -f "/tmp/ss-$slug.sql"
+            snow sql --temporary-connection -f "/tmp/ss-$slug.sql"
           done
 
       # A CREATE OR REPLACE pipeline has no delete path — this is it. Every
@@ -77,7 +82,7 @@ jobs:
           set -euo pipefail
           streamsnow check tombstones --drop-sql > /tmp/ss-drops.sql
           if [ -s /tmp/ss-drops.sql ]; then
-            snow sql -f /tmp/ss-drops.sql
+            snow sql --temporary-connection -f /tmp/ss-drops.sql
           fi
 
       # "Deploy succeeded" is not "app serves": a missing live version renders
@@ -88,6 +93,6 @@ jobs:
         run: |
           set -euo pipefail
           for d in apps/*/; do
-            streamsnow verify-deploy "$(basename "$d")" --sha "$GITHUB_SHA"
+            streamsnow verify-deploy "$(basename "$d")" --sha "$GITHUB_SHA" --temporary-connection
           done
 {% endraw %}

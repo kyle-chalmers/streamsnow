@@ -266,6 +266,58 @@ def test_deploy_workflows_pin_verify_concurrency_and_dotfile_copy(tmp_path):
     assert "streamsnow verify-deploy" in git_deploy
 
 
+# A `snow` command word: not the tail of `streamsnow`, not inside a path or a
+# flag. The call runs to the end of its shell command (`&&`, `||`, `;`, `|`).
+_SNOW_CALL = re.compile(r"(?<![\w./-])snow\s[^\n;&|]*")
+
+
+def _render_deploy_workflows(tmp_path: Path) -> dict[str, dict]:
+    stage = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    git = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    git["deploy"] = {
+        "source": "git-repository",
+        "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
+        "api_integration_name": "GITHUB_API_INTEGRATION",
+        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
+    }
+    out = {}
+    for name, data in (("stage-copy", stage), ("git-repository", git)):
+        scaffold(Config.from_dict(data), tmp_path / name, "acme-sales-dashboard")
+        text = (tmp_path / name / ".github/workflows/deploy.yml").read_text()
+        out[name] = yaml.safe_load(text)
+    return out
+
+
+def _run_scripts(workflow: dict) -> list[str]:
+    return [s["run"] for job in workflow["jobs"].values() for s in job["steps"] if "run" in s]
+
+
+def test_every_snow_call_in_the_deploy_workflows_uses_a_temporary_connection(tmp_path):
+    """CI has only SNOWFLAKE_* env vars and no config.toml. Snowflake CLI 3.27
+    fails any call without --temporary-connection there ("Connection default
+    is not configured"), so a single call missing it fails the first deploy."""
+    expected = {"stage-copy": {"sql", "stage copy"}, "git-repository": {"sql", "git fetch"}}
+    for source, workflow in _render_deploy_workflows(tmp_path).items():
+        calls = [m.group(0) for run in _run_scripts(workflow) for m in _SNOW_CALL.finditer(run)]
+        # `snow sql`, `snow stage copy`, `snow git fetch`: proves the scan found every call.
+        seen = {"sql" if c.split()[1] == "sql" else " ".join(c.split()[1:3]) for c in calls}
+        assert seen == expected[source], (source, calls)
+        missing = [c for c in calls if "--temporary-connection" not in c.split()]
+        assert not missing, (source, missing)
+
+
+def test_deploy_workflows_run_verify_deploy_with_a_temporary_connection(tmp_path):
+    for source, workflow in _render_deploy_workflows(tmp_path).items():
+        lines = [
+            line
+            for run in _run_scripts(workflow)
+            for line in run.splitlines()
+            if "streamsnow verify-deploy" in line
+        ]
+        assert lines, source
+        assert all("--temporary-connection" in line.split() for line in lines), (source, lines)
+
+
 def test_generated_precommit_enforces_sql_review_and_vulns(tmp_path):
     data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
     scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
