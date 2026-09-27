@@ -140,6 +140,23 @@ def test_version_source_is_not_fooled_by_a_sha_that_extends_the_deployed_one():
     assert check_version_source(_describe_row("abc1234"), FQN, "abc12345")["status"] == "fail"
 
 
+def test_version_source_follows_the_last_version_the_live_one_is_built_from():
+    # The deploy runs ADD LIVE VERSION FROM LAST, so LAST decides freshness.
+    older = "e" * 40
+    desc = _describe_row(SHA)
+    desc["default_version_source_location_uri"] = desc[
+        "default_version_source_location_uri"
+    ].replace(SHA, older)
+    assert check_version_source(desc, FQN, SHA)["status"] == "pass"
+
+    desc = _describe_row(SHA)
+    desc["last_version_source_location_uri"] = desc["last_version_source_location_uri"].replace(
+        SHA, older
+    )
+    res = check_version_source(desc, FQN, SHA)
+    assert res["status"] == "fail" and "last_version_source_location_uri" in res["findings"][0]
+
+
 def test_version_source_null_uris_fail():
     desc = _describe_row()
     desc["default_version_source_location_uri"] = None

@@ -163,9 +163,12 @@ def check_live_version(desc: dict | None, fqn: str) -> dict:
 
 
 # The stage-copy deploy runs CREATE OR REPLACE STREAMLIT ... FROM
-# '@<stage>/commits/<sha>/apps/<slug>/', and DESCRIBE reports that path in both
-# source columns.
-_SOURCE_URI_KEYS = ("default_version_source_location_uri", "last_version_source_location_uri")
+# '@<stage>/commits/<sha>/apps/<slug>/', then ADD LIVE VERSION FROM LAST, so the
+# live version is built from LAST: last_version_source_location_uri is the column
+# that must point at the merged commit. default_version_source_location_uri is
+# read only when the last column is missing (observed: both carry the stage path).
+_LAST_SOURCE_KEY = "last_version_source_location_uri"
+_DEFAULT_SOURCE_KEY = "default_version_source_location_uri"
 _COMMIT_SEGMENT = re.compile(r"/commits/([0-9A-Za-z]+)/")
 
 
@@ -185,17 +188,18 @@ def check_version_source(desc: dict | None, fqn: str, sha: str) -> dict:
     neither source column in it, means the check could not run: skipped."""
     if desc is None:
         return _skipped("version-source", "DESCRIBE STREAMLIT returned no row")
-    if not any(_has(desc, k) for k in _SOURCE_URI_KEYS):
+    key = next((k for k in (_LAST_SOURCE_KEY, _DEFAULT_SOURCE_KEY) if _has(desc, k)), None)
+    if key is None:
         return _skipped("version-source", "no version-source URI columns in DESCRIBE STREAMLIT")
-    uris = [str(_get(desc, k)) for k in _SOURCE_URI_KEYS if _get(desc, k)]
+    uris = [str(_get(desc, key))] if _get(desc, key) else []
     if any(_points_at(u, sha) for u in uris):
         return _check("version-source", PASS, [])
     return _check(
         "version-source",
         FAIL,
         [
-            f"{fqn}: no version-source URI contains '/commits/{sha}/', so the deployed "
-            f"object does not point at the merged commit (saw: {uris or 'no source URI'})"
+            f"{fqn}: {key} does not contain '/commits/{sha}/', so the live version "
+            f"was not built from the merged commit (saw: {uris or 'no source URI'})"
         ],
     )
 
