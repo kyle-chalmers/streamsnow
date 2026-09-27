@@ -99,6 +99,15 @@ generated workflow). Never a password.
 | `SNOWFLAKE_WAREHOUSE` | a warehouse the CI role can use |
 | `SNOWFLAKE_ROLE` | your `ci_role` from `streamsnow.config.yaml` |
 
+The runner has no Snowflake CLI `config.toml`, so every `snow` call in the
+workflow, and `streamsnow verify-deploy`, passes `--temporary-connection`: the
+CLI then builds its connection from these `SNOWFLAKE_*` variables
+([temporary connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection)).
+Without the flag, Snowflake CLI 3.27 fails with `Connection default is not
+configured`. The passphrase secret reaches `snow` as `PRIVATE_KEY_PASSPHRASE`,
+the variable it reads for an encrypted key. A `deploy.yml` generated before
+0.7.1 has neither; `streamsnow update --apply` re-renders it.
+
 Once `SNOWFLAKE_ACCOUNT` is present, the deploy job runs on the next merge:
 it uploads `apps/` to the SHA-versioned stage, runs `CREATE OR REPLACE
 STREAMLIT` (via `streamsnow deploy-sql`) for each app, reconciles the

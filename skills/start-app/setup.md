@@ -13,6 +13,10 @@ moving on. This is required, not optional: there is no `uvx` fallback, because t
 call the bare command. `streamsnow: command not found` after a successful install means the tool
 bin dir is not on PATH yet — have the user re-open the shell.
 
+Report which `streamsnow` answered and its version (`command -v streamsnow`, `streamsnow --version`),
+from the same shell the later steps run in. When the user is testing a source checkout or a pinned
+version that differs from the global install, call that executable by its path for every step.
+
 ## 1 · Machine prerequisites
 
 Run `streamsnow doctor --format json` and read the per-check results — each check is one object:
@@ -26,7 +30,7 @@ time — propose the fix (start from the check's own `hint`; the table below giv
 run it on confirmation, then re-run `streamsnow doctor --format json` and confirm that check now
 reads `ok: true` before moving on. Never batch installs. `level` decides severity: a `required`
 failure blocks the build phases (doctor exits 1); an `optional` one (`snow`, `streamlit`, `gh`,
-`snow-connection`, `container-python`) is offered, skippable. `snow` flips to `required` when it
+`snow-connection`, `snow-key-file`, `container-python`) is offered, skippable. `snow` flips to `required` when it
 is on PATH but `snow --version` fails (`BROKEN`): reinstall with `uv tool install snowflake-cli`.
 `gh` is optional here and required later by `/ship-app`. `container-python` warns in a
 container-runtime repo with no Python 3.11 (`uv python install 3.11`). Two checks flip level by context: `config` is `optional`
@@ -36,6 +40,10 @@ machine and `required` once a config exists, because the generated hooks are `la
 and the repo's first commit fails without the executable. If the user declines a fix, mark it
 skipped and continue. Exit codes: 0 = all required checks pass, 1 = a required check failed,
 2 = the doctor itself failed (report the error verbatim).
+
+Skip `doctor` when the user has ruled out inspecting local connection settings: it reads
+`snow connection list` for the `snow-connection` and `snow-key-file` checks. Say it was skipped and
+report the prerequisites, connection readiness included, as unverified.
 
 | Tool | Why | macOS | Windows / Linux |
 |---|---|---|---|
@@ -54,7 +62,7 @@ intentional).
 
 First decide which case this is:
 
-- The repo **already has Streamlit apps or its own Claude commands**: stop, that's
+- The repo **already has Streamlit apps or its own agent commands or skills**: stop, that's
   [adopt mode](adopt.md), which maps onto what exists instead of scaffolding.
 - Otherwise (an empty repo, or one with no `apps/` yet), run:
 
@@ -79,6 +87,8 @@ comment saying when to change it; the file is the editing surface. To change ans
 restart); existing repo files are left alone by a re-run of `init --no-starter-app`.
 
 - **Don't hand-author `streamsnow.config.yaml` from scratch**: the wizard owns its shape.
+- **Not in Claude Code?** After `init`, `streamsnow agent-skills install --agent codex` copies these
+  skills into the repo's `.agents/skills/`, where every teammate's Codex finds them; commit it.
 - `streamsnow init` without the flag also scaffolds an `example-dashboard` starter app. That is
   the CLI-only path; in this skill the real app comes from `/start-app`, so pass the flag.
 - The first deploy needs one-time Snowflake objects (database, schema, warehouse, roles, a CI
@@ -87,12 +97,28 @@ restart); existing repo files are left alone by a re-run of `init --no-starter-a
 
 ## 3 · Connection (one store, owned by the user)
 
-`streamsnow init` (and `configure`) print the exact `snow connection add … --default` command for
-the account.
+**Check before adding anything.** When the machine already has a default `snow` connection (a
+prior tutorial, another project), the wizard writes that name into `snowflake.connection_name`,
+and `init`'s `Next:` block says there is nothing to add. If `streamsnow doctor --format json`
+already reads `snow-connection: ok: true`, skip to the key-file check below: **do not** have the
+user run `snow connection add … --default`, which would add a second connection and repoint the
+default every other tool reads. If the check fails but its hint names an existing default
+connection, the usual fix is to set `snowflake.connection_name` to that name (confirm with the
+user first) rather than create a new one.
+
+Only when there is no usable connection: `streamsnow init` (and `configure`) print the exact
+`snow connection add … --default` command for the account.
 Have the user run it (it opens a browser for SSO) — never ask for credentials in chat. That writes
 the `snow` CLI's `connections.toml`, which `st.connection("snowflake")` reads locally, so it is the
 only place account details get typed. Then re-run `streamsnow doctor --format json` and confirm the
-`snow-connection` check reads `ok: true`. The per-app `apps/<slug>/.streamlit/secrets.toml`
+`snow-connection` check reads `ok: true`.
+
+**Key-pair connections:** a `snow-key-file` warning means the default connection uses key-pair
+auth with a key name only the `snow` CLI reads (the legacy `private_key_path`). `snow sql` works,
+and local preview then crashes on the first page load with `TypeError: Expected bytes,
+RSAPrivateKey, ...`. Have the user rename `private_key_path` to `private_key_file` in that
+connection's entry (a passphrase goes in `private_key_file_pwd`); both `snow` and the Python
+connector read that name. Never open or edit the connection file yourself. The per-app `apps/<slug>/.streamlit/secrets.toml`
 (gitignored) is an optional override for an app that needs a different role or warehouse — offer
 it only when asked. Two classic traps either way:
 
@@ -115,6 +141,9 @@ it only when asked. Two classic traps either way:
 - **Preview can't connect** — no default `snow` connection (the `snow-connection` doctor check
   says so) or, if a `secrets.toml` override exists, its account format / role / warehouse grant.
   Print the connection error verbatim and have the user recheck.
+- **Preview dies with `TypeError: Expected bytes, RSAPrivateKey, ...`**: the key-pair key is named
+  `private_key_path`; see the key-pair note in step 3 (`streamsnow preview logs` prints the same
+  remedy).
 
 ## Done → next step
 

@@ -14,6 +14,16 @@ real pages, queries, and branding without breaking the governance contract.
    local `branding.py` and `sql_loader.py`. **Do not hand-create these files**: the scaffold keeps
    them consistent with the governance templates, and `streamsnow update` re-renders the governed
    ones later.
+
+   It also writes a **starter trio that is placeholder content, not a start on the real app**:
+   `queries/example_metric.sql` (reads `YOUR_TABLE`), its audit-trail manifest
+   `sql_review/manifests/example_metric.json` (whose review window reads `YOUR_TABLE` too) and
+   `pages/overview.py` (hard-coded sample numbers). They keep the fresh scaffold structurally whole:
+   the entrypoint has a page, and `snowflake.yml`'s `pages/` and `queries/` artifacts resolve. The
+   build phase replaces all three with the first real page
+   ([pages.md § Replace the starter trio](pages.md#replace-the-starter-trio)), and `validate-app`
+   FAILS while any app file still reads `YOUR_TABLE`, so a skipped replacement cannot ship. Show
+   the three as "starter, replaced in the build phase" in the CP1 tree, never as created pages.
 2. If the staged spec lives outside the app dir, `git mv` it to `apps/<slug>/REQUIREMENTS.md` so §11
    travels with the app. Confirm `apps/<slug>/streamlit_app.py` exists before reporting the phase done.
 3. **Runtime** was decided in the spec (§9) — the scaffold materializes it into `snowflake.yml` and

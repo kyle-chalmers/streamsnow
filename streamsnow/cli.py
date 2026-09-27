@@ -22,6 +22,7 @@ import yaml
 from rich.console import Console
 
 from . import __version__
+from .agent_skills import main as _agent_skills_main
 from .config import (
     CONFIG_FILENAME,
     DEPLOY_SOURCES,
@@ -155,6 +156,42 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return merged
 
 
+def _snow_connections() -> list[dict] | None:
+    """``snow connection list`` rows (None when snow is missing or broken).
+
+    One indirection so the test suite can keep the wizard off the developer's
+    real ``snow`` (tests/conftest.py stubs it).
+    """
+    return _doctor.snow_connections()
+
+
+def _detect_connection_name(account: str, slug: str) -> str:
+    """The default ``snow`` connection's name when it opens ``account``, else ``slug``.
+
+    An existing default connection (a prior tutorial, another project) is what
+    ``st.connection("snowflake")`` already reads locally, so adopting it spares
+    those users a second ``--default`` connection. Adopting it without comparing
+    accounts wrote a config whose connection opens some other account, so the
+    default is used only when its ``account`` parameter matches the answer
+    (case-insensitive). Neither account value is ever printed.
+    """
+    rows = _snow_connections()
+    detected = _doctor.default_connection_name(rows)
+    if not detected:
+        return slug
+    row = _doctor.default_connection(rows) or {}
+    params = row.get("parameters") if isinstance(row.get("parameters"), dict) else {}
+    theirs = params.get("account")
+    if isinstance(theirs, str) and theirs.strip().casefold() == account.strip().casefold():
+        console.print(f"[dim]using your default snow connection {detected!r}[/]")
+        return detected
+    why = "names no account" if not theirs else "is for another account"
+    console.print(
+        f"[dim]default snow connection {detected!r} {why}, so connection_name is {slug!r}[/]"
+    )
+    return slug
+
+
 def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -> dict:
     """Interactive setup wizard: detect first, ask at most 5 questions.
 
@@ -181,6 +218,12 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
         "Snowflake account locator (no .snowflakecomputing.com)",
         default=_pf(prefill, "snowflake.account", None),
     )
+    # The snow connection: the default one when it opens this account, else the slug
+    # (see _detect_connection_name). snow is only asked when the config does not
+    # already name a connection; missing or broken snow falls back to the slug.
+    connection_name = _pf(prefill, "snowflake.connection_name", None)
+    if connection_name is None:
+        connection_name = _detect_connection_name(account, slug)
     gov_db = p(
         "Database your apps query", default=_pf(prefill, "governance.database", "ANALYTICS_DB")
     )
@@ -192,9 +235,9 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
         "Deploy source", DEPLOY_SOURCES, _pf(prefill, "deploy.source", "stage-copy")
     )
     # Everything below ships as a commented default in the written file.
-    app_db = _pf(prefill, "snowflake.objects.app_database", "DATA_APPS")
-    app_schema = _pf(prefill, "snowflake.objects.app_schema", "BI_APPS")
-    warehouse = _pf(prefill, "snowflake.objects.default_warehouse", "STREAMLIT_WH")
+    app_db = _pf(prefill, "snowflake.objects.app_database", "STREAMSNOW_APPS")
+    app_schema = _pf(prefill, "snowflake.objects.app_schema", "DASHBOARDS")
+    warehouse = _pf(prefill, "snowflake.objects.default_warehouse", "STREAMSNOW_WH")
     objects: dict = {
         "app_database": app_db,
         "app_schema": app_schema,
@@ -204,7 +247,9 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
         "allowed_warehouses": _pf(prefill, "snowflake.objects.allowed_warehouses", [warehouse]),
     }
     if runtime == "container":
-        objects["compute_pool"] = _pf(prefill, "snowflake.objects.compute_pool", "STREAMLIT_POOL")
+        objects["compute_pool"] = _pf(
+            prefill, "snowflake.objects.compute_pool", "SYSTEM_COMPUTE_POOL_CPU"
+        )
         objects["external_access_integration"] = _pf(
             prefill, "snowflake.objects.external_access_integration", "PYPI_ACCESS_INTEGRATION"
         )
@@ -227,11 +272,13 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
         "project": {"name": name, "slug": slug},
         "snowflake": {
             "account": account,
-            "connection_name": _pf(prefill, "snowflake.connection_name", slug),
+            "connection_name": connection_name,
             "objects": objects,
             "roles": {
-                "ci_role": _pf(prefill, "snowflake.roles.ci_role", "STREAMLIT_CI_ROLE"),
-                "viewer_role": _pf(prefill, "snowflake.roles.viewer_role", "STREAMLIT_APP_ROLE"),
+                "ci_role": _pf(prefill, "snowflake.roles.ci_role", "STREAMSNOW_DEPLOY_ROLE"),
+                "viewer_role": _pf(
+                    prefill, "snowflake.roles.viewer_role", "STREAMSNOW_VIEWER_ROLE"
+                ),
             },
         },
         "governance": {
@@ -249,14 +296,14 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
 _DEFAULT_COMMENTS: dict[str, str] = {
     "project.name": "display name — edit freely",
     "project.slug": "derived from the directory name",
-    "snowflake.connection_name": "snow CLI connection to create/use",
+    "snowflake.connection_name": "snow CLI connection (your default one when it is this account)",
     "snowflake.objects.app_database": "where deployed STREAMLIT objects live",
     "snowflake.objects.app_schema": "schema for deployed STREAMLIT objects",
     "snowflake.objects.stage_database": "stage-copy deploys stage code here",
     "snowflake.objects.stage_schema": "schema for the deploy stage",
     "snowflake.objects.default_warehouse": "warehouse apps query with",
     "snowflake.objects.allowed_warehouses": "warehouses apps may use",
-    "snowflake.objects.compute_pool": "container runtime only",
+    "snowflake.objects.compute_pool": "container only; SYSTEM_COMPUTE_POOL_CPU is pre-provisioned",
     "snowflake.objects.external_access_integration": "container: PyPI access during image build",
     "snowflake.roles.ci_role": "role the CI deploy runs as",
     "snowflake.roles.viewer_role": "role viewers (and local preview) use",
@@ -339,9 +386,26 @@ PREVIEW_ROLE_NOTE = (
 )
 
 
-def _connection_hint(cfg: Config) -> str:
+def _connection_hint(cfg: Config, rows: list[dict] | None = None) -> str:
+    """The one-time connection step, given what ``snow connection list`` reported.
+
+    Only a machine with no connection by the configured name gets the
+    ``snow connection add ... --default`` line: re-adding an existing default
+    would fail or, worse, repoint every tool that reads the default.
+    """
+    name = cfg.snowflake.connection_name
+    if _doctor.default_connection_name(rows) == name:
+        return (
+            f"snow connection {name!r} is already your default connection: nothing to add "
+            "(st.connection('snowflake') reads it locally)"
+        )
+    if any((r.get("connection_name") or r.get("name")) == name for r in rows or []):
+        return (
+            f"snow connection set-default {name}   (it exists but is not the default, and "
+            "st.connection('snowflake') reads the default locally)"
+        )
     return (
-        f"snow connection add --connection-name {cfg.snowflake.connection_name} "
+        f"snow connection add --connection-name {name} "
         f"--account {cfg.snowflake.account} --user <your_user> "
         f"--authenticator externalbrowser "
         f"--warehouse {cfg.snowflake.objects.default_warehouse} "
@@ -378,7 +442,7 @@ def configure(
     console.print(
         "\nConnect your machine to Snowflake (one-time, one store — the snow CLI's\n"
         "connections.toml is what st.connection('snowflake') reads locally):\n"
-        f"  {_connection_hint(cfg)}\n"
+        f"  {_connection_hint(cfg, _snow_connections())}\n"
         f"{PREVIEW_ROLE_NOTE}\n"
         "\nPer-app apps/<slug>/.streamlit/secrets.toml (gitignored) is an optional override —\n"
         "copy secrets.toml.example only if an app needs a different role or warehouse."
@@ -465,8 +529,8 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
         "Next:",
         "  1. Claude Code users: /plugin marketplace add kyle-chalmers/streamsnow",
         "                        /plugin install streamsnow@streamsnow   then /start-app",
-        "     (CLI only? skip this step.)",
-        f"  2. {_connection_hint(cfg)}",
+        "     (CLI only? skip this step. Codex: streamsnow agent-skills install --agent codex)",
+        f"  2. {_connection_hint(cfg, _snow_connections())}",
         "     (one-time; st.connection('snowflake') reads this default connection locally.",
         "      Per-app apps/<slug>/.streamlit/secrets.toml is an optional override.)",
         *[f"     {line}" for line in PREVIEW_ROLE_NOTE.splitlines()],
@@ -481,9 +545,10 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
         return "\n".join(lines)
     install = local_install_command(target / "apps" / app_slug)
     lines += [
-        f"  4. Repoint apps/{app_slug}/queries/example_metric.sql at a real table: it reads",
-        "     YOUR_TABLE until you do (validate-app warns about it).",
-        f"  5. streamsnow validate-app {app_slug}   (PASS proves the scaffold is whole)",
+        f"  4. Replace the starter placeholders in apps/{app_slug}: queries/example_metric.sql",
+        "     and the window in sql_review/manifests/example_metric.json read YOUR_TABLE, and",
+        "     pages/overview.py shows sample numbers. validate-app FAILS until they are gone.",
+        f"  5. streamsnow validate-app {app_slug}   (PASS once step 4 is done)",
         f"  6. {install}",
         f"     streamsnow preview {app_slug}",
         "  Add the app to README.md's Apps table.",
@@ -530,6 +595,12 @@ def new(
             "  Fix: streamsnow init --no-starter-app   (reuses your config; writes only the "
             "missing files)"
         )
+    console.print(
+        "The starter files are placeholders: queries/example_metric.sql, its sql_review "
+        "manifest and pages/overview.py (sample numbers). Replace them with your real pages "
+        "and queries (/start-app does this in its build phase); validate-app FAILS while any "
+        "file still reads YOUR_TABLE."
+    )
     console.print(
         f"Next: streamsnow validate-app {slug}, then add {slug} to README.md's Apps table "
         "(the index is hand-maintained and the row is the step teams forget)."
@@ -659,20 +730,30 @@ def verify_deploy_cmd(
     sha: str = typer.Option(None, "--sha", help="Expected commit SHA (stage-copy source check)."),
     attempts: int = typer.Option(3, "--attempts", help="Retries for cold-start absorption."),
     delay: float = typer.Option(20.0, "--delay", help="Seconds between retries."),
+    temporary_connection: bool = typer.Option(
+        False,
+        "--temporary-connection",
+        help="Pass --temporary-connection to every snow call, so snow connects from "
+        "SNOWFLAKE_* environment variables instead of config.toml (the generated deploy "
+        "workflow passes it in CI). Omit locally to use your default connection.",
+    ),
     config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
     output_format: str = typer.Option("md", "--format"),
 ) -> None:
     """Verify a deployed app actually serves: object exists, live version set,
     version source matches the merge SHA, container logs show no crash loop."""
-    from .verify import verify_app
+    from functools import partial
+
+    from .verify import run_query_snow, verify_app
 
     try:
         cfg = load_config(Path(config) if config else None)
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
+    run_query = partial(run_query_snow, temporary_connection=temporary_connection)
     try:
-        result = verify_app(cfg, slug, sha=sha, attempts=attempts, delay=delay)
+        result = verify_app(cfg, slug, sha=sha, run_query=run_query, attempts=attempts, delay=delay)
     except ValueError as exc:  # invalid slug
         _err(str(exc))
         raise typer.Exit(2) from exc
@@ -981,6 +1062,16 @@ def nav(
     if json_array:
         argv.append("--json-array")
     raise typer.Exit(code=_app_nav_main(argv))
+
+
+@app.command(
+    name="agent-skills",
+    add_help_option=False,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def agent_skills_cmd(ctx: typer.Context) -> None:
+    """Install the skills for other AI coding agents, e.g. Codex (install | list)."""
+    raise typer.Exit(code=_agent_skills_main(list(ctx.args)))
 
 
 if __name__ == "__main__":  # pragma: no cover

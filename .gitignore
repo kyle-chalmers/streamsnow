@@ -36,3 +36,6 @@ streamsnow.config.local.yaml
 # Org-specific export denylist for the privacy gate (check_export_clean).
 # Local only: a committed list of names-not-to-leak is itself the leak.
 .streamsnow/export-denylist.txt
+
+# Local-only working notes and fix evidence (never committed)
+.internal/

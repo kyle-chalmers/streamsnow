@@ -7,7 +7,7 @@ allowed-tools: [Bash, Read, Glob, Grep]
 
 # /audit-lineage
 
-> **Repo overlay:** if `.streamsnow/overlays/audit-lineage.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+> **Repo overlay:** if `.streamsnow/overlays/audit-lineage.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
 Confirm the live Snowflake objects an app queries actually match what the code assumes — columns,
 lineage, filtering, cost. The live-DB tier of review: it sees what static review can't (real column

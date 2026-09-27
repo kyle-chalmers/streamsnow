@@ -34,6 +34,16 @@ container-runtime repo, a Python 3.11 interpreter must be findable (the apps
 pin ``>=3.11,<3.12``, so a machine with only 3.12 passed the old doctor and
 then failed ``uv pip install -e``); a miss is a warning with the fix.
 
+``snow-key-file`` reads the *default* ``snow`` connection, the one
+``st.connection("snowflake")`` opens locally when an app has no
+``secrets.toml``. Key-pair auth with no ``private_key_file`` listed means the
+key is named some way only the ``snow`` CLI understands (in practice the legacy
+``private_key_path`` alias, which ``snow connection list`` never prints): ``snow
+sql`` works, and the first page load of a local preview dies inside the Python
+connector with ``TypeError: Expected bytes, RSAPrivateKey, ... got NoneType``.
+The check reads parameter NAMES only, never values, and never edits the
+connection; the hint names the rename that works for both tools.
+
 Detection only: no prompts, no fix execution — hints name the fix, callers own
 the UX. Checks never raise; an unexpected error inside the doctor itself is a
 tool error.
@@ -208,7 +218,49 @@ def check_container_python(cfg_result: dict) -> dict:
     )
 
 
-def check_snow_connection(cfg_result: dict, snow_result: dict | None = None) -> dict:
+def snow_connections() -> list[dict] | None:
+    """Rows of ``snow connection list --format json``, or None when ``snow`` is
+    absent, fails, times out, or prints anything that is not a JSON list.
+
+    Callers read connection names, ``is_default`` and parameter NAMES; nothing
+    here prints a parameter value. Never raises.
+    """
+    if shutil.which("snow") is None:
+        return None
+    code, out = _run(["snow", "connection", "list", "--format", "json"])
+    if code != 0:
+        return None
+    try:
+        parsed = json.loads(out or "[]")
+    except ValueError:
+        return None
+    if not isinstance(parsed, list):
+        return None
+    return [row for row in parsed if isinstance(row, dict)]
+
+
+def _connection_name(row: dict) -> str:
+    candidate = row.get("connection_name") or row.get("name")
+    return candidate if isinstance(candidate, str) else ""
+
+
+def default_connection(rows: list[dict] | None) -> dict | None:
+    """The row ``snow`` marks ``is_default``, or None."""
+    for row in rows or []:
+        if row.get("is_default") is True and _connection_name(row):
+            return row
+    return None
+
+
+def default_connection_name(rows: list[dict] | None) -> str | None:
+    """Name of the default ``snow`` connection, or None when there is none."""
+    row = default_connection(rows)
+    return _connection_name(row) if row else None
+
+
+def check_snow_connection(
+    cfg_result: dict, snow_result: dict | None = None, rows: list[dict] | None = None
+) -> dict:
     """Does the ``snow`` connection the config names exist on this machine?
 
     Optional, and a not-ok "skipped" result (never an omission) when there is
@@ -241,28 +293,29 @@ def check_snow_connection(cfg_result: dict, snow_result: dict | None = None) -> 
             {"skipped": "snow not on PATH", "connection_name": name},
             "skipped — snow CLI not installed",
         )
-    code, out = _run(["snow", "connection", "list", "--format", "json"])
-    names: list[str] = []
-    if code == 0:
-        try:
-            parsed = json.loads(out or "[]")
-        except ValueError:
-            parsed = []
-        for row in parsed if isinstance(parsed, list) else []:
-            if isinstance(row, dict):
-                candidate = row.get("connection_name") or row.get("name")
-                if isinstance(candidate, str):
-                    names.append(candidate)
+    if rows is None:
+        rows = snow_connections() or []
+    names = [n for n in (_connection_name(row) for row in rows) if n]
     ok = name in names
-    hint = (
-        ""
-        if ok
-        else (
-            f"no snow connection named {name!r} — run: snow connection add "
-            f"--connection-name {name} --account <locator> --user <you> "
-            "--authenticator externalbrowser --default"
-        )
+    add = (
+        f"snow connection add --connection-name {name} --account <locator> --user <you> "
+        "--authenticator externalbrowser --default"
     )
+    existing_default = default_connection_name(rows)
+    if ok:
+        hint = ""
+    elif existing_default:
+        # A working default connection (a prior tutorial, another project) is the
+        # common case. Telling that user to add a second --default connection
+        # silently repoints every other tool that reads the default.
+        hint = (
+            f"no snow connection named {name!r}, but your default snow connection is "
+            f"{existing_default!r}: set snowflake.connection_name: {existing_default} in "
+            "streamsnow.config.yaml to use it (st.connection('snowflake') reads the default "
+            f"locally), or create a new one: {add}"
+        )
+    else:
+        hint = f"no snow connection named {name!r}; run: {add}"
     return _result(
         "snow-connection",
         ok,
@@ -270,6 +323,69 @@ def check_snow_connection(cfg_result: dict, snow_result: dict | None = None) -> 
         {"connection_name": name, "found": ok, "known": names},
         hint,
     )
+
+
+# Parameter names under which the Python connector (and so st.connection) can
+# load a key-pair key from a connection definition. snow additionally accepts
+# private_key_path (a legacy alias it rewrites itself) and private_key_raw,
+# which the connector silently drops.
+_CONNECTOR_KEY_FIELDS = ("private_key_file",)
+_KEY_FILE_HINT = (
+    "rename private_key_path to private_key_file in that connection's entry (a passphrase "
+    "goes in private_key_file_pwd). st.connection('snowflake') loads the default connection "
+    "through the Python connector, which ignores private_key_path and fails with "
+    "'TypeError: Expected bytes, RSAPrivateKey, ... got NoneType'; snow reads private_key_file too"
+)
+
+
+def check_snow_key_file(snow_result: dict | None = None, rows: list[dict] | None = None) -> dict:
+    """Can the Python connector load the default connection's key-pair key?
+
+    Optional and never gating: a warning with the rename, or a not-ok "skipped"
+    result when there is no working ``snow`` or no default connection. Reads
+    parameter NAMES from ``snow connection list`` only.
+    """
+    if snow_result is not None and not snow_result.get("ok"):
+        broken = bool(snow_result.get("detail", {}).get("broken"))
+        return _result(
+            "snow-key-file",
+            False,
+            OPTIONAL,
+            {"skipped": "snow is broken" if broken else "snow not on PATH"},
+            "skipped: fix the snow CLI first" if broken else "skipped: snow CLI not installed",
+        )
+    if rows is None:
+        rows = snow_connections()
+    row = default_connection(rows)
+    if row is None:
+        return _result(
+            "snow-key-file",
+            False,
+            OPTIONAL,
+            {"skipped": "no default snow connection"},
+            "skipped: no default snow connection",
+        )
+    name = _connection_name(row)
+    params = row.get("parameters") if isinstance(row.get("parameters"), dict) else {}
+    keys = {str(k).lower() for k in params}
+    key_pair = str(params.get("authenticator") or "").upper() == "SNOWFLAKE_JWT"
+    loadable = any(field in keys for field in _CONNECTOR_KEY_FIELDS)
+    detail: dict = {
+        "connection_name": name,
+        "key_pair": key_pair,
+        "key_fields": sorted(k for k in keys if k.startswith("private_key")),
+    }
+    if key_pair and not loadable:
+        detail["warn"] = True
+        return _result(
+            "snow-key-file",
+            False,
+            OPTIONAL,
+            detail,
+            f"default snow connection {name!r} uses key-pair auth but lists no "
+            f"private_key_file: {_KEY_FILE_HINT}",
+        )
+    return _result("snow-key-file", True, OPTIONAL, detail)
 
 
 def check_config(start: Path | None = None) -> dict:
@@ -321,7 +437,10 @@ def run_checks(start: Path | None = None) -> list[dict]:
     config = check_config(start)
     checks.append(check_pre_commit(config_present=bool(config["detail"].get("found"))))
     checks.append(config)
-    checks.append(check_snow_connection(config, snow))
+    # One `snow connection list` (a cold start takes seconds) feeds both checks.
+    rows = snow_connections() if snow["ok"] else None
+    checks.append(check_snow_connection(config, snow, rows))
+    checks.append(check_snow_key_file(snow, rows))
     checks.append(check_container_python(config))
     return checks
 

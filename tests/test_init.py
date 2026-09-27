@@ -7,6 +7,7 @@ and that config drives the output + guardrails.
 from __future__ import annotations
 
 import py_compile
+import re
 from pathlib import Path
 
 import pytest
@@ -206,9 +207,9 @@ def test_git_repository_config_scaffolds_git_deploy_workflow(tmp_path):
     data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
     data["deploy"] = {
         "source": "git-repository",
-        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
         "api_integration_name": "GITHUB_API_INTEGRATION",
-        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
     }
     scaffold(Config.from_dict(data), tmp_path, "g-app")
     deploy = (tmp_path / ".github/workflows/deploy.yml").read_text()
@@ -254,15 +255,77 @@ def test_deploy_workflows_pin_verify_concurrency_and_dotfile_copy(tmp_path):
     data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
     data["deploy"] = {
         "source": "git-repository",
-        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
         "api_integration_name": "GITHUB_API_INTEGRATION",
-        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
     }
     scaffold(Config.from_dict(data), tmp_path / "g", "g-app")
     git_deploy = (tmp_path / "g/.github/workflows/deploy.yml").read_text()
     assert "group: deploy-snowflake" in git_deploy
     assert "cancel-in-progress: false" in git_deploy
     assert "streamsnow verify-deploy" in git_deploy
+
+
+# A `snow` command word: not the tail of `streamsnow`, not inside a path or a
+# flag. The call runs to the end of its shell command (`&&`, `||`, `;`, `|`).
+_SNOW_CALL = re.compile(r"(?<![\w./-])snow\s[^\n;&|]*")
+
+
+def _render_deploy_workflows(tmp_path: Path) -> dict[str, dict]:
+    stage = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    git = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    git["deploy"] = {
+        "source": "git-repository",
+        "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
+        "api_integration_name": "GITHUB_API_INTEGRATION",
+        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
+    }
+    out = {}
+    for name, data in (("stage-copy", stage), ("git-repository", git)):
+        scaffold(Config.from_dict(data), tmp_path / name, "acme-sales-dashboard")
+        text = (tmp_path / name / ".github/workflows/deploy.yml").read_text()
+        out[name] = yaml.safe_load(text)
+    return out
+
+
+def _run_scripts(workflow: dict) -> list[str]:
+    return [s["run"] for job in workflow["jobs"].values() for s in job["steps"] if "run" in s]
+
+
+def test_every_snow_call_in_the_deploy_workflows_uses_a_temporary_connection(tmp_path):
+    """CI has only SNOWFLAKE_* env vars and no config.toml. Snowflake CLI 3.27
+    fails any call without --temporary-connection there ("Connection default
+    is not configured"), so a single call missing it fails the first deploy."""
+    expected = {"stage-copy": {"sql", "stage copy"}, "git-repository": {"sql", "git fetch"}}
+    for source, workflow in _render_deploy_workflows(tmp_path).items():
+        calls = [m.group(0) for run in _run_scripts(workflow) for m in _SNOW_CALL.finditer(run)]
+        # `snow sql`, `snow stage copy`, `snow git fetch`: proves the scan found every call.
+        seen = {"sql" if c.split()[1] == "sql" else " ".join(c.split()[1:3]) for c in calls}
+        assert seen == expected[source], (source, calls)
+        missing = [c for c in calls if "--temporary-connection" not in c.split()]
+        assert not missing, (source, missing)
+
+
+def test_deploy_workflows_run_verify_deploy_with_a_temporary_connection(tmp_path):
+    for source, workflow in _render_deploy_workflows(tmp_path).items():
+        lines = [
+            line
+            for run in _run_scripts(workflow)
+            for line in run.splitlines()
+            if "streamsnow verify-deploy" in line
+        ]
+        assert lines, source
+        assert all("--temporary-connection" in line.split() for line in lines), (source, lines)
+
+
+def test_deploy_workflows_hand_snow_the_key_passphrase_by_the_name_it_reads(tmp_path):
+    """snow reads an encrypted key's passphrase from PRIVATE_KEY_PASSPHRASE;
+    a SNOWFLAKE_PRIVATE_KEY_PASSPHRASE variable is ignored, which would fail
+    an encrypted-key deploy. The repo secret keeps its documented name."""
+    for source, workflow in _render_deploy_workflows(tmp_path).items():
+        env = workflow["jobs"]["deploy"]["env"]
+        assert env["PRIVATE_KEY_PASSPHRASE"] == "${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}"
+        assert "SNOWFLAKE_PRIVATE_KEY_PASSPHRASE" not in env, source
 
 
 def test_generated_precommit_enforces_sql_review_and_vulns(tmp_path):
@@ -299,9 +362,9 @@ def test_generated_deploy_workflows_reconcile_tombstones(tmp_path):
     gitdata = dict(data)
     gitdata["deploy"] = {
         "source": "git-repository",
-        "git_repository_fqn": "DATA_APPS.BI_APPS.STREAMLIT_REPO",
+        "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
         "api_integration_name": "GITHUB_API_INTEGRATION",
-        "secret_name": "DATA_APPS.BI_APPS.GITHUB_PAT_SECRET",
+        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
     }
     scaffold(Config.from_dict(gitdata), tmp_path / "g", "acme-sales-dashboard")
     git_deploy = (tmp_path / "g" / ".github" / "workflows" / "deploy.yml").read_text()
@@ -341,24 +404,71 @@ def test_generated_workflows_pin_a_compatible_streamsnow(tmp_path):
         )
 
 
-def test_fresh_scaffold_passes_its_own_validate_gate(tmp_path):
-    """A repo straight out of `streamsnow init` (including the auto-generated
-    sql_review companion) must pass `validate-app` — the accuracy audit caught
-    check-artifacts demanding the .review.sql be declared deployable."""
-    result = runner.invoke(
-        app,
-        [
-            "init",
-            "--config",
-            str(EXAMPLE_CONFIG),
-            "--dir",
-            str(tmp_path),
-            "--app",
-            "acme-sales-dashboard",
-        ],
+def _repoint_starter(app_dir: Path) -> None:
+    """Replace YOUR_TABLE in all three starter files. Not enough on its own: the page's
+    hard-coded sample metric and chart are still on screen."""
+    for rel in (
+        "queries/example_metric.sql",
+        "sql_review/manifests/example_metric.json",
+        "pages/overview.py",
+    ):
+        f = app_dir / rel
+        f.write_text(f.read_text().replace("YOUR_TABLE", "ORDERS"))
+
+
+# The starter page's sample block, from its marker through the sample chart.
+_STARTER_SAMPLE_BLOCK = re.compile(
+    r"# STREAMSNOW_STARTER_PLACEHOLDER.*?st\.plotly_chart\(fig, use_container_width=True\)\n",
+    re.S,
+)
+
+
+def _finish_starter(app_dir: Path) -> None:
+    """The CLI-only path's step 4: repoint the starter trio at a real table AND render
+    the query's results in place of the page's sample metric and chart."""
+    _repoint_starter(app_dir)
+    page = app_dir / "pages/overview.py"
+    text, n = _STARTER_SAMPLE_BLOCK.subn(
+        'df = load_example("2024-01-01", "2024-12-31")\n'
+        'branded_metric("Rows", f"{int(df[\'N\'].sum()):,}")\n'
+        'fig = px.bar(df, x="DT", y="N", color_discrete_sequence=BRAND_CHART_COLORS)\n'
+        "st.plotly_chart(fig, use_container_width=True)\n",
+        page.read_text(),
     )
+    assert n == 1, "starter page sample block not found"
+    page.write_text(text)
+
+
+def test_fresh_scaffold_fails_only_on_its_placeholders(tmp_path):
+    """A repo straight out of `streamsnow init` (including the auto-generated
+    sql_review companion) is structurally whole: every check but `placeholders`
+    passes (the accuracy audit once caught check-artifacts demanding the .review.sql
+    be declared deployable). `placeholders` FAILS until the starter trio is replaced,
+    so the example app can never ship; once it is, the gate passes."""
+    import json as _json
+
+    from streamsnow.tools import sql_review
+
+    args = ["init", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path)]
+    result = runner.invoke(app, [*args, "--app", "acme-sales-dashboard"])
     assert result.exit_code == 0, result.output
-    result = runner.invoke(app, ["validate-app", "acme-sales-dashboard", "--dir", str(tmp_path)])
+    validate = ["validate-app", "acme-sales-dashboard", "--dir", str(tmp_path)]
+    result = runner.invoke(app, [*validate, "--format", "json"])
+    assert result.exit_code == 1, result.output
+    failing = [c["name"] for c in _json.loads(result.output)["checks"] if not c["ok"]]
+    assert failing == ["placeholders"]
+
+    # Replacing YOUR_TABLE alone leaves the page's sample numbers: still a FAIL.
+    _repoint_starter(tmp_path / "apps/acme-sales-dashboard")
+    assert sql_review.main(["generate", "acme-sales-dashboard", "--dir", str(tmp_path)]) == 0
+    result = runner.invoke(app, [*validate, "--format", "json"])
+    assert result.exit_code == 1, result.output
+    failing = [c["name"] for c in _json.loads(result.output)["checks"] if not c["ok"]]
+    assert failing == ["placeholders"]
+
+    _finish_starter(tmp_path / "apps/acme-sales-dashboard")
+    assert sql_review.main(["generate", "acme-sales-dashboard", "--dir", str(tmp_path)]) == 0
+    result = runner.invoke(app, validate)
     assert result.exit_code == 0, result.output
 
 
@@ -536,34 +646,181 @@ def test_setup_skill_writes_repo_files_on_a_repo_without_apps():
     assert "init --no-starter-app" in skill
 
 
-def test_validate_app_warns_but_passes_on_the_scaffold_placeholder_query(tmp_path):
-    """The starter query reads YOUR_TABLE: it validated clean, then CI deployed an
-    app that cannot run. A WARN (not a FAIL: the fresh scaffold must still pass
-    its own gate) names the file until the query is repointed."""
+def test_validate_app_fails_on_the_scaffold_placeholders(tmp_path):
+    """B8, tightened: the starter query reads YOUR_TABLE. As a warning it validated
+    clean and CI deployed an app that cannot run. It is a FAIL now, and it names every
+    file of the starter trio: repointing the query alone still leaves the manifest's
+    review window and the page's sample numbers. The page's sample metric and chart are
+    their own finding, so replacing YOUR_TABLE everywhere does not clear the gate either."""
     import json as _json
 
     args = ["init", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path), "--app", "a-b"]
     assert runner.invoke(app, args).exit_code == 0
-    result = runner.invoke(app, ["validate-app", "a-b", "--dir", str(tmp_path), "--format", "json"])
-    assert result.exit_code == 0, result.output
-    payload = _json.loads(result.output)
-    check = next(c for c in payload["checks"] if c["name"] == "placeholders")
-    assert check["ok"] is True
-    assert any("queries/example_metric.sql" in str(w) for w in check["warnings"])
+    validate = ["validate-app", "a-b", "--dir", str(tmp_path)]
 
-    md = runner.invoke(app, ["validate-app", "a-b", "--dir", str(tmp_path)])
-    assert md.exit_code == 0
-    assert "YOUR_TABLE" in md.output and "PASS" in md.output
+    def placeholder_findings() -> list[tuple[str, str]]:
+        out = runner.invoke(app, [*validate, "--format", "json"]).output
+        check = next(c for c in _json.loads(out)["checks"] if c["name"] == "placeholders")
+        assert check["ok"] is (not check["findings"])
+        kinds = {"scaffold placeholder YOUR_TABLE": "token", "starter page sample": "sample"}
+        return [
+            (f["file"], next(k for p, k in kinds.items() if f["detail"].startswith(p)))
+            for f in check["findings"]
+        ]
+
+    assert placeholder_findings() == [
+        ("pages/overview.py", "token"),
+        ("pages/overview.py", "sample"),
+        ("queries/example_metric.sql", "token"),
+        ("sql_review/manifests/example_metric.json", "token"),
+    ]
+    md = runner.invoke(app, validate)
+    assert md.exit_code == 1
+    assert "YOUR_TABLE" in md.output and "STREAMSNOW_STARTER_PLACEHOLDER" in md.output
+    assert "FAIL" in md.output
 
     q = tmp_path / "apps/a-b/queries/example_metric.sql"
     q.write_text(q.read_text().replace("YOUR_TABLE  -- TODO: replace YOUR_TABLE", "ORDERS"))
-    payload = _json.loads(
-        runner.invoke(
-            app, ["validate-app", "a-b", "--dir", str(tmp_path), "--format", "json"]
-        ).output
+    assert ("queries/example_metric.sql", "token") not in placeholder_findings()
+    assert runner.invoke(app, validate).exit_code == 1  # manifest + page still placeholders
+
+    # Every YOUR_TABLE gone, the sample metric and chart still on the page: FAIL.
+    _repoint_starter(tmp_path / "apps/a-b")
+    assert placeholder_findings() == [("pages/overview.py", "sample")]
+    assert runner.invoke(app, validate).exit_code == 1
+
+    # Deleting only the marker comment does not dodge it: the sample values match too,
+    # which is also how a page scaffolded before the marker existed is caught.
+    page = tmp_path / "apps/a-b/pages/overview.py"
+    marked = page.read_text()
+    lines = marked.splitlines(keepends=True)
+    start = next(i for i, ln in enumerate(lines) if "STREAMSNOW_STARTER_PLACEHOLDER" in ln)
+    del lines[start : start + 3]
+    page.write_text("".join(lines))
+    assert "STREAMSNOW_STARTER_PLACEHOLDER" not in page.read_text()
+    assert placeholder_findings() == [("pages/overview.py", "sample")]
+
+    page.write_text(marked)
+    _finish_starter(tmp_path / "apps/a-b")
+    assert placeholder_findings() == []
+
+
+def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypatch):
+    """The /start-app end state (pages.md § Replace the starter trio): `new`, then the
+    first real page, its query and an anchored manifest replace all three starter
+    files. The app must validate clean, which proves the documented replacement
+    leaves nothing dangling (nav entry, artifacts, sql_review)."""
+    import json as _json
+
+    from streamsnow.tools import sql_review
+
+    monkeypatch.chdir(tmp_path)
+    init = ["init", "--no-starter-app", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path)]
+    assert runner.invoke(app, init).exit_code == 0
+    result = runner.invoke(app, ["new", "sales", "trends"])
+    assert result.exit_code == 0, result.output
+    assert "placeholders" in result.output and "YOUR_TABLE" in result.output
+    a = tmp_path / "apps/sales-trends"
+    assert runner.invoke(app, ["validate-app", "sales-trends"]).exit_code == 1
+
+    for rel in (
+        "pages/overview.py",
+        "queries/example_metric.sql",
+        "sql_review/manifests/example_metric.json",
+        "sql_review/example_metric.review.sql",
+    ):
+        (a / rel).unlink()
+    (a / "queries/daily_sales.sql").write_text(
+        "-- Query: daily_sales\n-- Feeds: Sales trend\n-- Schemas: ANALYTICS_DB.ANALYTICS\n"
+        "-- Params: :1 start_date, :2 end_date\n"
+        "SELECT sold_date, SUM(net_paid) AS net_paid\nFROM ANALYTICS_DB.ANALYTICS.STORE_SALES\n"
+        "WHERE sold_date BETWEEN :1 AND :2\nGROUP BY sold_date\n"
     )
-    check = next(c for c in payload["checks"] if c["name"] == "placeholders")
-    assert check["warnings"] == []
+    (a / "pages/sales_trend.py").write_text(
+        '"""Sales trend."""\n\nimport streamlit as st\nfrom sql_loader import load_sql\n\n\n'
+        "@st.cache_data(ttl=1800)\n"
+        "def load_daily(start: str, end: str):\n"
+        '    sql = load_sql("daily_sales")\n'
+        '    return st.connection("snowflake").query(sql, params=[start, end], ttl=0)\n\n\n'
+        'st.title("Sales trend")\n'
+    )
+    entry = a / "streamlit_app.py"
+    entry.write_text(
+        entry.read_text().replace(
+            'st.Page("pages/overview.py", title="Overview"',
+            'st.Page("pages/sales_trend.py", title="Sales trend"',
+        )
+    )
+    table = "ANALYTICS_DB.ANALYTICS.STORE_SALES"
+    manifest = {
+        "schema_version": 1,
+        "feature": "sales",
+        "app": "sales-trends",
+        "set_block": {
+            "start_date": f"(SELECT DATEADD('year', -1, MAX(sold_date)) FROM {table})::DATE",
+            "end_date": f"(SELECT MAX(sold_date) FROM {table})::DATE",
+        },
+        "pages": [{"name": "Sales trend", "queries": ["daily_sales"]}],
+        "query_specs": {"daily_sales": {"params_doc": ":1 start_date, :2 end_date"}},
+    }
+    (a / "sql_review/manifests/sales.json").write_text(_json.dumps(manifest))
+    assert sql_review.main(["generate", "sales-trends", "--dir", str(tmp_path)]) == 0
+    result = runner.invoke(app, ["validate-app", "sales-trends", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    assert not [w for c in _json.loads(result.output)["checks"] for w in c.get("warnings", [])]
+
+    # pages.md's documented check for this end state is validate-app. It once said
+    # `grep -rn YOUR_TABLE apps/<slug>` must print nothing, but the app's own AGENTS.md
+    # names the token in its instructions, so this correct app failed that check.
+    assert "YOUR_TABLE" in (a / "AGENTS.md").read_text()
+    pages = (REPO_ROOT / "skills/start-app/pages.md").read_text()
+    assert "grep -rn YOUR_TABLE" not in pages
+    assert "Then `streamsnow validate-app <slug>` must PASS" in pages
+
+
+def test_fresh_no_starter_repo_passes_its_own_checks_workflow(tmp_path):
+    """`init --no-starter-app` (the /start-app setup path) writes no apps/ directory,
+    and git cannot carry an empty one. The generated checks.yml then failed on its
+    first push: `ruff check apps/` errors on a missing path, and `check tombstones`
+    refuses a missing apps dir. Run every checks.yml step that needs no network,
+    exactly as written, under bash in a fresh repo with origin/main set."""
+    import shutil
+    import subprocess
+
+    if shutil.which("bash") is None or shutil.which("git") is None:
+        pytest.skip("needs bash and git")
+    if shutil.which("ruff") is None or shutil.which("streamsnow") is None:
+        pytest.skip("needs ruff and streamsnow on PATH (uv run pytest provides both)")
+    init = ["init", "--no-starter-app", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path)]
+    assert runner.invoke(app, init).exit_code == 0
+    assert not (tmp_path / "apps").exists()
+    git = ["git", "-c", "user.name=Acme", "-c", "user.email=ci@example.com"]
+    for cmd in (
+        ["init", "-q", "-b", "main"],
+        ["add", "-A"],
+        ["commit", "-q", "-m", "init"],
+        ["update-ref", "refs/remotes/origin/main", "HEAD"],
+    ):
+        subprocess.run([*git, *cmd], cwd=tmp_path, check=True, capture_output=True)
+    workflow = yaml.safe_load((tmp_path / ".github/workflows/checks.yml").read_text())
+    steps = {s.get("name"): s.get("run") for s in workflow["jobs"]["checks"]["steps"]}
+    offline = [
+        "Lint",
+        "Governance gate (validate every app)",
+        "SQL-review audit trail (fresh + complete)",
+        "Tombstones (no abandoned deployed objects)",
+    ]
+    for name in offline:
+        proc = subprocess.run(
+            ["bash", "-eo", "pipefail", "-c", steps[name]],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, (name, proc.stdout, proc.stderr)
+    # The tombstones guard only skips while apps/ is absent on BOTH sides: once an
+    # app exists the real check runs.
+    assert "git ls-tree -d origin/main apps" in steps["Tombstones (no abandoned deployed objects)"]
 
 
 def test_next_block_explains_preview_role_grants():
@@ -676,3 +933,38 @@ def test_update_never_overwrites_an_existing_osv_allowlist(tmp_path):
     res = runner.invoke(app, ["update", "--dir", str(tmp_path), "--apply"])
     assert res.exit_code == 0, res.output
     assert (tmp_path / "osv_allowlist.json").read_text() == "[]\n"
+
+
+def test_container_pyproject_is_dependencies_only(tmp_path):
+    """The documented local setup is `uv pip install -e apps/<slug>`. With no package
+    list, setuptools' flat-layout discovery found pages/, queries/ and sql_review/ and
+    refused to build ("Multiple top-level packages discovered"), so the first preview
+    of every container app failed at install. An explicit empty package list turns
+    discovery off: the install resolves the dependencies and builds nothing."""
+    import tomllib
+
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    app_dir = tmp_path / "apps/acme-sales-dashboard"
+    pyproject = tomllib.loads((app_dir / "pyproject.toml").read_text())
+    assert pyproject["tool"]["setuptools"]["packages"] == []
+    # The directories that tripped discovery are all present in a fresh scaffold.
+    assert all((app_dir / d).is_dir() for d in ("pages", "queries", "sql_review"))
+
+
+def test_generated_gitignore_ignores_internal_notes(tmp_path):
+    """.internal/ is where local-only working notes live (handoffs, evidence, drafts).
+    A generated repo must never commit it."""
+    import shutil
+    import subprocess
+
+    init = ["init", "--no-starter-app", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path)]
+    assert runner.invoke(app, init).exit_code == 0
+    assert ".internal/" in (tmp_path / ".gitignore").read_text().splitlines()
+    if shutil.which("git") is None:
+        pytest.skip("git not on PATH")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    proc = subprocess.run(
+        ["git", "check-ignore", "-q", ".internal/notes.md"], cwd=tmp_path, check=False
+    )
+    assert proc.returncode == 0  # ignored

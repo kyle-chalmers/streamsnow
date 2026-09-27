@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -49,6 +50,30 @@ def _scaffold_with_trail(cfg: Config, root: Path, slug: str) -> Path:
     scaffold(cfg, root, slug)
     assert sql_review.main(["generate", slug, "--dir", str(root)]) == 0
     return root / "apps" / slug
+
+
+def _finish_starter(app: Path) -> Path:
+    """Finish the scaffold's placeholder trio the way a user does: the query and its
+    manifest window read a real table, and the starter page renders the query's results
+    in place of its sample metric and chart. validate-app FAILS (placeholders) until
+    this happens."""
+    for rel in ("queries/example_metric.sql", "sql_review/manifests/example_metric.json"):
+        f = app / rel
+        f.write_text(f.read_text().replace("YOUR_TABLE", "ORDERS"))
+    page = app / "pages/overview.py"
+    text, n = re.subn(
+        r"# STREAMSNOW_STARTER_PLACEHOLDER.*?st\.plotly_chart\(fig, use_container_width=True\)\n",
+        'df = load_example("2024-01-01", "2024-12-31")\n'
+        'branded_metric("Rows", f"{int(df[\'N\'].sum()):,}")\n'
+        'fig = px.bar(df, x="DT", y="N", color_discrete_sequence=BRAND_CHART_COLORS)\n'
+        "st.plotly_chart(fig, use_container_width=True)\n",
+        page.read_text(),
+        flags=re.S,
+    )
+    assert n == 1, "starter page sample block not found"
+    page.write_text(text.replace("YOUR_TABLE", "ORDERS"))
+    assert sql_review.main(["generate", app.name, "--dir", str(app.parent.parent)]) == 0
+    return app
 
 
 def test_security_flags_egress_exec_and_dynamic_sql(tmp_path):
@@ -305,7 +330,7 @@ def test_caching_walk_skips_dotted_dirs(tmp_path):
 
 def test_validate_app_passes_on_scaffold(tmp_path):
     cfg = _cfg()
-    _scaffold_with_trail(cfg, tmp_path, "good-app")
+    _finish_starter(_scaffold_with_trail(cfg, tmp_path, "good-app"))
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/good-app", policy, cfg)
     assert res["ok"], res["checks"]
@@ -314,7 +339,7 @@ def test_validate_app_passes_on_scaffold(tmp_path):
 def test_validate_app_skips_dotted_tooling_dirs(tmp_path):
     """A REVIEW note under .review/ that quotes a denied schema must NOT trip the gate."""
     cfg = _cfg()
-    app = _scaffold_with_trail(cfg, tmp_path, "clean-app")
+    app = _finish_starter(_scaffold_with_trail(cfg, tmp_path, "clean-app"))
     # Tooling artifacts that quote denied schemas / dynamic SQL — never app source.
     _write(
         app / ".review/REVIEW-2026-01-01.md",
@@ -817,7 +842,7 @@ def test_manifest_container_pyproject_invalid_toml_fails(tmp_path):
 def test_validate_app_passes_on_warehouse_scaffold(tmp_path):
     # The warehouse scaffold's environment.yml must satisfy the content validation.
     cfg = _warehouse_cfg()
-    _scaffold_with_trail(cfg, tmp_path, "wh-ok-app")
+    _finish_starter(_scaffold_with_trail(cfg, tmp_path, "wh-ok-app"))
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/wh-ok-app", policy, cfg)
     assert res["ok"], res["checks"]
@@ -1603,3 +1628,27 @@ def test_coverage_policy_fail_gates_validate_app(tmp_path):
     assert not res["ok"] and not sqlr["ok"]
     assert sqlr["findings"][0]["kind"] == "coverage"
     assert "coverage policy: fail" in sqlr["name"]
+
+
+def test_implicit_review_window_is_a_validate_warning_never_a_failure(tmp_path):
+    """A manifest with no set_block reviews the year ending today, which returns zero
+    rows for data that ends in the past. validate-app reports it as a sql-review
+    warning under both coverage policies; it never gates."""
+    import json as _json
+
+    for policy in ("warn", "fail"):
+        cfg_data = yaml.safe_load(EXAMPLE.read_text())
+        cfg_data["sql_review"] = {"coverage": policy}
+        cfg = Config.from_dict(cfg_data)
+        root = tmp_path / policy
+        app = _scaffold_with_trail(cfg, root, "window-app")
+        mp = app / "sql_review/manifests/example_metric.json"
+        manifest = _json.loads(mp.read_text())
+        assert "MAX(metric_date)" in manifest["set_block"]["end_date"]  # the starter anchors it
+        del manifest["set_block"], manifest["set_block_note"]
+        mp.write_text(_json.dumps(manifest))
+        assert sql_review.main(["generate", "window-app", "--dir", str(root)]) == 0
+        res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+        sqlr = next(c for c in res["checks"] if c["name"].startswith("sql-review"))
+        assert sqlr["ok"] and not sqlr["findings"], policy
+        assert [w["kind"] for w in sqlr["warnings"]] == ["window"], policy

@@ -7,7 +7,7 @@ allowed-tools: [Bash, Read]
 
 # /validate-app
 
-> **Repo overlay:** if `.streamsnow/overlays/validate-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+> **Repo overlay:** if `.streamsnow/overlays/validate-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
 Run the pass/fail check on one app and report exactly what fails and how to fix it.
 `streamsnow validate-app <slug>` is the single source of truth — it bundles the same checks the

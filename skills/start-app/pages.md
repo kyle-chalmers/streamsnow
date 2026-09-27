@@ -13,7 +13,10 @@ run the spec phase first ([spec.md](spec.md)) and resume.
 
 1. **Resolve target.** Confirm `apps/<slug>/` and its `REQUIREMENTS.md` exist. No spec → backfill
    one first (spec phase, automatic backfill mode). Page already exists as `pages/<page>.py` → stop;
-   overwriting risks losing in-progress work.
+   overwriting risks losing in-progress work. The one exception is the scaffold's own starter
+   `pages/overview.py` (it still contains `YOUR_TABLE` or the `STREAMSNOW_STARTER_PLACEHOLDER`
+   sample block): the first page replaces it, see
+   [Replace the starter trio](#replace-the-starter-trio).
 2. **Detect the runtime** (anchored `runtime_name:` in `snowflake.yml`) — it decides the loader's
    connection pattern below.
 3. **Scaffold the SQL stubs.** For each query the page needs, create `queries/<name>.sql` with the
@@ -51,11 +54,17 @@ run the spec phase first ([spec.md](spec.md)) and resume.
    1. `streamsnow sql-review discover <slug> --write` — proposes (and persists) a skeleton manifest
       under `apps/<slug>/sql_review/manifests/` for each query no manifest claims yet. It never
       overwrites an existing manifest, and exit 1 here just means gaps existed — that's why you ran it.
-   2. **Improve the skeleton's dispatcher literals.** `discover` fills each `{TOKEN}` dispatcher with
-      a `-- TODO: sample fragment for <TOKEN>` placeholder; replace every one with a real sample
-      fragment the page actually renders (e.g. `AND region = 'West'` for a region filter) so the
-      review SQL exercises the query the way the dashboard does. Fix the `description`/`pages`
-      fields if the header's `Feeds` line was still a TODO.
+   2. **Improve the skeleton's dispatcher literals, and anchor its window.** `discover` fills each
+      `{TOKEN}` dispatcher with a `-- TODO: sample fragment for <TOKEN>` placeholder; replace every
+      one with a real sample fragment the page actually renders (e.g. `AND region = 'West'` for a
+      region filter) so the review SQL exercises the query the way the dashboard does. Fix the
+      `description`/`pages` fields if the header's `Feeds` line was still a TODO. Then add a
+      `set_block` whose window ends at the data's latest date, never today:
+      `"end_date": "(SELECT MAX(<date_col>) FROM <db>.<schema>.<table>)::DATE"` and
+      `"start_date": "(SELECT DATEADD('year', -1, MAX(<date_col>)) FROM <db>.<schema>.<table>)::DATE"`
+      (the same object and column the page's default date range reads). The skeleton has none,
+      and the implicit default is the year ending `CURRENT_DATE`, which returns zero rows for any
+      data that ends in the past; `sql-review check` flags it as a `window` warning.
    3. `streamsnow sql-review generate <slug>` — renders the paste-runnable
       `sql_review/<feature>.review.sql` files with provenance lines.
    4. Commit the page module, its `queries/*.sql`, the manifest(s), and the rendered `.review.sql`
@@ -65,6 +74,28 @@ run the spec phase first ([spec.md](spec.md)) and resume.
 9. **End of the build phase** (all §4 pages built): `streamsnow sql-review index <slug>` rebuilds
    the `sql_review/README.md` coverage table so it reflects every page's queries; include the
    refreshed README in the final build commit.
+
+## Replace the starter trio
+
+`streamsnow new` leaves three placeholder files. The **first** page built replaces all three, in the
+same commit as that page (step 8), whatever the page is called:
+
+1. **`pages/overview.py`** (sample numbers). If the first §4 page is the landing or overview page,
+   write it into `pages/overview.py`, replacing the starter content entirely. Otherwise create
+   `pages/<page>.py`, put its `st.Page(...)` entry in `streamlit_app.py` in place of the starter's
+   `st.Page("pages/overview.py", ...)` entry (keeping `default=True`: the starter's default was a
+   placeholder, so the default-page gotcha below does not apply), and delete `pages/overview.py`.
+2. **`queries/example_metric.sql`** (reads `YOUR_TABLE`). Delete it once the page's real queries
+   exist. Never repoint it into a real query under the example name.
+3. **`sql_review/manifests/example_metric.json`** and its rendered
+   `sql_review/example_metric.review.sql`. Delete both with the query: `generate` would fail on
+   the missing template, and `check` reports a leftover review file as an orphan.
+
+Then `streamsnow validate-app <slug>` must PASS: its `placeholders` check FAILS while any query,
+page or manifest still carries `YOUR_TABLE` or the starter page's sample block. Do not grep the
+app folder for the token instead: the app's own `AGENTS.md` names `YOUR_TABLE` in its
+instructions, so a correct app still matches. `streamsnow sql-review index <slug>` then drops the
+example row from the README.
 
 ## Connection pattern by runtime
 

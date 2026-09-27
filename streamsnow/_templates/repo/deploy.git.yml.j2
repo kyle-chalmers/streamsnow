@@ -24,9 +24,16 @@ jobs:
       SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
       SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
       SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_RAW }}
-      SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+      # snow reads an encrypted key's passphrase from PRIVATE_KEY_PASSPHRASE
+      # (no SNOWFLAKE_ prefix); unused when the key is unencrypted.
+      PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
       SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+    # Every snow call (and verify-deploy) passes --temporary-connection: the
+    # runner has no config.toml, so without it the Snowflake CLI looks for a
+    # connection named "default" and fails ("Connection default is not
+    # configured") instead of connecting from the SNOWFLAKE_* variables above
+    # (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection).
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +53,7 @@ jobs:
       - name: Install tooling
         if: steps.gate.outputs.go == 'true'
         run: |
-          uv tool install 'streamsnow>=0.7,<0.8'
+          uv tool install 'streamsnow>=0.7.1,<0.8'
           uv tool install snowflake-cli
 
       - name: Deploy changed apps (git-repository)
@@ -54,14 +61,14 @@ jobs:
         run: |
           set -euo pipefail
           REPO="$(streamsnow config-get deploy.git_repository_fqn)"
-          snow git fetch "$REPO"
+          snow git fetch --temporary-connection "$REPO"
           for d in apps/*/; do
             [ -d "$d" ] || continue
             slug="$(basename "$d")"
             streamsnow deploy-sql "$slug" > "/tmp/ss-$slug.sql"
-            snow sql -f "/tmp/ss-$slug.sql"
+            snow sql --temporary-connection -f "/tmp/ss-$slug.sql"
             streamsnow deploy-sql "$slug" --refresh > "/tmp/ss-$slug-refresh.sql"
-            snow sql -f "/tmp/ss-$slug-refresh.sql" || true
+            snow sql --temporary-connection -f "/tmp/ss-$slug-refresh.sql" || true
           done
 
       # A CREATE OR REPLACE pipeline has no delete path — this is it. Every
@@ -74,7 +81,7 @@ jobs:
           set -euo pipefail
           streamsnow check tombstones --drop-sql > /tmp/ss-drops.sql
           if [ -s /tmp/ss-drops.sql ]; then
-            snow sql -f /tmp/ss-drops.sql
+            snow sql --temporary-connection -f /tmp/ss-drops.sql
           fi
 
       # "Deploy succeeded" is not "app serves": a missing live version renders
@@ -87,6 +94,6 @@ jobs:
           set -euo pipefail
           for d in apps/*/; do
             [ -d "$d" ] || continue
-            streamsnow verify-deploy "$(basename "$d")"
+            streamsnow verify-deploy "$(basename "$d")" --temporary-connection
           done
 {% endraw %}

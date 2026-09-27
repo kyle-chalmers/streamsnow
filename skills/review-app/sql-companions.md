@@ -41,6 +41,16 @@ until regenerated. To change what a companion renders, edit
      them via `modules` — the render is then exactly what the app emits, not your transcription of
      it. Only `generate` imports app code, and only on a developer machine; `check` stays
      import-free by design.
+   - **Anchor the review window to the data, always.** Set `set_block` explicitly; never rely on
+     the implicit default, which is the year ending `CURRENT_DATE` and returns zero rows for data
+     whose latest date is in the past (a historical extract, a sample dataset like TPC-DS, a
+     paused feed). End the window at the source's own latest date:
+     `"start_date": "(SELECT DATEADD('year', -1, MAX(<date_col>)) FROM <db>.<schema>.<table>)::DATE"`,
+     `"end_date": "(SELECT MAX(<date_col>) FROM <db>.<schema>.<table>)::DATE"`, reading the same
+     object and date column the page's default range uses (see the default-date-range rule in
+     [page-conventions](../_shared/page-conventions.md)). `sql-review check` reports a manifest
+     with no `set_block` as a `window` warning. Declare `CURRENT_DATE` explicitly only when today
+     really is the anchor (a live feed that loads daily), and say so in `set_block_note`.
    - Defaults cover `:1 start_date, :2 end_date` via the `SET` block; override `param_bindings` /
      `set_block` when the query binds something else. **Every bind a query uses must be declared**
      — an undeclared `:3` is a hard error, and `param_bindings` must point at a variable that

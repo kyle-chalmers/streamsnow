@@ -2,7 +2,7 @@
 
 Triggered when preflight finds an existing repo: Streamlit apps not born from `streamsnow new`
 (an `apps/`-like tree, `streamlit_app.py` files, deploy scripts), an existing `AGENTS.md`/`CLAUDE.md`,
-or custom `.claude/commands` / `.claude/skills`. The rule: **map onto what exists — never scaffold
+or custom `.claude/commands` / `.claude/skills` / `.agents/skills`. The rule: **map onto what exists — never scaffold
 over it, never demand a rewrite.**
 
 ## 1 · Inventory what's there (read-only)
@@ -11,7 +11,8 @@ over it, never demand a rewrite.**
   repo-is-the-app?). Infer the slug convention from directory names.
 - **Tools in use:** CI configs, deploy scripts, `snow` connections, existing secrets examples —
   these pre-answer most of the `streamsnow configure` questions.
-- **Custom commands/skills:** list everything in `.claude/commands/` and `.claude/skills/` and
+- **Custom commands/skills:** list everything in `.claude/commands/`, `.claude/skills/` and
+  `.agents/skills/` (except StreamSnow's own copies, listed in `.agents/skills/.streamsnow-skills.json`) and
   classify each against the plugin's skills: **shadows** (does what a plugin skill does), **extends**
   (a domain-specific variant — e.g. company branding checks, a tracker-specific spec flow), or
   **unrelated** (keep as-is).

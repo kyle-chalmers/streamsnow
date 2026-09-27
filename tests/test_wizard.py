@@ -7,8 +7,13 @@ from pathlib import Path
 import typer
 import yaml
 
-from streamsnow.cli import _prompt_config, _render_config_yaml
+from streamsnow import cli
+from streamsnow.cli import _connection_hint, _prompt_config, _render_config_yaml
 from streamsnow.config import Config
+from streamsnow.tools import doctor
+
+# Captured at import, before tests/conftest.py stubs it per test.
+_REAL_SNOW_CONNECTIONS = cli._snow_connections
 
 
 def _run_wizard(monkeypatch, prefill=None, directory=Path("acme-analytics")):
@@ -96,3 +101,184 @@ def test_rendered_yaml_round_trips_and_carries_comments(monkeypatch):
     # The defaulted values are self-documenting in the file.
     assert "#" in text
     assert "viewer" in text.lower()
+
+
+def test_wizard_defaults_to_the_pre_provisioned_compute_pool(monkeypatch):
+    """A first-time container user owns no compute pool. The old STREAMLIT_POOL default
+    made deploy-setup --admin emit a CREATE COMPUTE POOL they had no reason to run (and
+    often no privilege to); SYSTEM_COMPUTE_POOL_CPU exists in every account."""
+    from streamsnow.deploy import generate_admin_sql
+
+    cfg_dict, _ = _run_wizard(monkeypatch)
+    assert cfg_dict["runtime"] == "container"
+    assert cfg_dict["snowflake"]["objects"]["compute_pool"] == "SYSTEM_COMPUTE_POOL_CPU"
+    sql = generate_admin_sql(Config.from_dict(cfg_dict))
+    statements = "\n".join(line for line in sql.splitlines() if not line.startswith("--"))
+    assert "CREATE COMPUTE POOL" not in statements
+    assert "GRANT USAGE ON COMPUTE POOL SYSTEM_COMPUTE_POOL_CPU TO ROLE" in statements
+    # A pool the user already named survives a re-run of the wizard.
+    prefill = {"snowflake": {"objects": {"compute_pool": "ACME_POOL"}}}
+    cfg_dict, _ = _run_wizard(monkeypatch, prefill=prefill)
+    assert cfg_dict["snowflake"]["objects"]["compute_pool"] == "ACME_POOL"
+
+
+def test_wizard_defaults_are_streamsnow_branded(monkeypatch):
+    """Default object names are StreamSnow's own, so an admin finds every database,
+    warehouse, role, user and stage the bootstrap creates with LIKE 'STREAMSNOW%'
+    (the DASHBOARDS schema lives inside STREAMSNOW_APPS; the PyPI integration keeps
+    its descriptive name). The CI user derives from the deploy role."""
+    import re
+
+    from streamsnow.deploy import generate_admin_sql
+
+    cfg_dict, _ = _run_wizard(monkeypatch)
+    o, r = cfg_dict["snowflake"]["objects"], cfg_dict["snowflake"]["roles"]
+    assert (o["app_database"], o["app_schema"]) == ("STREAMSNOW_APPS", "DASHBOARDS")
+    assert (o["stage_database"], o["stage_schema"]) == ("STREAMSNOW_APPS", "DASHBOARDS")
+    assert o["default_warehouse"] == "STREAMSNOW_WH"
+    assert o["allowed_warehouses"] == ["STREAMSNOW_WH"]
+    assert (r["ci_role"], r["viewer_role"]) == ("STREAMSNOW_DEPLOY_ROLE", "STREAMSNOW_VIEWER_ROLE")
+    cfg = Config.from_dict(cfg_dict)
+    assert cfg.snowflake.objects.stage_name == "STREAMSNOW_CODE_STAGE"  # loader default
+    sql = generate_admin_sql(cfg)
+    assert "CREATE USER IF NOT EXISTS STREAMSNOW_DEPLOY_USER" in sql
+    created = re.findall(
+        r"^CREATE (?:DATABASE|WAREHOUSE|ROLE|USER|STAGE) IF NOT EXISTS ([\w.$]+)", sql, re.M
+    )
+    assert len(created) == 6, created
+    assert all(fqn.rsplit(".", 1)[-1].startswith("STREAMSNOW_") for fqn in created), created
+
+
+class _Proc:
+    def __init__(self, returncode: int, stdout: str) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def _fake_snow(monkeypatch, list_result, calls=None):
+    """Route the wizard's detection through the real doctor parser over a faked
+    subprocess. ``list_result`` is (returncode, stdout) or an exception to raise."""
+    import json as _json
+
+    monkeypatch.setattr(cli, "_snow_connections", _REAL_SNOW_CONNECTIONS)
+    monkeypatch.setattr(doctor.shutil, "which", lambda tool: f"/opt/acme/bin/{tool}")
+
+    def fake_run(cmd, **_kwargs):
+        if calls is not None:
+            calls.append(list(cmd))
+        if isinstance(list_result, Exception):
+            raise list_result
+        code, out = list_result
+        return _Proc(code, out if isinstance(out, str) else _json.dumps(out))
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+
+
+# The default connection's account is the wizard's answer ("ab12345.us-east-1" in
+# _run_wizard) in another case: accounts compare case-insensitively.
+_ROWS = [
+    {"connection_name": "other", "is_default": False, "parameters": {"account": "zz99999"}},
+    {
+        "connection_name": "tutorial",
+        "is_default": True,
+        "parameters": {"account": "AB12345.US-EAST-1", "user": "u"},
+    },
+]
+
+
+def test_wizard_defaults_connection_name_to_the_existing_default_connection(monkeypatch):
+    """Someone who already has a working default snow connection (a prior tutorial) got
+    connection_name = the folder slug, failed doctor's connection check, and was told
+    to create a second --default connection. The existing default is the right answer
+    when it opens the account they answered."""
+    _fake_snow(monkeypatch, (0, _ROWS))
+    cfg_dict, asked = _run_wizard(monkeypatch)
+    assert cfg_dict["snowflake"]["connection_name"] == "tutorial"
+    assert len(asked) <= 5  # detected, never asked
+    cfg = Config.from_dict(cfg_dict)
+    # ...so the doctor's connection check passes on the same rows.
+    res = doctor.check_snow_connection(
+        {"ok": True, "detail": {"connection_name": cfg.snowflake.connection_name}}, rows=_ROWS
+    )
+    assert res["ok"]
+    # ...and the one-time step no longer tells them to add a default connection.
+    hint = _connection_hint(cfg, _ROWS)
+    assert "snow connection add" not in hint and "already your default" in hint
+
+
+def _default_row(params: dict) -> list[dict]:
+    return [{"connection_name": "tutorial", "is_default": True, "parameters": params}]
+
+
+def test_wizard_ignores_a_default_connection_for_another_account(monkeypatch, capsys):
+    """The default connection was adopted before the account was even asked, so a
+    default left over from another account (a trial, a previous employer) wrote a
+    config whose connection opens the wrong account. A mismatch falls back to the slug
+    with a one-line note, and neither account value is printed."""
+    _fake_snow(monkeypatch, (0, _default_row({"account": "zz99999.eu-west-1", "user": "u"})))
+    cfg_dict, asked = _run_wizard(monkeypatch)
+    assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics"
+    assert cfg_dict["snowflake"]["account"] == "ab12345.us-east-1"
+    assert len(asked) <= 5
+    out = capsys.readouterr().out
+    assert "'tutorial' is for another account" in out
+    assert "zz99999" not in out.lower() and "ab12345" not in out.lower()
+
+
+def test_wizard_ignores_a_default_connection_that_names_no_account(monkeypatch, capsys):
+    """No account parameter (or a non-string one) cannot be shown to match: slug."""
+    for params in ({"user": "u"}, {"account": None}, {"account": ""}):
+        _fake_snow(monkeypatch, (0, _default_row(params)))
+        cfg_dict, _ = _run_wizard(monkeypatch)
+        assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics", params
+        assert "'tutorial' names no account" in capsys.readouterr().out
+    # No parameters mapping at all.
+    _fake_snow(monkeypatch, (0, [{"connection_name": "tutorial", "is_default": True}]))
+    cfg_dict, _ = _run_wizard(monkeypatch)
+    assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics"
+    out = capsys.readouterr().out
+    assert "'tutorial' names no account" in out and "ab12345" not in out.lower()
+
+
+def test_wizard_connection_name_falls_back_to_the_slug(monkeypatch):
+    no_default = [{"connection_name": "other", "is_default": False}]
+    for result in (
+        (0, no_default),  # connections, none of them the default
+        (0, []),  # no connections at all
+        (1, ""),  # snow on PATH but failing
+        (0, "not json"),  # garbage output
+        (0, {"not": "a list"}),  # wrong shape
+        doctor.subprocess.TimeoutExpired(cmd="snow", timeout=15),  # hung cold start
+        OSError("snow vanished"),
+    ):
+        _fake_snow(monkeypatch, result)
+        cfg_dict, _ = _run_wizard(monkeypatch)
+        assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics", result
+    # snow not installed at all.
+    monkeypatch.setattr(cli, "_snow_connections", _REAL_SNOW_CONNECTIONS)
+    monkeypatch.setattr(doctor.shutil, "which", lambda tool: None)
+    cfg_dict, _ = _run_wizard(monkeypatch)
+    assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics"
+
+
+def test_wizard_keeps_a_configured_connection_name_without_asking_snow(monkeypatch):
+    calls: list[list[str]] = []
+    _fake_snow(monkeypatch, (0, _ROWS), calls)
+    prefill = {"snowflake": {"connection_name": "acme-prod"}}
+    cfg_dict, _ = _run_wizard(monkeypatch, prefill=prefill)
+    assert cfg_dict["snowflake"]["connection_name"] == "acme-prod"
+    assert calls == []  # re-running configure never shells out for a value it has
+
+
+def test_connection_hint_matches_what_snow_already_has():
+    from streamsnow.config import load_config
+
+    cfg = load_config(Path(__file__).resolve().parent.parent / "streamsnow.config.example.yaml")
+    name = cfg.snowflake.connection_name
+    absent = _connection_hint(cfg, None)
+    assert f"snow connection add --connection-name {name}" in absent and "--default" in absent
+    assert _connection_hint(cfg, [{"connection_name": "other", "is_default": True}]) == absent
+    exists = _connection_hint(cfg, [{"connection_name": name, "is_default": False}])
+    assert exists.startswith(f"snow connection set-default {name}")
+    already = _connection_hint(cfg, [{"connection_name": name, "is_default": True}])
+    assert "snow connection add" not in already and "already your default" in already

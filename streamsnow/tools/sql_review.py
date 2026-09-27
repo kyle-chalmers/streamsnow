@@ -45,8 +45,10 @@ Manifest schema (v1)
       },
       "combos": [{"name": "all-default", "description": "no filters", "channel": "All"}],
       "param_bindings": {"1": "$start_date", "2": "$end_date"},
-      "set_block": {"start_date": "DATEADD('year', -1, CURRENT_DATE)",
-                     "end_date": "CURRENT_DATE"},
+      "set_block": {"start_date": "(SELECT DATEADD('year', -1, MAX(order_date))
+                                      FROM ANALYTICS_DB.REPORTING.ORDERS)::DATE",
+                     "end_date": "(SELECT MAX(order_date)
+                                    FROM ANALYTICS_DB.REPORTING.ORDERS)::DATE"},
       "set_block_note": "why these defaults — which source the bounds derive
                           from, and any mechanics that bite when editing them",
       "fragments": [{"file": "_shared_ctes.sql",
@@ -121,8 +123,12 @@ Verbs
 ``generate <slug>``   render review files (+ provenance) from manifests.
 ``check <slug>``      import-free freshness + coverage gate. Every finding
                       carries a ``kind`` (coverage | fragment | collision |
-                      orphan | bind | provenance | readonly). Correctness
-                      kinds always exit 1; ``coverage`` follows
+                      orphan | bind | provenance | readonly | window).
+                      ``window`` is advisory and never fails: a manifest
+                      with no ``set_block`` renders the implicit review
+                      window (the year ending CURRENT_DATE), which returns
+                      zero rows for data whose latest date is in the past.
+                      Correctness kinds always exit 1; ``coverage`` follows
                       ``sql_review.coverage`` in streamsnow.config.yaml
                       (``warn`` default → reported, exit 0; ``fail`` → exit 1),
                       so pre-commit and CI can run the drift check before a
@@ -197,6 +203,10 @@ KIND_ORPHAN = "orphan"
 KIND_BIND = "bind"
 KIND_PROVENANCE = "provenance"
 KIND_READONLY = "readonly"
+# Advisory: reported by `check` (and validate-app) as a warning under every
+# coverage policy, never a failure. The committed file is correct; the window
+# it was generated with may simply not overlap the data.
+KIND_WINDOW = "window"
 CORRECTNESS_KINDS = (
     KIND_FRAGMENT,
     KIND_COLLISION,
@@ -596,10 +606,21 @@ def _import_modules(app: Path, manifest: dict) -> dict:
 # Rendering
 # --------------------------------------------------------------------------- #
 _DEFAULT_BINDS = {"1": "$start_date", "2": "$end_date"}
+# The window a manifest gets when it declares no set_block. Kept for manifests
+# that already rely on it, but `check` flags every use (KIND_WINDOW): it is
+# anchored to today, so data that ends in the past (a historical extract, a
+# sample dataset, a paused feed) renders review files that return zero rows,
+# and an empty result on paste reads like a broken query. A data-anchored
+# set_block (the window ends at the source's own MAX(date)) is the fix.
 _DEFAULT_SET = {
     "start_date": "DATEADD('year', -1, CURRENT_DATE)",
     "end_date": "CURRENT_DATE",
 }
+_DEFAULT_SET_LINES = frozenset(f"SET {name} = {expr};" for name, expr in _DEFAULT_SET.items())
+_ANCHORED_EXAMPLE = (
+    '"set_block": {"start_date": "(SELECT DATEADD(\'year\', -1, MAX(<date_col>)) FROM '
+    '<table>)::DATE", "end_date": "(SELECT MAX(<date_col>) FROM <table>)::DATE"}'
+)
 
 
 def _substitute_binds(sql: str, binds: dict[str, str]) -> str:
@@ -1869,6 +1890,10 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
                 )
 
     for mp in _manifest_paths(app):
+        with contextlib.suppress(ToolError):
+            findings += _implicit_window_findings(app, mp, load_manifest(mp))
+
+    for mp in _manifest_paths(app):
         try:
             manifest = load_manifest(mp)
         except ToolError as exc:
@@ -1949,6 +1974,41 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
     return findings
 
 
+def _implicit_window_findings(app: Path, mp: Path, manifest: dict) -> list[dict]:
+    """A ``window`` warning when a manifest's review files use the implicit window.
+
+    Only manifests with no ``set_block`` of their own qualify: an explicit
+    window, even an explicit CURRENT_DATE one, is the author's decision and is
+    left alone. And only when a committed review file actually carries the
+    default SET lines, because pruning drops them when no section binds a date
+    (then there is no window to be wrong). One finding per manifest, however
+    many combos it renders.
+    """
+    if manifest.get("set_block"):
+        return []
+    for fname in _manifest_outputs(manifest):
+        out = _review_dir(app) / fname
+        try:
+            lines = {ln.strip() for ln in out.read_text(encoding="utf-8").splitlines()}
+        except (OSError, UnicodeDecodeError):
+            continue  # missing/unreadable files are provenance findings
+        if lines & _DEFAULT_SET_LINES:
+            return [
+                {
+                    "kind": KIND_WINDOW,
+                    "file": f"apps/{app.name}/sql_review/manifests/{mp.name}",
+                    "line": 1,
+                    "detail": "no set_block, so the review window is the implicit default: "
+                    "the year ending CURRENT_DATE. Data whose latest date is in the past "
+                    "(a historical extract, a sample dataset, a paused feed) returns zero "
+                    "rows on paste. Anchor the window to the data: "
+                    f"{_ANCHORED_EXAMPLE}, then `streamsnow sql-review generate {app.name}` "
+                    "(or declare CURRENT_DATE explicitly if today really is the anchor)",
+                }
+            ]
+    return []
+
+
 def coverage_policy(repo: Path) -> str:
     """``sql_review.coverage`` from the repo's config, ``warn`` when absent.
 
@@ -1965,11 +2025,14 @@ def coverage_policy(repo: Path) -> str:
 
 
 def split_by_policy(findings: list[dict], policy: str) -> tuple[list[dict], list[dict]]:
-    """(hard, soft): findings that fail the gate vs. coverage gaps only reported."""
-    if policy == "fail":
-        return list(findings), []
-    hard = [f for f in findings if f.get("kind") != KIND_COVERAGE]
-    soft = [f for f in findings if f.get("kind") == KIND_COVERAGE]
+    """(hard, soft): findings that fail the gate vs. ones only reported.
+
+    ``window`` is always soft. ``coverage`` is soft unless the policy is
+    ``fail``. Everything else is a correctness finding and always hard.
+    """
+    soft_kinds = {KIND_WINDOW} if policy == "fail" else {KIND_WINDOW, KIND_COVERAGE}
+    hard = [f for f in findings if f.get("kind") not in soft_kinds]
+    soft = [f for f in findings if f.get("kind") in soft_kinds]
     return hard, soft
 
 
@@ -2002,17 +2065,23 @@ def cmd_check(args: argparse.Namespace) -> int:
             print("The committed audit trail does not match what the app runs:")
             for f in hard:
                 print(f"FAIL [{f.get('kind', '?')}] {f['file']}:{f['line']} {f['detail']}")
-        if soft:
+        gaps = [f for f in soft if f.get("kind") == KIND_COVERAGE]
+        windows = [f for f in soft if f.get("kind") == KIND_WINDOW]
+        if gaps:
             print(
                 f"Queries with no human-runnable companion yet (coverage policy: {policy} — "
                 "set sql_review.coverage: fail in streamsnow.config.yaml to gate on these):"
             )
-            for f in soft:
+            for f in gaps:
+                print(f"WARN [{f.get('kind', '?')}] {f['file']}:{f['line']} {f['detail']}")
+        if windows:
+            print("Review windows anchored to today instead of the data (advisory, never gates):")
+            for f in windows:
                 print(f"WARN [{f.get('kind', '?')}] {f['file']}:{f['line']} {f['detail']}")
         if not hard and not soft:
             print("sql-review: clean")
         elif not hard:
-            print(f"sql-review: clean ({len(soft)} coverage warning(s))")
+            print(f"sql-review: clean ({len(soft)} warning(s))")
     return 0 if result["ok"] else 1
 
 

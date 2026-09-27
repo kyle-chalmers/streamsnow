@@ -7,7 +7,7 @@ allowed-tools: [Bash, Read, Write, Edit]
 
 # /preview-app
 
-> **Repo overlay:** if `.streamsnow/overlays/preview-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)).
+> **Repo overlay:** if `.streamsnow/overlays/preview-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
 Launch `apps/<slug>` locally against live Snowflake and open it in the browser — the "see it
 before you ship it" step, ahead of /validate-app and /ship-app. `streamsnow preview` owns the whole
@@ -25,7 +25,7 @@ confirmation, safe secrets provisioning, URL surfacing, triage.
   session-outside-Snowflake) into an actionable hint — read it before improvising.
 - `streamsnow preview status <slug>` — running/not-running + live health probe; stale state from a
   crashed preview is cleaned up silently, so a dead run never wedges the next `start`.
-- `streamsnow preview logs <slug> [--lines N]` — tail the launch log (kept after `stop`).
+- `streamsnow preview logs <slug> [--lines N]`: tail the log (kept after `stop`); a `cause:` line names a known failure.
 - `streamsnow preview stop <slug>` — graceful kill, state removed; idempotent.
 
 "Healthy" means **serving**, not "queries succeeded" — the health endpoint answers before the
