@@ -20,6 +20,18 @@ version bump; the log scan (3) is strictly best-effort and fail-open — log
 access varies by role and edition, and a verification step must never block a
 deploy over its own permissions.
 
+``SHOW STREAMLITS`` answers "does it exist"; checks 1 and 2 read ``DESCRIBE
+STREAMLIT``. SHOW used to carry the version URIs, but current Snowflake returns
+only artifact_repositories, comment, created_on, database_name,
+idle_auto_shutdown_time_seconds, name, owner, owner_role_type, query_warehouse,
+scheduled_tasks, schema_name, title and url_id (observed 2026-09-27), so both
+checks printed a check mark while reporting they had been skipped.
+
+Every check reports a ``status``: ``pass``, ``fail`` or ``skipped``. A check
+that could not run is ``skipped``, never ``pass``: its ``ok`` is false and the
+summary line counts it apart from the passes. Skips do not fail the run (the
+exit code tracks failures only), but they are never shown as a pass.
+
 All Snowflake access goes through an injected ``run_query`` callable so the
 check logic stays pure and unit-testable.
 """
@@ -85,6 +97,30 @@ def _get(row: dict, key: str) -> object:
     return None
 
 
+def _has(row: dict, key: str) -> bool:
+    return any(k.lower() == key for k in row)
+
+
+PASS = "pass"
+FAIL = "fail"
+SKIPPED = "skipped"
+
+
+def _check(name: str, status: str, findings: list[str], level: str = "block") -> dict:
+    """One check result. ``ok`` is true only for a check that ran and passed."""
+    return {
+        "name": name,
+        "status": status,
+        "ok": status == PASS,
+        "level": level,
+        "findings": findings,
+    }
+
+
+def _skipped(name: str, why: str) -> dict:
+    return _check(name, SKIPPED, [f"not checked: {why}"], level="warn")
+
+
 def _show_streamlit(cfg: Config, slug: str, run_query: RunQuery) -> dict | None:
     o = cfg.snowflake.objects
     name = streamlit_fqn(cfg, slug).rsplit(".", 1)[-1]
@@ -92,89 +128,88 @@ def _show_streamlit(cfg: Config, slug: str, run_query: RunQuery) -> dict | None:
     return rows[0] if rows else None
 
 
+def _describe_streamlit(fqn: str, run_query: RunQuery) -> dict | None:
+    """The ``DESCRIBE STREAMLIT`` row, which carries the live and version-source
+    URIs that ``SHOW STREAMLITS`` no longer returns."""
+    rows = run_query(f"DESCRIBE STREAMLIT {fqn}")
+    return rows[0] if rows else None
+
+
 def check_exists(row: dict | None, fqn: str) -> dict:
-    ok = row is not None
-    return {
-        "name": "exists",
-        "ok": ok,
-        "level": "block",
-        "findings": [] if ok else [f"{fqn} not found — the deploy did not create the object"],
-    }
+    if row is not None:
+        return _check("exists", PASS, [])
+    return _check("exists", FAIL, [f"{fqn} not found: the deploy did not create the object"])
 
 
-def check_live_version(row: dict | None, fqn: str) -> dict:
-    """A NULL/empty ``live_version_location_uri`` means Snowsight cannot render
-    the app even though it exists. The column being absent from SHOW output is a
-    warn-skip (edition/version differences), never a hard fail."""
-    if row is None:
-        return {"name": "live-version", "ok": False, "level": "block", "findings": ["no row"]}
-    if not any(k.lower() == "live_version_location_uri" for k in row):
-        return {
-            "name": "live-version",
-            "ok": True,
-            "level": "warn",
-            "findings": ["live_version_location_uri not in SHOW output — skipped"],
-        }
-    uri = _get(row, "live_version_location_uri")
-    ok = bool(uri) and str(uri).lower() not in ("null", "none")
-    return {
-        "name": "live-version",
-        "ok": ok,
-        "level": "block",
-        "findings": []
-        if ok
-        else [
-            f"{fqn} has no live version — the app exists but Snowsight cannot render it. "
+def check_live_version(desc: dict | None, fqn: str) -> dict:
+    """A NULL/empty ``live_version_location_uri`` in ``DESCRIBE STREAMLIT`` means
+    Snowsight cannot render the app even though it exists. No DESCRIBE row, or
+    no such column in it, means the check could not run: skipped, never a pass."""
+    if desc is None:
+        return _skipped("live-version", "DESCRIBE STREAMLIT returned no row")
+    if not _has(desc, "live_version_location_uri"):
+        return _skipped("live-version", "no live_version_location_uri in DESCRIBE STREAMLIT output")
+    uri = _get(desc, "live_version_location_uri")
+    if uri and str(uri).strip().lower() not in ("null", "none"):
+        return _check("live-version", PASS, [])
+    return _check(
+        "live-version",
+        FAIL,
+        [
+            f"{fqn} has no live version, so the app exists but Snowsight cannot render it. "
             f"Fix: ALTER STREAMLIT {fqn} ADD LIVE VERSION FROM LAST;"
         ],
-    }
-
-
-def check_version_source(row: dict | None, fqn: str, sha: str) -> dict:
-    """Stage-copy: some version-source URI must contain ``/commits/<sha>/`` —
-    otherwise the object points at an old stage path and viewers see stale code.
-    (The git-repository source pins freshness via fetch+PULL instead; callers
-    skip this check there.) Absent URI columns warn-skip."""
-    if row is None:
-        return {"name": "version-source", "ok": False, "level": "block", "findings": ["no row"]}
-    uri_keys = (
-        "default_version_source_location_uri",
-        "live_version_location_uri",
-        "root_location",
     )
-    uris = [str(_get(row, k)) for k in uri_keys if _get(row, k)]
-    if not uris:
-        return {
-            "name": "version-source",
-            "ok": True,
-            "level": "warn",
-            "findings": ["no version-source URI columns in SHOW output — skipped"],
-        }
-    needle = f"/commits/{sha}"
-    ok = any(needle in u for u in uris)
-    return {
-        "name": "version-source",
-        "ok": ok,
-        "level": "block",
-        "findings": []
-        if ok
-        else [
-            f"{fqn}: no version-source URI contains {needle!r} — the deployed object "
-            f"does not point at the merged commit (saw: {uris})"
+
+
+# The stage-copy deploy runs CREATE OR REPLACE STREAMLIT ... FROM
+# '@<stage>/commits/<sha>/apps/<slug>/', and DESCRIBE reports that path in both
+# source columns.
+_SOURCE_URI_KEYS = ("default_version_source_location_uri", "last_version_source_location_uri")
+_COMMIT_SEGMENT = re.compile(r"/commits/([0-9A-Za-z]+)/")
+
+
+def _points_at(uri: str, sha: str) -> bool:
+    """True when ``uri`` has a ``/commits/<segment>/`` path for this commit. A
+    short SHA matches as a prefix of the segment, so a local run can pass the
+    abbreviated SHA that git prints."""
+    want = sha.lower()
+    return any(seg.lower().startswith(want) for seg in _COMMIT_SEGMENT.findall(uri))
+
+
+def check_version_source(desc: dict | None, fqn: str, sha: str) -> dict:
+    """Stage-copy: a version-source URI in ``DESCRIBE STREAMLIT`` must contain
+    ``/commits/<sha>/``, otherwise the object points at an old stage path and
+    viewers see stale code. (The git-repository source pins freshness via
+    fetch+PULL instead; callers skip this check there.) No DESCRIBE row, or
+    neither source column in it, means the check could not run: skipped."""
+    if desc is None:
+        return _skipped("version-source", "DESCRIBE STREAMLIT returned no row")
+    if not any(_has(desc, k) for k in _SOURCE_URI_KEYS):
+        return _skipped("version-source", "no version-source URI columns in DESCRIBE STREAMLIT")
+    uris = [str(_get(desc, k)) for k in _SOURCE_URI_KEYS if _get(desc, k)]
+    if any(_points_at(u, sha) for u in uris):
+        return _check("version-source", PASS, [])
+    return _check(
+        "version-source",
+        FAIL,
+        [
+            f"{fqn}: no version-source URI contains '/commits/{sha}/', so the deployed "
+            f"object does not point at the merged commit (saw: {uris or 'no source URI'})"
         ],
-    }
+    )
 
 
 def check_service_logs(log_text: str | None, fqn: str) -> dict:
     """Scan a container service log tail for crash-loop signatures. ``None``
-    (logs unavailable) is a warn-skip — this check is strictly best-effort."""
+    (logs unavailable) is skipped, not passed: this check is strictly
+    best-effort, so a skip never fails the run."""
     if log_text is None:
-        return {
-            "name": "service-logs",
-            "ok": True,
-            "level": "warn",
-            "findings": ["service logs unavailable — skipped (best-effort check)"],
-        }
+        return _skipped(
+            "service-logs",
+            "service logs unavailable: no single matching service, or no log access "
+            "(best-effort check)",
+        )
     lowered = log_text.lower()
     findings = [
         f"{fqn} service log contains {sig!r} — startup failure signature"
@@ -187,7 +222,7 @@ def check_service_logs(log_text: str | None, fqn: str) -> dict:
             f"{fqn} service log shows {banners} Streamlit start banners in one tail — "
             "restart loop (the service can report healthy while the app crash-loops)"
         )
-    return {"name": "service-logs", "ok": not findings, "level": "block", "findings": findings}
+    return _check("service-logs", FAIL if findings else PASS, findings)
 
 
 def _fetch_service_logs(cfg: Config, slug: str, run_query: RunQuery) -> str | None:
@@ -211,6 +246,13 @@ def _fetch_service_logs(cfg: Config, slug: str, run_query: RunQuery) -> str | No
         return None
 
 
+def _describe_blocker(exists: dict, describe_error: str) -> str:
+    """Why the DESCRIBE-based checks cannot run, or "" when they can."""
+    if not exists["ok"]:
+        return "the app does not exist"
+    return describe_error
+
+
 def verify_app(
     cfg: Config,
     slug: str,
@@ -221,39 +263,59 @@ def verify_app(
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
     """Run all post-deploy checks for one app; retries exists/live-version to
-    absorb container cold start. Returns ``{"app", "ok", "checks"}``."""
+    absorb container cold start. Returns ``{"app", "ok", "checks"}``, where
+    ``ok`` means no check failed (a skipped check is reported, not failed)."""
     fqn = streamlit_fqn(cfg, slug)
-    row: dict | None = None
-    checks: list[dict] = []
+    attempts = max(1, attempts)
     for attempt in range(attempts):
+        last = attempt == attempts - 1
         try:
             row = _show_streamlit(cfg, slug, run_query)
         except Exception as exc:
             row = None
-            if attempt == attempts - 1:
+            if last:
                 return {
                     "app": slug,
                     "ok": False,
-                    "checks": [
-                        {
-                            "name": "exists",
-                            "ok": False,
-                            "level": "block",
-                            "findings": [f"could not query {fqn}: {exc}"],
-                        }
-                    ],
+                    "checks": [_check("exists", FAIL, [f"could not query {fqn}: {exc}"])],
                 }
         exists = check_exists(row, fqn)
-        live = check_live_version(row, fqn)
-        if (exists["ok"] and live["ok"]) or attempt == attempts - 1:
-            checks = [exists, live]
+        desc, describe_error = None, ""
+        if exists["ok"]:
+            try:
+                desc = _describe_streamlit(fqn, run_query)
+            except Exception as exc:
+                describe_error = f"DESCRIBE STREAMLIT {fqn} failed: {exc}"
+        blocker = _describe_blocker(exists, describe_error)
+        live = _skipped("live-version", blocker) if blocker else check_live_version(desc, fqn)
+        # A missing column will not appear on a retry; a failed live version or
+        # a DESCRIBE error can, during the cold start that follows a version bump.
+        if last or (exists["ok"] and live["status"] != FAIL and not describe_error):
             break
-        sleep(delay)  # container cold start after a version bump takes 1–3 min
+        sleep(delay)  # container cold start after a version bump takes 1 to 3 min
 
+    checks = [exists, live]
     if sha and cfg.deploy.source == "stage-copy":
-        checks.append(check_version_source(row, fqn, sha))
+        blocker = _describe_blocker(exists, describe_error)
+        checks.append(
+            _skipped("version-source", blocker) if blocker else check_version_source(desc, fqn, sha)
+        )
 
     if cfg.runtime == "container":
         checks.append(check_service_logs(_fetch_service_logs(cfg, slug, run_query), fqn))
 
-    return {"app": slug, "ok": all(c["ok"] for c in checks), "checks": checks}
+    return {"app": slug, "ok": not any(c["status"] == FAIL for c in checks), "checks": checks}
+
+
+def summary_line(result: dict) -> str:
+    """``PASS: <app> (3 passed; 1 skipped: service-logs)``. Skipped checks are
+    counted and named on their own, never folded into the passes."""
+    by_status: dict[str, list[str]] = {PASS: [], FAIL: [], SKIPPED: []}
+    for c in result["checks"]:
+        by_status[c["status"]].append(c["name"])
+    parts = [f"{len(by_status[PASS])} passed"]
+    for status, word in ((FAIL, "failed"), (SKIPPED, "skipped")):
+        if by_status[status]:
+            parts.append(f"{len(by_status[status])} {word}: {', '.join(by_status[status])}")
+    verdict = "PASS" if result["ok"] else "FAIL"
+    return f"{verdict}: {result['app']} ({'; '.join(parts)})"

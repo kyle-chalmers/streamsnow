@@ -32,6 +32,12 @@ On merge to `main`, the workflow:
    `verify-deploy` without `--sha` (the fetch/refresh step is what advances
    versions there), and that refresh step is best-effort: a failed refresh
    logs and continues rather than failing the run.
+   Existence comes from `SHOW STREAMLITS`; the live-version and version-source
+   checks read `DESCRIBE STREAMLIT`, the only one of the two that carries the
+   version URIs. A check that cannot run prints `○ <check> (skipped)` with the
+   reason, and the summary line counts it apart from the passes
+   (`PASS: store-sales (3 passed; 1 skipped: service-logs)`). Skips never fail
+   the run; the container service-log scan is best-effort and often skips.
 
 The scaffolded checks workflow runs `validate-app` on every PR, but nothing
 wires it to the deploy job: `checks.yml` and `deploy.yml` are independent
