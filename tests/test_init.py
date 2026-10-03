@@ -216,6 +216,12 @@ def test_git_repository_config_scaffolds_git_deploy_workflow(tmp_path):
     deploy = (tmp_path / ".github/workflows/deploy.yml").read_text()
     assert "snow git fetch" in deploy
     assert "stage copy" not in deploy
+    # Hardened in 0.7.4: no refresh step that hid failures behind `|| true`,
+    # and verify-deploy proves the live version came from this commit.
+    assert "|| true" not in deploy
+    assert "--refresh" not in deploy
+    assert "EXPERIMENTAL" not in deploy
+    assert 'verify-deploy "$(basename "$d")" --sha "$GITHUB_SHA"' in deploy
 
 
 def test_brand_injection_rejected(tmp_path):

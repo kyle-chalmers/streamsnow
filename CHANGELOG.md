@@ -3,6 +3,44 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [0.7.4] - Unreleased
+
+The git-repository deploy source, hardened from a live test against Snowflake
+on 2026-10-03. Stage-copy stays the default.
+
+### Fixed
+
+- **A git-repository deploy could report success while serving old code.**
+  The workflow refreshed existing apps with ABORT / PULL / COMMIT behind
+  `|| true`, and verify-deploy skipped the version check for this source.
+  Deploys now run `CREATE OR REPLACE STREAMLIT ... FROM
+  '@<repo>/branches/<branch>/apps/<slug>/'` after `snow git fetch`, the same
+  idempotent statement stage-copy uses; a failed fetch fails the deploy.
+  Snowflake rejects a `/commits/<sha>/` path as a Git source ("Invalid git
+  branch path"), so `verify-deploy --sha` now compares the merge commit with
+  the `last_version_git_commit_hash` that `DESCRIBE STREAMLIT` reports. The
+  generated workflow passes `--sha "$GITHUB_SHA"` to it. Re-render with
+  `streamsnow update --apply` to pick this up; an older workflow's
+  `deploy-sql --refresh` call still works (it now prints a comment).
+- **The git setup SQL needed hand edits.** `CREATE GIT REPOSITORY` carried a
+  literal `<https://github.com/your-org/your-repo.git>` placeholder, and the
+  API integration allowed every GitHub repository. The new
+  `deploy.git_origin` config field fills `ORIGIN`, the integration allows only
+  `https://github.com/<owner>`, the non-admin script grants the CI role the
+  WRITE it needs to fetch, and the generated workflow is no longer labeled
+  experimental.
+
+### Added
+
+- **`github_auth_mode: public`.** A public repo needs no token: no secret, no
+  `GIT_CREDENTIALS`, no `CREATE SECRET` grant.
+- **`streamsnow deploy-setup --source git-repository`** prints the other deploy
+  source's setup for review without changing your config (with `--git-origin`
+  and `--github-auth`), under a `PREVIEW` banner. It never runs SQL.
+- **[Switching to the Git repository deploy source](docs/git-repository.md)**:
+  when to choose it, a least-privilege GitHub token, switching the config,
+  checking the first deploy, and dropping the old stage.
+
 ## [0.7.3] - 2026-10-03
 
 ### Removed
