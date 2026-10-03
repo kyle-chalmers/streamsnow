@@ -24,11 +24,14 @@ All notable changes to StreamSnow are recorded here. This project follows
 
 - **`/start-app --setup` proposes the wizard's answers.** Instead of running
   the wizard and leaving the user to answer cold, the setup skill reads the
-  account with read-only `SHOW` queries over the user's own `snow` connection
-  (compute pools, databases, the chosen database's schemas, existing Git
-  repositories), proposes each answer with a one-line reason, lets the user
-  confirm or change them inline, and runs `streamsnow init --no-starter-app`
-  with the confirmed answers as flags. It proposes the denied schemas from the
+  account with read-only `SHOW` queries (compute pools, databases, the chosen
+  database's schemas, existing Git repositories) over the access the machine
+  already has: the `snow` CLI's default connection first, then a Snowflake MCP
+  server connected to the agent, with a dbt profile as a further signal. It
+  checks the role before trusting an empty result, asks only the questions
+  the evidence could not settle, lets the user confirm or change the rest
+  inline, and runs `streamsnow init --no-starter-app` with the confirmed
+  answers as flags. It proposes the denied schemas from the
   raw and staging schemas that actually exist, recommends `stage-copy` unless a
   Git repository is already in use, and falls back to asking any question a
   probe cannot answer. It never runs DDL or grants.

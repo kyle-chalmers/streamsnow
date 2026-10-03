@@ -88,31 +88,54 @@ investigate, propose, confirm, then pass the confirmed answers as flags.
 
 ### 2a · Investigate (read-only)
 
-Use the user's own default `snow` connection. Its name is `detail.connection_name` of the
-`snow-key-file` check in `streamsnow doctor --format json` (present whenever a default
-connection exists). Never print `snow connection list` output: it shows the account. Run each
-probe as `snow sql -c <connection> --format json -q "<query>"`. The `->>` pipe keeps only the
-columns you need, so owners and share origins stay off screen:
+Find the answers before asking anything. Use whatever Snowflake access this machine and this
+agent session already have, in this order, and say which source and role each finding came from:
+
+1. **The `snow` CLI's default connection** (it reads `~/.snowflake/connections.toml` and
+   `config.toml`). Its name is `detail.connection_name` of the `snow-key-file` check in
+   `streamsnow doctor --format json` (present whenever a default connection exists). Run each probe
+   as `snow sql -c <connection> --format json -q "<query>"`. This is the preferred source: it is
+   the connection local preview reads, and `--connection` can take the account from it unseen.
+2. **A Snowflake MCP server already connected to this agent session** (a tool that runs Snowflake
+   SQL). Run the same probes through it. It is the fallback when `snow` is missing, broken or has
+   no default connection, and a second opinion when the `snow` role sees too little.
+3. **Other local Snowflake config, for signals only**: a dbt `profiles.yml` target of
+   `type: snowflake`, or a dbt project in this repo. Read only the `database`, `schema` and `role`
+   keys (a dbt target database usually is the curated one; `models/marts/` and similar folders
+   name the curated schemas). Never read or print passwords, tokens, key paths or whole files.
+
+Before trusting an empty result, run `SELECT CURRENT_ROLE()` on that source. An empty `SHOW` under
+`PUBLIC` or another low role means "not visible to this role", not "does not exist": try the next
+source, or ask that question instead of proposing from absence.
+
+**Never print** `snow connection list`, `claude mcp list` (or another agent's MCP listing), MCP
+config files, connection files, `profiles.yml`, or `SNOWFLAKE_*` environment values: any of them
+can show the account or a credential. Read named keys through a filter instead. The `->>` pipe
+in each probe keeps only the columns you need, so owners and share origins stay off screen:
 
 | Question | Probe | How to read it |
 |---|---|---|
 | Runtime | `SHOW COMPUTE POOLS ->> SELECT "name", "state" FROM $1` | Any pool listed: propose `container` (the default `SYSTEM_COMPUTE_POOL_CPU`, or the listed pool if that one is absent). None listed: propose `warehouse`, because trial accounts have no compute pools and the container runtime needs one; say that a paid account whose admin grants a pool can still choose `container`. |
-| Account | none | Derived from the connection with `--connection <name>`; never ask for it or echo it. |
+| Account | none | With a `snow` connection, pass `--connection <name>`: the CLI reads the account and never prints it. With only an MCP server, `SELECT CURRENT_ORGANIZATION_NAME() \|\| '-' \|\| CURRENT_ACCOUNT_NAME()` returns a usable identifier, but it then appears on screen: ask before running it, or let the user type it. |
 | Database | `SHOW DATABASES ->> SELECT "name", "kind", "comment" FROM $1` | Propose the curated or reporting database, never a raw or landing one. A comment saying what the data is for, or the user's own description of the app, outweighs the name; with neither, names like `ANALYTICS`, `REPORTING`, `MARTS` or `DW` point to curated data and `RAW`, `LANDING`, `INGEST`, `STAGING`, `SANDBOX` or `DEV` to raw. Ignore `SNOWFLAKE`, `SNOWFLAKE_LEARNING_DB`, `SNOWFLAKE_SAMPLE_DATA` and the StreamSnow app database (`STREAMSNOW_APPS` by default). Two plausible candidates: name both and ask. |
 | Allowed schemas | `SHOW SCHEMAS IN DATABASE <db> ->> SELECT "name", "comment" FROM $1` | Propose the curated schemas (`MARTS`, `REPORTING`, `ANALYTICS`, `CURATED`, `GOLD`, `PRESENTATION`); skip `INFORMATION_SCHEMA`. When nothing matches those names but the database holds only one or two other schemas that are not raw, propose those and say the names gave no signal. |
 | Denied schemas | same result | Propose the raw and staging schemas that actually exist (`RAW*`, `STG*`, `STAGING`, `LANDING`, `BRONZE`, `INGEST*`), not the `RAW,STAGING` default. When none exist, omit `--deny-schemas` so the default stands, and say it guards names that do not exist yet. An intermediate layer (`INT*`, `INTERMEDIATE`) goes in neither list unless the user says so. Never put a schema in both. |
 | Deploy source | `SHOW GIT REPOSITORIES IN ACCOUNT ->> SELECT "database_name", "schema_name", "name" FROM $1` | Propose `stage-copy`. Offer `git-repository` only when a GIT REPOSITORY already exists, and say what it adds: an API integration (ACCOUNTADMIN creates it), a GitHub token stored as a Snowflake secret, and Snowflake needing network access to GitHub. |
 
 These are SHOW and SELECT-over-SHOW only. **Never run DDL, grants, or anything that writes**, and
-never switch roles to get more visibility. A probe that errors (no privilege, no `snow`, no
-default connection) or returns nothing to choose from is not a failure: that question falls back
-to asking the user plainly, with no proposal, and you say why. With no usable connection at all,
-ask all five and pass `--account` with the locator the user gives.
+never switch roles to get more visibility. A probe that errors (no privilege, no source can see
+it) or returns nothing to choose from is not a failure: that question falls back to asking the
+user plainly, with no proposal, and you say why. With no usable source at all, ask all five and
+pass `--account` with the locator the user gives.
 
 ### 2b · Propose, confirm, run
 
-Show one table with the proposed answer and a one-line reason for each, then let the user confirm
-or change any of them inline ("schemas: MARTS only" is enough). Explain the schema lists when you
+Ask only what the investigation could not settle. Show one table of all five answers, each with a
+one-line reason and the source it came from, and mark each row **found** (one clear answer from
+the evidence) or **needs you** (two plausible candidates, nothing visible, or a judgment call).
+Ask the **needs you** rows as direct questions; one "yes" confirms every **found** row, and the
+user can still change any of them inline ("schemas: MARTS only" is enough). The allowed-schema
+list is always shown, even when found, because it is the data boundary. Explain the schema lists when you
 show them: `deploy-setup --admin` grants the CI role SELECT on exactly the allowed schemas, and
 deployed apps run with their owner's rights (the CI role), so the allowed list is the data
 boundary for every viewer; the denied list is what `streamsnow check schema-refs` blocks in app
@@ -125,8 +148,9 @@ streamsnow init --no-starter-app --runtime container --connection <name> \
 ```
 
 With all five answers passed, no prompt fires. `--connection` reads the account from that
-connection and makes it `snowflake.connection_name`; use `--account <locator>` only on the
-no-connection fallback. If `--connection` exits 2 (the connection names no account, or `snow`
+connection and makes it `snowflake.connection_name`; use `--account <locator>` only when there is
+no `snow` connection (MCP-only or nothing at all). Local preview still needs a `snow` connection
+later, which step 3 covers. If `--connection` exits 2 (the connection names no account, or `snow`
 cannot list connections), ask for the locator and pass `--account` instead. To change answers
 later, run `streamsnow configure` (interactive, prefilled from the current file) or
 `streamsnow init --no-starter-app --reconfigure` with the changed flags; answer flags on an
