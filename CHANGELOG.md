@@ -3,6 +3,44 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [0.7.5] - 2026-10-03
+
+### Added
+
+- **`init` and `configure` take the five wizard answers as flags.**
+  `--runtime`, `--account` (or `--connection <name>`), `--database`,
+  `--schemas` and `--deploy-source` each replace their question, and
+  `--deny-schemas` sets `governance.schema_deny` (default `RAW,STAGING`; `''`
+  denies none). With all five passed no prompt fires. The flags go through the
+  same defaults and prefill logic as the wizard, so the same answers write the
+  same file. `--connection` reads the account from that `snow` connection
+  without printing it and uses the connection as `snowflake.connection_name`.
+  Bad values, `--account` with `--connection`, a schema both allowed and
+  denied, or flags combined with `--config` exit 2 before anything is written;
+  on an existing config the flags need `--reconfigure`, so they are never
+  silently ignored. The interactive wizard is unchanged.
+
+### Changed
+
+- **`/start-app --setup` proposes the wizard's answers.** Instead of leaving
+  the user to answer the wizard cold, the setup skill first works out what
+  Snowflake access the user has (a default `snow` connection, other
+  connections, a Snowflake MCP server, a dbt profile, or nothing) and offers
+  to help create a `snow` connection when there is none, in the user's own
+  terminal so the account is never typed into chat. It then probes the
+  account read-only (`SHOW` with `INFORMATION_SCHEMA` fallbacks for tools that
+  refuse it), checks the role before trusting an empty result, and weighs the
+  evidence as a method rather than name rules: what the user said, then
+  comments, then what objects hold, then dbt, with names last. It asks only
+  what the evidence could not settle, writes the config with `configure` and
+  the confirmed answers, lets the user change the unasked defaults
+  (warehouse, roles, app database, compute pool), then runs
+  `streamsnow init --no-starter-app` so the governed files render from the
+  final values. Everything is a proposal the user can skip or override,
+  including `container` or `git-repository` against the evidence and keeping
+  a non-default connection (step 3 then sets up preview for it). It never
+  runs DDL or grants and never handles credentials in chat.
+
 ## [0.7.4] - 2026-10-03
 
 The git-repository deploy source, hardened from a live test against Snowflake

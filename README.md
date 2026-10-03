@@ -109,8 +109,12 @@ each question you cannot answer on my behalf.
 
 4. If the repo already has Streamlit apps, read
    https://github.com/kyle-chalmers/streamsnow/blob/main/skills/start-app/adopt.md and
-   follow that instead of scaffolding. Otherwise run `streamsnow init --no-starter-app`.
-   It is an interactive wizard; if you cannot answer its prompts, hand it to me.
+   follow that instead of scaffolding. Otherwise set up with `streamsnow init --no-starter-app`.
+   Its wizard asks five questions. Answer what you can first with read-only SHOW queries
+   over whatever Snowflake access I already have (my default snow connection, a Snowflake
+   MCP server, a dbt profile), ask me only what you could not settle, then pass the
+   confirmed answers as flags (see `streamsnow init --help`). If you cannot, hand the
+   wizard to me.
 
 5. Run `streamsnow agent-skills install --agent codex` (repo scope, the default; never
    `--scope user`). It copies the skills into this repo's .agents/skills, which Codex
@@ -201,7 +205,11 @@ StreamSnow's one-line session-start message first appears in your next session.
 doctor, walks each missing prerequisite one confirmation at a time, runs
 `streamsnow init --no-starter-app` (the five-question wizard plus the governed
 repo files: `AGENTS.md`, pre-commit hooks, CI, `.gitignore`, README; no example
-app), and hands you to `/start-app` to build your first app. In a repo that already has Streamlit apps it switches to adopt
+app), and hands you to `/start-app` to build your first app. You don't answer the
+wizard cold: Claude reads your account with read-only `SHOW` queries over the
+Snowflake access you already have (your `snow` connection, a Snowflake MCP server,
+a dbt profile), asks only what it could not settle, and runs `init` with the
+answers you confirm or change. In a repo that already has Streamlit apps it switches to adopt
 mode (maps onto what exists, writes `MIGRATION.md`, never scaffolds over you).
 
 ### CLI only
@@ -210,6 +218,8 @@ mode (maps onto what exists, writes `MIGRATION.md`, never scaffolds over you).
 uv tool install streamsnow           # persistent `streamsnow` on your PATH
 mkdir my-snowflake-apps && cd my-snowflake-apps
 streamsnow init                      # 5-question wizard, then a governed scaffold
+# or skip the prompts: streamsnow init --runtime warehouse --account <locator> \
+#   --database ANALYTICS --schemas MARTS,REPORTING --deploy-source stage-copy
 snow connection add --connection-name <name> --account <locator> \
   --user <you> --authenticator externalbrowser --default   # init prints the exact command
 uv tool install pre-commit && pre-commit install
