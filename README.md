@@ -25,8 +25,8 @@
 > **Status: beta, functional.** The CLI (configure / init / new / doctor /
 > validate-app / preview / check / sql-review / review-gate / review-loop /
 > migrate / nav / deploy-sql / deploy-setup / verify-deploy / update /
-> agent-skills) and the Claude Code plugin (8 skills + shared recipes, with
-> deprecated aliases for the pre-0.3 names) are implemented and CI-green for
+> agent-skills) and the Claude Code plugin (8 skills + shared recipes) are
+> implemented and CI-green for
 > both runtimes and both deploy sources. Published on PyPI (`uvx streamsnow` /
 > `pip install streamsnow`); APIs may still evolve toward 1.0.
 
@@ -246,8 +246,7 @@ streamsnow update --apply                # re-render AGENTS.md, hooks, CI, deplo
 
 Generated CI pins `streamsnow>=0.7,<0.8` (the deploy workflow
 `>=0.7.2,<0.8`); bump the pin with `update --apply` when you move majors.
-`claude plugin details streamsnow@streamsnow` lists 16 skills: 8 real ones plus
-8 deprecated aliases for the pre-0.3 names.
+`claude plugin details streamsnow@streamsnow` lists the 8 skills below.
 
 ## The skills
 
@@ -264,10 +263,6 @@ lines, with depth in per-skill reference files:
 | `/feedback-app` | Turn user feedback into classified, atomic-commit fixes |
 | `/ship-app` | Validate-gated stage → commit → push → PR → watch CI |
 | `/migrate-app` | Port an external Streamlit app in (lift, then conform) |
-
-Pre-0.3 names (`/new-app`, `/refine-requirements`, `/add-page`, `/onboard`,
-`/auto-review-app`, `/sql-review`, `/apply-review`, `/deep-dive-data`) still
-work as deprecated aliases and will be removed in the next major release.
 
 ## Use with other agents
 

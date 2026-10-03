@@ -107,10 +107,10 @@ a trial run), **extends** (domain-specific variant → keep, note it in AGENTS.m
    /review-app → /ship-app` with the plugin versions.
 4. **Delete the shadows** the trial proved covered; keep the extends with a one-line AGENTS.md note
    each; leave unrelated skills alone.
-5. **Old names keep working** during the transition — v0.3 ships deprecated aliases
-   (`/new-app`, `/refine-requirements`, `/add-page`, `/onboard`, `/auto-review-app`, `/sql-review`,
-   `/apply-review`, `/deep-dive-data`) that point at their replacements. They are removed in the
-   next major release, so update muscle memory (and any docs/scripts) before then.
+5. **Old names are gone.** The pre-0.3 aliases (`/new-app`, `/refine-requirements`,
+   `/add-page`, `/onboard`, `/auto-review-app`, `/sql-review`, `/apply-review`,
+   `/deep-dive-data`) were removed in 0.7.3; use the plugin equivalents in the table above, and
+   update any docs or scripts that still call the old names.
 
 ## Adoption knobs added in 0.7
 

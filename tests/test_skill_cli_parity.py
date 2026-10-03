@@ -33,7 +33,7 @@ _PASSTHROUGH = {
 }
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _CALL_RE = re.compile(r"(?<![\w/.-])streamsnow[ \t]+([a-z][a-z-]*)(?:[ \t]+([a-z][a-z-]*))?")
-_SCAN_DIRS = ("skills", "docs", "commands", "hooks")
+_SCAN_DIRS = ("skills", "docs", "hooks")
 _SCAN_FILES = ("README.md", "CONTRIBUTING.md", "RELEASING.md")
 
 
