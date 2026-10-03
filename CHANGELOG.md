@@ -3,7 +3,7 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
-## [0.7.4] - Unreleased
+## [0.7.4] - 2026-10-03
 
 The git-repository deploy source, hardened from a live test against Snowflake
 on 2026-10-03. Stage-copy stays the default.
