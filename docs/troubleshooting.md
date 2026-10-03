@@ -194,8 +194,9 @@ caught it. Runtime-specific facts link to the official page in
 - **Cause:** the installed plugin predates the feature; installed copies do not
   pick up hook or skill changes on their own. The SessionStart line prints the
   installed version.
-- **Fix:** `/plugin uninstall streamsnow@streamsnow`, `/plugin install
-  streamsnow@streamsnow`, restart Claude Code.
+- **Fix:** `claude plugin uninstall --scope project streamsnow@streamsnow`,
+  `claude plugin install --scope project streamsnow@streamsnow`, restart Claude
+  Code.
 
 ## Adding new issues
 
