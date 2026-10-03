@@ -172,7 +172,7 @@ StreamSnow treats two axes as first-class, configurable options:
 | Axis | Options |
 |------|---------|
 | **Runtime** | **Container** (default — GA since March 2026, full PyPI, local preview matches deploy) or **Warehouse** (instant start, Anaconda channel, no compute-pool cost). Snowflake's own comparison: [runtime environments](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/runtime-environments) |
-| **Deploy source** | **Stage-copy** (default — CI uploads to an internal stage) or **Snowflake `GIT REPOSITORY`** (Snowflake pulls from your Git repo) |
+| **Deploy source** | **Stage-copy** (default: CI uploads to an internal stage) or **Snowflake `GIT REPOSITORY`** (Snowflake pulls from your Git repo; see [Switching to Git repository](docs/git-repository.md)) |
 
 ## Quickstart
 
@@ -397,6 +397,8 @@ code — one implementation, many consumers.
   deploy sources.
 - **[Deploy setup](docs/deploy-setup.md)** — the one-time Snowflake objects and
   CI secrets the pipeline needs.
+- **[Switching to Git repository](docs/git-repository.md)**: when to deploy
+  from a Snowflake `GIT REPOSITORY` instead of a stage, and how to switch.
 - **[Auditing a visual](docs/auditing-a-visual.md)** — the five-minute runbook
   for confirming any dashboard number against the warehouse, no code required.
 - **[Production lessons](docs/production-lessons.md)** — the incidents behind

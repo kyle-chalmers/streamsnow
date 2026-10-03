@@ -7,17 +7,34 @@ from pathlib import Path
 import pytest
 import yaml
 
-from streamsnow.config import Config
+from streamsnow.config import Config, ConfigError
 from streamsnow.deploy import (
     generate_admin_sql,
     generate_create_sql,
-    generate_refresh_sql,
     generate_setup_sql,
     stage_path,
+    with_source,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE = REPO_ROOT / "streamsnow.config.example.yaml"
+
+
+ORIGIN = "https://github.com/acme/dashboards.git"
+
+GIT_DEPLOY = {
+    "source": "git-repository",
+    "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
+    "api_integration_name": "GITHUB_API_INTEGRATION",
+    "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
+    "git_origin": ORIGIN,
+}
+
+
+def _git_cfg(**deploy) -> Config:
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data["deploy"] = {**GIT_DEPLOY, **deploy}
+    return Config.from_dict(data)
 
 
 def _cfg(**overrides) -> Config:
@@ -56,24 +73,21 @@ def test_warehouse_create_sql_has_no_runtime_alter():
     assert "ADD LIVE VERSION FROM LAST" in sql
 
 
-def test_git_repository_create_and_refresh():
-    data = yaml.safe_load(EXAMPLE.read_text())
-    data["deploy"] = {
-        "source": "git-repository",
-        "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
-        "api_integration_name": "GITHUB_API_INTEGRATION",
-        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
-    }
-    cfg = Config.from_dict(data)
-    create = generate_create_sql(cfg, "sales-overview")
-    assert "CREATE STREAMLIT IF NOT EXISTS" in create
+def test_git_repository_create_redeploys_from_the_branch():
+    """CREATE OR REPLACE from the branch path, like stage-copy: CREATE copies the
+    files once, so each deploy rebuilds from what `snow git fetch` brought in.
+    No ABORT/PULL/COMMIT refresh, and no /commits/ path (Snowflake rejects it
+    for a GIT REPOSITORY source: "Invalid git branch path", observed 2026-10-03)."""
+    create = generate_create_sql(_git_cfg(), "sales-overview")
+    assert "CREATE OR REPLACE STREAMLIT STREAMSNOW_APPS.DASHBOARDS.SALES_OVERVIEW" in create
     assert (
         "FROM '@STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO/branches/main/apps/sales-overview/'"
         in create
     )
-    refresh = generate_refresh_sql(cfg, "sales-overview")
-    for verb in ("ABORT;", "PULL;", "COMMIT;", "ADD LIVE VERSION FROM LAST;"):
-        assert verb in refresh
+    assert "/commits/" not in create
+    for verb in ("ABORT", "PULL", "COMMIT"):
+        assert verb not in create
+    assert "ADD LIVE VERSION FROM LAST" in create
 
 
 def test_setup_sql_per_source():
@@ -86,11 +100,80 @@ def test_setup_sql_per_source():
         "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
         "api_integration_name": "GITHUB_API_INTEGRATION",
         "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
+        "git_origin": ORIGIN,
     }
     git = generate_setup_sql(Config.from_dict(data))
     assert "CREATE API INTEGRATION IF NOT EXISTS GITHUB_API_INTEGRATION" in git
     assert "CREATE GIT REPOSITORY IF NOT EXISTS STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO" in git
-    assert "GRANT READ ON GIT REPOSITORY" in git
+    assert "GRANT READ, WRITE ON GIT REPOSITORY" in git
+
+
+def test_git_setup_sql_has_no_placeholder_but_the_token():
+    """ORIGIN comes from deploy.git_origin, and the integration allows only the
+    repo's owner, not all of github.com."""
+    git = generate_setup_sql(_git_cfg())
+    assert f"ORIGIN = '{ORIGIN}';" in git
+    assert "API_ALLOWED_PREFIXES = ('https://github.com/acme')" in git
+    assert "your-org" not in git
+    # Not named on the integration: the secret is created after it.
+    assert "ALLOWED_AUTHENTICATION_SECRETS" not in git
+    assert "GRANT READ, WRITE ON GIT REPOSITORY" in git
+    assert "GIT_CREDENTIALS = STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET" in git
+    assert _stmts(git).count("<") == 1 and "PASSWORD = '<github-token>'" in git
+
+
+def test_public_repo_setup_needs_no_secret():
+    cfg = _git_cfg(github_auth_mode="public", secret_name=None)
+    assert cfg.deploy.secret_name == ""
+    for sql in (generate_setup_sql(cfg), generate_admin_sql(cfg)):
+        assert "SECRET" not in _stmts(sql)
+        assert "GIT_CREDENTIALS" not in sql
+        assert "<github-token>" not in sql
+        assert f"ORIGIN = '{ORIGIN}';" in sql
+
+
+def test_git_setup_without_an_origin_says_how_to_set_it():
+    with pytest.raises(ConfigError, match="deploy.git_origin"):
+        generate_setup_sql(_git_cfg(git_origin=None))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        # Joined with + so the privacy scan does not read them as email addresses.
+        "https://user:token" + "@github.com/acme/dashboards.git",
+        "git" + "@github.com:acme/dashboards.git",
+        "https://github.com/acme/dashboards.git'; DROP DATABASE x; --",
+        "https://gitlab.com/acme/dashboards.git",
+        "https://github.com/acme/dashboards.git\n",
+        "https://github.com/acme/..",
+    ],
+)
+def test_git_origin_is_validated_strictly(bad):
+    with pytest.raises(ConfigError, match="git_origin"):
+        _git_cfg(git_origin=bad)
+
+
+def test_source_override_matches_a_git_repository_config():
+    """`deploy-setup --source git-repository` on a stage-copy config prints the
+    same SQL a git-repository config (with the wizard's default names) would."""
+    stage_cfg = _cfg()
+    previewed = with_source(stage_cfg, "git-repository", git_origin=ORIGIN)
+    assert generate_setup_sql(previewed) == generate_setup_sql(_git_cfg())
+    assert generate_admin_sql(previewed) == generate_admin_sql(_git_cfg())
+    public = with_source(stage_cfg, "git-repository", git_origin=ORIGIN, github_auth="public")
+    assert generate_admin_sql(public) == generate_admin_sql(
+        _git_cfg(github_auth_mode="public", secret_name=None)
+    )
+
+
+def test_source_override_leaves_stage_copy_output_unchanged():
+    cfg = _cfg()
+    same = with_source(cfg, "stage-copy")
+    assert generate_setup_sql(same) == generate_setup_sql(cfg)
+    assert generate_admin_sql(same) == generate_admin_sql(cfg)
+    back = with_source(_git_cfg(), "stage-copy")
+    assert generate_admin_sql(back) == generate_admin_sql(cfg)
 
 
 def test_stage_path():
@@ -230,6 +313,7 @@ def test_admin_sql_git_repository_source():
         "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
         "api_integration_name": "GITHUB_API_INTEGRATION",
         "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
+        "git_origin": ORIGIN,
     }
     sql = generate_admin_sql(Config.from_dict(data))
     sec = _sections(sql)
@@ -272,6 +356,55 @@ def test_cli_deploy_setup_admin_flag(tmp_path):
     assert "USE ROLE USERADMIN;" in res.output
     plain = CliRunner().invoke(app, ["deploy-setup", "--config", str(cfg)])
     assert "USE ROLE USERADMIN;" not in plain.output
+
+
+def _cli(*args: str):
+    from typer.testing import CliRunner
+
+    from streamsnow.cli import app
+
+    return CliRunner().invoke(app, list(args))
+
+
+def test_cli_deploy_setup_source_override_previews_without_touching_config(tmp_path):
+    cfg = tmp_path / "streamsnow.config.yaml"
+    cfg.write_text(EXAMPLE.read_text())
+    before = cfg.read_text()
+    res = _cli(
+        "deploy-setup", "--admin", "--source", "git-repository", "--git-origin", ORIGIN,
+        "--config", str(cfg),
+    )  # fmt: skip
+    assert res.exit_code == 0, res.output
+    assert res.output.startswith("-- PREVIEW of the git-repository deploy source.")
+    assert "Your config uses stage-copy" in res.output
+    assert generate_admin_sql(_git_cfg()) in res.output
+    assert cfg.read_text() == before
+    # Without the override, the stage-copy output carries no preview banner.
+    plain = _cli("deploy-setup", "--admin", "--config", str(cfg))
+    assert plain.exit_code == 0, plain.output
+    assert "PREVIEW" not in plain.output
+    assert plain.output.strip() == generate_admin_sql(_cfg()).strip()
+
+
+def test_cli_deploy_setup_git_override_without_an_origin_exits_2(tmp_path):
+    cfg = tmp_path / "streamsnow.config.yaml"
+    cfg.write_text(EXAMPLE.read_text())
+    res = _cli("deploy-setup", "--source", "git-repository", "--config", str(cfg))
+    assert res.exit_code == 2
+    assert "--git-origin" in res.output
+
+
+def test_cli_deploy_sql_refresh_is_a_no_op_for_old_workflows(tmp_path):
+    """Workflows rendered before 0.7.4 still run `deploy-sql --refresh` and pipe
+    it to `snow sql ... || true`; it must print SQL that runs nothing."""
+    data = yaml.safe_load(EXAMPLE.read_text())
+    data["deploy"] = GIT_DEPLOY
+    cfg = tmp_path / "streamsnow.config.yaml"
+    cfg.write_text(yaml.safe_dump(data))
+    res = _cli("deploy-sql", "my-app", "--refresh", "--config", str(cfg))
+    assert res.exit_code == 0, res.output
+    lines = [ln for ln in res.output.splitlines() if ln.strip()]
+    assert lines and all(ln.startswith("--") for ln in lines)
 
 
 def test_admin_sql_eai_uses_valid_create_syntax():

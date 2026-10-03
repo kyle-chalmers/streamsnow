@@ -22,23 +22,62 @@ All notable changes to StreamSnow are recorded here. This project follows
 
 ### Changed
 
-- **`/start-app --setup` proposes the wizard's answers.** Instead of running
-  the wizard and leaving the user to answer cold, the setup skill reads the
-  account with read-only `SHOW` queries (compute pools, databases, the chosen
-  database's schemas, existing Git repositories) over the access the machine
-  already has: the `snow` CLI's default connection first, then a Snowflake MCP
-  server connected to the agent, with a dbt profile as a further signal. It
-  checks the role before trusting an empty result, asks only the questions
-  the evidence could not settle, lets the user confirm or change the rest
-  inline, and runs `streamsnow init --no-starter-app` with the confirmed
-  answers as flags. Everything is a proposal: the user can skip the
-  investigation, pick the connection or role it uses, override any answer
-  (including `container` or `git-repository` against the evidence), keep a
-  non-default connection, and review the wizard's unasked defaults (warehouse,
-  roles, app database, compute pool) after `init`. It proposes the denied schemas from the
-  raw and staging schemas that actually exist, recommends `stage-copy` unless a
-  Git repository is already in use, and falls back to asking any question a
-  probe cannot answer. It never runs DDL or grants.
+- **`/start-app --setup` proposes the wizard's answers.** Instead of leaving
+  the user to answer the wizard cold, the setup skill first works out what
+  Snowflake access the user has (a default `snow` connection, other
+  connections, a Snowflake MCP server, a dbt profile, or nothing) and offers
+  to help create a `snow` connection when there is none, in the user's own
+  terminal so the account is never typed into chat. It then probes the
+  account read-only (`SHOW` with `INFORMATION_SCHEMA` fallbacks for tools that
+  refuse it), checks the role before trusting an empty result, and weighs the
+  evidence as a method rather than name rules: what the user said, then
+  comments, then what objects hold, then dbt, with names last. It asks only
+  what the evidence could not settle, writes the config with `configure` and
+  the confirmed answers, lets the user change the unasked defaults
+  (warehouse, roles, app database, compute pool), then runs
+  `streamsnow init --no-starter-app` so the governed files render from the
+  final values. Everything is a proposal the user can skip or override,
+  including `container` or `git-repository` against the evidence and keeping
+  a non-default connection (step 3 then sets up preview for it). It never
+  runs DDL or grants and never handles credentials in chat.
+
+## [0.7.4] - 2026-10-03
+
+The git-repository deploy source, hardened from a live test against Snowflake
+on 2026-10-03. Stage-copy stays the default.
+
+### Fixed
+
+- **A git-repository deploy could report success while serving old code.**
+  The workflow refreshed existing apps with ABORT / PULL / COMMIT behind
+  `|| true`, and verify-deploy skipped the version check for this source.
+  Deploys now run `CREATE OR REPLACE STREAMLIT ... FROM
+  '@<repo>/branches/<branch>/apps/<slug>/'` after `snow git fetch`, the same
+  idempotent statement stage-copy uses; a failed fetch fails the deploy.
+  Snowflake rejects a `/commits/<sha>/` path as a Git source ("Invalid git
+  branch path"), so `verify-deploy --sha` now compares the merge commit with
+  the `last_version_git_commit_hash` that `DESCRIBE STREAMLIT` reports. The
+  generated workflow passes `--sha "$GITHUB_SHA"` to it. Re-render with
+  `streamsnow update --apply` to pick this up; an older workflow's
+  `deploy-sql --refresh` call still works (it now prints a comment).
+- **The git setup SQL needed hand edits.** `CREATE GIT REPOSITORY` carried a
+  literal `<https://github.com/your-org/your-repo.git>` placeholder, and the
+  API integration allowed every GitHub repository. The new
+  `deploy.git_origin` config field fills `ORIGIN`, the integration allows only
+  `https://github.com/<owner>`, the non-admin script grants the CI role the
+  WRITE it needs to fetch, and the generated workflow is no longer labeled
+  experimental.
+
+### Added
+
+- **`github_auth_mode: public`.** A public repo needs no token: no secret, no
+  `GIT_CREDENTIALS`, no `CREATE SECRET` grant.
+- **`streamsnow deploy-setup --source git-repository`** prints the other deploy
+  source's setup for review without changing your config (with `--git-origin`
+  and `--github-auth`), under a `PREVIEW` banner. It never runs SQL.
+- **[Switching to the Git repository deploy source](docs/git-repository.md)**:
+  when to choose it, a least-privilege GitHub token, switching the config,
+  checking the first deploy, and dropping the old stage.
 
 ## [0.7.3] - 2026-10-03
 

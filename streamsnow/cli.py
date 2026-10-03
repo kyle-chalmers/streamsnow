@@ -32,13 +32,14 @@ from .config import (
     ConfigError,
     load_config,
     normalize_account,
+    validate_github_origin,
 )
 from .deploy import (
     generate_admin_sql,
     generate_create_sql,
-    generate_refresh_sql,
     generate_setup_sql,
     stage_path,
+    with_source,
 )
 from .scaffolder import (
     APP_ITEMS,
@@ -358,7 +359,7 @@ _DEFAULT_COMMENTS: dict[str, str] = {
     "deploy.git_branch": "branch the deploy tracks",
     "deploy.api_integration_name": "TODO: confirm before first deploy",
     "deploy.secret_name": "TODO: confirm before first deploy",
-    "deploy.github_auth_mode": "pat or github-app",
+    "deploy.github_auth_mode": "pat | github-app | public (a public repo needs no token)",
 }
 
 
@@ -858,6 +859,23 @@ def deploy_setup(
         help="Emit the full one-time admin bootstrap: database, schema, warehouse, roles, "
         "CI service user, grants, and container/git account objects.",
     ),
+    source: str = typer.Option(
+        None,
+        "--source",
+        help="Print the setup for this deploy source (stage-copy | git-repository) instead "
+        "of the one in your config, to review before switching. Changes nothing.",
+    ),
+    git_origin: str = typer.Option(
+        None,
+        "--git-origin",
+        help="git-repository: the repo's HTTPS URL (default: deploy.git_origin, else this "
+        "checkout's GitHub origin remote).",
+    ),
+    github_auth: str = typer.Option(
+        None,
+        "--github-auth",
+        help="git-repository: pat | github-app | public (a public repo needs no token).",
+    ),
 ) -> None:
     """Emit the one-time Snowflake DDL for your configured deploy source.
 
@@ -869,10 +887,59 @@ def deploy_setup(
     """
     try:
         cfg = load_config(Path(config) if config else None)
+        configured = cfg.deploy.source
+        if source or git_origin or github_auth:
+            target = source or configured
+            origin = git_origin
+            if target == "git-repository" and not origin and not cfg.deploy.git_origin:
+                origin = _checkout_github_origin()
+            cfg = with_source(cfg, target, git_origin=origin, github_auth=github_auth)
+        sql = generate_admin_sql(cfg) if admin else generate_setup_sql(cfg)
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
-    print(generate_admin_sql(cfg) if admin else generate_setup_sql(cfg))
+    if cfg.deploy.source != configured:
+        sql = (
+            f"-- PREVIEW of the {cfg.deploy.source} deploy source. Your config uses {configured};\n"
+            "-- nothing here takes effect until you switch deploy.source (`streamsnow configure`)\n"
+            "-- and re-render the deploy workflow (`streamsnow update --apply`). See\n"
+            "-- docs/git-repository.md. Review only: this command never runs SQL.\n" + sql
+        )
+    print(sql)
+
+
+_SSH_GITHUB_RE = re.compile(
+    r"^(?:ssh://)?git@github\.com[:/](?P<path>[^/\s]+/[^/\s]+?)(?:\.git)?/?$"
+)
+
+
+def _checkout_github_origin() -> str | None:
+    """This checkout's ``origin`` remote as a GitHub HTTPS URL, or None.
+
+    SSH remotes (the ``git@`` form) become HTTPS, the form a
+    Snowflake GIT REPOSITORY clones from; anything else is left for the user
+    to pass with --git-origin rather than guessed at.
+    """
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    url = proc.stdout.strip().rstrip("/") if proc.returncode == 0 else ""
+    m = _SSH_GITHUB_RE.match(url)
+    if m:
+        url = f"https://github.com/{m.group('path')}.git"
+    try:
+        return validate_github_origin(url, "origin remote")
+    except ConfigError:
+        return None
 
 
 @app.command(name="config-get")
@@ -915,14 +982,23 @@ def deploy_sql(
     refresh: bool = typer.Option(
         False,
         "--refresh",
-        help="git-repository: emit the ABORT/PULL/COMMIT refresh for an existing app.",
+        hidden=True,
+        help="Deprecated no-op: git-repository deploys now CREATE OR REPLACE.",
     ),
     config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
 ) -> None:
     """Emit the CREATE OR REPLACE STREAMLIT SQL for one app (used by the deploy workflow)."""
     try:
         cfg = load_config(Path(config) if config else None)
-        sql = generate_refresh_sql(cfg, slug) if refresh else generate_create_sql(cfg, slug, sha)
+        # Workflows rendered before 0.7.4 still run `deploy-sql --refresh` (an
+        # ABORT/PULL/COMMIT refresh, piped to `snow sql ... || true`) after the
+        # create step. The create step now redeploys on its own, so the refresh
+        # is a comment that runs nothing.
+        sql = (
+            "-- refresh is no longer needed: the create step redeploys with CREATE OR REPLACE."
+            if refresh
+            else generate_create_sql(cfg, slug, sha)
+        )
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
@@ -935,7 +1011,9 @@ def deploy_sql(
 @app.command(name="verify-deploy")
 def verify_deploy_cmd(
     slug: str = typer.Argument(..., help="App slug to verify."),
-    sha: str = typer.Option(None, "--sha", help="Expected commit SHA (stage-copy source check)."),
+    sha: str = typer.Option(
+        None, "--sha", help="Expected commit SHA: the version-source check confirms it is live."
+    ),
     attempts: int = typer.Option(3, "--attempts", help="Retries for cold-start absorption."),
     delay: float = typer.Option(20.0, "--delay", help="Seconds between retries."),
     temporary_connection: bool = typer.Option(
