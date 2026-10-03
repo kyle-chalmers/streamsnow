@@ -86,10 +86,30 @@ names, container objects) is written as a sensible default with an inline commen
 change it; the file is the editing surface. Don't make the user answer those questions cold:
 investigate, propose, confirm, then pass the confirmed answers as flags.
 
-### 2a · Investigate (read-only)
+### 2a · Find the user's Snowflake access
+
+Every user arrives with a different setup: a `snow` connection from a past tutorial, a Snowflake
+MCP server in their agent, a dbt profile, several accounts, or nothing at all. Work out which
+before asking anything, and help them get to a working default `snow` connection, because local
+preview reads it and `--connection` can take the account from it without anyone typing the
+account into chat.
+
+| What you find | What to do |
+|---|---|
+| A default `snow` connection (`snow-key-file` in `streamsnow doctor --format json` names it) | Use it. Confirm with the user that it is the account these apps are for. |
+| `snow` connections, none of them default | List the names only: `snow connection list --format json \| python3 -c "import json,sys; [print(r.get('connection_name'), r.get('is_default')) for r in json.load(sys.stdin)]"`. Ask which one is this account. Making it the default (`snow connection set-default <name>`) repoints every tool that reads the default, so ask before running it. |
+| No `snow` connection, but a Snowflake MCP server or a dbt profile | Investigate through those (2b). Then offer to add a `snow` connection as below, since local preview needs one. |
+| No Snowflake access on this machine | Help set it up. Ask how they sign in: SSO (`--authenticator externalbrowser`), a key pair (`--private-key-file <path>` with `--authenticator SNOWFLAKE_JWT`), or a programmatic access token. Then have them run `snow connection add --connection-name <slug> --default` in their own terminal, adding only that sign-in flag; it prompts for the account identifier, user and the rest, so nothing is typed into chat. The account identifier is in Snowsight's account menu (bottom left) under the account details. Then have them run `snow connection test -c <slug>`, which may open a browser. |
+| No Snowflake account | Point them to a Snowflake trial. Trial accounts have no compute pools, so expect the `warehouse` runtime. |
+
+Never ask for a password, token or key in chat, never open or edit the connection files, and
+never propose password-only auth (Snowflake's MFA rollout retires it). If the user would rather
+not set up a connection now, carry on with whatever access exists and fall back to asking.
+
+### 2b · Investigate (read-only)
 
 Find the answers before asking anything. Use whatever Snowflake access this machine and this
-agent session already have, in this order, and say which source and role each finding came from:
+agent session have, in this order, and say which source and role each finding came from:
 
 1. **The `snow` CLI's default connection** (it reads `~/.snowflake/connections.toml` and
    `config.toml`). Its name is `detail.connection_name` of the `snow-key-file` check in
@@ -128,7 +148,7 @@ it) or returns nothing to choose from is not a failure: that question falls back
 user plainly, with no proposal, and you say why. With no usable source at all, ask all five and
 pass `--account` with the locator the user gives.
 
-### 2b · Propose, confirm, run
+### 2c · Propose, confirm, run
 
 Ask only what the investigation could not settle. Show one table of all five answers, each with a
 one-line reason and the source it came from, and mark each row **found** (one clear answer from
@@ -179,9 +199,10 @@ default every other tool reads. If the check fails but its hint names an existin
 connection, the usual fix is to set `snowflake.connection_name` to that name (confirm with the
 user first) rather than create a new one.
 
-Only when there is no usable connection: `streamsnow init` (and `configure`) print the exact
+A connection created in 2a is already the default, so this step only confirms it. When the user
+skipped creating one in 2a, `streamsnow init` (and `configure`) print the exact
 `snow connection add … --default` command for the account.
-Have the user run it (it opens a browser for SSO) — never ask for credentials in chat. That writes
+Have the user run it (it opens a browser for SSO); never ask for credentials in chat. That writes
 the `snow` CLI's `connections.toml`, which `st.connection("snowflake")` reads locally, so it is the
 only place account details get typed. Then re-run `streamsnow doctor --format json` and confirm the
 `snow-connection` check reads `ok: true`.
