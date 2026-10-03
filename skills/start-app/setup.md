@@ -67,13 +67,8 @@ First decide which case this is:
 
 - The repo **already has Streamlit apps or its own agent commands or skills**: stop, that's
   [adopt mode](adopt.md), which maps onto what exists instead of scaffolding.
-- Otherwise (an empty repo, or one with no `apps/` yet), run:
-
-  ```
-  streamsnow init --no-starter-app
-  ```
-
-  This is the setup verb. It runs the config wizard (or reuses an existing
+- Otherwise (an empty repo, or one with no `apps/` yet), the setup verb is
+  `streamsnow init --no-starter-app`. It runs the config wizard (or reuses an existing
   `streamsnow.config.yaml`) and then writes the governed repo files: `AGENTS.md`, `CLAUDE.md`,
   `.gitignore`, `.pre-commit-config.yaml`, `.github/workflows/`, `README.md` and
   `deploy/tombstones.yml`. It writes no example app; `/start-app` scaffolds the real one next
@@ -82,14 +77,65 @@ First decide which case this is:
   way has no hooks, no CI and no `.gitignore` (an app's `.streamlit/secrets.toml` could then be
   committed). `streamsnow new` warns when those files are missing; the fix is the same command.
 
-The wizard detects what it can and asks **at most 5 questions**: runtime, Snowflake account, the
-database apps query, the allowed schemas, and the deploy source. Everything else (project name,
-roles, warehouse, schema names, container objects) is written as a sensible default with an inline
-comment saying when to change it; the file is the editing surface. To change answers later, run
-`streamsnow configure` (it prefills from the current file, so re-running is an edit, not a
-restart); existing repo files are left alone by a re-run of `init --no-starter-app`.
+When `streamsnow.config.yaml` already exists, run `streamsnow init --no-starter-app` as is: it
+reuses the file and writes only the missing repo files. Skip the proposals below.
 
-- **Don't hand-author `streamsnow.config.yaml` from scratch**: the wizard owns its shape.
+The wizard asks **at most 5 questions**: runtime, Snowflake account, the database apps query, the
+allowed schemas, and the deploy source. Everything else (project name, roles, warehouse, schema
+names, container objects) is written as a sensible default with an inline comment saying when to
+change it; the file is the editing surface. Don't make the user answer those questions cold:
+investigate, propose, confirm, then pass the confirmed answers as flags.
+
+### 2a · Investigate (read-only)
+
+Use the user's own default `snow` connection. Its name is `detail.connection_name` of the
+`snow-key-file` check in `streamsnow doctor --format json` (present whenever a default
+connection exists). Never print `snow connection list` output: it shows the account. Run each
+probe as `snow sql -c <connection> --format json -q "<query>"`. The `->>` pipe keeps only the
+columns you need, so owners and share origins stay off screen:
+
+| Question | Probe | How to read it |
+|---|---|---|
+| Runtime | `SHOW COMPUTE POOLS ->> SELECT "name", "state" FROM $1` | Any pool listed: propose `container` (the default `SYSTEM_COMPUTE_POOL_CPU`, or the listed pool if that one is absent). None listed: propose `warehouse`, because trial accounts have no compute pools and the container runtime needs one; say that a paid account whose admin grants a pool can still choose `container`. |
+| Account | none | Derived from the connection with `--connection <name>`; never ask for it or echo it. |
+| Database | `SHOW DATABASES ->> SELECT "name", "kind", "comment" FROM $1` | Propose the curated or reporting database (names like `ANALYTICS`, `REPORTING`, `MARTS`, `DW`, `PROD`), never a raw or landing one (`RAW`, `LANDING`, `INGEST`, `STAGING`, `SANDBOX`, `DEV`). Ignore `SNOWFLAKE`, `SNOWFLAKE_SAMPLE_DATA` and the StreamSnow app database. Two plausible candidates: name both and ask. |
+| Allowed schemas | `SHOW SCHEMAS IN DATABASE <db> ->> SELECT "name", "comment" FROM $1` | Propose the curated schemas (`MARTS`, `REPORTING`, `ANALYTICS`, `CURATED`, `GOLD`, `PRESENTATION`); skip `INFORMATION_SCHEMA`. |
+| Denied schemas | same result | Propose the raw and staging schemas that actually exist (`RAW*`, `STG*`, `STAGING`, `LANDING`, `BRONZE`, `INGEST*`), not the `RAW,STAGING` default. An intermediate layer (`INT*`, `INTERMEDIATE`) goes in neither list unless the user says so. Never put a schema in both. |
+| Deploy source | `SHOW GIT REPOSITORIES IN ACCOUNT ->> SELECT "database_name", "schema_name", "name" FROM $1` | Propose `stage-copy`. Offer `git-repository` only when a GIT REPOSITORY already exists, and say what it adds: an API integration (ACCOUNTADMIN creates it), a GitHub token stored as a Snowflake secret, and Snowflake needing network access to GitHub. |
+
+These are SHOW and SELECT-over-SHOW only. **Never run DDL, grants, or anything that writes**, and
+never switch roles to get more visibility. A probe that errors (no privilege, no `snow`, no
+default connection) or returns nothing to choose from is not a failure: that question falls back
+to asking the user plainly, with no proposal, and you say why. With no usable connection at all,
+ask all five and pass `--account` with the locator the user gives.
+
+### 2b · Propose, confirm, run
+
+Show one table with the proposed answer and a one-line reason for each, then let the user confirm
+or change any of them inline ("schemas: MARTS only" is enough). Explain the schema lists when you
+show them: `deploy-setup --admin` grants the CI role SELECT on exactly the allowed schemas, and
+deployed apps run with their owner's rights (the CI role), so the allowed list is the data
+boundary for every viewer; the denied list is what `streamsnow check schema-refs` blocks in app
+code. Then run, with the confirmed answers:
+
+```
+streamsnow init --no-starter-app --runtime container --connection <name> \
+  --database ANALYTICS --schemas MARTS,REPORTING --deny-schemas RAW,STG_CRM \
+  --deploy-source stage-copy
+```
+
+With all five answers passed, no prompt fires. `--connection` reads the account from that
+connection and makes it `snowflake.connection_name`; use `--account <locator>` only on the
+no-connection fallback. If `--connection` exits 2 (the connection names no account, or `snow`
+cannot list connections), ask for the locator and pass `--account` instead. To change answers
+later, run `streamsnow configure` (interactive, prefilled from the current file) or
+`streamsnow init --no-starter-app --reconfigure` with the changed flags; answer flags on an
+existing config without `--reconfigure` exit 2 rather than being ignored. When the deploy source
+is `git-repository`, the written `deploy.git_repository_fqn` is a placeholder: propose setting it
+to the repository the probe found.
+
+- **Don't hand-author `streamsnow.config.yaml` from scratch**: the wizard owns its shape, and the
+  answer flags are its supported non-interactive path.
 - **Not in Claude Code?** After `init`, `streamsnow agent-skills install --agent codex` copies these
   skills into the repo's `.agents/skills/`, where every teammate's Codex finds them; commit it.
 - `streamsnow init` without the flag also scaffolds an `example-dashboard` starter app. That is

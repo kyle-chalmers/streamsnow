@@ -3,6 +3,36 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [Unreleased]
+
+### Added
+
+- **`init` and `configure` take the five wizard answers as flags.**
+  `--runtime`, `--account` (or `--connection <name>`), `--database`,
+  `--schemas` and `--deploy-source` each replace their question, and
+  `--deny-schemas` sets `governance.schema_deny` (default `RAW,STAGING`; `''`
+  denies none). With all five passed no prompt fires. The flags go through the
+  same defaults and prefill logic as the wizard, so the same answers write the
+  same file. `--connection` reads the account from that `snow` connection
+  without printing it and uses the connection as `snowflake.connection_name`.
+  Bad values, `--account` with `--connection`, a schema both allowed and
+  denied, or flags combined with `--config` exit 2 before anything is written;
+  on an existing config the flags need `--reconfigure`, so they are never
+  silently ignored. The interactive wizard is unchanged.
+
+### Changed
+
+- **`/start-app --setup` proposes the wizard's answers.** Instead of running
+  the wizard and leaving the user to answer cold, the setup skill reads the
+  account with read-only `SHOW` queries over the user's own `snow` connection
+  (compute pools, databases, the chosen database's schemas, existing Git
+  repositories), proposes each answer with a one-line reason, lets the user
+  confirm or change them inline, and runs `streamsnow init --no-starter-app`
+  with the confirmed answers as flags. It proposes the denied schemas from the
+  raw and staging schemas that actually exist, recommends `stage-copy` unless a
+  Git repository is already in use, and falls back to asking any question a
+  probe cannot answer. It never runs DDL or grants.
+
 ## [0.7.3] - 2026-10-03
 
 ### Removed
