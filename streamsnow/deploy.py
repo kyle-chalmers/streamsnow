@@ -1,25 +1,38 @@
 """Generate Snowflake deploy SQL from config — the deploy-source strategy seam.
 
-Two deploy sources share an identical *tail* (the container ALTER, the
-``ADD LIVE VERSION FROM LAST`` defense, the ``GRANT USAGE`` to the viewer role);
-only the ``FROM`` clause, the create/refresh verb, and the CI pre-step differ:
+Both deploy sources run the same idempotent ``CREATE OR REPLACE STREAMLIT``
+and share its *tail* (the container ALTER, the ``ADD LIVE VERSION FROM LAST``
+defense, the ``GRANT USAGE`` to the viewer role); only the ``FROM`` clause and
+the CI pre-step differ:
 
 - **stage-copy** (default): CI uploads app source to a SHA-versioned internal
-  stage; deploy runs idempotent ``CREATE OR REPLACE STREAMLIT ... FROM '@stage/
-  commits/<sha>/...'``.
-- **git-repository**: Snowflake's GIT REPOSITORY object holds the source;
-  new apps ``CREATE STREAMLIT ... FROM '@<repo>/branches/<branch>/...'`` and
-  existing apps refresh via the ``ABORT -> PULL -> COMMIT -> ADD LIVE VERSION``
-  state machine.
+  stage and deploys ``FROM '@stage/commits/<sha>/apps/<slug>/'``.
+- **git-repository**: Snowflake's GIT REPOSITORY object mirrors the GitHub
+  repo; CI runs ``snow git fetch`` and deploys
+  ``FROM '@<repo>/branches/<branch>/apps/<slug>/'``. CREATE copies the files
+  once, so a later push changes nothing until the next deploy. Snowflake
+  rejects a ``/commits/<sha>/`` path here ("Invalid git branch path", observed
+  2026-10-03), so freshness is proven afterwards: ``DESCRIBE STREAMLIT``
+  reports ``last_version_git_commit_hash``, which verify-deploy compares with
+  the CI commit.
 
 All identifiers come from a validated :class:`~streamsnow.config.Config`, so
 they are rendered into SQL directly (the config layer is the injection gate).
 This module is pure (no DB calls); the CLI / generated deploy workflow runs it.
 """
 
+import dataclasses
 import re
 
-from .config import Config
+from .config import (
+    DEPLOY_SOURCES,
+    GITHUB_AUTH_MODES,
+    Config,
+    ConfigError,
+    github_owner,
+    validate_choice,
+    validate_github_origin,
+)
 
 # slug + sha reach SQL/object names — validate at the boundary (defense in depth
 # alongside the config-layer gate), so a hostile value can't inject.
@@ -70,13 +83,8 @@ def generate_create_sql(cfg: Config, slug: str, sha: str = "<sha>") -> str:
     """The create/replace statement + container ALTER + live-version + grant."""
     o = cfg.snowflake.objects
     fqn = streamlit_fqn(cfg, slug)
-    verb = (
-        "CREATE OR REPLACE STREAMLIT"
-        if cfg.deploy.source == "stage-copy"
-        else "CREATE STREAMLIT IF NOT EXISTS"
-    )
     lines = [
-        f"{verb} {fqn}",
+        f"CREATE OR REPLACE STREAMLIT {fqn}",
         f"  {_from_clause(cfg, slug, sha)}",
         "  MAIN_FILE = 'streamlit_app.py'",
         f"  QUERY_WAREHOUSE = {o.default_warehouse}",
@@ -96,21 +104,6 @@ def generate_create_sql(cfg: Config, slug: str, sha: str = "<sha>") -> str:
     return "\n".join(lines)
 
 
-def generate_refresh_sql(cfg: Config, slug: str) -> str:
-    """Git-repository refresh for an EXISTING app (the ABORT/PULL/COMMIT state
-    machine). Not used by stage-copy (CREATE OR REPLACE is idempotent there)."""
-    if cfg.deploy.source != "git-repository":
-        raise ValueError("refresh SQL only applies to the git-repository deploy source")
-    fqn = streamlit_fqn(cfg, slug)
-    return (
-        f"ALTER STREAMLIT {fqn} ABORT;\n"
-        f"ALTER STREAMLIT {fqn} PULL;\n"
-        f"ALTER STREAMLIT {fqn} COMMIT;\n"
-        f"ALTER STREAMLIT {fqn} ADD LIVE VERSION FROM LAST;\n"
-        "-- If PULL reports 'already up to date': skip COMMIT, keep the trailing ADD LIVE VERSION."
-    )
-
-
 # Snowflake's pre-provisioned CPU pool for Streamlit container apps. It exists
 # in every account (owned by ACCOUNTADMIN, USAGE granted to PUBLIC by default),
 # so setup SQL must never try to create it.
@@ -128,26 +121,96 @@ def _stage_objects(cfg: Config) -> list[str]:
     ]
 
 
+def with_source(
+    cfg: Config,
+    source: str,
+    *,
+    git_origin: str | None = None,
+    github_auth: str | None = None,
+) -> Config:
+    """``cfg`` with its deploy source swapped, for previewing the other path's
+    setup SQL without editing streamsnow.config.yaml. Git fields the config
+    does not set get the wizard's defaults (named after the app database and
+    schema), so the output matches what a git-repository config would emit."""
+    validate_choice(source, DEPLOY_SOURCES, "--source")
+    d = cfg.deploy
+    if source == "stage-copy":
+        return dataclasses.replace(cfg, deploy=dataclasses.replace(d, source=source))
+    o = cfg.snowflake.objects
+    auth = validate_choice(
+        github_auth or (d.github_auth_mode if d.source == source else "pat"),
+        GITHUB_AUTH_MODES,
+        "--github-auth",
+    )
+    origin = git_origin or d.git_origin
+    secret = d.secret_name or f"{o.app_database}.{o.app_schema}.GITHUB_PAT_SECRET"
+    return dataclasses.replace(
+        cfg,
+        deploy=dataclasses.replace(
+            d,
+            source=source,
+            git_repository_fqn=d.git_repository_fqn
+            or f"{o.app_database}.{o.app_schema}.STREAMLIT_REPO",
+            git_origin=validate_github_origin(origin, "--git-origin") if origin else "",
+            api_integration_name=d.api_integration_name or "GITHUB_API_INTEGRATION",
+            secret_name="" if auth == "public" else secret,
+            github_auth_mode=auth,
+        ),
+    )
+
+
+def _git_origin(cfg: Config) -> str:
+    """The configured repo URL; setup SQL cannot be generated without it."""
+    if not cfg.deploy.git_origin:
+        raise ConfigError(
+            "deploy.git_origin is not set: add your repo's HTTPS URL "
+            "(https://github.com/<owner>/<repo>.git) under deploy: in streamsnow.config.yaml, "
+            "or pass --git-origin to `streamsnow deploy-setup`."
+        )
+    return cfg.deploy.git_origin
+
+
+def _uses_secret(cfg: Config) -> bool:
+    return cfg.deploy.github_auth_mode != "public"
+
+
 def _git_api_integration(cfg: Config) -> list[str]:
-    return [
+    # Allow only this repo's owner, not all of github.com (Snowflake's own
+    # guidance: restrict allowed locations as narrowly as practical).
+    owner = github_owner(_git_origin(cfg))
+    lines = [
+        "-- Needs ACCOUNTADMIN (or the CREATE INTEGRATION privilege).",
         f"CREATE API INTEGRATION IF NOT EXISTS {cfg.deploy.api_integration_name}",
         "  API_PROVIDER = git_https_api",
-        "  API_ALLOWED_PREFIXES = ('https://github.com/')",
-        "  ENABLED = TRUE;",
+        f"  API_ALLOWED_PREFIXES = ('https://github.com/{owner}')",
     ]
+    # ALLOWED_AUTHENTICATION_SECRETS is left at Snowflake's default (any
+    # secret): naming the token secret here would reference it before the CI
+    # role creates it later in the same script.
+    lines.append("  ENABLED = TRUE;")
+    return lines
 
 
 def _git_secret_and_repo(cfg: Config) -> list[str]:
-    return [
-        f"-- Store a GitHub token (PAT or GitHub-App installation token) in {cfg.deploy.secret_name}",
-        f"CREATE SECRET IF NOT EXISTS {cfg.deploy.secret_name}",
-        "  TYPE = password USERNAME = 'x-access-token' PASSWORD = '<github-token>';",
-        "",
+    origin = _git_origin(cfg)
+    out: list[str] = []
+    repo = [
         f"CREATE GIT REPOSITORY IF NOT EXISTS {cfg.deploy.git_repository_fqn}",
         f"  API_INTEGRATION = {cfg.deploy.api_integration_name}",
-        f"  GIT_CREDENTIALS = {cfg.deploy.secret_name}",
-        "  ORIGIN = '<https://github.com/your-org/your-repo.git>';",
     ]
+    if _uses_secret(cfg):
+        out += [
+            "-- Paste a GitHub token with read access to the repo (a fine-grained PAT",
+            "-- with Contents: read) in place of <github-token>. Never commit it.",
+            f"CREATE SECRET IF NOT EXISTS {cfg.deploy.secret_name}",
+            "  TYPE = password USERNAME = 'x-access-token' PASSWORD = '<github-token>';",
+            "",
+        ]
+        repo.append(f"  GIT_CREDENTIALS = {cfg.deploy.secret_name}")
+    else:
+        out.append("-- Public repo: no token or secret needed.")
+    repo.append(f"  ORIGIN = '{origin}';")
+    return out + repo
 
 
 def generate_setup_sql(cfg: Config) -> str:
@@ -169,7 +232,9 @@ def generate_setup_sql(cfg: Config) -> str:
         out += _git_api_integration(cfg)
         out += ["", *_git_secret_and_repo(cfg), ""]
         out += [
-            f"GRANT READ ON GIT REPOSITORY {cfg.deploy.git_repository_fqn} TO ROLE {ci};",
+            # FETCH needs WRITE (or OWNERSHIP) when an admin, not the CI role,
+            # ran this and so owns the repository.
+            f"GRANT READ, WRITE ON GIT REPOSITORY {cfg.deploy.git_repository_fqn} TO ROLE {ci};",
             f"GRANT USAGE ON INTEGRATION {cfg.deploy.api_integration_name} TO ROLE {ci};",
         ]
     if cfg.runtime == "container":
@@ -272,9 +337,10 @@ def generate_admin_sql(cfg: Config) -> str:
     if cfg.deploy.source == "stage-copy":
         out.append(f"GRANT CREATE STAGE ON SCHEMA {stage_schema} TO ROLE {ci};")
     else:
-        out.append(
-            f"GRANT CREATE SECRET ON SCHEMA {_schema_of(cfg.deploy.secret_name)} TO ROLE {ci};"
-        )
+        if _uses_secret(cfg):
+            out.append(
+                f"GRANT CREATE SECRET ON SCHEMA {_schema_of(cfg.deploy.secret_name)} TO ROLE {ci};"
+            )
         out.append(
             "GRANT CREATE GIT REPOSITORY ON SCHEMA "
             f"{_schema_of(cfg.deploy.git_repository_fqn)} TO ROLE {ci};"

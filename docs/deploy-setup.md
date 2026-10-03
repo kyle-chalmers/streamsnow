@@ -74,9 +74,13 @@ streamsnow deploy-setup | snow sql --stdin   # or pipe to your admin session
   StreamSnow still emits the EAI because the Snowflake CLI's `snowflake.yml`
   schema has no artifact-repository field yet; if your account already uses one,
   do not also attach the EAI.
-- **git-repository**: creates the API integration, the secret holding a GitHub
-  token, and the `GIT REPOSITORY` object, and grants them to the CI role
+- **git-repository**: creates the API integration, the `GIT REPOSITORY`
+  object and, for a private repo, the secret holding a GitHub token, and grants
+  them to the CI role
   ([setting up Git](https://docs.snowflake.com/en/developer-guide/git/git-setting-up)).
+  To preview it before switching, run
+  `streamsnow deploy-setup --admin --source git-repository --git-origin <url>`;
+  the full walkthrough is [Switching to the Git repository deploy source](git-repository.md).
 
 ## 2. CI auth (key-pair / JWT)
 
@@ -124,10 +128,9 @@ declared in the app's `snowflake.yml` `artifacts:`.
 ## git-repository note
 
 The generated workflow matches your `deploy.source`. The default **stage-copy**
-rendering has CI push to a stage (Snowflake never reaches out to GitHub — fewer
+rendering has CI push to a stage (Snowflake never reaches out to GitHub: fewer
 moving parts, no network-policy dependency). With
 `deploy.source: git-repository`, the rendered workflow instead runs
-`snow git fetch` and Snowflake must be able to reach GitHub (or mint a
-GitHub-App token into the secret). Use `streamsnow deploy-sql <slug>` for the create
-statement and `streamsnow deploy-sql <slug> --refresh` for the
-ABORT/PULL/COMMIT refresh of an existing app.
+`snow git fetch`, so Snowflake must be able to reach GitHub, and then rebuilds
+each app from the branch with `CREATE OR REPLACE STREAMLIT`. See
+[Switching to the Git repository deploy source](git-repository.md).
