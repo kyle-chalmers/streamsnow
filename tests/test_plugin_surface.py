@@ -1,7 +1,7 @@
-"""The v0.3 plugin-surface contract: 8 skills, ≤80-line front pages, 8 alias stubs.
+"""The plugin-surface contract: 8 skills, ≤80-line front pages, no alias stubs.
 
 The CHANGELOG and README advertise this surface; these tests keep it honest so
-drift (an 81-line SKILL.md, a dropped stub, a resurrected old name) fails CI
+drift (an 81-line SKILL.md, a resurrected alias or old name) fails CI
 instead of shipping.
 """
 
@@ -27,8 +27,9 @@ EXPECTED_SKILLS = {
     "migrate-app",
 }
 
-# Retired v0.2 name -> the surface that replaced it (stubs must point there).
-EXPECTED_STUBS = {
+# Retired v0.2 names -> the surface that replaced them. The alias stubs were
+# removed in 0.7.3; the names stay here so nothing re-introduces them.
+RETIRED_NAMES = {
     "new-app": "/start-app",
     "refine-requirements": "/start-app --spec",
     "add-page": "/start-app",
@@ -88,19 +89,16 @@ def test_every_skill_declares_argument_hint_and_allowed_tools():
         assert has_flag == (skill in HUMAN_ONLY_SKILLS), skill
 
 
-def test_alias_stubs_exist_and_point_at_their_replacements():
-    stubs = {p.stem for p in COMMANDS_DIR.glob("*.md")}
-    assert stubs == set(EXPECTED_STUBS)
-    for old, new in EXPECTED_STUBS.items():
-        text = (COMMANDS_DIR / f"{old}.md").read_text()
-        assert "Deprecated" in text, old
-        assert new in text, f"{old} stub must point at {new}"
+def test_no_alias_commands_ship_with_the_plugin():
+    # Plugin commands show up in the `/` menu next to the skills; the retired
+    # aliases cluttered it, so the plugin ships skills only.
+    assert not COMMANDS_DIR.exists(), "commands/ was removed in 0.7.3; ship skills only"
 
 
 def test_no_retired_skill_name_is_referenced_as_live_inside_skills():
-    # Old slash-names may appear in commands/ stubs, docs, and the CHANGELOG —
-    # but a /old-name inside skills/ is a dangling reference.
-    retired = "|".join(re.escape(s) for s in EXPECTED_STUBS)
+    # Old slash-names may appear in docs and the CHANGELOG, but a /old-name
+    # inside skills/ is a dangling reference.
+    retired = "|".join(re.escape(s) for s in RETIRED_NAMES)
     pattern = re.compile(rf"/(?:{retired})\b")
     offenders = [
         f"{p.relative_to(REPO_ROOT)}: {m.group(0)}"

@@ -3,6 +3,28 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [0.7.3] - 2026-10-03
+
+### Removed
+
+- **The 8 pre-0.3 alias commands.** `/new-app`, `/refine-requirements`,
+  `/add-page`, `/onboard`, `/auto-review-app`, `/sql-review`, `/apply-review`
+  and `/deep-dive-data` only forwarded to the 8 real skills, and they doubled
+  the `/streamsnow:` menu to 16 entries. The `commands/` folder is gone, so the
+  menu now lists the 8 skills. Use `/start-app` (with `--spec` or `--setup`),
+  `/review-app` (with `--fix`, `--auto` or `--sql`) and `/audit-lineage`
+  instead; [docs/migrating-a-consumer-repo.md](docs/migrating-a-consumer-repo.md)
+  maps each old name. This was promised for the next major release; it ships
+  in a patch because the plugin is still beta and the aliases added nothing
+  the skills do not. The CLI is unchanged.
+
+### Changed
+
+- **Install docs use project scope and `/reload-plugins`.** The README's agent
+  install prompt, Quickstart and upgrade steps install the plugin with
+  `--scope project` and load it with `/reload-plugins` instead of a restart.
+  The README also gains a diagram of how the skills fit together.
+
 ## [0.7.2] - 2026-09-27
 
 Fixes from the first real GitHub Actions deploy and from a `doctor` run on a
