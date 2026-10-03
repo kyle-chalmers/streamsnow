@@ -87,26 +87,35 @@ github.com/kyle-chalmers/streamsnow and follow it."* Or paste the prompt in
 yourself:
 
 ```text
-Install StreamSnow (https://github.com/kyle-chalmers/streamsnow) for me.
-Confirm with me before installing anything, and stop at each question you
-cannot answer on my behalf.
+Install StreamSnow (https://github.com/kyle-chalmers/streamsnow) for me at the
+project level: enable the plugin and install the skills for this repo only,
+never at the user level. Confirm with me before installing anything, and stop at
+each question you cannot answer on my behalf.
 
-1. If you are Claude Code: run `claude plugin marketplace add kyle-chalmers/streamsnow`
-   and then `claude plugin install streamsnow@streamsnow`. Tell me to restart Claude
-   Code and type `/start-app --setup`. Stop there; that skill does the rest.
+1. Work in the git repo for my Snowflake apps. Ask me which folder if unsure; if it
+   is new, create it and run `git init`. Run every command below from its root.
 
-2. Any other agent: make sure `uv` is installed, then run `uv tool install streamsnow`
-   and confirm `streamsnow --version` answers. Run `streamsnow doctor` and fix each
-   failing required check one at a time, re-running doctor after each fix.
+2. If you are Claude Code: run
+   `claude plugin marketplace add --scope project kyle-chalmers/streamsnow` and then
+   `claude plugin install --scope project streamsnow@streamsnow`. Both record the
+   plugin in this repo's .claude/settings.json, not my user settings. Tell me to
+   restart Claude Code and type `/start-app --setup`. Stop there; that skill does
+   the rest.
 
-3. In the folder for my apps: if it already has Streamlit apps, read
+3. Any other agent: make sure `uv` is installed, then run `uv tool install streamsnow`
+   and confirm `streamsnow --version` answers (the CLI is a command on my PATH; the
+   skills call it by name). Run `streamsnow doctor` and fix each failing required
+   check one at a time, re-running doctor after each fix.
+
+4. If the repo already has Streamlit apps, read
    https://github.com/kyle-chalmers/streamsnow/blob/main/skills/start-app/adopt.md and
    follow that instead of scaffolding. Otherwise run `streamsnow init --no-starter-app`.
    It is an interactive wizard; if you cannot answer its prompts, hand it to me.
 
-4. Run `streamsnow agent-skills install --agent codex` to copy the StreamSnow skills
-   into .agents/skills. Codex reads that folder; any other agent can open
-   .agents/skills/start-app/SKILL.md directly. Follow start-app to build my first app.
+5. Run `streamsnow agent-skills install --agent codex` (repo scope, the default; never
+   `--scope user`). It copies the skills into this repo's .agents/skills, which Codex
+   reads; any other agent can open .agents/skills/start-app/SKILL.md directly. Then
+   follow start-app to build my first app.
 
 Rules: never ask me for Snowflake credentials (I run `snow connection add` myself
 when init prints it), and never run the admin DDL that `streamsnow deploy-setup --admin`
@@ -116,6 +125,15 @@ prints; show it to me for my Snowflake admin.
 Only Claude Code and Codex are tested. Prefer to type the steps yourself? See
 [Quickstart](#quickstart), and [Use with other agents](#use-with-other-agents)
 for what differs outside Claude Code.
+
+## How the skills fit together
+
+<p align="center">
+  <a href="docs/images/skills-flow.png"><img alt="StreamSnow skills flow: your idea goes into /start-app, which runs spec and pages, /preview-app, the /validate-app pass/fail gate, and /review-app, stopping for your OK along the way; then you type /ship-app to open the PR. On merge, CI deploys the live app to Snowflake. /migrate-app and /feedback-app both re-enter at /preview-app, so every path passes the /validate-app gate, and /audit-lineage optionally checks numbers against the live warehouse." src="docs/images/skills-flow.png" width="100%"></a>
+</p>
+
+The source is [docs/images/skills-flow.excalidraw](docs/images/skills-flow.excalidraw);
+open it at [excalidraw.com](https://excalidraw.com) to edit, then re-export the PNG.
 
 ## What it is
 
@@ -160,9 +178,17 @@ you what is missing).
 
 ### With Claude Code (recommended)
 
+From the root of your apps repo, install the plugin at project scope (it is
+recorded in the repo's `.claude/settings.json`, not your user settings):
+
+```bash
+claude plugin marketplace add --scope project kyle-chalmers/streamsnow
+claude plugin install --scope project streamsnow@streamsnow
 ```
-/plugin marketplace add kyle-chalmers/streamsnow
-/plugin install streamsnow@streamsnow
+
+Restart Claude Code in that repo, then run:
+
+```
 /start-app --setup
 ```
 
@@ -201,10 +227,10 @@ The two halves upgrade separately, and the plugin half does **not** pick up
 hook or skill changes on its own — an installed copy stays at the version it
 was installed at until you reinstall it.
 
-```
-claude plugin list                       # shows the installed plugin version
-/plugin uninstall streamsnow@streamsnow
-/plugin install streamsnow@streamsnow    # then restart Claude Code
+```bash
+claude plugin list                                              # installed plugin version
+claude plugin uninstall --scope project streamsnow@streamsnow
+claude plugin install --scope project streamsnow@streamsnow    # then restart Claude Code
 ```
 
 ```bash
@@ -247,7 +273,6 @@ one tested. The CLI installs them where Codex looks:
 
 ```bash
 streamsnow agent-skills install --agent codex               # <repo>/.agents/skills; commit it
-streamsnow agent-skills install --agent codex --scope user  # ~/.agents/skills, every repo on this machine
 streamsnow agent-skills list --agent codex                  # what is installed, and from which version
 ```
 

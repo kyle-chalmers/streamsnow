@@ -66,10 +66,10 @@ GH_TOKEN="$GH_TOKEN" gh repo edit kyle-chalmers/streamsnow --visibility public -
 
 ## Claude Code plugin marketplace
 
-Once public, users add the plugin with:
-```
-/plugin marketplace add kyle-chalmers/streamsnow
-/plugin install streamsnow@streamsnow
+Once public, users add the plugin at project scope, from their apps repo:
+```bash
+claude plugin marketplace add --scope project kyle-chalmers/streamsnow
+claude plugin install --scope project streamsnow@streamsnow
 ```
 No publish step is required for the plugin — it's served from the public repo.
 

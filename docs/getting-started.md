@@ -87,11 +87,18 @@ mock data instead of `conn.query(...)`. See
 
 ## Path B — with Claude Code
 
-Inside Claude Code, in the directory that will hold your apps:
+From a shell in the directory that will hold your apps, install the plugin at
+project scope (recorded in the repo's `.claude/settings.json`, not your user
+settings):
+
+```bash
+claude plugin marketplace add --scope project kyle-chalmers/streamsnow
+claude plugin install --scope project streamsnow@streamsnow
+```
+
+Then start Claude Code in that directory and run:
 
 ```
-/plugin marketplace add kyle-chalmers/streamsnow
-/plugin install streamsnow@streamsnow
 /start-app --setup
 ```
 
@@ -287,9 +294,11 @@ step teams forget.
 
 ### 6. Add the Claude Code plugin
 
-```
-/plugin marketplace add kyle-chalmers/streamsnow
-/plugin install streamsnow@streamsnow
+From the repo root, at project scope:
+
+```bash
+claude plugin marketplace add --scope project kyle-chalmers/streamsnow
+claude plugin install --scope project streamsnow@streamsnow
 ```
 
 This adds the skills that wrap the CLI — `/start-app` (the front door),
@@ -310,9 +319,9 @@ The plugin does not pick up hook or skill changes on its own; an installed copy
 stays at the version it was installed at. `claude plugin list` shows what you
 have; the SessionStart line shows it too.
 
-```
-/plugin uninstall streamsnow@streamsnow
-/plugin install streamsnow@streamsnow      # then restart Claude Code
+```bash
+claude plugin uninstall --scope project streamsnow@streamsnow
+claude plugin install --scope project streamsnow@streamsnow    # then restart Claude Code
 ```
 
 ```bash
