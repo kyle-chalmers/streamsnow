@@ -72,7 +72,8 @@ First decide which case this is:
   `streamsnow.config.yaml`) and then writes the governed repo files: `AGENTS.md`, `CLAUDE.md`,
   `.gitignore`, `.pre-commit-config.yaml`, `.github/workflows/`, `README.md` and
   `deploy/tombstones.yml`. It writes no example app; `/start-app` scaffolds the real one next
-  with `streamsnow new`. **Never run only `streamsnow configure` here**: `configure` writes the
+  with `streamsnow new`. **Never run only `streamsnow configure` here** (`configure` followed by
+  `init`, as in 2c, is fine): `configure` writes the
   config file and nothing else, and `streamsnow new` writes app files only, so a repo set up that
   way has no hooks, no CI and no `.gitignore` (an app's `.streamlit/secrets.toml` could then be
   committed). `streamsnow new` warns when those files are missing; the fix is the same command.
@@ -94,7 +95,7 @@ will read and from which connection, so the user can redirect it or decline. The
 - choose which connection, MCP server or role you investigate with;
 - override any proposed answer, including choosing `container` or `git-repository` when the
   evidence points elsewhere (say what that choice needs, then respect it);
-- change any default the wizard does not ask about (2c);
+- change any default the wizard does not ask about (2c, before `init` renders the repo files);
 - stop at any point and carry on later.
 
 Two limits are not the user's to waive, because they protect the user: you never run DDL or
@@ -150,26 +151,60 @@ source, or ask that question instead of proposing from absence.
 
 **Never print** `snow connection list`, `claude mcp list` (or another agent's MCP listing), MCP
 config files, connection files, `profiles.yml`, or `SNOWFLAKE_*` environment values: any of them
-can show the account or a credential. Read named keys through a filter instead. The `->>` pipe
-in each probe keeps only the columns you need, so owners and share origins stay off screen:
+can show the account or a credential. Read named keys through a filter instead.
 
-| Question | Probe | How to read it |
+**Probes.** This is a method, not a recipe: adapt it to whatever the user's tools accept. The
+`->>` pipe keeps only the columns you need, so owners and share origins stay off screen. Some
+tools refuse `SHOW` or the pipe form; then use the `INFORMATION_SCHEMA` fallback, which any
+read-only SQL tool accepts.
+
+| Question | Probe | When `SHOW` is refused |
 |---|---|---|
-| Runtime | `SHOW COMPUTE POOLS ->> SELECT "name", "state" FROM $1` | Any pool listed: propose `container` (the default `SYSTEM_COMPUTE_POOL_CPU`, or the listed pool if that one is absent). None listed: propose `warehouse`, because trial accounts have no compute pools and the container runtime needs one; say that a paid account whose admin grants a pool can still choose `container`. |
-| Account | none | With a `snow` connection, pass `--connection <name>`: the CLI reads the account and never prints it. With only an MCP server, `SELECT CURRENT_ORGANIZATION_NAME() \|\| '-' \|\| CURRENT_ACCOUNT_NAME()` returns a usable identifier, but it then appears on screen: ask before running it, or let the user type it. |
-| Database | `SHOW DATABASES ->> SELECT "name", "kind", "comment" FROM $1` | Propose the curated or reporting database, never a raw or landing one. A comment saying what the data is for, or the user's own description of the app, outweighs the name; with neither, names like `ANALYTICS`, `REPORTING`, `MARTS` or `DW` point to curated data and `RAW`, `LANDING`, `INGEST`, `STAGING`, `SANDBOX` or `DEV` to raw. Ignore `SNOWFLAKE`, `SNOWFLAKE_LEARNING_DB`, `SNOWFLAKE_SAMPLE_DATA`, the StreamSnow app database (`STREAMSNOW_APPS` by default), and any database whose `kind` is `IMPORTED DATABASE`, `PERSONAL DATABASE` or `APPLICATION`: a share takes `GRANT IMPORTED PRIVILEGES`, not the per-schema `SELECT` grants `deploy-setup --admin` writes, and a personal database belongs to one user. Two plausible candidates: name both and ask. |
-| Allowed schemas | `SHOW SCHEMAS IN DATABASE <db> ->> SELECT "name", "comment" FROM $1`, then table counts: `SELECT table_schema, COUNT(*) FROM <db>.INFORMATION_SCHEMA.TABLES WHERE table_schema <> 'INFORMATION_SCHEMA' GROUP BY 1` | Propose the curated schemas: a comment saying what a schema holds outweighs its name; otherwise `MARTS`, `REPORTING`, `ANALYTICS`, `CURATED`, `GOLD`, `PRESENTATION`, `PRODUCTION` or `PROD`. Never propose a schema with no tables or views (an empty `PUBLIC` is in every database). When nothing matches but the database holds only one or two other non-empty schemas that are not raw, propose those and say the names gave no signal. |
-| Denied schemas | same result | Propose the raw, staging and development schemas that actually exist (`RAW*`, `STG*`, `STAGING`, `LANDING`, `BRONZE`, `INGEST*`, `DEV*`, `DEVELOPMENT`, `SANDBOX`, `SCRATCH`, or a comment saying so), not the `RAW,STAGING` default. When none exist, omit `--deny-schemas` so the default stands, and say it guards names that do not exist yet. An intermediate layer (`INT*`, `INTERMEDIATE`) goes in neither list unless the user says so. Never put a schema in both. |
-| Deploy source | `SHOW GIT REPOSITORIES IN ACCOUNT ->> SELECT "database_name", "schema_name", "name" FROM $1` | Propose `stage-copy`. Propose `git-repository` only when a GIT REPOSITORY already exists; the user can still choose it either way. When it comes up, say what it adds: an API integration (ACCOUNTADMIN creates it), a GitHub token stored as a Snowflake secret, and Snowflake needing network access to GitHub. |
+| Runtime | `SHOW COMPUTE POOLS ->> SELECT "name", "state" FROM $1` | No equivalent: try another source, or ask |
+| Account | none (see below the table) | |
+| Database | `SHOW DATABASES ->> SELECT "name", "kind", "comment" FROM $1` | `SELECT database_name, type, comment FROM SNOWFLAKE.INFORMATION_SCHEMA.DATABASES` |
+| Schemas | `SHOW SCHEMAS IN DATABASE <db> ->> SELECT "name", "comment" FROM $1` | `SELECT schema_name, comment FROM <db>.INFORMATION_SCHEMA.SCHEMATA` |
+| What schemas hold | `SELECT table_schema, COUNT(*) FROM <db>.INFORMATION_SCHEMA.TABLES WHERE table_schema <> 'INFORMATION_SCHEMA' GROUP BY 1` | (already a SELECT) |
+| Deploy source | `SHOW GIT REPOSITORIES IN ACCOUNT ->> SELECT "database_name", "schema_name", "name" FROM $1` | No equivalent: `stage-copy` is the default either way |
 
-Some MCP servers refuse `SHOW` or the `->>` form (one reports "Statement type of Unknown is not
-allowed"). Fall back to `INFORMATION_SCHEMA`, which any read-only SQL tool accepts:
-`SELECT database_name, type, comment FROM SNOWFLAKE.INFORMATION_SCHEMA.DATABASES` and
-`SELECT schema_name, comment FROM <db>.INFORMATION_SCHEMA.SCHEMATA`. Compute pools and Git
-repositories have no `INFORMATION_SCHEMA` view: try another source, or ask.
+Account: with a `snow` connection, pass `--connection <name>`; the CLI reads the account and
+never prints it. With only an MCP server,
+`SELECT CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME()` returns a usable
+identifier, but it then appears on screen: ask before running it, or let the user type it.
+
+**Reading the evidence.** Every team names things differently, so weigh signals in this order,
+strongest first, and treat names as the weakest:
+
+1. What the user has said about the app and its data.
+2. Comments on databases and schemas.
+3. What the objects hold: table and view counts (never propose an empty schema), and, with the
+   user's OK, table names.
+4. The user's own tooling: a dbt project or profile names its target database and its layers.
+5. Names, as hints only. Common conventions (`MARTS`, `REPORTING` or `GOLD` for curated data;
+   `RAW`, `STAGING`, `LANDING`, `BRONZE` or `DEV` for raw and working layers) are examples, not
+   rules; say when a proposal rests on names alone.
+
+A few facts hold whatever the naming:
+
+- **Some databases cannot be the governed one**: a share (`kind` `IMPORTED DATABASE`) takes
+  `GRANT IMPORTED PRIVILEGES`, not the per-schema `SELECT` grants `deploy-setup --admin` writes;
+  a `PERSONAL DATABASE` belongs to one user; an `APPLICATION` database (such as `SNOWFLAKE`) and
+  the StreamSnow app database (`STREAMSNOW_APPS` by default) hold no reporting data.
+- **Runtime**: a visible compute pool means `container` works; propose it, defaulting to
+  `SYSTEM_COMPUTE_POOL_CPU` when listed. No pool visible to a role that can see them suggests a
+  trial account, which only runs `warehouse`; a paid account's admin can still grant a pool.
+- **Deploy source**: propose `stage-copy` unless a GIT REPOSITORY already exists; the user can
+  choose `git-repository` either way. When it comes up, say what it adds: an API integration
+  (ACCOUNTADMIN creates it), a GitHub token stored as a Snowflake secret, and Snowflake needing
+  network access to GitHub.
+- **Deny list**: propose the schemas the evidence marks as raw, staging or working layers, not
+  the `RAW,STAGING` default. When there are none, omit `--deny-schemas` so the default stands,
+  and say it guards names that do not exist yet. A layer the evidence cannot place (an
+  intermediate one, say) goes in neither list until the user decides. Never put a schema in both.
+- **Two or more plausible candidates** for any answer: show them and ask.
 
 Different sources run as different roles and can see different databases (a personal `snow`
-connection may see a handful where an admin-role MCP sees every one). When they disagree, show
+connection may see a handful where an admin-role MCP sees many more). When they disagree, show
 what each role sees rather than picking one silently. Proposing from a broader role is fine: the
 allowed schemas still reach apps only through the grants `deploy-setup --admin` writes.
 
@@ -190,15 +225,24 @@ list is always shown, even when found, because it is the data boundary. Explain 
 show them: `deploy-setup --admin` grants the CI role SELECT on exactly the allowed schemas, and
 deployed apps run with their owner's rights (the CI role), so the allowed list is the data
 boundary for every viewer; the denied list is what `streamsnow check schema-refs` blocks in app
-code. Then run, with the confirmed answers:
+code. Then write the config with the confirmed answers:
 
 ```
-streamsnow init --no-starter-app --runtime container --connection <name> \
+streamsnow configure --runtime container --connection <name> \
   --database ANALYTICS --schemas MARTS,REPORTING --deny-schemas RAW,STG_CRM \
   --deploy-source stage-copy
 ```
 
-With all five answers passed, no prompt fires. `--connection` reads the account from that
+With all five answers passed, no prompt fires. Before writing the repo files, show the defaults
+the wizard did not ask about (project name, app database and schema, warehouse, CI and viewer
+roles, compute pool) in a short list and ask whether any should change: a team may already have
+its own warehouse, roles or naming. Change the values the user asks for in
+`streamsnow.config.yaml`, keeping its keys and comments. Nothing needs changing for a first run;
+each value carries a comment saying when to. Then run `streamsnow init --no-starter-app`: it
+reuses that config and renders `AGENTS.md`, CI and the rest from the final values. (Editing
+defaults after `init` leaves those files naming the old values until
+`streamsnow update --apply` re-renders them.) `streamsnow init` takes the same flags, for a user
+who wants no review of the defaults. `--connection` reads the account from that
 connection and makes it `snowflake.connection_name`; use `--account <locator>` only when there is
 no `snow` connection (MCP-only or nothing at all). Local preview still needs a `snow` connection
 later, which step 3 covers. If `--connection` exits 2 (the connection names no account, or `snow`
@@ -209,12 +253,6 @@ existing config without `--reconfigure` exit 2 rather than being ignored. When t
 is `git-repository`, the written `deploy.git_repository_fqn` is a placeholder: propose setting it
 to the repository the probe found.
 
-After `init`, show the defaults the wizard did not ask about (project name, app database and
-schema, warehouse, CI and viewer roles, compute pool) in a short list and ask whether any should
-change: a team may already have its own warehouse, roles or naming. Change the values the user
-asks for in the written file, keeping its keys and comments, then re-run
-`streamsnow doctor --format json` and confirm the `config` check still passes. Nothing needs
-changing for a first run; each value carries a comment saying when to.
 
 - **Don't hand-author `streamsnow.config.yaml` from scratch**: the wizard owns its shape, and the
   answer flags are its supported non-interactive path. Editing values in the file it wrote is
@@ -228,6 +266,15 @@ changing for a first run; each value carries a comment saying when to.
   for the user's Snowflake admin, never run it yourself.
 
 ## 3 · Connection (one store, owned by the user)
+
+**A non-default connection needs one more step.** `snowflake.connection_name` may name a
+connection that is not the machine's default (the user kept their own default in 2a). The
+`snow-connection` check still passes, but local preview reads the default connection, so without
+this step it would open the default account. Before the first preview, let the user pick one:
+make it the default (`snow connection set-default <name>`, which repoints every tool that reads
+the default); set `SNOWFLAKE_DEFAULT_CONNECTION_NAME=<name>` in the shell that runs preview (the
+Python connector reads it, and nothing else changes); or copy an app's
+`.streamlit/secrets.toml.example` to `secrets.toml` and fill it in.
 
 **Check before adding anything.** When the machine already has a default `snow` connection (a
 prior tutorial, another project), the wizard writes that name into `snowflake.connection_name`,
