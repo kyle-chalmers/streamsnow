@@ -99,8 +99,8 @@ each question you cannot answer on my behalf.
    `claude plugin marketplace add --scope project kyle-chalmers/streamsnow` and then
    `claude plugin install --scope project streamsnow@streamsnow`. Both record the
    plugin in this repo's .claude/settings.json, not my user settings. Tell me to
-   restart Claude Code and type `/start-app --setup`. Stop there; that skill does
-   the rest.
+   type `/reload-plugins` (no restart needed) and then `/start-app --setup`. Stop
+   there; that skill does the rest.
 
 3. Any other agent: make sure `uv` is installed, then run `uv tool install streamsnow`
    and confirm `streamsnow --version` answers (the CLI is a command on my PATH; the
@@ -186,11 +186,16 @@ claude plugin marketplace add --scope project kyle-chalmers/streamsnow
 claude plugin install --scope project streamsnow@streamsnow
 ```
 
-Restart Claude Code in that repo, then run:
+Then, in a Claude Code session in that repo, load it without restarting and
+start setup:
 
 ```
+/reload-plugins
 /start-app --setup
 ```
+
+`/reload-plugins` picks up the plugin's skills and hooks in the running session.
+StreamSnow's one-line session-start message first appears in your next session.
 
 `/start-app --setup` installs the `streamsnow` CLI if it is missing, runs the
 doctor, walks each missing prerequisite one confirmation at a time, runs
@@ -230,7 +235,7 @@ was installed at until you reinstall it.
 ```bash
 claude plugin list                                              # installed plugin version
 claude plugin uninstall --scope project streamsnow@streamsnow
-claude plugin install --scope project streamsnow@streamsnow    # then restart Claude Code
+claude plugin install --scope project streamsnow@streamsnow    # then /reload-plugins in Claude Code
 ```
 
 ```bash
