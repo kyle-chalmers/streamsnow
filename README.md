@@ -56,42 +56,66 @@ behind the numbers it shows.**
   (possible with customization; see below)
 
 **Where it fits next to a BI tool.** For internal analytics, meaning dashboards
-your own Snowflake users open inside Snowsight, StreamSnow can replace a BI tool:
-the apps are Python you review like any other code, they run where the data
-lives, and access is managed with Snowflake roles. External or customer-facing analytics is
-a different job. Viewers without Snowflake logins, embedding a dashboard in
-another product, and pixel-perfect scheduled reports are all possible, but they
-take additional customization beyond what StreamSnow ships today.
+your own Snowflake users open in Snowsight, StreamSnow can replace a BI tool:
+the apps are reviewed Python, they run where the data lives, and Snowflake roles
+manage access. Customer-facing dashboards, embedding, and pixel-perfect
+scheduled reports are possible but need customization beyond what ships today.
 
-**Who can use this.** You need a Snowflake account (any edition runs
-Streamlit in Snowflake; masking and row access policies, which StreamSnow does
-not require, need Enterprise) and either a role with `CREATE STREAMLIT` on one
-schema, or a Snowflake admin willing to run the one-time bootstrap that
-`streamsnow deploy-setup --admin` prints (database, schema, warehouse, roles, a
-CI service user and grants; see [Deploy setup](docs/deploy-setup.md)).
-Building and previewing locally needs only a login that can read your data.
+**Who can use this.** Anyone with a Snowflake account (any edition runs
+Streamlit in Snowflake; StreamSnow does not need Enterprise-only masking or row
+access policies) and either a role with `CREATE STREAMLIT` on one schema or an
+admin willing to run the one-time bootstrap that `streamsnow deploy-setup --admin`
+prints ([Deploy setup](docs/deploy-setup.md)). Building and previewing locally
+needs only a login that can read your data.
 
-**Principles** every change is judged against (the rules were already in the
-repo; collecting them here is what keeps future edits aligned):
+**Principles** every change is judged against:
 
-1. **One implementation, many consumers.** CLI, plugin, pre-commit, and CI call
-   the same code.
-2. **Detection is automated and total; destruction requires explicit committed
-   consent.**
-3. **The backstop asks; it never decides.** The gates are `validate-app` and CI,
-   not the review nudge.
-4. **Org knowledge lives in `streamsnow.config.yaml` and `.streamsnow/overlays/`,
-   never in skills.**
-5. **Every rule names the incident that created it and the mechanism that
-   enforces it.**
-6. **Degrade, don't die.** A missing enabler is named, not refused.
-7. **Faithful to a real fleet.** A check that fails a well-run production app is
-   a defect in the check until proven otherwise; `tests/fixtures/fleet/` is the
-   regression net.
-8. **Leaving should be cheap.** Everything StreamSnow writes into a repo is a
-   plain file the repo keeps; the checks are the only dependency, and the exit
-   path is documented as it actually is ([Distribution → Ownership and
-   exit](docs/distribution.md#ownership-and-exit)).
+1. **One implementation, many consumers:** CLI, plugin, pre-commit, and CI call the same code.
+2. **Detection is automated and total; destruction requires explicit committed consent.**
+3. **The backstop asks; it never decides:** the gates are `validate-app` and CI, not the review nudge.
+4. **Org knowledge lives in `streamsnow.config.yaml` and `.streamsnow/overlays/`**, never in skills.
+5. **Every rule names the incident that created it and the mechanism that enforces it.**
+6. **Degrade, don't die:** a missing enabler is named, not refused.
+7. **Faithful to a real fleet:** a check that fails a well-run production app is a defect in the check until proven otherwise (`tests/fixtures/fleet/` is the regression net).
+8. **Leaving should be cheap:** everything StreamSnow writes is a plain file the repo keeps ([Ownership and exit](docs/distribution.md#ownership-and-exit)).
+
+## Install with your coding agent
+
+Point any coding agent (Claude Code, Codex, Cursor, Gemini CLI, and others) at
+this repo and say: *"Read the install prompt in
+github.com/kyle-chalmers/streamsnow and follow it."* Or paste the prompt in
+yourself:
+
+```text
+Install StreamSnow (https://github.com/kyle-chalmers/streamsnow) for me.
+Confirm with me before installing anything, and stop at each question you
+cannot answer on my behalf.
+
+1. If you are Claude Code: run `claude plugin marketplace add kyle-chalmers/streamsnow`
+   and then `claude plugin install streamsnow@streamsnow`. Tell me to restart Claude
+   Code and type `/start-app --setup`. Stop there; that skill does the rest.
+
+2. Any other agent: make sure `uv` is installed, then run `uv tool install streamsnow`
+   and confirm `streamsnow --version` answers. Run `streamsnow doctor` and fix each
+   failing required check one at a time, re-running doctor after each fix.
+
+3. In the folder for my apps: if it already has Streamlit apps, read
+   https://github.com/kyle-chalmers/streamsnow/blob/main/skills/start-app/adopt.md and
+   follow that instead of scaffolding. Otherwise run `streamsnow init --no-starter-app`.
+   It is an interactive wizard; if you cannot answer its prompts, hand it to me.
+
+4. Run `streamsnow agent-skills install --agent codex` to copy the StreamSnow skills
+   into .agents/skills. Codex reads that folder; any other agent can open
+   .agents/skills/start-app/SKILL.md directly. Follow start-app to build my first app.
+
+Rules: never ask me for Snowflake credentials (I run `snow connection add` myself
+when init prints it), and never run the admin DDL that `streamsnow deploy-setup --admin`
+prints; show it to me for my Snowflake admin.
+```
+
+Only Claude Code and Codex are tested. Prefer to type the steps yourself? See
+[Quickstart](#quickstart), and [Use with other agents](#use-with-other-agents)
+for what differs outside Claude Code.
 
 ## What it is
 
