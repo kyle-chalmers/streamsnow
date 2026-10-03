@@ -31,7 +31,11 @@ All notable changes to StreamSnow are recorded here. This project follows
   checks the role before trusting an empty result, asks only the questions
   the evidence could not settle, lets the user confirm or change the rest
   inline, and runs `streamsnow init --no-starter-app` with the confirmed
-  answers as flags. It proposes the denied schemas from the
+  answers as flags. Everything is a proposal: the user can skip the
+  investigation, pick the connection or role it uses, override any answer
+  (including `container` or `git-repository` against the evidence), keep a
+  non-default connection, and review the wizard's unasked defaults (warehouse,
+  roles, app database, compute pool) after `init`. It proposes the denied schemas from the
   raw and staging schemas that actually exist, recommends `stage-copy` unless a
   Git repository is already in use, and falls back to asking any question a
   probe cannot answer. It never runs DDL or grants.

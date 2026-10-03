@@ -86,30 +86,49 @@ names, container objects) is written as a sensible default with an inline commen
 change it; the file is the editing surface. Don't make the user answer those questions cold:
 investigate, propose, confirm, then pass the confirmed answers as flags.
 
+**The user decides; everything below is a proposal.** Before probing, say in one line what you
+will read and from which connection, so the user can redirect it or decline. The user can:
+
+- skip the investigation and answer the five questions themselves, or run
+  `streamsnow init --no-starter-app` in their own terminal and answer the wizard there;
+- choose which connection, MCP server or role you investigate with;
+- override any proposed answer, including choosing `container` or `git-repository` when the
+  evidence points elsewhere (say what that choice needs, then respect it);
+- change any default the wizard does not ask about (2c);
+- stop at any point and carry on later.
+
+Two limits are not the user's to waive, because they protect the user: you never run DDL or
+grants (the admin runs `deploy-setup --admin` output), and you never handle a password, token or
+key in chat (the user types those into their own terminal).
+
 ### 2a · Find the user's Snowflake access
 
 Every user arrives with a different setup: a `snow` connection from a past tutorial, a Snowflake
 MCP server in their agent, a dbt profile, several accounts, or nothing at all. Work out which
-before asking anything, and help them get to a working default `snow` connection, because local
-preview reads it and `--connection` can take the account from it without anyone typing the
-account into chat.
+before asking anything. A `snow` connection is the recommended path, because local preview reads
+it and `--connection` can take the account from it without anyone typing the account into chat;
+it does not have to be the default one (`--connection` takes any name), and the user may prefer
+to keep their current setup. Local preview reads the default connection, so a non-default one
+then needs the per-app `secrets.toml` override from step 3.
 
 | What you find | What to do |
 |---|---|
 | A default `snow` connection (`snow-key-file` in `streamsnow doctor --format json` names it) | Use it. Confirm with the user that it is the account these apps are for. |
 | `snow` connections, none of them default | List the names only: `snow connection list --format json \| python3 -c "import json,sys; [print(r.get('connection_name'), r.get('is_default')) for r in json.load(sys.stdin)]"`. Ask which one is this account. Making it the default (`snow connection set-default <name>`) repoints every tool that reads the default, so ask before running it. |
 | No `snow` connection, but a Snowflake MCP server or a dbt profile | Investigate through those (2b). Then offer to add a `snow` connection as below, since local preview needs one. |
-| No Snowflake access on this machine | Help set it up. Ask how they sign in: SSO (`--authenticator externalbrowser`), a key pair (`--private-key-file <path>` with `--authenticator SNOWFLAKE_JWT`), or a programmatic access token. Then have them run `snow connection add --connection-name <slug> --default` in their own terminal, adding only that sign-in flag; it prompts for the account identifier, user and the rest, so nothing is typed into chat. The account identifier is in Snowsight's account menu (bottom left) under the account details. Then have them run `snow connection test -c <slug>`, which may open a browser. |
+| No Snowflake access on this machine | Offer to help set it up. Ask how they sign in: SSO (`--authenticator externalbrowser`), a key pair (`--private-key-file <path>` with `--authenticator SNOWFLAKE_JWT`), or a programmatic access token. Then have them run `snow connection add --connection-name <slug> --default` (any name they like; drop `--default` to leave their current default alone) in their own terminal, adding only that sign-in flag; it prompts for the account identifier, user and the rest, so nothing is typed into chat. The account identifier is in Snowsight's account menu (bottom left) under the account details. Then have them run `snow connection test -c <slug>`, which may open a browser. |
 | No Snowflake account | Point them to a Snowflake trial. Trial accounts have no compute pools, so expect the `warehouse` runtime. |
 
-Never ask for a password, token or key in chat, never open or edit the connection files, and
-never propose password-only auth (Snowflake's MFA rollout retires it). If the user would rather
-not set up a connection now, carry on with whatever access exists and fall back to asking.
+Never ask for a password, token or key in chat, and never open or edit the connection files. Don't
+recommend password-only auth (Snowflake's MFA rollout retires it); if the user chooses it anyway,
+say so once and leave it to them. If the user would rather not set up a connection now, carry on
+with whatever access exists and fall back to asking.
 
 ### 2b · Investigate (read-only)
 
-Find the answers before asking anything. Use whatever Snowflake access this machine and this
-agent session have, in this order, and say which source and role each finding came from:
+Find the answers before asking anything. Use the source the user named, or else whatever
+Snowflake access this machine and this agent session have, in this order, and say which source
+and role each finding came from:
 
 1. **The `snow` CLI's default connection** (it reads `~/.snowflake/connections.toml` and
    `config.toml`). Its name is `detail.connection_name` of the `snow-key-file` check in
@@ -141,7 +160,7 @@ in each probe keeps only the columns you need, so owners and share origins stay 
 | Database | `SHOW DATABASES ->> SELECT "name", "kind", "comment" FROM $1` | Propose the curated or reporting database, never a raw or landing one. A comment saying what the data is for, or the user's own description of the app, outweighs the name; with neither, names like `ANALYTICS`, `REPORTING`, `MARTS` or `DW` point to curated data and `RAW`, `LANDING`, `INGEST`, `STAGING`, `SANDBOX` or `DEV` to raw. Ignore `SNOWFLAKE`, `SNOWFLAKE_LEARNING_DB`, `SNOWFLAKE_SAMPLE_DATA` and the StreamSnow app database (`STREAMSNOW_APPS` by default). Two plausible candidates: name both and ask. |
 | Allowed schemas | `SHOW SCHEMAS IN DATABASE <db> ->> SELECT "name", "comment" FROM $1` | Propose the curated schemas (`MARTS`, `REPORTING`, `ANALYTICS`, `CURATED`, `GOLD`, `PRESENTATION`); skip `INFORMATION_SCHEMA`. When nothing matches those names but the database holds only one or two other schemas that are not raw, propose those and say the names gave no signal. |
 | Denied schemas | same result | Propose the raw and staging schemas that actually exist (`RAW*`, `STG*`, `STAGING`, `LANDING`, `BRONZE`, `INGEST*`), not the `RAW,STAGING` default. When none exist, omit `--deny-schemas` so the default stands, and say it guards names that do not exist yet. An intermediate layer (`INT*`, `INTERMEDIATE`) goes in neither list unless the user says so. Never put a schema in both. |
-| Deploy source | `SHOW GIT REPOSITORIES IN ACCOUNT ->> SELECT "database_name", "schema_name", "name" FROM $1` | Propose `stage-copy`. Offer `git-repository` only when a GIT REPOSITORY already exists, and say what it adds: an API integration (ACCOUNTADMIN creates it), a GitHub token stored as a Snowflake secret, and Snowflake needing network access to GitHub. |
+| Deploy source | `SHOW GIT REPOSITORIES IN ACCOUNT ->> SELECT "database_name", "schema_name", "name" FROM $1` | Propose `stage-copy`. Propose `git-repository` only when a GIT REPOSITORY already exists; the user can still choose it either way. When it comes up, say what it adds: an API integration (ACCOUNTADMIN creates it), a GitHub token stored as a Snowflake secret, and Snowflake needing network access to GitHub. |
 
 These are SHOW and SELECT-over-SHOW only. **Never run DDL, grants, or anything that writes**, and
 never switch roles to get more visibility. A probe that errors (no privilege, no source can see
@@ -179,8 +198,16 @@ existing config without `--reconfigure` exit 2 rather than being ignored. When t
 is `git-repository`, the written `deploy.git_repository_fqn` is a placeholder: propose setting it
 to the repository the probe found.
 
+After `init`, show the defaults the wizard did not ask about (project name, app database and
+schema, warehouse, CI and viewer roles, compute pool) in a short list and ask whether any should
+change: a team may already have its own warehouse, roles or naming. Change the values the user
+asks for in the written file, keeping its keys and comments, then re-run
+`streamsnow doctor --format json` and confirm the `config` check still passes. Nothing needs
+changing for a first run; each value carries a comment saying when to.
+
 - **Don't hand-author `streamsnow.config.yaml` from scratch**: the wizard owns its shape, and the
-  answer flags are its supported non-interactive path.
+  answer flags are its supported non-interactive path. Editing values in the file it wrote is
+  fine; that is what it is for.
 - **Not in Claude Code?** After `init`, `streamsnow agent-skills install --agent codex` copies these
   skills into the repo's `.agents/skills/`, where every teammate's Codex finds them; commit it.
 - `streamsnow init` without the flag also scaffolds an `example-dashboard` starter app. That is
