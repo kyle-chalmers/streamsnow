@@ -183,8 +183,8 @@ def _points_at(uri: str, sha: str) -> bool:
 def check_version_source(desc: dict | None, fqn: str, sha: str) -> dict:
     """Stage-copy: a version-source URI in ``DESCRIBE STREAMLIT`` must contain
     ``/commits/<sha>/``, otherwise the object points at an old stage path and
-    viewers see stale code. (The git-repository source pins freshness via
-    fetch+PULL instead; callers skip this check there.) No DESCRIBE row, or
+    viewers see stale code. (The git-repository source is checked by
+    ``check_git_commit`` instead.) No DESCRIBE row, or
     neither source column in it, means the check could not run: skipped."""
     if desc is None:
         return _skipped("version-source", "DESCRIBE STREAMLIT returned no row")
@@ -200,6 +200,44 @@ def check_version_source(desc: dict | None, fqn: str, sha: str) -> dict:
         [
             f"{fqn}: {key} does not contain '/commits/{sha}/', so the live version "
             f"was not built from the merged commit (saw: {uris or 'no source URI'})"
+        ],
+    )
+
+
+# The git-repository deploy runs CREATE OR REPLACE STREAMLIT ... FROM
+# '@<repo>/branches/<branch>/apps/<slug>/' (Snowflake rejects a /commits/<sha>/
+# path there), so the source URI names a branch, not a commit. DESCRIBE reports
+# the commit the branch pointed at in last_version_git_commit_hash (observed
+# 2026-10-03, with default_version_git_commit_hash carrying the same value).
+_LAST_GIT_KEY = "last_version_git_commit_hash"
+_DEFAULT_GIT_KEY = "default_version_git_commit_hash"
+
+
+def check_git_commit(desc: dict | None, fqn: str, sha: str) -> dict:
+    """Git-repository: the commit hash in ``DESCRIBE STREAMLIT`` must be this
+    deploy's commit. A different hash means the branch moved before
+    ``snow git fetch`` ran (the newer commit's own deploy will ship it) or the
+    fetch did not pick up the merge, so viewers may not see this change. A short
+    SHA matches as a prefix. No row or no hash column: skipped."""
+    if desc is None:
+        return _skipped("version-source", "DESCRIBE STREAMLIT returned no row")
+    key = next((k for k in (_LAST_GIT_KEY, _DEFAULT_GIT_KEY) if _has(desc, k)), None)
+    if key is None:
+        return _skipped("version-source", "no git commit hash column in DESCRIBE STREAMLIT")
+    got = str(_get(desc, key) or "")
+    if len(sha) < 7:
+        return _check(
+            "version-source", FAIL, [f"{fqn}: --sha {sha!r} is too short to identify a commit"]
+        )
+    if got and got.lower().startswith(sha.lower()):
+        return _check("version-source", PASS, [])
+    return _check(
+        "version-source",
+        FAIL,
+        [
+            f"{fqn}: {key} is {got or 'empty'}, not {sha}: the live version was not built "
+            "from this commit. If a newer commit reached the branch before `snow git fetch`, "
+            "its own deploy run ships it; otherwise check that the fetch succeeded."
         ],
     )
 
@@ -299,11 +337,10 @@ def verify_app(
         sleep(delay)  # container cold start after a version bump takes 1 to 3 min
 
     checks = [exists, live]
-    if sha and cfg.deploy.source == "stage-copy":
+    if sha:
         blocker = _describe_blocker(exists, describe_error)
-        checks.append(
-            _skipped("version-source", blocker) if blocker else check_version_source(desc, fqn, sha)
-        )
+        check = check_version_source if cfg.deploy.source == "stage-copy" else check_git_commit
+        checks.append(_skipped("version-source", blocker) if blocker else check(desc, fqn, sha))
 
     if cfg.runtime == "container":
         checks.append(check_service_logs(_fetch_service_logs(cfg, slug, run_query), fqn))

@@ -324,32 +324,78 @@ def test_verify_app_describe_error_is_skipped_with_the_error_after_retries():
     assert slept == [5.0, 5.0]  # a DESCRIBE error can be the cold start: retried
 
 
-def test_verify_app_git_repository_source_checks_live_version_only():
-    """The git-repository source pins freshness via fetch + PULL, so there is
-    no SHA stage path to compare even when a SHA is passed."""
+def _git_data() -> dict:
     data = yaml.safe_load(EXAMPLE.read_text())
     data["deploy"] = {
         "source": "git-repository",
         "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
         "api_integration_name": "GITHUB_API_INTEGRATION",
         "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
+        "git_origin": "https://github.com/acme/dashboards.git",
     }
-    git_desc = _describe_row()
-    git_source = "@STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO/branches/main/apps/my-app/"
-    git_desc["default_version_source_location_uri"] = git_source
-    git_desc["last_version_source_location_uri"] = git_source
-    for describe_rows, want in (([git_desc], "pass"), ([_describe_row(live=None)], "fail")):
-        result = verify_app(
-            Config.from_dict(data),
-            "my-app",
-            sha=SHA,
-            run_query=_run_query_factory([[_show_row()]], describe_rows=describe_rows),
-            attempts=1,
-            sleep=lambda _: None,
-        )
-        checks = _by_name(result)
-        assert "version-source" not in checks
-        assert checks["live-version"]["status"] == want
+    return data
+
+
+def _git_desc(commit: str | None) -> dict:
+    """DESCRIBE for a git-sourced app, shaped like the live row observed on
+    2026-10-03: a branch source URI plus the commit hash it resolved to."""
+    row = _describe_row()
+    source = "@STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO/branches/main/apps/my-app/"
+    row["default_version_source_location_uri"] = source
+    row["last_version_source_location_uri"] = source
+    if commit is not None:
+        row["default_version_git_commit_hash"] = commit
+        row["last_version_git_commit_hash"] = commit
+    return row
+
+
+@pytest.mark.parametrize(
+    ("commit", "want"),
+    [(SHA, "pass"), (SHA[:7], "pass"), ("0" * 40, "fail"), (None, "skipped")],
+)
+def test_verify_app_git_repository_source_checks_the_deployed_commit(commit, want):
+    """A git deploy builds from a branch path, so the commit is proven by
+    DESCRIBE's last_version_git_commit_hash; a missing column is skipped."""
+    expected = SHA[:7] if commit == SHA[:7] else SHA
+    desc = _git_desc(SHA if commit == SHA[:7] else commit)
+    result = verify_app(
+        Config.from_dict(_git_data()),
+        "my-app",
+        sha=expected,
+        run_query=_run_query_factory([[_show_row()]], describe_rows=[desc]),
+        attempts=1,
+        sleep=lambda _: None,
+    )
+    check = _by_name(result)["version-source"]
+    assert check["status"] == want
+    if want == "fail":
+        assert "last_version_git_commit_hash" in check["findings"][0]
+        assert result["ok"] is False
+
+
+def test_verify_app_git_repository_rejects_a_too_short_sha():
+    result = verify_app(
+        Config.from_dict(_git_data()),
+        "my-app",
+        sha=SHA[:1],
+        run_query=_run_query_factory([[_show_row()]], describe_rows=[_git_desc(SHA)]),
+        attempts=1,
+        sleep=lambda _: None,
+    )
+    assert _by_name(result)["version-source"]["status"] == "fail"
+
+
+def test_verify_app_git_repository_without_sha_checks_live_version_only():
+    result = verify_app(
+        Config.from_dict(_git_data()),
+        "my-app",
+        run_query=_run_query_factory([[_show_row()]], describe_rows=[_git_desc(SHA)]),
+        attempts=1,
+        sleep=lambda _: None,
+    )
+    checks = _by_name(result)
+    assert "version-source" not in checks
+    assert checks["live-version"]["status"] == "pass"
 
 
 def test_verify_app_retries_through_cold_start():

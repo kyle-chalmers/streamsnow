@@ -45,7 +45,7 @@ runs in pre-commit + CI.
 {% if deploy_source == 'stage-copy' %}
 CI pushes `apps/` to a SHA-versioned internal stage (`{{ stage_database }}.{{ stage_schema }}.{{ stage_name }}/commits/<sha>/apps/<slug>/`) and runs `CREATE OR REPLACE STREAMLIT` against that path. Snowflake never reaches out to GitHub.
 {% else %}
-Snowflake's `GIT REPOSITORY` pulls app source on `snow git fetch`; deploy runs `CREATE STREAMLIT ... FROM '@<repo>/branches/{{ "{" }}branch}/apps/<slug>/'` (new) or the `ABORT → PULL → COMMIT → ADD LIVE VERSION FROM LAST` refresh (existing). Requires Snowflake→GitHub network reachability.
+Snowflake's `GIT REPOSITORY` pulls app source on `snow git fetch`; deploy runs `CREATE OR REPLACE STREAMLIT ... FROM '@<repo>/branches/{{ "{" }}branch}/apps/<slug>/'`, and verify-deploy checks that the live version came from the merged commit. Requires Snowflake→GitHub network reachability.
 {% endif %}
 STREAMLIT objects are created in `{{ app_database }}.{{ app_schema }}`. Deploy through CI on merge to `main` — never `snow streamlit deploy` locally. (Wire the deploy workflow + your Snowflake CI credentials per the deploy docs; the generated CI workflow covers lint + schema-refs today.)
 

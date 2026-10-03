@@ -28,10 +28,10 @@ On merge to `main`, the workflow:
 5. **Verifies deploy health** per app (`streamsnow verify-deploy`) — object
    exists, live version set, no container crash-loop signature. With the
    **stage-copy** source it also confirms the version source matches the merge
-   SHA. The **git-repository** workflow verifies health only — it calls
-   `verify-deploy` without `--sha` (the fetch/refresh step is what advances
-   versions there), and that refresh step is best-effort: a failed refresh
-   logs and continues rather than failing the run.
+   SHA. The **git-repository** workflow passes the merge SHA too, and the
+   check compares it with the `last_version_git_commit_hash` that
+   `DESCRIBE STREAMLIT` reports, because a Git-sourced app is built from the
+   branch rather than a commit path.
    Existence comes from `SHOW STREAMLITS`; the live-version and version-source
    checks read `DESCRIBE STREAMLIT`, the only one of the two that carries the
    version URIs. A check that cannot run prints `○ <check> (skipped)` with the
@@ -84,18 +84,18 @@ Set `deploy.source` in `streamsnow.config.yaml`:
 
 | | **stage-copy** (default) | **git-repository** |
 |---|---|---|
-| Mechanism | CI uploads `apps/` to a SHA-versioned internal stage; the STREAMLIT serves `FROM '@stage/...'` | Snowflake's `GIT REPOSITORY` object fetches the app source from your Git repo |
+| Mechanism | CI uploads `apps/` to a SHA-versioned internal stage; the STREAMLIT serves `FROM '@stage/commits/<sha>/...'` | CI runs `snow git fetch`, then each app is rebuilt `FROM '@<repo>/branches/<branch>/...'` |
 | Network direction | CI → Snowflake only | Snowflake → GitHub (must be reachable) |
-| One-time objects | an internal stage | API integration + secret (GitHub token) + `GIT REPOSITORY` |
-| Best when | you want the fewest moving parts and no Snowflake→GitHub dependency | you already run a Snowflake `GIT REPOSITORY` workflow |
+| One-time objects | an internal stage | API integration (ACCOUNTADMIN) + `GIT REPOSITORY`, plus a secret holding a GitHub token for a private repo |
+| Best when | you want the fewest moving parts and no Snowflake→GitHub dependency | you want the repo browsable in Snowsight and can give Snowflake access to GitHub |
 | Limits | stage retains every SHA (your rollback surface) | repositories over 2 GB are unsupported ([Git overview](https://docs.snowflake.com/en/developer-guide/git/git-overview)) |
 
 The scaffold renders `deploy.yml` for whichever source your config declares.
 With the default **stage-copy**, Snowflake never reaches out to GitHub, so
-there's no network-policy dependency. Choose `git-repository` only if you
-specifically want Snowflake to pull from your repo; the rendered workflow then
-runs `snow git fetch` and Snowflake must reach GitHub (or you mint a
-GitHub-App token into the secret).
+there's no network-policy dependency. To move to `git-repository`, follow
+**[Switching to the Git repository deploy source](git-repository.md)**;
+`streamsnow deploy-setup --admin --source git-repository` previews its setup
+SQL without changing your config.
 
 ## One-time setup
 
@@ -113,8 +113,9 @@ streamsnow deploy-setup | snow sql --stdin    # then apply
   The wizard defaults `compute_pool` to `SYSTEM_COMPUTE_POOL_CPU`, which already
   exists in every account, so only the integration is new.
   **Warehouse** apps need neither.
-- **git-repository**: creates the API integration, the secret holding a GitHub
-  token, and the `GIT REPOSITORY` object, and grants them to your `ci_role`.
+- **git-repository**: creates the API integration, the `GIT REPOSITORY` object
+  and, for a private repo, the secret holding a GitHub token, and grants them
+  to your `ci_role` ([guide](git-repository.md)).
 
 Then add the CI auth secrets (key-pair / JWT for the CI user). The full secret
 table is in **[Deploy setup → CI auth](deploy-setup.md#2-ci-auth-key-pair--jwt)**.
@@ -128,7 +129,6 @@ to deploy a single app by hand:
 ```bash
 streamsnow deploy-sql <slug>                 # CREATE OR REPLACE STREAMLIT (stage-copy embeds the SHA)
 streamsnow deploy-sql <slug> --sha <sha>     # pin a specific commit (stage-copy)
-streamsnow deploy-sql <slug> --refresh       # git-repository: ABORT/PULL/COMMIT an existing app
 ```
 
 `streamsnow stage-path` prints the stage base path (`@DB.SCHEMA.STAGE`) the
