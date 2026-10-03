@@ -178,7 +178,9 @@ strongest first, and treat names as the weakest:
 1. What the user has said about the app and its data.
 2. Comments on databases and schemas.
 3. What the objects hold: table and view counts (never propose an empty schema), and, with the
-   user's OK, table names.
+   user's OK, table names. A narrowly scoped role is evidence too: its grants
+   (`SHOW GRANTS TO ROLE <current role> ->> SELECT "privilege", "granted_on", "name" FROM $1`)
+   show which data someone chose to expose. A broad role's grants say little.
 4. The user's own tooling: a dbt project or profile names its target database and its layers.
 5. Names, as hints only. Common conventions (`MARTS`, `REPORTING` or `GOLD` for curated data;
    `RAW`, `STAGING`, `LANDING`, `BRONZE` or `DEV` for raw and working layers) are examples, not
