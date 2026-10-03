@@ -195,8 +195,8 @@ caught it. Runtime-specific facts link to the official page in
   pick up hook or skill changes on their own. The SessionStart line prints the
   installed version.
 - **Fix:** `claude plugin uninstall --scope project streamsnow@streamsnow`,
-  `claude plugin install --scope project streamsnow@streamsnow`, restart Claude
-  Code.
+  `claude plugin install --scope project streamsnow@streamsnow`, then run
+  `/reload-plugins` in Claude Code (no restart needed).
 
 ## Adding new issues
 
