@@ -271,6 +271,15 @@ def _prompt_config(
         deny = _split_schemas(given["deny_schemas"])
     else:
         deny = _pf(prefill, "governance.schema_deny", ["RAW", "STAGING"])
+    if given:
+        # Flags can meet a default or prefilled list they never named (--schemas RAW
+        # against the RAW,STAGING default), so check the lists that will be written.
+        both = {s.upper() for s in _split_schemas(allow)} & {s.upper() for s in deny}
+        if both:
+            raise ConfigError(
+                f"schema(s) {', '.join(sorted(both))} are both allowed and denied; "
+                "drop them from --schemas or set --deny-schemas."
+            )
     # Everything below ships as a commented default in the written file.
     app_db = _pf(prefill, "snowflake.objects.app_database", "STREAMSNOW_APPS")
     app_schema = _pf(prefill, "snowflake.objects.app_schema", "DASHBOARDS")
@@ -498,6 +507,14 @@ def _flag_answers(
         raise ConfigError("--schemas must name at least one schema.")
     if account is not None and connection is not None:
         raise ConfigError("pass --account or --connection, not both.")
+    if account is not None:
+        try:
+            normalize_account(account)
+        except ConfigError:
+            raise ConfigError(
+                "--account must be an account locator such as ab12345.us-east-1 "
+                "(no .snowflakecomputing.com)."
+            ) from None
     if schemas is not None and deny_schemas is not None:
         both = {s.upper() for s in _split_schemas(schemas)} & {
             s.upper() for s in _split_schemas(deny_schemas)

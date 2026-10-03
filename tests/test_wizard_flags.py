@@ -248,3 +248,46 @@ def test_flags_and_config_import_are_exclusive(tmp_path, monkeypatch):
         )
         assert r.exit_code == 2, r.output
         assert "--config" in r.output
+
+
+@pytest.mark.parametrize("bad", ["", "  ", "not a locator!"])
+def test_bad_account_flag_exits_2_without_prompting(tmp_path, monkeypatch, bad):
+    _no_prompts(monkeypatch)
+    flags = [f for f in FLAGS if f not in ("--account", ANSWERS["account"])]
+    r = runner.invoke(app, ["configure", "--dir", str(tmp_path), *flags, "--account", bad])
+    assert r.exit_code == 2, r.output
+    assert "--account" in r.output
+    assert not (tmp_path / CONFIG_FILENAME).exists()
+
+
+def test_allowed_schema_conflicting_with_the_default_deny_list_exits_2(tmp_path, monkeypatch):
+    # --schemas alone still meets the RAW,STAGING default deny list.
+    _no_prompts(monkeypatch)
+    flags = [f for f in FLAGS if f not in ("--schemas", ANSWERS["schemas"])]
+    r = runner.invoke(app, ["configure", "--dir", str(tmp_path), *flags, "--schemas", "raw,MARTS"])
+    assert r.exit_code == 2, r.output
+    assert "both allowed and denied" in r.output
+    assert "RAW" in r.output
+    assert not (tmp_path / CONFIG_FILENAME).exists()
+
+
+def test_deny_flag_conflicting_with_the_prefilled_allow_list_exits_2(tmp_path, monkeypatch):
+    _no_prompts(monkeypatch)
+    assert runner.invoke(app, ["configure", "--dir", str(tmp_path), *FLAGS]).exit_code == 0
+    before = (tmp_path / CONFIG_FILENAME).read_text()
+    # --schemas omitted: its prompt is answered with the prefilled default (Enter).
+    monkeypatch.setattr(typer, "prompt", lambda text, default=None, **kw: default)
+    r = runner.invoke(
+        app,
+        ["configure", "--dir", str(tmp_path), *FLAGS[:6], *FLAGS[8:], "--deny-schemas", "MARTS"],
+    )
+    assert r.exit_code == 2, r.output
+    assert "both allowed and denied" in r.output
+    assert (tmp_path / CONFIG_FILENAME).read_text() == before
+
+
+def test_setup_skill_probes_are_shell_safe():
+    """`-q "<query>"` would let the shell eat the "name" quotes and expand $1."""
+    text = (Path(__file__).resolve().parent.parent / "skills/start-app/setup.md").read_text()
+    assert '-q "<query>"' not in text
+    assert "-q '<query>'" in text

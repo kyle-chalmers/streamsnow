@@ -114,7 +114,8 @@ agent session have, in this order, and say which source and role each finding ca
 1. **The `snow` CLI's default connection** (it reads `~/.snowflake/connections.toml` and
    `config.toml`). Its name is `detail.connection_name` of the `snow-key-file` check in
    `streamsnow doctor --format json` (present whenever a default connection exists). Run each probe
-   as `snow sql -c <connection> --format json -q "<query>"`. This is the preferred source: it is
+   as `snow sql -c <connection> --format json -q '<query>'`, in single quotes: the probes contain
+   `"name"` and `$1`, which double quotes would hand to the shell. This is the preferred source: it is
    the connection local preview reads, and `--connection` can take the account from it unseen.
 2. **A Snowflake MCP server already connected to this agent session** (a tool that runs Snowflake
    SQL). Run the same probes through it. It is the fallback when `snow` is missing, broken or has
