@@ -265,7 +265,9 @@ to the repository the probe found.
   the CLI-only path; in this skill the real app comes from `/start-app`, so pass the flag.
 - The first deploy needs one-time Snowflake objects (database, schema, warehouse, roles, a CI
   service user, grants). `streamsnow deploy-setup --admin` prints the reviewable DDL; surface it
-  for the user's Snowflake admin, never run it yourself.
+  for the user's Snowflake admin, never run it yourself. The user runs `streamsnow ci-key create`
+  in their own terminal for the CI key pair, then adds `--public-key-file <its .pub>` so the file
+  runs unedited; it is safe to re-run, and `deploy-setup --teardown` prints the start-fresh reverse.
 
 ## 3 · Connection (one store, owned by the user)
 

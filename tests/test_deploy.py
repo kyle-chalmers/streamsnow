@@ -407,11 +407,7 @@ def test_cli_deploy_sql_refresh_is_a_no_op_for_old_workflows(tmp_path):
     assert lines and all(ln.startswith("--") for ln in lines)
 
 
-def test_admin_sql_eai_uses_valid_create_syntax():
-    # Snowflake's CREATE EXTERNAL ACCESS INTEGRATION has no IF NOT EXISTS clause.
-    stmts = _stmts(generate_admin_sql(_cfg()))
-    assert "EXTERNAL ACCESS INTEGRATION IF NOT EXISTS" not in stmts
-    assert "CREATE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION" in stmts
+# The EAI statement's re-run guard is covered in tests/test_admin_setup.py.
 
 
 def test_admin_sql_viewer_role_gets_no_data_grants_by_default():

@@ -24,7 +24,7 @@
 
 > **Status: beta, functional.** The CLI (configure / init / new / doctor /
 > validate-app / preview / check / sql-review / review-gate / review-loop /
-> migrate / nav / deploy-sql / deploy-setup / verify-deploy / update /
+> migrate / nav / deploy-sql / deploy-setup / ci-key / verify-deploy / update /
 > agent-skills) and the Claude Code plugin (8 skills + shared recipes) are
 > implemented and CI-green for
 > both runtimes and both deploy sources. Published on PyPI (`uvx streamsnow` /
