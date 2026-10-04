@@ -7,12 +7,27 @@ All notable changes to StreamSnow are recorded here. This project follows
 
 ### Added
 
+- **The plugin bundles the Playwright MCP** (`.mcp.json`, an exact
+  `@playwright/mcp` pin). Five skills already walked running apps in a browser,
+  but nothing set the browser tool up, so the walkthrough was silently skipped
+  for anyone who had not configured one by hand.
+- **Onboarding rows in `streamsnow doctor`:** `repo-files`, `git-identity`
+  (reports only whether name and email are set) and `pre-commit-hook` (pre-commit's
+  own hook, honoring `core.hooksPath`), all required once a config exists;
+  `node` (warning) for the browser tool; `ci-secrets`, which reads secret names
+  through `gh` and says "not checked", never "missing", when it cannot list them.
+  On native Windows a `platform` row points to WSL.
+- **`/start-app --setup` runs the setup and explains each step.** Before every
+  install it says in a line or two what it is and why the user needs it, then
+  waits for a yes. It routes a teammate cloning a configured repo straight to
+  machine setup, adds a browser check, saves the plugin at project scope, and
+  sets the deploy workflow's non-secret GitHub secrets (the user sets the key).
 - **`streamsnow deploy-setup --teardown` prints the start-fresh reverse of
   `--admin`.** Reviewable DROP statements, never run: the app database (and
   every deployed app in it), warehouse, CI service user, viewer and CI roles,
   then the external access integration, the configured compute pool (never
-  `SYSTEM_COMPUTE_POOL_CPU`), and the git API integration. Every DROP uses `IF EXISTS`. It keeps the
-  governance database, refuses when the app or stage database is the governance
+  `SYSTEM_COMPUTE_POOL_CPU`), and the git API integration. Every DROP uses
+  `IF EXISTS`. It keeps the governance database, refuses when the app or stage database is the governance
   database or a Snowflake-shared one or a role is a system role, and marks each
   object that could predate StreamSnow.
 - **`streamsnow ci-key create` makes the CI key pair and the five secret
@@ -32,6 +47,11 @@ All notable changes to StreamSnow are recorded here. This project follows
   kept serving through a replace in a live test.
 - **The admin script grants the viewer role to whoever runs it**, through
   `CURRENT_USER()`, instead of leaving a commented `GRANT` to fill in.
+
+### Fixed
+
+- `docs/getting-started.md` promised a git-identity check that doctor did not
+  have.
 
 ## [0.7.5] - 2026-10-03
 

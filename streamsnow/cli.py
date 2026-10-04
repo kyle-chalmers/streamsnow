@@ -52,6 +52,7 @@ from .scaffolder import (
     CREATE_IF_MISSING_ITEMS,
     GOVERNANCE_ITEMS,
     REPO_ITEMS,
+    missing_repo_files,
     render_item,
     scaffold,
 )
@@ -777,11 +778,6 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
     return "\n".join(lines)
 
 
-def _missing_repo_files(cfg: Config, root: Path) -> list[str]:
-    """Repo-level governed files this config calls for that are not on disk."""
-    return [i.output for i in REPO_ITEMS if i.when(cfg) and not (root / i.output).exists()]
-
-
 @app.command()
 def new(
     domain: str = typer.Argument(..., help="Business domain, e.g. 'marketing'."),
@@ -806,7 +802,7 @@ def new(
     # `new` writes app files only. A repo set up with `configure` alone (the
     # pre-0.7.1 plugin setup path) has no .gitignore, hooks or CI: warn loudly,
     # because without .gitignore an app's .streamlit/secrets.toml can be committed.
-    missing = _missing_repo_files(cfg, Path.cwd())
+    missing = missing_repo_files(cfg, Path.cwd())
     if missing:
         console.print(
             "[yellow]warning:[/] this repo is missing StreamSnow's governed repo files: "
@@ -1003,7 +999,8 @@ def ci_key_create(
         f"{result.public_key} > admin-setup.sql"
     )
     print("     (review, then run it as ACCOUNTADMIN)")
-    print("  2. In your repo, store the five secrets (values go straight from file to GitHub):")
+    print("  2. In your repo, store the five secrets (values go straight from file to GitHub;")
+    print("     SNOWFLAKE_ACCOUNT last, since it switches the deploy job on):")
     names = " ".join(_ci_key.SECRET_NAMES)
     print(f'     for s in {names}; do gh secret set "$s" < "{d}/secrets/$s"; done')
 

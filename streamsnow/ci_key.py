@@ -30,12 +30,14 @@ from pathlib import Path
 
 KEY_BASENAME = "streamsnow_ci_rsa_key"
 PRIVATE_KEY_SECRET = "SNOWFLAKE_PRIVATE_KEY_RAW"
+# SNOWFLAKE_ACCOUNT last: it switches the deploy job on, so setting it before the
+# others would make a merge in between fail at sign-in.
 SECRET_NAMES = (
-    "SNOWFLAKE_ACCOUNT",
     "SNOWFLAKE_USER",
     PRIVATE_KEY_SECRET,
     "SNOWFLAKE_WAREHOUSE",
     "SNOWFLAKE_ROLE",
+    "SNOWFLAKE_ACCOUNT",
 )
 DEFAULT_DIR = Path("~/.streamsnow-ci")
 
