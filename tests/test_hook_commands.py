@@ -120,6 +120,10 @@ def test_every_python_hook_uses_the_cross_shell_launcher() -> None:
 
 def test_this_machine_has_a_shell_to_test_with() -> None:
     assert SHELLS, "no sh/bash/PowerShell found; the launcher went untested"
+    if os.name == "nt":
+        # A missing shell would silently drop its parametrized cases; on Windows
+        # every shell Claude Code can hand a hook to must actually be exercised.
+        assert {"git-bash", "pwsh", "powershell"} <= set(SHELL_IDS), SHELL_IDS
 
 
 @shells
@@ -163,5 +167,8 @@ def test_hook_fails_open_when_no_python_is_found(
 
 
 def test_shell_discovery_never_picks_the_wsl_launcher() -> None:
-    for _, argv in SHELLS:
-        assert "system32" not in argv[0].lower(), argv[0]
+    """System32\\bash.exe is the WSL launcher, which would run the hook inside
+    Linux. (Windows PowerShell 5.1 legitimately lives under System32.)"""
+    for name, argv in SHELLS:
+        if "bash" in name:
+            assert "system32" not in argv[0].lower(), argv[0]
