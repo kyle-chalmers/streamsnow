@@ -125,7 +125,15 @@ def find_unwrapped_calls(text: str, filename: str = "<string>") -> list[dict]:
 def _git(args: list[str], cwd: Path) -> tuple[int, str]:
     """Run git, never raising — (127, "") when git itself is unavailable."""
     try:
-        proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+            encoding="utf-8",
+            errors="replace",
+        )
         return proc.returncode, proc.stdout
     except OSError:
         return 127, ""
@@ -193,7 +201,7 @@ def scan_paths(paths: list[Path], base_ref: str | None = None) -> dict:
 
     findings = []
     for p in files:
-        file_findings = find_unwrapped_calls(p.read_text(errors="ignore"), str(p))
+        file_findings = find_unwrapped_calls(p.read_text(errors="ignore", encoding="utf-8"), str(p))
         if base_ref is not None and p in baselines:
             current = sum(1 for f in file_findings if not f["detail"].startswith("syntax error"))
             if current <= baselines[p]:

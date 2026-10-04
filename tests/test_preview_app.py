@@ -12,15 +12,22 @@ import json
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+from _portable import posix_process_control
 
 from streamsnow.tools import preview_app
 
 SLUG = "acme-sales-dashboard"
 
 # Stand-in "streamlit": binds the port and answers the health endpoint.
+# socketserver.TCPServer, not http.server.HTTPServer: HTTPServer calls
+# socket.getfqdn() between bind and listen, a reverse-DNS lookup that stalls on
+# GitHub's macOS runners, leaving the port bound but refusing connections.
 FAKE_SERVER = """\
 import http.server
+import socketserver
 import sys
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -34,9 +41,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+socketserver.TCPServer.allow_reuse_address = True  # as HTTPServer does
+server = socketserver.TCPServer(("127.0.0.1", int(sys.argv[1])), Handler)
 print("You can now view your Streamlit app in your browser.", flush=True)
 print("Local URL: http://127.0.0.1:" + sys.argv[1], flush=True)
-http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+server.serve_forever()
 """
 
 # Stand-in that hangs without ever serving health (secrets misconfiguration).
@@ -68,13 +77,13 @@ def _free_port() -> int:
 def _repo(tmp_path: Path) -> Path:
     app_dir = tmp_path / "apps" / SLUG
     app_dir.mkdir(parents=True)
-    (app_dir / "streamlit_app.py").write_text("import streamlit as st\n")
+    (app_dir / "streamlit_app.py").write_text("import streamlit as st\n", encoding="utf-8")
     return tmp_path
 
 
 def _fake_launcher(tmp_path: Path, script_body: str, monkeypatch) -> None:
     script = tmp_path / "fake_streamlit.py"
-    script.write_text(script_body)
+    script.write_text(script_body, encoding="utf-8")
     monkeypatch.setattr(
         preview_app,
         "build_command",
@@ -97,6 +106,7 @@ def _start_args(repo: Path, port: int, timeout: float = 15.0) -> list[str]:
     ]
 
 
+@posix_process_control
 def test_start_ready_status_logs_stop_lifecycle(tmp_path, monkeypatch, capsys):
     repo = _repo(tmp_path)
     _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
@@ -107,7 +117,7 @@ def test_start_ready_status_logs_stop_lifecycle(tmp_path, monkeypatch, capsys):
         assert payload["status"] == "ready"
         assert payload["url"] == f"http://127.0.0.1:{port}"
         state_path = repo / ".streamsnow" / "preview" / f"{SLUG}.json"
-        state = json.loads(state_path.read_text())
+        state = json.loads(state_path.read_text(encoding="utf-8"))
         assert state["port"] == port and state["slug"] == SLUG
 
         # A second start is a no-op report, not a double launch.
@@ -133,6 +143,7 @@ def test_start_ready_status_logs_stop_lifecycle(tmp_path, monkeypatch, capsys):
         preview_app.main(["stop", SLUG, "--dir", str(repo)])
 
 
+@posix_process_control
 def test_start_timeout_kills_and_classifies_missing_secrets(tmp_path, monkeypatch, capsys):
     repo = _repo(tmp_path)
     _fake_launcher(tmp_path, FAKE_HANG, monkeypatch)
@@ -184,6 +195,7 @@ def test_missing_entrypoint_is_tool_error(tmp_path, capsys):
     assert "not found" in capsys.readouterr().out
 
 
+@posix_process_control
 def test_stale_state_cleaned_up_not_an_error(tmp_path, capsys):
     repo = _repo(tmp_path)
     # A genuinely dead PID: spawn a trivial process and wait for it to exit.
@@ -193,7 +205,8 @@ def test_stale_state_cleaned_up_not_an_error(tmp_path, capsys):
     state_dir.mkdir(parents=True)
     state_path = state_dir / f"{SLUG}.json"
     state_path.write_text(
-        json.dumps({"slug": SLUG, "pid": proc.pid, "port": 8599, "log": str(state_dir / "x.log")})
+        json.dumps({"slug": SLUG, "pid": proc.pid, "port": 8599, "log": str(state_dir / "x.log")}),
+        encoding="utf-8",
     )
 
     assert preview_app.main(["status", SLUG, "--dir", str(repo)]) == 1
@@ -204,6 +217,7 @@ def test_stale_state_cleaned_up_not_an_error(tmp_path, capsys):
     assert preview_app.main(["stop", SLUG, "--dir", str(repo)]) == 0
 
 
+@posix_process_control
 def test_stale_state_does_not_block_restart(tmp_path, monkeypatch, capsys):
     repo = _repo(tmp_path)
     _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
@@ -211,7 +225,9 @@ def test_stale_state_does_not_block_restart(tmp_path, monkeypatch, capsys):
     proc.wait()
     state_dir = repo / ".streamsnow" / "preview"
     state_dir.mkdir(parents=True)
-    (state_dir / f"{SLUG}.json").write_text(json.dumps({"slug": SLUG, "pid": proc.pid, "port": 1}))
+    (state_dir / f"{SLUG}.json").write_text(
+        json.dumps({"slug": SLUG, "pid": proc.pid, "port": 1}), encoding="utf-8"
+    )
     port = _free_port()
     try:
         assert preview_app.main(_start_args(repo, port)) == 0
@@ -291,14 +307,14 @@ def test_logs_prints_the_remedy_for_a_first_page_load_failure(tmp_path, capsys):
     repo = _repo(tmp_path)
     log = repo / ".streamsnow" / "preview" / f"{SLUG}.log"
     log.parent.mkdir(parents=True)
-    log.write_text(KEYPAIR_LOG)
+    log.write_text(KEYPAIR_LOG, encoding="utf-8")
     assert preview_app.main(["logs", SLUG, "--dir", str(repo)]) == 0
     out = capsys.readouterr().out
     assert "TypeError: Expected bytes" in out  # the raw tail is still printed
     assert "cause: keypair_key_not_loaded: " in out
     assert "Rename private_key_path to private_key_file" in out
 
-    log.write_text("  You can now view your Streamlit app in your browser.\n")
+    log.write_text("  You can now view your Streamlit app in your browser.\n", encoding="utf-8")
     assert preview_app.main(["logs", SLUG, "--dir", str(repo)]) == 0
     assert "cause:" not in capsys.readouterr().out
 
@@ -307,6 +323,31 @@ def test_logs_missing_file(tmp_path, capsys):
     repo = _repo(tmp_path)
     assert preview_app.main(["logs", SLUG, "--dir", str(repo)]) == 1
     assert "no preview log" in capsys.readouterr().err
+
+
+def test_probe_health_ignores_proxy_settings(tmp_path, monkeypatch):
+    """A proxy in the environment (corporate machines, CI runners) must not
+    capture the localhost probe; it once made a serving app read unhealthy."""
+    monkeypatch.setenv("HTTP_PROXY", "http://10.255.255.1:9")
+    monkeypatch.setenv("http_proxy", "http://10.255.255.1:9")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    port = _free_port()
+    script = tmp_path / "fake_streamlit.py"
+    script.write_text(FAKE_SERVER, encoding="utf-8")
+    server = subprocess.Popen(
+        [sys.executable, str(script), str(port)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+    )
+    try:
+        assert server.stdout is not None
+        server.stdout.readline()  # the "You can now view" line: about to bind
+        deadline = time.monotonic() + 10
+        while not preview_app.probe_health(port, timeout=0.5):
+            assert time.monotonic() < deadline, "probe never reached the local server"
+            time.sleep(0.05)
+    finally:
+        server.kill()
+        server.wait(timeout=10)
 
 
 def test_probe_health_refused_port_is_false():
@@ -335,12 +376,12 @@ def test_build_command_prefers_repo_venv_streamlit(tmp_path):
     assert preview_app.build_command(entry, 8501)[0] == "streamlit"
     fake = repo / ".venv" / "bin" / "streamlit"
     fake.parent.mkdir(parents=True)
-    fake.write_text("#!/bin/sh\n")
+    fake.write_text("#!/bin/sh\n", encoding="utf-8")
     assert preview_app.build_command(entry, 8501)[0] == str(fake)
     # An app-local venv wins over nothing but loses to the repo venv.
     app_fake = repo / "apps" / SLUG / ".venv" / "bin" / "streamlit"
     app_fake.parent.mkdir(parents=True)
-    app_fake.write_text("#!/bin/sh\n")
+    app_fake.write_text("#!/bin/sh\n", encoding="utf-8")
     assert preview_app.build_command(entry, 8501)[0] == str(fake)
     fake.unlink()
     assert preview_app.build_command(entry, 8501)[0] == str(app_fake)
@@ -369,7 +410,7 @@ dependencies:
 def test_local_install_command_container_app(tmp_path):
     repo = _repo(tmp_path)
     (repo / "apps" / SLUG / "pyproject.toml").write_text(
-        '[project]\nname = "x"\nrequires-python = ">=3.11,<3.12"\n'
+        '[project]\nname = "x"\nrequires-python = ">=3.11,<3.12"\n', encoding="utf-8"
     )
     cmd = preview_app.local_install_command(repo / "apps" / SLUG)
     assert cmd == f"uv venv --python 3.11 && uv pip install -e apps/{SLUG}"
@@ -379,7 +420,7 @@ def test_local_install_command_warehouse_app(tmp_path):
     """`uv pip install -e apps/<slug>` fails on a warehouse app (no pyproject):
     the hint installs environment.yml's packages, conda pins translated to pip."""
     repo = _repo(tmp_path)
-    (repo / "apps" / SLUG / "environment.yml").write_text(_ENV_YML)
+    (repo / "apps" / SLUG / "environment.yml").write_text(_ENV_YML, encoding="utf-8")
     cmd = preview_app.local_install_command(repo / "apps" / SLUG)
     assert "-e apps/" not in cmd
     assert cmd.startswith("uv venv --python 3.11 && uv pip install ")
@@ -390,7 +431,7 @@ def test_local_install_command_warehouse_app(tmp_path):
 
 def test_start_warehouse_app_without_streamlit_prints_install_hint(tmp_path, monkeypatch, capsys):
     repo = _repo(tmp_path)
-    (repo / "apps" / SLUG / "environment.yml").write_text(_ENV_YML)
+    (repo / "apps" / SLUG / "environment.yml").write_text(_ENV_YML, encoding="utf-8")
     monkeypatch.setattr(
         preview_app,
         "build_command",

@@ -136,11 +136,11 @@ def scan_tree(root: Path, denylist: Path | None = None) -> dict:
         if deny_resolved is not None and p.resolve() == deny_resolved:
             continue  # the denylist necessarily spells its own terms
         try:
-            text = p.read_text(errors="ignore")
+            text = p.read_text(errors="ignore", encoding="utf-8")
         except OSError:
             continue
         low = text.lower()
-        rel = str(p.relative_to(root))
+        rel = p.relative_to(root).as_posix()
         for term in terms:
             idx = low.find(term)
             if idx != -1:
@@ -188,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--denylist",
         default=None,
-        help=f"Org-specific denylist file (default: <root>/{LOCAL_DENYLIST}, if present).",
+        help=f"Org-specific denylist file (default: <root>/{LOCAL_DENYLIST.as_posix()}, if present).",
     )
     ap.add_argument("--format", choices=("md", "json"), default="md")
     args = ap.parse_args(argv)

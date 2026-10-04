@@ -18,11 +18,13 @@ BRAND_COLORS = {{"primary": "#336699"}}
 def _app(tmp_path: Path, slug: str, version: str | None) -> Path:
     app = tmp_path / "apps" / slug
     app.mkdir(parents=True)
-    (app / "snowflake.yml").write_text("definition_version: 2\nentities: {}\n")
+    (app / "snowflake.yml").write_text("definition_version: 2\nentities: {}\n", encoding="utf-8")
     if version is None:
-        (app / "branding.py").write_text('"""Branding, pre-stamp era."""\nCOLOR = "#123456"\n')
+        (app / "branding.py").write_text(
+            '"""Branding, pre-stamp era."""\nCOLOR = "#123456"\n', encoding="utf-8"
+        )
     else:
-        (app / "branding.py").write_text(_BRANDING.format(version=version))
+        (app / "branding.py").write_text(_BRANDING.format(version=version), encoding="utf-8")
     return app
 
 
@@ -70,7 +72,7 @@ def test_single_app_clean(tmp_path):
 def test_app_without_branding_file_skipped(tmp_path):
     app = tmp_path / "apps" / "acme-sales-dashboard"
     app.mkdir(parents=True)
-    (app / "snowflake.yml").write_text("definition_version: 2\nentities: {}\n")
+    (app / "snowflake.yml").write_text("definition_version: 2\nentities: {}\n", encoding="utf-8")
     res = check_branding_parity.scan_paths([tmp_path / "apps"])
     assert res["ok"]
     assert res["findings"] == []
@@ -102,6 +104,6 @@ def test_main_exit_codes_and_json(tmp_path, capsys):
     assert '"ok": false' in capsys.readouterr().out
     # Bring the straggler up to date -> clean.
     (tmp_path / "apps/marketing-campaign-dashboard/branding.py").write_text(
-        _BRANDING.format(version="1.2.0")
+        _BRANDING.format(version="1.2.0"), encoding="utf-8"
     )
     assert check_branding_parity.main([str(tmp_path / "apps")]) == 0

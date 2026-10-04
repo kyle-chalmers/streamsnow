@@ -1,0 +1,4 @@
+# LF on every checkout, including Git for Windows, whose default (core.autocrlf)
+# converts text files to CRLF. Shell hooks, the committed SQL-review digests and
+# `ruff format --check` all read line endings, so a CRLF checkout breaks them.
+* text=auto eol=lf

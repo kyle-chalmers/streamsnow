@@ -70,7 +70,8 @@ def _write_report_with_resolutions(path: Path) -> None:
         REPORT + "\n## Resolutions\n\n### Applied (Bucket A)\n"
         "- [apps/acme-sales-dashboard/queries/revenue_daily.sql:12] SELECT * over a wide view — fixed.\n"
         "\n### Deferred — judgment required (Bucket B)\n"
-        "- [apps/acme-sales-dashboard/pages/overview.py:40] query function missing @st.cache_data ttl — needs TTL decision.\n"
+        "- [apps/acme-sales-dashboard/pages/overview.py:40] query function missing @st.cache_data ttl — needs TTL decision.\n",
+        encoding="utf-8",
     )
 
 
@@ -79,7 +80,7 @@ def test_dedup_filters_previously_resolved(tmp_path: Path, capsys: pytest.Captur
     session.mkdir()
     _write_report_with_resolutions(session / "review-20260830-090000.md")
     new_report = session / "review-20260831-090000.md"
-    new_report.write_text(REPORT)
+    new_report.write_text(REPORT, encoding="utf-8")
 
     code = rl.main(["dedup-findings", str(session), "--new", str(new_report)])
     assert code == 0
@@ -98,7 +99,7 @@ def test_dedup_reads_uppercase_artifact_dialect(
     session.mkdir()
     _write_report_with_resolutions(session / "REVIEW-20260830-090000.md")
     new_report = session / "review-new.md"
-    new_report.write_text(REPORT)
+    new_report.write_text(REPORT, encoding="utf-8")
     rl.main(["dedup-findings", str(session), "--new", str(new_report)])
     kept = json.loads(capsys.readouterr().out)
     assert "apps/acme-sales-dashboard/queries/revenue_daily.sql:12" not in {
@@ -119,7 +120,7 @@ def test_stale_resolutions_outside_window_do_not_dedup(
     stale = time.time() - 8 * 86400
     os.utime(old, (stale, stale))
     new_report = session / "review-new.md"
-    new_report.write_text(REPORT)
+    new_report.write_text(REPORT, encoding="utf-8")
     rl.main(["dedup-findings", str(session), "--new", str(new_report)])
     kept = json.loads(capsys.readouterr().out)
     assert "apps/acme-sales-dashboard/queries/revenue_daily.sql:12" in {f["citation"] for f in kept}
@@ -127,7 +128,7 @@ def test_stale_resolutions_outside_window_do_not_dedup(
 
 def test_write_resolutions_appends_block(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     report = tmp_path / "review-1.md"
-    report.write_text(REPORT)
+    report.write_text(REPORT, encoding="utf-8")
     applied = tmp_path / "applied.json"
     applied.write_text(
         json.dumps(
@@ -138,13 +139,14 @@ def test_write_resolutions_appends_block(tmp_path: Path, capsys: pytest.CaptureF
                     "why": "columns now named",
                 }
             ]
-        )
+        ),
+        encoding="utf-8",
     )
     code = rl.main(["write-resolutions", str(report), "--applied", str(applied)])
     assert code == 0
     counts = json.loads(capsys.readouterr().out)
     assert counts == {"applied": 1, "deferred_b": 0, "bucket_c": 0, "out_of_scope": 0}
-    text = report.read_text()
+    text = report.read_text(encoding="utf-8")
     assert "## Resolutions" in text
     assert "### Applied (Bucket A)" in text
     # Round-trip: the block we wrote is what dedup reads.
@@ -276,13 +278,14 @@ def test_walk_reentry_cap_exhausted_plateaus(capsys: pytest.CaptureFixture) -> N
 
 def test_merge_findings_consensus_tags(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     a = tmp_path / "claude.md"
-    a.write_text(REPORT)
+    a.write_text(REPORT, encoding="utf-8")
     b = tmp_path / "other.md"
     b.write_text(
         "## SQL\n\n### BLOCK\n"
         "- [apps/acme-sales-dashboard/queries/revenue_daily.sql:12] SELECT * over a wide view — same finding, different reviewer.\n"
         "\n### FLAG\n"
-        "- [apps/acme-sales-dashboard/sql_loader.py:5] token substitution unguarded — could render empty fragment.\n"
+        "- [apps/acme-sales-dashboard/sql_loader.py:5] token substitution unguarded — could render empty fragment.\n",
+        encoding="utf-8",
     )
     code = rl.main(["merge-findings", "--inputs", f"claude:{a},other:{b}"])
     assert code == 0
@@ -297,7 +300,7 @@ def test_merge_findings_missing_report_errors(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
     a = tmp_path / "claude.md"
-    a.write_text(REPORT)
+    a.write_text(REPORT, encoding="utf-8")
     code = rl.main(["merge-findings", "--inputs", f"claude:{a},other:{tmp_path / 'nope.md'}"])
     assert code == 2
 
@@ -311,7 +314,9 @@ def test_dedup_with_repeats_surfaces_no_convergence(
     session.mkdir()
     _write_report_with_resolutions(session / "review-20260830-090000.md")
     new_report = session / "review-20260831-090000.md"
-    new_report.write_text(REPORT)  # the SELECT * BLOCK is back after being Applied
+    new_report.write_text(
+        REPORT, encoding="utf-8"
+    )  # the SELECT * BLOCK is back after being Applied
     code = rl.main(["dedup-findings", str(session), "--new", str(new_report), "--with-repeats"])
     assert code == 0
     out = json.loads(capsys.readouterr().out)

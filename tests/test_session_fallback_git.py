@@ -26,7 +26,15 @@ _WRAPPED = (
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 def _repo_with_baseline(tmp_path: Path, name: str, files: dict[str, str]) -> Path:
@@ -38,7 +46,7 @@ def _repo_with_baseline(tmp_path: Path, name: str, files: dict[str, str]) -> Pat
     for rel, text in files.items():
         p = repo / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text)
+        p.write_text(text, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "baseline")
     return repo
@@ -54,7 +62,7 @@ def test_legacy_violation_not_flagged_against_baseline(tmp_path):
 def test_new_violation_in_existing_file_flagged(tmp_path):
     repo = _repo_with_baseline(tmp_path, "acme-dashboards", {"apps/a/page.py": _WRAPPED})
     target = repo / "apps/a/page.py"
-    target.write_text(_WRAPPED + "\nrefresh = get_active_session()\n")
+    target.write_text(_WRAPPED + "\nrefresh = get_active_session()\n", encoding="utf-8")
     res = check_session_fallback.scan_paths([target], base_ref="main")
     assert not res["ok"]
     assert any("unwrapped" in f["detail"] for f in res["findings"])
@@ -63,7 +71,7 @@ def test_new_violation_in_existing_file_flagged(tmp_path):
 def test_new_file_has_zero_baseline(tmp_path):
     repo = _repo_with_baseline(tmp_path, "acme-dashboards", {"apps/a/page.py": _WRAPPED})
     new = repo / "apps/a/extra.py"
-    new.write_text(_UNWRAPPED)
+    new.write_text(_UNWRAPPED, encoding="utf-8")
     res = check_session_fallback.scan_paths([new], base_ref="main")
     assert not res["ok"]
 
@@ -72,7 +80,7 @@ def test_count_not_lines_is_the_gate(tmp_path):
     # Moving the one legacy violation to a different line is not "introducing" one.
     repo = _repo_with_baseline(tmp_path, "acme-dashboards", {"apps/a/page.py": _UNWRAPPED})
     target = repo / "apps/a/page.py"
-    target.write_text("# revenue page header comment\n" + _UNWRAPPED)
+    target.write_text("# revenue page header comment\n" + _UNWRAPPED, encoding="utf-8")
     assert check_session_fallback.scan_paths([target], base_ref="main")["ok"]
 
 
@@ -85,7 +93,7 @@ def test_unresolvable_ref_falls_back_tree_wide_with_note(tmp_path):
 
 def test_outside_git_falls_back_tree_wide_with_note(tmp_path):
     p = tmp_path / "page.py"
-    p.write_text(_UNWRAPPED)
+    p.write_text(_UNWRAPPED, encoding="utf-8")
     res = check_session_fallback.scan_paths([p], base_ref="main")
     assert not res["ok"]
     assert any("not in a git work tree" in n for n in res["notes"])

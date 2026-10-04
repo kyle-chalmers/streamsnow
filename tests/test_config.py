@@ -58,7 +58,9 @@ def test_valid_container_config_loads():
 
 
 def test_example_file_is_valid():
-    data = yaml.safe_load((REPO_ROOT / "streamsnow.config.example.yaml").read_text())
+    data = yaml.safe_load(
+        (REPO_ROOT / "streamsnow.config.example.yaml").read_text(encoding="utf-8")
+    )
     cfg = Config.from_dict(data)
     assert cfg.project.slug == "acme-dashboards"
 

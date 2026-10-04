@@ -541,7 +541,7 @@ def _scan_cortex_rest(tree: ast.AST, lines: list[str]) -> list[dict]:
 
 def _scan_python(path: Path) -> list[dict]:
     try:
-        source = path.read_text(errors="ignore")
+        source = path.read_text(errors="ignore", encoding="utf-8")
     except OSError:
         return []
     try:
@@ -561,7 +561,7 @@ def _scan_python(path: Path) -> list[dict]:
 
 def _scan_sql(path: Path) -> list[dict]:
     try:
-        text = path.read_text(errors="ignore")
+        text = path.read_text(errors="ignore", encoding="utf-8")
     except OSError:
         return []
     return [

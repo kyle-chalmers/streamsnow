@@ -29,7 +29,7 @@ def scan_paths(paths: list[Path]) -> dict:
     for p in paths:
         if p.suffix not in (".py", ".sql") or not p.is_file():
             continue
-        for line_no in find_bind_predicates(p.read_text(errors="ignore")):
+        for line_no in find_bind_predicates(p.read_text(errors="ignore", encoding="utf-8")):
             findings.append({"file": str(p), "line": line_no})
     return {"ok": not findings, "findings": findings}
 

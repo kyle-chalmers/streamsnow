@@ -138,7 +138,7 @@ def _declared_modules(app_root: Path) -> set[str]:
     pyproject = app_root / "pyproject.toml"
     if pyproject.is_file():
         try:
-            data = tomllib.loads(pyproject.read_text(errors="ignore"))
+            data = tomllib.loads(pyproject.read_text(errors="ignore", encoding="utf-8"))
             project = data.get("project")
             deps = project.get("dependencies") if isinstance(project, dict) else None
             specs += [d for d in deps if isinstance(d, str)] if isinstance(deps, list) else []
@@ -148,7 +148,7 @@ def _declared_modules(app_root: Path) -> set[str]:
     env = app_root / "environment.yml"
     if env.is_file():
         try:
-            data = yaml.safe_load(env.read_text(errors="ignore"))
+            data = yaml.safe_load(env.read_text(errors="ignore", encoding="utf-8"))
             deps = data.get("dependencies") if isinstance(data, dict) else None
             specs += [d for d in deps if isinstance(d, str)] if isinstance(deps, list) else []
         except (yaml.YAMLError, OSError):
@@ -205,9 +205,9 @@ def _display(path: Path) -> str:
     finding while the ``apps/`` route prints a relative one.
     """
     try:
-        return str(path.relative_to(Path.cwd()))
+        return path.relative_to(Path.cwd()).as_posix()
     except ValueError:
-        return str(path)
+        return path.as_posix()
 
 
 def _check_file(
@@ -217,7 +217,7 @@ def _check_file(
     root_names: set[str],
     declared: set[str],
 ) -> list[dict]:
-    text = path.read_text(errors="ignore")
+    text = path.read_text(errors="ignore", encoding="utf-8")
     try:
         tree = ast.parse(text, filename=str(path))
     except SyntaxError:

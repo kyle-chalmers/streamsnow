@@ -23,17 +23,17 @@ PAST = "2025-01-01"
 def _app(tmp_path: Path, slug: str, pyproject: str = "", env_yml: str = "") -> Path:
     app = tmp_path / "apps" / slug
     app.mkdir(parents=True)
-    (app / "snowflake.yml").write_text("definition_version: '2'\n")
+    (app / "snowflake.yml").write_text("definition_version: '2'\n", encoding="utf-8")
     if pyproject:
-        (app / "pyproject.toml").write_text(pyproject)
+        (app / "pyproject.toml").write_text(pyproject, encoding="utf-8")
     if env_yml:
-        (app / "environment.yml").write_text(env_yml)
+        (app / "environment.yml").write_text(env_yml, encoding="utf-8")
     return app
 
 
 def _allowlist(tmp_path: Path, entries: list[dict]) -> Path:
     p = tmp_path / "osv_allowlist.json"
-    p.write_text(json.dumps(entries))
+    p.write_text(json.dumps(entries), encoding="utf-8")
     return p
 
 
@@ -236,7 +236,7 @@ def test_network_failure_with_best_effort_warns_and_passes(tmp_path, monkeypatch
 def test_default_allowlist_resolves_beside_config(tmp_path, monkeypatch):
     # Repo root = the directory containing streamsnow.config.yaml, found by
     # walking up from the cwd; the allowlist sits beside it.
-    (tmp_path / "streamsnow.config.yaml").write_text("schema_version: 1\n")
+    (tmp_path / "streamsnow.config.yaml").write_text("schema_version: 1\n", encoding="utf-8")
     _allowlist(tmp_path, [])
     nested = tmp_path / "apps"
     nested.mkdir()
@@ -268,9 +268,10 @@ def test_strict_pins_fails_on_range_specs(tmp_path, monkeypatch, capsys):
 
     app = tmp_path / "apps" / "acme-sales-dashboard"
     app.mkdir(parents=True)
-    (app / "snowflake.yml").write_text("definition_version: 2\n")
+    (app / "snowflake.yml").write_text("definition_version: 2\n", encoding="utf-8")
     (app / "pyproject.toml").write_text(
-        '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["requests>=2"]\n'
+        '[project]\nname = "x"\nversion = "0.1.0"\ndependencies = ["requests>=2"]\n',
+        encoding="utf-8",
     )
     monkeypatch.setattr(dv, "query_osv", lambda pins: [[] for _ in pins])
     monkeypatch.chdir(tmp_path)

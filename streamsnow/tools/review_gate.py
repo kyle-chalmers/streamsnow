@@ -120,6 +120,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -241,6 +242,8 @@ def _git(repo_root: Path, *args: str, check: bool = True) -> str:
         cwd=repo_root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if check and proc.returncode != 0:
         raise GitError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
@@ -265,6 +268,8 @@ def repo_root(start: Path | None = None) -> Path:
             cwd=base,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         if proc.returncode == 0:
             return Path(proc.stdout.strip()).resolve()
@@ -278,6 +283,8 @@ def repo_root(start: Path | None = None) -> Path:
         cwd=base,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if proc.returncode != 0:
         raise GitError(f"not a git repository: {base}")
@@ -305,6 +312,8 @@ def resolve_base_ref(root: Path, preferred: str = "origin/main") -> str:
             cwd=root,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         if proc.returncode == 0:
             return ref
@@ -320,6 +329,8 @@ def _merge_base(root: Path, base_ref: str) -> str:
         cwd=root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
@@ -480,6 +491,8 @@ def compute_baseline(root: Path, slug: str, apps_dir: str = DEFAULT_APPS_DIR) ->
         cwd=root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     tracked = [
         line
@@ -492,6 +505,8 @@ def compute_baseline(root: Path, slug: str, apps_dir: str = DEFAULT_APPS_DIR) ->
         cwd=root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     ).stdout
 
     h = hashlib.sha256()
@@ -589,6 +604,8 @@ def blob_sha(root: Path, rel: str) -> str:
         cwd=root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     return proc.stdout.strip() if proc.returncode == 0 else DELETED_BLOB
 
@@ -795,7 +812,9 @@ STATE_TTL_SECONDS = 7 * 86400
 
 
 def _state_dir() -> Path:
-    return Path(os.environ.get("TMPDIR", "/tmp")) / "streamsnow-review-gate"
+    # TMPDIR first (tests point it at tmp_path); tempfile resolves %TEMP% on Windows,
+    # where a literal "/tmp" resolved to a \tmp folder on the current drive.
+    return Path(os.environ.get("TMPDIR") or tempfile.gettempdir()) / "streamsnow-review-gate"
 
 
 def _state_path(session_id: str) -> Path:
@@ -819,7 +838,7 @@ def _prune_state_dir(now: float) -> None:
 def load_notified(session_id: str) -> set[str]:
     path = _state_path(session_id)
     try:
-        return set(json.loads(path.read_text()))
+        return set(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, ValueError):
         return set()
 
@@ -831,7 +850,7 @@ def save_notified(session_id: str, keys: set[str]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         _prune_state_dir(time.time())
-        path.write_text(json.dumps(trimmed))
+        path.write_text(json.dumps(trimmed), encoding="utf-8")
     except OSError:
         pass  # dedupe is best-effort; never fail the hook over it
 

@@ -52,7 +52,7 @@ _TEMPLATE = Path(__file__).resolve().parent.parent / "_templates" / "app" / "bra
 def _extract_version(path: Path) -> tuple[str, int] | None:
     """Return ``(version, line)`` of the ``_BRANDING_VERSION`` stamp, or None."""
     try:
-        text = path.read_text(errors="ignore")
+        text = path.read_text(errors="ignore", encoding="utf-8")
     except OSError:
         return None
     match = _VERSION_RE.search(text)

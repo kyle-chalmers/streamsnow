@@ -107,7 +107,7 @@ def scan_paths(paths: list[Path]) -> dict:
     for p in paths:
         if p.suffix != ".sql" or not p.is_file():
             continue
-        for f in find_comment_tokens(p.read_text(errors="ignore")):
+        for f in find_comment_tokens(p.read_text(errors="ignore", encoding="utf-8")):
             findings.append({"file": str(p), **f})
     return {"ok": not findings, "findings": findings}
 

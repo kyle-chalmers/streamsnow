@@ -9,6 +9,7 @@ from __future__ import annotations
 import py_compile
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -72,7 +73,7 @@ def test_init_container_scaffolds_a_working_repo(tmp_path):
     assert cfg.runtime == "container"
 
     # Config DROVE the governance doc.
-    agents = (tmp_path / "AGENTS.md").read_text()
+    agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
     assert "ANALYTICS_DB" in agents
     assert "ANALYTICS" in agents and "REPORTING" in agents
     assert "BRIDGE" in agents  # denied schema documented
@@ -81,7 +82,7 @@ def test_init_container_scaffolds_a_working_repo(tmp_path):
     _compile_py(tmp_path / "apps")
 
     # Container connection pattern present.
-    overview = (tmp_path / "apps/sales-overview/pages/overview.py").read_text()
+    overview = (tmp_path / "apps/sales-overview/pages/overview.py").read_text(encoding="utf-8")
     assert 'st.connection("snowflake")' in overview
 
     # The example app passes its own schema-refs guardrail.
@@ -90,7 +91,7 @@ def test_init_container_scaffolds_a_working_repo(tmp_path):
     assert report["ok"], report["findings"]
 
     # Every governance hook the checks ship is wired into the generated pre-commit.
-    hooks = (tmp_path / ".pre-commit-config.yaml").read_text()
+    hooks = (tmp_path / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     for hook in (
         "schema-refs",
         "security",
@@ -105,7 +106,7 @@ def test_init_container_scaffolds_a_working_repo(tmp_path):
 
 
 def test_init_warehouse_runtime(tmp_path):
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     data["runtime"] = "warehouse"
     data["snowflake"]["objects"]["compute_pool"] = ""
     data["snowflake"]["objects"]["external_access_integration"] = ""
@@ -115,7 +116,7 @@ def test_init_warehouse_runtime(tmp_path):
 
     assert (tmp_path / "apps/ops-monitor/environment.yml").is_file()
     assert not (tmp_path / "apps/ops-monitor/pyproject.toml").exists()
-    overview = (tmp_path / "apps/ops-monitor/pages/overview.py").read_text()
+    overview = (tmp_path / "apps/ops-monitor/pages/overview.py").read_text(encoding="utf-8")
     assert "get_active_session" in overview
     _compile_py(tmp_path / "apps")
 
@@ -186,10 +187,10 @@ def test_generated_repo_ships_ci_workflow(tmp_path):
 
 
 def test_generated_snowflake_yml_parses_both_runtimes(tmp_path):
-    base = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    base = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     # container
     scaffold(Config.from_dict(base), tmp_path / "c", "app-c")
-    cyml = yaml.safe_load((tmp_path / "c/apps/app-c/snowflake.yml").read_text())
+    cyml = yaml.safe_load((tmp_path / "c/apps/app-c/snowflake.yml").read_text(encoding="utf-8"))
     entity = cyml["entities"]["app_c"]
     assert entity["runtime_name"]
     assert entity["compute_pool"]
@@ -200,12 +201,12 @@ def test_generated_snowflake_yml_parses_both_runtimes(tmp_path):
     wdata["snowflake"]["objects"]["compute_pool"] = ""
     wdata["snowflake"]["objects"]["external_access_integration"] = ""
     scaffold(Config.from_dict(wdata), tmp_path / "w", "app-w")
-    wyml = yaml.safe_load((tmp_path / "w/apps/app-w/snowflake.yml").read_text())
+    wyml = yaml.safe_load((tmp_path / "w/apps/app-w/snowflake.yml").read_text(encoding="utf-8"))
     assert "runtime_name" not in wyml["entities"]["app_w"]
 
 
 def test_git_repository_config_scaffolds_git_deploy_workflow(tmp_path):
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     data["deploy"] = {
         "source": "git-repository",
         "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
@@ -213,7 +214,7 @@ def test_git_repository_config_scaffolds_git_deploy_workflow(tmp_path):
         "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
     }
     scaffold(Config.from_dict(data), tmp_path, "g-app")
-    deploy = (tmp_path / ".github/workflows/deploy.yml").read_text()
+    deploy = (tmp_path / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
     assert "snow git fetch" in deploy
     assert "stage copy" not in deploy
     # Hardened in 0.7.4: no refresh step that hid failures behind `|| true`,
@@ -225,7 +226,7 @@ def test_git_repository_config_scaffolds_git_deploy_workflow(tmp_path):
 
 
 def test_brand_injection_rejected(tmp_path):
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     data["brand"] = {"theme": {"primary": '#fff"; evil'}}
     with pytest.raises(ConfigError):
         scaffold(Config.from_dict(data), tmp_path, "b-app")
@@ -233,7 +234,9 @@ def test_brand_injection_rejected(tmp_path):
 
 def test_doctor_fails_loudly_on_malformed_config(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / CONFIG_FILENAME).write_text("runtime: container\n")  # missing required sections
+    (tmp_path / CONFIG_FILENAME).write_text(
+        "runtime: container\n", encoding="utf-8"
+    )  # missing required sections
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code != 0
     assert "invalid" in result.output.lower()
@@ -249,8 +252,12 @@ def test_deploy_workflows_pin_verify_concurrency_and_dotfile_copy(tmp_path):
     - verify step: deploy success is not app health; verify-deploy must run.
     """
     # stage-copy variant
-    scaffold(Config.from_dict(yaml.safe_load(EXAMPLE_CONFIG.read_text())), tmp_path / "s", "s-app")
-    stage_deploy = (tmp_path / "s/.github/workflows/deploy.yml").read_text()
+    scaffold(
+        Config.from_dict(yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))),
+        tmp_path / "s",
+        "s-app",
+    )
+    stage_deploy = (tmp_path / "s/.github/workflows/deploy.yml").read_text(encoding="utf-8")
     assert "group: deploy-snowflake" in stage_deploy
     assert "cancel-in-progress: false" in stage_deploy
     assert ".streamlit/config.toml" in stage_deploy  # explicit dotfile copy loop
@@ -259,7 +266,7 @@ def test_deploy_workflows_pin_verify_concurrency_and_dotfile_copy(tmp_path):
     assert '--sha "$GITHUB_SHA"' in stage_deploy
 
     # git-repository variant
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     data["deploy"] = {
         "source": "git-repository",
         "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
@@ -267,7 +274,7 @@ def test_deploy_workflows_pin_verify_concurrency_and_dotfile_copy(tmp_path):
         "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
     }
     scaffold(Config.from_dict(data), tmp_path / "g", "g-app")
-    git_deploy = (tmp_path / "g/.github/workflows/deploy.yml").read_text()
+    git_deploy = (tmp_path / "g/.github/workflows/deploy.yml").read_text(encoding="utf-8")
     assert "group: deploy-snowflake" in git_deploy
     assert "cancel-in-progress: false" in git_deploy
     assert "streamsnow verify-deploy" in git_deploy
@@ -279,8 +286,8 @@ _SNOW_CALL = re.compile(r"(?<![\w./-])snow\s[^\n;&|]*")
 
 
 def _render_deploy_workflows(tmp_path: Path) -> dict[str, dict]:
-    stage = yaml.safe_load(EXAMPLE_CONFIG.read_text())
-    git = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    stage = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+    git = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     git["deploy"] = {
         "source": "git-repository",
         "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
@@ -290,7 +297,7 @@ def _render_deploy_workflows(tmp_path: Path) -> dict[str, dict]:
     out = {}
     for name, data in (("stage-copy", stage), ("git-repository", git)):
         scaffold(Config.from_dict(data), tmp_path / name, "acme-sales-dashboard")
-        text = (tmp_path / name / ".github/workflows/deploy.yml").read_text()
+        text = (tmp_path / name / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
         out[name] = yaml.safe_load(text)
     return out
 
@@ -362,7 +369,7 @@ def test_deploy_workflows_guard_against_a_repo_with_no_app_directories(tmp_path)
 
 
 def _init_repo(tmp_path: Path, *, source: str, app_slug: str | None) -> Path:
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     if source == "git-repository":
         data["deploy"] = {
             "source": "git-repository",
@@ -371,13 +378,18 @@ def _init_repo(tmp_path: Path, *, source: str, app_slug: str | None) -> Path:
             "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
         }
     cfg_file = tmp_path / "input.config.yaml"
-    cfg_file.write_text(yaml.safe_dump(data))
+    cfg_file.write_text(yaml.safe_dump(data), encoding="utf-8")
     repo = tmp_path / "repo"
     argv = ["init", "--config", str(cfg_file), "--dir", str(repo)]
     argv += ["--app", app_slug] if app_slug else ["--no-starter-app"]
     result = runner.invoke(app, argv)
     assert result.exit_code == 0, result.output
     return repo
+
+
+# The generated workflows run on ubuntu runners in consumer repos; executing their
+# bash steps on Windows would test Git Bash quirks, not anything users run.
+_workflow_bash = pytest.mark.skipif(sys.platform == "win32", reason="workflow steps run on Linux")
 
 
 def _run_with_stub_snow(
@@ -390,12 +402,13 @@ def _run_with_stub_snow(
 
     bin_dir.mkdir(exist_ok=True)
     log = bin_dir / "snow.log"
-    log.write_text("")
+    log.write_text("", encoding="utf-8")
     stub = bin_dir / "snow"
     stub.write_text(
         "#!/usr/bin/env bash\n"
         'echo "$*" >> "$SNOW_LOG"\n'
-        'if [ "$1" = stage ] && [ ! -e "$4" ]; then echo "No data" >&2; exit 2; fi\n'
+        'if [ "$1" = stage ] && [ ! -e "$4" ]; then echo "No data" >&2; exit 2; fi\n',
+        encoding="utf-8",
     )
     stub.chmod(0o755)
     env = {
@@ -405,11 +418,18 @@ def _run_with_stub_snow(
         "GITHUB_SHA": "0123456789abcdef0123456789abcdef01234567",
     }
     proc = subprocess.run(
-        ["bash", "-e", "-c", script], cwd=repo, env=env, capture_output=True, text=True
+        ["bash", "-e", "-c", script],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
-    return proc, log.read_text()
+    return proc, log.read_text(encoding="utf-8")
 
 
+@_workflow_bash
 @pytest.mark.parametrize("source", ["stage-copy", "git-repository"])
 def test_fresh_no_starter_repo_deploy_workflow_no_ops_without_calling_snow(tmp_path, source):
     """Run the deploy and verify steps, exactly as written, under bash in an
@@ -421,7 +441,7 @@ def test_fresh_no_starter_repo_deploy_workflow_no_ops_without_calling_snow(tmp_p
         pytest.skip("needs bash")
     repo = _init_repo(tmp_path, source=source, app_slug=None)
     assert not (repo / "apps").exists()
-    workflow = yaml.safe_load((repo / ".github/workflows/deploy.yml").read_text())
+    workflow = yaml.safe_load((repo / ".github/workflows/deploy.yml").read_text(encoding="utf-8"))
     steps = {s.get("name"): s.get("run") for s in workflow["jobs"]["deploy"]["steps"]}
     for name in _APP_STEPS[source]:
         proc, calls = _run_with_stub_snow(repo, steps[name], tmp_path / "bin")
@@ -430,11 +450,12 @@ def test_fresh_no_starter_repo_deploy_workflow_no_ops_without_calling_snow(tmp_p
         assert calls == "", (name, calls)
     # An apps/ holding no app directory (a stray file) is still nothing to deploy.
     (repo / "apps").mkdir()
-    (repo / "apps" / "README.md").write_text("apps go here\n")
+    (repo / "apps" / "README.md").write_text("apps go here\n", encoding="utf-8")
     proc, calls = _run_with_stub_snow(repo, steps[_APP_STEPS[source][0]], tmp_path / "bin")
     assert proc.returncode == 0 and calls == "", (proc.stdout, proc.stderr, calls)
 
 
+@_workflow_bash
 def test_stage_copy_deploy_step_still_copies_when_an_app_exists(tmp_path):
     """Control for the no-apps test: with an app present the same step reaches
     `snow stage copy`, so an empty stub log there means the guard fired."""
@@ -443,7 +464,7 @@ def test_stage_copy_deploy_step_still_copies_when_an_app_exists(tmp_path):
     if shutil.which("bash") is None or shutil.which("streamsnow") is None:
         pytest.skip("needs bash and streamsnow on PATH (uv run pytest provides both)")
     repo = _init_repo(tmp_path, source="stage-copy", app_slug="acme-sales")
-    workflow = yaml.safe_load((repo / ".github/workflows/deploy.yml").read_text())
+    workflow = yaml.safe_load((repo / ".github/workflows/deploy.yml").read_text(encoding="utf-8"))
     steps = {s.get("name"): s.get("run") for s in workflow["jobs"]["deploy"]["steps"]}
     proc, calls = _run_with_stub_snow(
         repo, steps["Deploy changed apps (stage-copy)"], tmp_path / "bin"
@@ -456,9 +477,9 @@ def test_stage_copy_deploy_step_still_copies_when_an_app_exists(tmp_path):
 
 
 def test_generated_precommit_enforces_sql_review_and_vulns(tmp_path):
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
-    text = (tmp_path / ".pre-commit-config.yaml").read_text()
+    text = (tmp_path / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     assert "streamsnow sql-review check" in text
     assert "streamsnow check dependency-vulns --best-effort" in text
     assert "streamsnow check path-leaks" in text
@@ -468,9 +489,9 @@ def test_generated_precommit_enforces_sql_review_and_vulns(tmp_path):
 
 
 def test_generated_ci_enforces_the_deterministic_gates(tmp_path):
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
-    text = (tmp_path / ".github" / "workflows" / "checks.yml").read_text()
+    text = (tmp_path / ".github" / "workflows" / "checks.yml").read_text(encoding="utf-8")
     assert "streamsnow check dependency-vulns" in text  # fail-closed: no --best-effort in CI
     assert "--best-effort" not in text
     assert "streamsnow sql-review check" in text
@@ -480,9 +501,9 @@ def test_generated_ci_enforces_the_deterministic_gates(tmp_path):
 
 
 def test_generated_deploy_workflows_reconcile_tombstones(tmp_path):
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
-    stage_copy = (tmp_path / ".github" / "workflows" / "deploy.yml").read_text()
+    stage_copy = (tmp_path / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
     assert "streamsnow check tombstones --drop-sql" in stage_copy
     yaml.safe_load(stage_copy)
     # git-repository deploy source renders the other template — same step.
@@ -494,16 +515,18 @@ def test_generated_deploy_workflows_reconcile_tombstones(tmp_path):
         "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
     }
     scaffold(Config.from_dict(gitdata), tmp_path / "g", "acme-sales-dashboard")
-    git_deploy = (tmp_path / "g" / ".github" / "workflows" / "deploy.yml").read_text()
+    git_deploy = (tmp_path / "g" / ".github" / "workflows" / "deploy.yml").read_text(
+        encoding="utf-8"
+    )
     assert "streamsnow check tombstones --drop-sql" in git_deploy
     yaml.safe_load(git_deploy)
 
 
 def test_scaffolded_tombstones_registry_is_valid_and_user_owned(tmp_path):
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
     reg = tmp_path / "deploy" / "tombstones.yml"
-    assert yaml.safe_load(reg.read_text()) == {"tombstones": []}
+    assert yaml.safe_load(reg.read_text(encoding="utf-8")) == {"tombstones": []}
     # `streamsnow update` must never re-render the registry (it would wipe
     # user-appended tombstone entries).
     from streamsnow.scaffolder import GOVERNANCE_ITEMS
@@ -519,10 +542,10 @@ def test_generated_workflows_pin_a_compatible_streamsnow(tmp_path):
 
     import streamsnow
 
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
     for wf in ("checks.yml", "deploy.yml"):
-        text = (tmp_path / ".github" / "workflows" / wf).read_text()
+        text = (tmp_path / ".github" / "workflows" / wf).read_text(encoding="utf-8")
         assert "uv tool install 'streamsnow" in text
         spec = text.split("uv tool install 'streamsnow")[1].split("'")[0]
         assert streamsnow.__version__ in SpecifierSet(spec), (
@@ -540,7 +563,9 @@ def _repoint_starter(app_dir: Path) -> None:
         "pages/overview.py",
     ):
         f = app_dir / rel
-        f.write_text(f.read_text().replace("YOUR_TABLE", "ORDERS"))
+        f.write_text(
+            f.read_text(encoding="utf-8").replace("YOUR_TABLE", "ORDERS"), encoding="utf-8"
+        )
 
 
 # The starter page's sample block, from its marker through the sample chart.
@@ -560,10 +585,10 @@ def _finish_starter(app_dir: Path) -> None:
         'branded_metric("Rows", f"{int(df[\'N\'].sum()):,}")\n'
         'fig = px.bar(df, x="DT", y="N", color_discrete_sequence=BRAND_CHART_COLORS)\n'
         "st.plotly_chart(fig, use_container_width=True)\n",
-        page.read_text(),
+        page.read_text(encoding="utf-8"),
     )
     assert n == 1, "starter page sample block not found"
-    page.write_text(text)
+    page.write_text(text, encoding="utf-8")
 
 
 def test_fresh_scaffold_fails_only_on_its_placeholders(tmp_path):
@@ -610,19 +635,21 @@ def test_generated_python_is_format_clean_under_ruff_defaults(tmp_path):
     ruff = shutil.which("ruff")
     if ruff is None:
         pytest.skip("ruff not on PATH")
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
     proc = subprocess.run(
         [ruff, "format", "--check", "--isolated", str(tmp_path)],
         capture_output=True,
         text=True,
         check=False,
+        encoding="utf-8",
+        errors="replace",
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 def _scaffold_runtime(tmp_path: Path, runtime: str) -> Path:
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     if runtime == "warehouse":
         data["runtime"] = "warehouse"
         data["snowflake"]["objects"]["compute_pool"] = ""
@@ -641,10 +668,10 @@ def test_generated_ci_pins_the_same_ruff_as_pre_commit(tmp_path):
     from streamsnow.scaffolder import RUFF_VERSION
 
     root = _scaffold_runtime(tmp_path, "container")
-    precommit = yaml.safe_load((root / ".pre-commit-config.yaml").read_text())
+    precommit = yaml.safe_load((root / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
     ruff_repo = next(r for r in precommit["repos"] if "ruff-pre-commit" in r["repo"])
     assert ruff_repo["rev"] == f"v{RUFF_VERSION}"
-    ci = (root / ".github/workflows/checks.yml").read_text()
+    ci = (root / ".github/workflows/checks.yml").read_text(encoding="utf-8")
     installs = re.findall(r"uv tool install (\S+)", ci)
     ruff_installs = [i for i in installs if i.strip("'\"").startswith("ruff")]
     assert ruff_installs == [f"ruff=={RUFF_VERSION}"], installs
@@ -674,6 +701,8 @@ def test_generated_python_is_lint_clean_under_ruff(tmp_path, runtime, extra):
         text=True,
         check=False,
         cwd=root,
+        encoding="utf-8",
+        errors="replace",
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
@@ -705,11 +734,11 @@ def test_init_no_starter_app_writes_repo_files_without_an_app(tmp_path):
     for rel in _REPO_FILES:
         assert (tmp_path / rel).is_file(), f"missing {rel}"
     assert not (tmp_path / "apps").exists()
-    readme = (tmp_path / "README.md").read_text()
+    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
     assert "example-dashboard" not in readme
     assert "apps//" not in readme and "| |" not in readme
     assert "streamsnow new" in readme
-    assert "secrets.toml" in (tmp_path / ".gitignore").read_text()
+    assert "secrets.toml" in (tmp_path / ".gitignore").read_text(encoding="utf-8")
     assert "streamsnow new <domain> <function>" in result.output
 
 
@@ -721,15 +750,15 @@ def test_init_no_starter_app_reuses_an_existing_config(tmp_path):
         ).exit_code
         == 0
     )
-    before = (tmp_path / CONFIG_FILENAME).read_text()
+    before = (tmp_path / CONFIG_FILENAME).read_text(encoding="utf-8")
     result = runner.invoke(app, ["init", "--dir", str(tmp_path), "--no-starter-app"])
     assert result.exit_code == 0, result.output
-    assert (tmp_path / CONFIG_FILENAME).read_text() == before
+    assert (tmp_path / CONFIG_FILENAME).read_text(encoding="utf-8") == before
     assert (tmp_path / ".gitignore").is_file()
     # Re-running is idempotent: existing repo files are left alone.
-    (tmp_path / "README.md").write_text("# mine\n")
+    (tmp_path / "README.md").write_text("# mine\n", encoding="utf-8")
     assert runner.invoke(app, ["init", "--dir", str(tmp_path), "--no-starter-app"]).exit_code == 0
-    assert (tmp_path / "README.md").read_text() == "# mine\n"
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "# mine\n"
 
 
 def test_new_warns_when_repo_governance_files_are_missing(tmp_path, monkeypatch):
@@ -767,9 +796,9 @@ def test_init_next_block_puts_the_plugin_first(tmp_path):
 
 
 def test_setup_skill_writes_repo_files_on_a_repo_without_apps():
-    setup = (REPO_ROOT / "skills/start-app/setup.md").read_text()
+    setup = (REPO_ROOT / "skills/start-app/setup.md").read_text(encoding="utf-8")
     assert "streamsnow init --no-starter-app" in setup
-    skill = (REPO_ROOT / "skills/start-app/SKILL.md").read_text()
+    skill = (REPO_ROOT / "skills/start-app/SKILL.md").read_text(encoding="utf-8")
     assert "init --no-starter-app" in skill
 
 
@@ -807,7 +836,10 @@ def test_validate_app_fails_on_the_scaffold_placeholders(tmp_path):
     assert "FAIL" in md.output
 
     q = tmp_path / "apps/a-b/queries/example_metric.sql"
-    q.write_text(q.read_text().replace("YOUR_TABLE  -- TODO: replace YOUR_TABLE", "ORDERS"))
+    q.write_text(
+        q.read_text(encoding="utf-8").replace("YOUR_TABLE  -- TODO: replace YOUR_TABLE", "ORDERS"),
+        encoding="utf-8",
+    )
     assert ("queries/example_metric.sql", "token") not in placeholder_findings()
     assert runner.invoke(app, validate).exit_code == 1  # manifest + page still placeholders
 
@@ -819,15 +851,15 @@ def test_validate_app_fails_on_the_scaffold_placeholders(tmp_path):
     # Deleting only the marker comment does not dodge it: the sample values match too,
     # which is also how a page scaffolded before the marker existed is caught.
     page = tmp_path / "apps/a-b/pages/overview.py"
-    marked = page.read_text()
+    marked = page.read_text(encoding="utf-8")
     lines = marked.splitlines(keepends=True)
     start = next(i for i, ln in enumerate(lines) if "STREAMSNOW_STARTER_PLACEHOLDER" in ln)
     del lines[start : start + 3]
-    page.write_text("".join(lines))
-    assert "STREAMSNOW_STARTER_PLACEHOLDER" not in page.read_text()
+    page.write_text("".join(lines), encoding="utf-8")
+    assert "STREAMSNOW_STARTER_PLACEHOLDER" not in page.read_text(encoding="utf-8")
     assert placeholder_findings() == [("pages/overview.py", "sample")]
 
-    page.write_text(marked)
+    page.write_text(marked, encoding="utf-8")
     _finish_starter(tmp_path / "apps/a-b")
     assert placeholder_findings() == []
 
@@ -861,7 +893,8 @@ def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
         "-- Query: daily_sales\n-- Feeds: Sales trend\n-- Schemas: ANALYTICS_DB.ANALYTICS\n"
         "-- Params: :1 start_date, :2 end_date\n"
         "SELECT sold_date, SUM(net_paid) AS net_paid\nFROM ANALYTICS_DB.ANALYTICS.STORE_SALES\n"
-        "WHERE sold_date BETWEEN :1 AND :2\nGROUP BY sold_date\n"
+        "WHERE sold_date BETWEEN :1 AND :2\nGROUP BY sold_date\n",
+        encoding="utf-8",
     )
     (a / "pages/sales_trend.py").write_text(
         '"""Sales trend."""\n\nimport streamlit as st\nfrom sql_loader import load_sql\n\n\n'
@@ -869,14 +902,16 @@ def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
         "def load_daily(start: str, end: str):\n"
         '    sql = load_sql("daily_sales")\n'
         '    return st.connection("snowflake").query(sql, params=[start, end], ttl=0)\n\n\n'
-        'st.title("Sales trend")\n'
+        'st.title("Sales trend")\n',
+        encoding="utf-8",
     )
     entry = a / "streamlit_app.py"
     entry.write_text(
-        entry.read_text().replace(
+        entry.read_text(encoding="utf-8").replace(
             'st.Page("pages/overview.py", title="Overview"',
             'st.Page("pages/sales_trend.py", title="Sales trend"',
-        )
+        ),
+        encoding="utf-8",
     )
     table = "ANALYTICS_DB.ANALYTICS.STORE_SALES"
     manifest = {
@@ -890,7 +925,7 @@ def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
         "pages": [{"name": "Sales trend", "queries": ["daily_sales"]}],
         "query_specs": {"daily_sales": {"params_doc": ":1 start_date, :2 end_date"}},
     }
-    (a / "sql_review/manifests/sales.json").write_text(_json.dumps(manifest))
+    (a / "sql_review/manifests/sales.json").write_text(_json.dumps(manifest), encoding="utf-8")
     assert sql_review.main(["generate", "sales-trends", "--dir", str(tmp_path)]) == 0
     result = runner.invoke(app, ["validate-app", "sales-trends", "--format", "json"])
     assert result.exit_code == 0, result.output
@@ -899,12 +934,13 @@ def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
     # pages.md's documented check for this end state is validate-app. It once said
     # `grep -rn YOUR_TABLE apps/<slug>` must print nothing, but the app's own AGENTS.md
     # names the token in its instructions, so this correct app failed that check.
-    assert "YOUR_TABLE" in (a / "AGENTS.md").read_text()
-    pages = (REPO_ROOT / "skills/start-app/pages.md").read_text()
+    assert "YOUR_TABLE" in (a / "AGENTS.md").read_text(encoding="utf-8")
+    pages = (REPO_ROOT / "skills/start-app/pages.md").read_text(encoding="utf-8")
     assert "grep -rn YOUR_TABLE" not in pages
     assert "Then `streamsnow validate-app <slug>` must PASS" in pages
 
 
+@_workflow_bash
 def test_fresh_no_starter_repo_passes_its_own_checks_workflow(tmp_path):
     """`init --no-starter-app` (the /start-app setup path) writes no apps/ directory,
     and git cannot carry an empty one. The generated checks.yml then failed on its
@@ -929,7 +965,9 @@ def test_fresh_no_starter_repo_passes_its_own_checks_workflow(tmp_path):
         ["update-ref", "refs/remotes/origin/main", "HEAD"],
     ):
         subprocess.run([*git, *cmd], cwd=tmp_path, check=True, capture_output=True)
-    workflow = yaml.safe_load((tmp_path / ".github/workflows/checks.yml").read_text())
+    workflow = yaml.safe_load(
+        (tmp_path / ".github/workflows/checks.yml").read_text(encoding="utf-8")
+    )
     steps = {s.get("name"): s.get("run") for s in workflow["jobs"]["checks"]["steps"]}
     offline = [
         "Lint",
@@ -943,6 +981,8 @@ def test_fresh_no_starter_repo_passes_its_own_checks_workflow(tmp_path):
             cwd=tmp_path,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         assert proc.returncode == 0, (name, proc.stdout, proc.stderr)
     # The tombstones guard only skips while apps/ is absent on BOTH sides: once an
@@ -958,7 +998,7 @@ def test_next_block_explains_preview_role_grants():
 
 
 def _warehouse_cfg() -> Config:
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     data["runtime"] = "warehouse"
     data["snowflake"]["objects"]["compute_pool"] = ""
     data["snowflake"]["objects"]["external_access_integration"] = ""
@@ -969,7 +1009,7 @@ def test_warehouse_scaffold_pins_newest_supported_streamlit(tmp_path):
     from streamsnow.scaffolder import WAREHOUSE_STREAMLIT_PIN
 
     scaffold(_warehouse_cfg(), tmp_path, "sales-overview")
-    env = (tmp_path / "apps/sales-overview/environment.yml").read_text()
+    env = (tmp_path / "apps/sales-overview/environment.yml").read_text(encoding="utf-8")
     assert f"streamlit={WAREHOUSE_STREAMLIT_PIN}" in env
     assert WAREHOUSE_STREAMLIT_PIN == "1.52.2"
     assert "cosmetic" not in env
@@ -982,7 +1022,7 @@ def test_warehouse_scaffold_ships_dated_osv_allowlist(tmp_path):
     from streamsnow.tools import check_dependency_vulns as cdv
 
     scaffold(_warehouse_cfg(), tmp_path, "sales-overview")
-    entries = json.loads((tmp_path / "osv_allowlist.json").read_text())
+    entries = json.loads((tmp_path / "osv_allowlist.json").read_text(encoding="utf-8"))
     ids = {e["id"] for e in entries}
     assert ids == {
         "GHSA-7p48-42j8-8846",
@@ -1032,11 +1072,11 @@ def test_update_adds_missing_osv_allowlist_to_existing_warehouse_repo(tmp_path):
     import json
 
     cfg = _warehouse_cfg()
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     data["runtime"] = "warehouse"
     data["snowflake"]["objects"]["compute_pool"] = ""
     data["snowflake"]["objects"]["external_access_integration"] = ""
-    (tmp_path / CONFIG_FILENAME).write_text(yaml.safe_dump(data))
+    (tmp_path / CONFIG_FILENAME).write_text(yaml.safe_dump(data), encoding="utf-8")
     scaffold(cfg, tmp_path, "sales-overview")
     (tmp_path / "osv_allowlist.json").unlink()  # a repo scaffolded before 0.7.1
 
@@ -1047,19 +1087,19 @@ def test_update_adds_missing_osv_allowlist_to_existing_warehouse_repo(tmp_path):
 
     res = runner.invoke(app, ["update", "--dir", str(tmp_path), "--apply"])
     assert res.exit_code == 0, res.output
-    assert len(json.loads((tmp_path / "osv_allowlist.json").read_text())) == 4
+    assert len(json.loads((tmp_path / "osv_allowlist.json").read_text(encoding="utf-8"))) == 4
 
 
 def test_update_never_overwrites_an_existing_osv_allowlist(tmp_path):
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     data["runtime"] = "warehouse"
     data["snowflake"]["objects"]["compute_pool"] = ""
     data["snowflake"]["objects"]["external_access_integration"] = ""
-    (tmp_path / CONFIG_FILENAME).write_text(yaml.safe_dump(data))
-    (tmp_path / "osv_allowlist.json").write_text("[]\n")  # the user's own entries
+    (tmp_path / CONFIG_FILENAME).write_text(yaml.safe_dump(data), encoding="utf-8")
+    (tmp_path / "osv_allowlist.json").write_text("[]\n", encoding="utf-8")  # the user's own entries
     res = runner.invoke(app, ["update", "--dir", str(tmp_path), "--apply"])
     assert res.exit_code == 0, res.output
-    assert (tmp_path / "osv_allowlist.json").read_text() == "[]\n"
+    assert (tmp_path / "osv_allowlist.json").read_text(encoding="utf-8") == "[]\n"
 
 
 def test_container_pyproject_is_dependencies_only(tmp_path):
@@ -1070,10 +1110,10 @@ def test_container_pyproject_is_dependencies_only(tmp_path):
     discovery off: the install resolves the dependencies and builds nothing."""
     import tomllib
 
-    data = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
     app_dir = tmp_path / "apps/acme-sales-dashboard"
-    pyproject = tomllib.loads((app_dir / "pyproject.toml").read_text())
+    pyproject = tomllib.loads((app_dir / "pyproject.toml").read_text(encoding="utf-8"))
     assert pyproject["tool"]["setuptools"]["packages"] == []
     # The directories that tripped discovery are all present in a fresh scaffold.
     assert all((app_dir / d).is_dir() for d in ("pages", "queries", "sql_review"))
@@ -1087,7 +1127,7 @@ def test_generated_gitignore_ignores_internal_notes(tmp_path):
 
     init = ["init", "--no-starter-app", "--config", str(EXAMPLE_CONFIG), "--dir", str(tmp_path)]
     assert runner.invoke(app, init).exit_code == 0
-    assert ".internal/" in (tmp_path / ".gitignore").read_text().splitlines()
+    assert ".internal/" in (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
     if shutil.which("git") is None:
         pytest.skip("git not on PATH")
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)

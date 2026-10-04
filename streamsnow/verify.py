@@ -76,10 +76,7 @@ def run_query_snow(sql: str, *, temporary_connection: bool = False) -> list[dict
     if temporary_connection:
         argv.append("--temporary-connection")
     proc = subprocess.run(  # noqa: S603 - sql comes from validated config values
-        argv,
-        capture_output=True,
-        text=True,
-        timeout=120,
+        argv, capture_output=True, text=True, timeout=120, encoding="utf-8", errors="replace"
     )
     if proc.returncode != 0:
         raise RuntimeError(f"snow sql failed ({proc.returncode}): {proc.stderr.strip()[:500]}")
