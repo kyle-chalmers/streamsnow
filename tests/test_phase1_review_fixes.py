@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from _portable import posix_process_control
 
 from streamsnow.tools import check_requirements, preview_app, review_gate
 from streamsnow.tools import doctor as doctor_mod
@@ -96,7 +95,6 @@ def test_stop_hook_uses_payload_cwd_over_stale_env(
 # --------------------------------------------------------------------------- #
 
 
-@posix_process_control
 def test_stop_refuses_pid_that_is_not_our_process(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
@@ -190,7 +188,6 @@ def test_validate_app_dir_flag_anchors_config(tmp_path: Path, monkeypatch: pytes
 # --------------------------------------------------------------------------- #
 
 
-@posix_process_control
 def test_stop_refuses_pid_of_a_different_apps_preview(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:

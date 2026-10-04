@@ -19,6 +19,16 @@ full-path invocations (`/usr/local/bin/snow`). When a referenced SQL file is too
 large to scan, the hook asks rather than letting it pass unseen. It errs toward
 an extra confirmation — a guard should over-ask, never under-ask.
 
+Native Windows. Claude Code's PowerShell tool is on by default there and is
+Claude's primary shell, so a guard that read only the Bash tool missed most
+Windows commands. The hook therefore inspects both tools (hooks.json matches
+`Bash|PowerShell`) and the shapes Windows adds: an `.exe`/`.cmd`/`.bat`/`.ps1`
+suffix, backslash paths and the `&` call operator (`& 'C:\\...\\snow.exe'`),
+case-blind command names, PowerShell's backtick escape (`` sn`ow ``), and SQL
+piped in with `Get-Content deploy.sql | snow sql --stdin` (PowerShell has no
+`<` redirect). The payload is read as UTF-8 bytes: Windows pipes default to
+cp1252, which fails on some UTF-8 characters and silently skipped the guard.
+
 Repo-gated (does nothing unless a `streamsnow.config.yaml` is found, so it is
 zero-cost in unrelated repos), stdlib-only, no network, and fail-open — it never
 crashes a session and only ever *adds* a confirmation, never bypasses one.
@@ -38,6 +48,9 @@ from pathlib import Path
 
 CONFIG_FILENAME = "streamsnow.config.yaml"
 
+#: Claude Code's command-running tools. PowerShell is the default on Windows.
+SHELL_TOOLS = frozenset({"Bash", "PowerShell"})
+
 WAREHOUSE_CLIS = [
     "snow",
     "snowsql",
@@ -55,16 +68,19 @@ DESTRUCTIVE_SQL = re.compile(
     re.IGNORECASE,
 )
 
+# A Windows executable suffix: `snow.exe`, or a shim npm/pip/scoop installed.
+_WIN_EXT = r"(?:\.exe|\.cmd|\.bat|\.ps1)?"
+
 # Streamlit-in-Snowflake destructive surface. Single-stack, so the patterns
 # live here (no adapter indirection); tests/test_deploy_safety.py asserts each
 # one fires.
 STREAMLIT_DESTRUCTIVE: list[dict[str, str]] = [
     {
-        "pattern": r"snow\s+streamlit\s+deploy\b",
+        "pattern": rf"snow{_WIN_EXT}\s+streamlit\s+deploy\b",
         "reason": "`snow streamlit deploy` replaces the live app definition (CREATE OR REPLACE under the hood). The sanctioned path is /ship-app: validate first, confirm the target, then deploy.",
     },
     {
-        "pattern": r"snow\s+streamlit\s+drop\b",
+        "pattern": rf"snow{_WIN_EXT}\s+streamlit\s+drop\b",
         "reason": "`snow streamlit drop` removes a live app users may be viewing in Snowsight.",
     },
     {
@@ -77,21 +93,29 @@ STREAMLIT_DESTRUCTIVE: list[dict[str, str]] = [
         "reason": "`ALTER STREAMLIT` mutates a live app (including ADD LIVE VERSION / commit swaps that change what users see).",
     },
     {
-        "pattern": r"\bREMOVE\s+@|snow\s+stage\s+remove\b",
+        "pattern": rf"\bREMOVE\s+@|snow{_WIN_EXT}\s+stage\s+remove\b",
         "reason": "Removing files from a stage can break the deployed app that serves from it.",
     },
 ]
 
 # SQL can live in a file (-f/--file) or a stdin redirect (`psql db < deploy.sql`).
-_FILE_FLAG = re.compile(r"(?:-f|-i|--file|--filename|--input-file|--query)[=\s]+([^\s;|&]+)")
+# One shell argument: a double- or single-quoted string (spaces allowed), or a bare word.
+_ARG = r"(\"[^\"]*\"|'[^']*'|[^\s;|&]+)"
+_FILE_FLAG = re.compile(rf"(?:-f|-i|--file|--filename|--input-file|--query)[=\s]+{_ARG}")
 _STDIN_REDIR = re.compile(r"<\s*([^\s;|&<>]+)")
+# PowerShell has no `<`; SQL is piped in: `Get-Content deploy.sql | snow sql --stdin`.
+# Options can come first (`-Raw`, `-Encoding utf8 -Path x`), so every non-option
+# argument before the pipe is a candidate file; only one that exists is read.
+_PIPED_SOURCE = re.compile(r"\b(?:Get-Content|gc|cat|type)\b([^|;&]*)", re.IGNORECASE)
+_ARG_TOKEN = re.compile(_ARG)
 _MAX_SCAN_BYTES = 2_000_000
 
 
 def _dequote(command: str) -> str:
-    """Remove shell quote characters so `sn'ow' streamlit deploy` matches a pattern.
+    """Remove shell quote characters so `sn'ow' streamlit deploy` matches a pattern,
+    and PowerShell's backtick escape (`` sn`ow ``) for the same reason.
     Used for pattern matching only — never for opening files."""
-    return command.replace("'", "").replace('"', "")
+    return command.replace("'", "").replace('"', "").replace("`", "")
 
 
 def find_config(cwd: str) -> Path | None:
@@ -115,8 +139,9 @@ def find_config(cwd: str) -> Path | None:
 
 def invokes_warehouse(command: str) -> str | None:
     for cli in WAREHOUSE_CLIS:
-        # allow a path prefix (/usr/local/bin/snow) by treating '/' as a boundary
-        if re.search(rf"(^|[\s;&|(/]){re.escape(cli)}(\s|$)", command):
+        # A path prefix (/usr/local/bin/snow, C:\tools\snow.exe) or PowerShell's
+        # `&` call operator is a boundary; Windows command names are case-blind.
+        if re.search(rf"(^|[\s;&|(/\\]){re.escape(cli)}{_WIN_EXT}(\s|$)", command, re.IGNORECASE):
             return cli
     return None
 
@@ -129,7 +154,13 @@ def referenced_sql(command: str, cwd: str) -> tuple[str, bool]:
     """
     text = ""
     unscannable = False
-    for raw in _FILE_FLAG.findall(command) + _STDIN_REDIR.findall(command):
+    piped = [
+        token
+        for segment in _PIPED_SOURCE.findall(command)
+        for token in _ARG_TOKEN.findall(segment)
+        if not token.startswith("-")
+    ]
+    for raw in _FILE_FLAG.findall(command) + _STDIN_REDIR.findall(command) + piped:
         raw = raw.strip("'\"")  # `-f "deploy.sql"` -> deploy.sql
         if not raw:
             continue
@@ -163,10 +194,12 @@ def emit_ask(reason: str) -> None:
 
 def main() -> int:
     try:
-        payload = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
+        # Bytes, not sys.stdin's text mode: Claude Code sends UTF-8, and the
+        # Windows pipe default (cp1252) cannot decode every UTF-8 character.
+        payload = json.loads(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
+    except (json.JSONDecodeError, ValueError, OSError):
         return 0
-    if payload.get("tool_name") != "Bash":
+    if not isinstance(payload, dict) or payload.get("tool_name") not in SHELL_TOOLS:
         return 0
     command = (payload.get("tool_input") or {}).get("command", "") or ""
     if not command.strip():
