@@ -144,3 +144,23 @@ def test_every_skill_declares_its_repo_overlay_point():
             f"{skill.name}/SKILL.md does not declare its repo-overlay point"
         )
     assert (skills_dir / "_shared" / "overlays.md").is_file()
+
+
+def test_plugin_bundles_a_pinned_playwright_mcp():
+    """Five skills walk the running app in a browser through a Playwright MCP.
+    Bundling it in the plugin means nobody has to configure it by hand; an exact
+    pin (never @latest) keeps a new upstream release from changing the walk
+    under a released plugin. RELEASING.md owns the bump."""
+    servers = json.loads((REPO_ROOT / ".mcp.json").read_text())["mcpServers"]
+    pw = servers["playwright"]
+    assert pw["command"] == "npx"
+    pkg = next(a for a in pw["args"] if a.startswith("@playwright/mcp"))
+    assert re.fullmatch(r"@playwright/mcp@\d+\.\d+\.\d+", pkg), pkg
+    assert "pin" in (REPO_ROOT / "RELEASING.md").read_text().lower()
+    assert "@playwright/mcp" in (REPO_ROOT / "RELEASING.md").read_text()
+
+
+def test_walkthrough_degrade_line_points_at_the_bundled_setup():
+    text = (SKILLS_DIR / "_shared" / "playwright-walkthrough.md").read_text()
+    assert "/reload-plugins" in text
+    assert "restart the session" not in text

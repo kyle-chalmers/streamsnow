@@ -205,6 +205,28 @@ caught it. Runtime-specific facts link to the official page in
   `claude plugin install --scope project streamsnow@streamsnow`, then run
   `/reload-plugins` in Claude Code (no restart needed).
 
+### 20. "Playwright MCP not loaded, so the UI walkthrough was skipped"
+
+- **Symptom:** `/validate-app`, `/preview-app` or `/review-app` say the UI
+  walkthrough was skipped; no screenshots under `apps/<slug>/.review/`.
+- **Cause:** the plugin bundles a Playwright MCP that starts through `npx`, so
+  it is missing when Node.js 20+ is not installed or the plugin was not reloaded
+  after installing it. A browser that has never been downloaded fails on first
+  use with "is not installed" instead.
+- **Fix:** `streamsnow doctor` (the `node` row names the install), then
+  `/reload-plugins` and `/mcp` to confirm `playwright` is connected. For a
+  missing browser, run `npx @playwright/mcp@<version> install-browser <name>`
+  with the browser name from the error and the version pinned in the plugin's
+  `.mcp.json` (the error's own command omits the version). `/start-app --setup` runs all of this for you.
+
+### 21. A teammate's commits skip the governance checks
+
+- **Symptom:** CI fails on something pre-commit would have caught, only for some
+  people.
+- **Cause:** `pre-commit install` runs per clone, so a fresh clone has no hook.
+- **Fix:** `streamsnow doctor` reports it as the `pre-commit-hook` row; run
+  `pre-commit install` in the clone, or `/start-app --setup`.
+
 ## Adding new issues
 
 Append a numbered entry in the same Symptom / Cause / Fix shape under the right

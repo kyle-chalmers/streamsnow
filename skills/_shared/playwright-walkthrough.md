@@ -6,8 +6,8 @@ Consumed by: /validate-app and /preview-app (their optional UI-smoke sections), 
 
 ## Preconditions
 
-- A Playwright MCP must be loaded in the session (its `browser_*` tools are visible). If not, **degrade**: emit the one-liner below and return control to the caller with `ui_walk: skipped`. Never block, never error.
-  > Playwright MCP not loaded — skipping UI walkthrough. Static checks still ran. To enable, add a Playwright MCP to `.mcp.json` and restart the session.
+- A Playwright MCP must be loaded in the session (its `browser_*` tools are visible). StreamSnow bundles one in the plugin's `.mcp.json`, so it is missing only when Node.js is absent or the plugin has not been reloaded. Its first start downloads the package, so a server that is still connecting is not missing: search your tools for `browser_navigate` (a tool search waits for connecting servers) before deciding. If it is still not loaded, **degrade**: emit the one-liner below and return control to the caller with `ui_walk: skipped`. Never block, never error.
+  > Playwright MCP not loaded, so the UI walkthrough was skipped. Static checks still ran. To enable it, run `/start-app --setup` (or `streamsnow doctor` and fix the `node` row), then `/reload-plugins`.
 - The app must already be serving locally. The caller owns launch via `streamsnow preview <slug>` (see /preview-app); this recipe assumes a reachable base URL. If none was passed, ask the caller for the local URL rather than launching one.
 
 ## Inputs

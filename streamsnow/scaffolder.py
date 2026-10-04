@@ -137,6 +137,17 @@ GOVERNANCE_ITEMS = tuple(
 )
 
 
+def missing_repo_files(cfg: Config, root: Path) -> list[str]:
+    """Repo-level governed files this config calls for that are not on disk.
+
+    A ``streamsnow.config.yaml`` alone does not make a governed repo: ``configure``
+    writes only the config, so a repo set up that way has no hooks, no CI and no
+    ``.gitignore`` entry for ``secrets.toml``. ``new`` warns on it and ``doctor``
+    reports it, so setup never treats config presence as "already onboarded".
+    """
+    return [i.output for i in REPO_ITEMS if i.when(cfg) and not (root / i.output).exists()]
+
+
 def _title_from_slug(slug: str) -> str:
     return " ".join(w.capitalize() for w in slug.replace("_", "-").split("-"))
 

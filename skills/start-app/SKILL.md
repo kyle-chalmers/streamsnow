@@ -32,7 +32,7 @@ next command at each judgment point, and never skips a checkpoint.
 
 ## Phase 0 — Preflight (degrade, don't die)
 
-1. Report which `streamsnow` runs and its version, then run `streamsnow doctor` and fix-or-skip each failure interactively per [setup.md](setup.md) §0 and §1 (§1 says when doctor is skipped).
+1. Report which `streamsnow` runs and its version, then run `streamsnow doctor` and fix-or-skip each failure interactively per [setup.md](setup.md) §0 to §1b (§1 says when doctor is skipped).
 2. If `streamsnow.config.yaml` is missing, this isn't a governed repo yet — offer `--setup` (or
    `adopt` if the repo already has apps). You can still write a spec without config; note that
    schema choices in §3 stay unverified until the repo is configured.

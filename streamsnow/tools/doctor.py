@@ -46,6 +46,22 @@ connector with ``TypeError: Expected bytes, RSAPrivateKey, ... got NoneType``.
 The check reads parameter NAMES only, never values, and never edits the
 connection; the hint names the rename that works for both tools.
 
+Onboarding checks (0.7.6), each closing a way a new user or a teammate cloning
+a configured repo could be told "ok" while governance was silently off:
+``repo-files`` (required once a config exists: ``configure`` alone writes the
+config but no hooks, CI or ``.gitignore``, so config presence never means
+"onboarded"); ``git-identity`` (required once a config exists; reads whether
+``user.name``/``user.email`` are set and never records their values);
+``pre-commit-hook`` (required once a config exists: ``pre-commit install`` is
+per clone, and a teammate's commits skip every governance check until it runs;
+the hook must be pre-commit's own, not just any file at that path); ``node``
+(optional warning: the bundled Playwright MCP runs through ``npx``, and without
+it every UI walkthrough is skipped); ``ci-secrets`` (optional: the deploy
+workflow does nothing until its ``SNOWFLAKE_*`` secrets exist; reads secret
+NAMES via ``gh``, and a listing that fails for lack of access says "not
+checked", never "missing"). On native Windows only, a ``platform`` warning says
+StreamSnow runs inside WSL today.
+
 Detection only: no prompts, no fix execution — hints name the fix, callers own
 the UX. Checks never raise; an unexpected error inside the doctor itself is a
 tool error.
@@ -58,6 +74,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -65,6 +82,7 @@ import sys
 from pathlib import Path
 
 from ..config import ConfigError, find_config, load_config
+from ..scaffolder import missing_repo_files
 
 REQUIRED = "required"
 OPTIONAL = "optional"
@@ -142,11 +160,15 @@ def check_pre_commit(config_present: bool) -> dict:
     return res
 
 
-def _run(cmd: list[str], timeout: float = _PROBE_TIMEOUT_S) -> tuple[int, str]:
+def _run(
+    cmd: list[str], timeout: float = _PROBE_TIMEOUT_S, cwd: Path | None = None
+) -> tuple[int, str]:
     """Run a short diagnostic command; never raises (124 on timeout, 127 on any
     other failure to run, with empty output)."""
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, check=False, cwd=cwd
+        )
         return proc.returncode, proc.stdout or ""
     except subprocess.TimeoutExpired:
         return _TIMEOUT_CODE, ""
@@ -471,6 +493,258 @@ def check_config(start: Path | None = None) -> dict:
     )
 
 
+def _config_dir(cfg_result: dict) -> Path | None:
+    path = cfg_result.get("detail", {}).get("path")
+    return Path(path).parent if path else None
+
+
+def check_repo_files(start: Path | None = None) -> dict:
+    """Are the governed repo files this config calls for on disk?
+
+    Skipped without a valid config. Required when any is missing: a repo with a
+    config but no ``.pre-commit-config.yaml``/CI/``.gitignore`` has its
+    governance off, and the fix (``init --no-starter-app``) reuses the config
+    and writes only what is missing.
+    """
+    cfg_path = find_config(start)
+    if cfg_path is None:
+        return _result(
+            "repo-files", False, OPTIONAL, {"skipped": "no config"}, "skipped: no config"
+        )
+    try:
+        cfg = load_config(cfg_path)
+    except ConfigError:
+        return _result(
+            "repo-files", False, OPTIONAL, {"skipped": "invalid config"}, "skipped: fix the config"
+        )
+    missing = missing_repo_files(cfg, cfg_path.parent)
+    if not missing:
+        return _result("repo-files", True, REQUIRED, {"missing": []})
+    return _result(
+        "repo-files",
+        False,
+        REQUIRED,
+        {"missing": missing},
+        f"missing {', '.join(missing)}: run `streamsnow init --no-starter-app` "
+        "(it reuses the config and writes only the missing files)",
+    )
+
+
+def check_git_identity(config_present: bool, cwd: Path | None = None) -> dict:
+    """Are ``user.name`` and ``user.email`` set where commits happen?
+
+    Records only whether each is set, never the values. Required once a config
+    exists (every commit in a governed repo needs them); a warning on a bare
+    machine. A probe that times out says "not checked".
+    """
+    level = REQUIRED if config_present else OPTIONAL
+    if shutil.which("git") is None:
+        return _result(
+            "git-identity", False, OPTIONAL, {"skipped": "git not installed"}, "skipped: no git"
+        )
+    present: dict[str, bool] = {}
+    for key in ("name", "email"):
+        code, out = _run(["git", "config", f"user.{key}"], cwd=cwd)
+        if code == _TIMEOUT_CODE:
+            return _not_checked("git-identity", "git config did not answer")
+        present[key] = code == 0 and bool(out.strip())
+    detail = {"name_set": present["name"], "email_set": present["email"]}
+    unset = [k for k, ok in present.items() if not ok]
+    if not unset:
+        return _result("git-identity", True, level, detail)
+    if level == OPTIONAL:
+        detail["warn"] = True
+    fix = " and ".join(f'git config user.{k} "<your {k}>"' for k in unset)
+    return _result(
+        "git-identity",
+        False,
+        level,
+        detail,
+        f"commits need a name and email: {fix} (add --global to use them in every repo)",
+    )
+
+
+_PRE_COMMIT_MARKER = "generated by pre-commit"
+
+
+def check_pre_commit_hook(cfg_result: dict) -> dict:
+    """Is pre-commit's own git hook installed in this clone?
+
+    ``pre-commit install`` runs per clone, so a teammate who skips it commits
+    with every governance check off while the executable check still passes.
+    Resolves the hook path through git, so ``core.hooksPath`` and worktrees are
+    honored, and resolves a relative answer (older git) against the repo. Any
+    other hook at that path does not count. Skipped without a config; "not
+    checked" when git cannot resolve the path (not a git repository).
+    """
+    repo = _config_dir(cfg_result)
+    if repo is None:
+        return _result(
+            "pre-commit-hook", False, OPTIONAL, {"skipped": "no config"}, "skipped: no config"
+        )
+    if shutil.which("git") is None:
+        return _not_checked("pre-commit-hook", "git not installed")
+    code, out = _run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-path", "hooks/pre-commit"], cwd=repo
+    )
+    lines = out.strip().splitlines()
+    if code != 0 or not lines:
+        return _not_checked("pre-commit-hook", "git could not resolve the hooks path here")
+    hook = Path(lines[-1])
+    if not hook.is_absolute():
+        hook = repo / hook
+    install = "run `pre-commit install` in the repo"
+    if not hook.is_file():
+        return _result(
+            "pre-commit-hook",
+            False,
+            REQUIRED,
+            {"path": str(hook), "installed": False},
+            f"the governance hooks are not installed in this clone: {install} "
+            "(if it refuses because core.hooksPath is set, ask before unsetting it)",
+        )
+    try:
+        ours = _PRE_COMMIT_MARKER in hook.read_text(errors="replace").lower()
+    except OSError:
+        return _not_checked("pre-commit-hook", "could not read the hook file")
+    if not ours:
+        return _result(
+            "pre-commit-hook",
+            False,
+            REQUIRED,
+            {"path": str(hook), "installed": False, "foreign": True},
+            f"another tool's hook is installed, not pre-commit's: {install} "
+            "(it keeps the existing hook as pre-commit.legacy and still runs it)",
+        )
+    # Git silently skips a hook without the executable bit (Windows has none).
+    if os.name != "nt" and not os.access(hook, os.X_OK):
+        return _result(
+            "pre-commit-hook",
+            False,
+            REQUIRED,
+            {"path": str(hook), "installed": False, "executable": False},
+            f"the hook is there but not executable, so git skips it: {install} again",
+        )
+    return _result("pre-commit-hook", True, REQUIRED, {"path": str(hook), "installed": True})
+
+
+# @playwright/mcp itself declares node >=18, but the playwright-core it pins
+# declares >=20 and exits on anything older, so 18 would pass here and then fail.
+_NODE_MIN_MAJOR = 20
+_NODE_HINT = (
+    "install Node.js 20+ (brew install node, or nvm on Linux/WSL, where the distro package "
+    "is often older): the bundled "
+    "Playwright browser tool runs through npx, and without it UI walkthroughs are skipped"
+)
+
+
+def check_node() -> dict:
+    """Node >= 20 with ``npx``, which the plugin's bundled Playwright MCP needs.
+
+    Optional and never gating: the UI walkthrough is advisory. A warning (not a
+    quiet skip) when absent, because the walkthrough otherwise degrades silently.
+    """
+    npx = shutil.which("npx") is not None
+    path = shutil.which("node")
+    if path is None:
+        return _result(
+            "node",
+            False,
+            OPTIONAL,
+            {"found": False, "path": "", "npx": npx, "warn": True},
+            _NODE_HINT,
+        )
+    code, out = _run(["node", "--version"])
+    m = _VERSION_RE.search(out) if code == 0 else None
+    version = m.group(1) if m else ""
+    detail = {"found": True, "path": path, "version": version, "npx": npx}
+    if not version or int(version.split(".")[0]) < _NODE_MIN_MAJOR:
+        detail["warn"] = True
+        return _result(
+            "node", False, OPTIONAL, detail, f"Node {version or '?'} found; {_NODE_HINT}"
+        )
+    if not npx:
+        detail["warn"] = True
+        return _result(
+            "node", False, OPTIONAL, detail, "node is installed but npx is not: reinstall Node.js"
+        )
+    return _result("node", True, OPTIONAL, detail)
+
+
+# The deploy workflows' secrets (streamsnow/_templates/repo/deploy*.yml.j2; a test
+# pins this list to the templates). The passphrase only exists for encrypted keys.
+CI_SECRET_NAMES = (
+    "SNOWFLAKE_ACCOUNT",
+    "SNOWFLAKE_USER",
+    "SNOWFLAKE_PRIVATE_KEY_RAW",
+    "SNOWFLAKE_WAREHOUSE",
+    "SNOWFLAKE_ROLE",
+)
+OPTIONAL_CI_SECRET_NAMES = ("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE",)
+
+
+def check_ci_secrets(cfg_result: dict) -> dict:
+    """Do the GitHub secrets the deploy workflow reads exist on this repo?
+
+    The deploy job is gated on ``SNOWFLAKE_ACCOUNT``, so without the secrets a
+    merge deploys nothing and nothing says so. Reads secret NAMES only (``gh``
+    cannot return values). Listing needs repo access and a token scope a
+    teammate may not have, so any failure is "not checked", never "missing";
+    secrets set at the org or environment level do not appear here either.
+    """
+    repo = _config_dir(cfg_result)
+    if repo is None or not cfg_result.get("ok"):
+        return _result(
+            "ci-secrets", False, OPTIONAL, {"skipped": "no valid config"}, "skipped: no config"
+        )
+    if shutil.which("gh") is None:
+        return _result(
+            "ci-secrets", False, OPTIONAL, {"skipped": "gh not installed"}, "skipped: no gh CLI"
+        )
+    code, out = _run(["gh", "secret", "list", "--json", "name"], cwd=repo)
+    if code == _TIMEOUT_CODE:
+        return _not_checked("ci-secrets", "gh secret list did not answer")
+    try:
+        rows = json.loads(out) if code == 0 else None
+    except ValueError:
+        rows = None
+    if not isinstance(rows, list):
+        return _not_checked(
+            "ci-secrets",
+            "gh could not list this repo's secrets (run `gh auth login`; listing needs repo "
+            "access, and the repo needs a GitHub remote)",
+        )
+    names = {str(r.get("name")) for r in rows if isinstance(r, dict)}
+    missing = [n for n in CI_SECRET_NAMES if n not in names]
+    if not missing:
+        return _result("ci-secrets", True, OPTIONAL, {"missing": []})
+    return _result(
+        "ci-secrets",
+        False,
+        OPTIONAL,
+        {"missing": missing, "warn": True},
+        f"CI deploys stay off until these GitHub secrets exist: {', '.join(missing)} "
+        "(see docs/deploy-setup.md; secrets set at the org or environment level do not "
+        "show here)",
+    )
+
+
+def check_platform(system: str | None = None) -> dict | None:
+    """Native Windows only: StreamSnow's preview and safety hooks are POSIX-only
+    today, so it runs inside WSL. Returns None everywhere else (no row)."""
+    system = sys.platform if system is None else system
+    if system != "win32":
+        return None
+    return _result(
+        "platform",
+        False,
+        OPTIONAL,
+        {"system": system, "warn": True},
+        "StreamSnow runs inside WSL (Windows Subsystem for Linux) on Windows today: "
+        "run `wsl --install` in an administrator PowerShell, restart, then set up inside WSL",
+    )
+
+
 def run_checks(start: Path | None = None) -> list[dict]:
     """Run every check; never raises from an individual check."""
     checks = [check_python()]
@@ -490,6 +764,15 @@ def run_checks(start: Path | None = None) -> list[dict]:
     checks.append(check_snow_connection(config, snow, rows, list_error))
     checks.append(check_snow_key_file(snow, rows, list_error))
     checks.append(check_container_python(config))
+    config_present = bool(config["detail"].get("found"))
+    checks.append(check_repo_files(start))
+    checks.append(check_git_identity(config_present, cwd=_config_dir(config)))
+    checks.append(check_pre_commit_hook(config))
+    checks.append(check_node())
+    checks.append(check_ci_secrets(config))
+    platform = check_platform()
+    if platform is not None:
+        checks.append(platform)
     return checks
 
 
