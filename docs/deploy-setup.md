@@ -19,15 +19,33 @@ that can:
 | Section | Creates or grants |
 |---|---|
 | `SYSADMIN` | app database + schema (and the stage schema if different), an `XSMALL` warehouse (`AUTO_SUSPEND = 60`, `INITIALLY_SUSPENDED`) |
-| `USERADMIN` | `ci_role`, `viewer_role`, and a `TYPE = SERVICE` CI user with an `RSA_PUBLIC_KEY` placeholder (key-pair auth, no password) |
-| `SECURITYADMIN` | both roles to `SYSADMIN`; `USAGE` on the database, schema and warehouse to both roles; `CREATE STREAMLIT` + `CREATE STAGE` on the schema to `ci_role`; `USAGE` + `SELECT` on each allowed governance schema |
+| `USERADMIN` | `ci_role`, `viewer_role`, and a `TYPE = SERVICE` CI user with key-pair auth, no password (`RSA_PUBLIC_KEY` from `--public-key-file`, else a placeholder to paste) |
+| `SECURITYADMIN` | both roles to `SYSADMIN`; the viewer role to **you** (whoever runs the script, via `CURRENT_USER()`) and to each `--viewer-user`; `USAGE` on the database, schema and warehouse to both roles; `CREATE STREAMLIT` + `CREATE STAGE` on the schema to `ci_role`; `USAGE` + `SELECT` on each allowed governance schema |
 | `ACCOUNTADMIN` | container runtime: the PyPI external access integration (Snowflake's managed `snowflake.external_access.pypi_rule`) and `USAGE` on it and on the compute pool to `ci_role`; `CREATE COMPUTE POOL` only when your pool is not `SYSTEM_COMPUTE_POOL_CPU`, which Snowflake pre-provisions in every account; git-repository: the API integration |
 | `ci_role` | the deploy-source objects it will own: the stage, or the secret + git repository |
 
 ```bash
-streamsnow deploy-setup --admin > admin-setup.sql   # review, paste in the public key
+streamsnow ci-key create                            # CI key pair + secret files, outside the repo
+streamsnow deploy-setup --admin \
+  --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > admin-setup.sql
 snow sql -f admin-setup.sql -c <admin-connection>   # or run it in a Snowsight worksheet
 ```
+
+With `--public-key-file` the script needs no edits (stage-copy source; a private
+git repository still needs its GitHub token pasted in). Without it, paste the
+public key over the `<paste public key>` placeholder. `--viewer-user NAME`
+(repeatable) grants the viewer role to more people.
+
+**Safe to re-run.** Objects use `IF NOT EXISTS`, grants are idempotent, and the
+CI user's key is re-applied with `ALTER USER`, so running the script again after
+rotating the key, or just to check, changes nothing else. Snowflake has no
+`IF NOT EXISTS` for `CREATE EXTERNAL ACCESS INTEGRATION`
+([syntax](https://docs.snowflake.com/en/sql-reference/sql/create-external-access-integration)),
+so the script uses `CREATE OR REPLACE` and re-grants `USAGE` to the CI role on
+the next line. A deployed app keeps working when its integration is replaced:
+tested live, it kept serving, and a redeploy against the replaced integration
+passed `verify-deploy`. The cost is that grants or settings someone added to
+the integration by hand are reset on each run, so manage it through this script.
 
 Two things to check before running it:
 
@@ -44,6 +62,31 @@ Two things to check before running it:
   role are printed commented out: uncomment them if you want local preview to
   connect as the viewer role and mirror what the deployed app reads, or preview
   with a developer role that has the CI role's reads.
+
+### Starting fresh (`deploy-setup --teardown`)
+
+To uninstall, or to rehearse a first setup on an account that already has one,
+print the reverse:
+
+```bash
+streamsnow deploy-setup --teardown > teardown.sql   # review EVERY line, then run as ACCOUNTADMIN
+```
+
+It never runs anything itself. In order, it drops the app database (every
+deployed app, plus the stage or git repository and secret inside it), the
+warehouse, the CI service user, the viewer and CI roles, and then the
+account-level objects: the PyPI external access integration, the configured
+compute pool unless it is `SYSTEM_COMPUTE_POOL_CPU` (stopped first), and the git API integration
+([DROP INTEGRATION](https://docs.snowflake.com/en/sql-reference/sql/drop-integration)).
+Every statement uses `IF EXISTS`, so a partial teardown can be re-run. It keeps
+your governance database and its data, and `SYSTEM_COMPUTE_POOL_CPU`, and it
+refuses outright when `app_database` or `stage_database` is the governance
+database or a Snowflake-shared one, or a role is a Snowflake system role. Two
+things to check: every object that could predate StreamSnow (the database,
+warehouse, integrations, a custom pool) carries a comment; delete that line if
+other work uses it. And the CI
+key pair under `~/.streamsnow-ci` stays, so the next `deploy-setup --admin
+--public-key-file` re-registers the same key and your repo secrets keep working.
 
 ## 1. One-time Snowflake objects
 
@@ -85,7 +128,15 @@ streamsnow deploy-setup | snow sql --stdin   # or pipe to your admin session
 ## 2. CI auth (key-pair / JWT)
 
 Create a key-pair for a dedicated CI **service user**, register the public key
-on that user, and add these **repo secrets**. Key-pair is the default because
+on that user, and add these **repo secrets**. `streamsnow ci-key create` does
+the first and last parts: it uses `openssl` to write the same unencrypted
+PKCS#8 key pair Snowflake's
+[key-pair guide](https://docs.snowflake.com/en/user-guide/key-pair-auth) makes
+and one file per secret below to `~/.streamsnow-ci` (`--dir` to change it),
+reuses an existing key rather than replacing it, and prints only file names,
+the key's `SHA256:` fingerprint (compare it with `RSA_PUBLIC_KEY_FP` in
+`DESC USER`) and the `gh secret set` loop that copies each file straight into
+GitHub. The admin script registers the public key. Key-pair is the default because
 Snowflake's [MFA rollout](https://docs.snowflake.com/en/user-guide/security-mfa-rollout)
 blocks password authentication for service users in its final phase (Aug–Oct
 2026, account-specific and subject to change); a

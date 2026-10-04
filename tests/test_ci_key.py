@@ -1,0 +1,155 @@
+"""`streamsnow ci-key create`: key pair + CI secret files, never echoing a value."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import shutil
+import stat
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from streamsnow import ci_key
+from streamsnow.deploy import read_public_key
+
+pytestmark = pytest.mark.skipif(shutil.which("openssl") is None, reason="needs openssl")
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+EXAMPLE = REPO_ROOT / "streamsnow.config.example.yaml"
+ACCOUNT = "ab12345.us-east-1"  # the example config's placeholder locator
+
+
+def _cli(*args: str):
+    from typer.testing import CliRunner
+
+    from streamsnow.cli import app
+
+    return CliRunner().invoke(app, list(args))
+
+
+def _create(tmp_path: Path, *extra: str):
+    return _cli("ci-key", "create", "--config", str(EXAMPLE), "--dir", str(tmp_path / "ci"), *extra)
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def test_creates_the_layout_the_deploy_workflow_reads(tmp_path):
+    res = _create(tmp_path)
+    assert res.exit_code == 0, res.output
+    d = tmp_path / "ci"
+    p8, pub = d / "streamsnow_ci_rsa_key.p8", d / "streamsnow_ci_rsa_key.pub"
+    assert _mode(d) == 0o700 and _mode(d / "secrets") == 0o700
+    assert _mode(p8) == 0o600
+    assert "BEGIN PRIVATE KEY" in p8.read_text()  # unencrypted PKCS#8, as the workflow expects
+    read_public_key(pub)  # a valid PEM public key for --public-key-file
+    secrets = d / "secrets"
+    assert sorted(p.name for p in secrets.iterdir()) == sorted(ci_key.SECRET_NAMES)
+    link = secrets / "SNOWFLAKE_PRIVATE_KEY_RAW"
+    assert link.is_symlink() and link.resolve() == p8.resolve()
+    expected = {
+        "SNOWFLAKE_ACCOUNT": ACCOUNT,
+        "SNOWFLAKE_USER": "STREAMSNOW_DEPLOY_USER",
+        "SNOWFLAKE_WAREHOUSE": "STREAMSNOW_WH",
+        "SNOWFLAKE_ROLE": "STREAMSNOW_DEPLOY_ROLE",
+    }
+    for name, value in expected.items():
+        assert (secrets / name).read_text() == value  # no trailing newline for gh secret set
+        assert _mode(secrets / name) == 0o600
+
+
+def test_output_never_contains_a_secret_value(tmp_path):
+    res = _create(tmp_path)
+    p8_body = (tmp_path / "ci" / "streamsnow_ci_rsa_key.p8").read_text().splitlines()[1]
+    assert p8_body not in res.output
+    assert ACCOUNT not in res.output
+    assert "PRIVATE KEY-----" not in res.output
+
+
+def test_fingerprint_matches_snowflakes_rsa_public_key_fp(tmp_path):
+    res = _create(tmp_path)
+    der = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", str(tmp_path / "ci" / "streamsnow_ci_rsa_key.pub"),
+         "-outform", "DER"],
+        capture_output=True, check=True,
+    ).stdout  # fmt: skip
+    expected = "SHA256:" + base64.b64encode(hashlib.sha256(der).digest()).decode()
+    assert expected in res.output
+
+
+def test_rerun_reuses_the_key_and_keeps_secret_files(tmp_path):
+    first = _create(tmp_path)
+    p8 = tmp_path / "ci" / "streamsnow_ci_rsa_key.p8"
+    before = p8.read_bytes()
+    (tmp_path / "ci" / "streamsnow_ci_rsa_key.pub").unlink()  # regenerated from the .p8
+    second = _create(tmp_path, "--account", "other-acct")
+    assert second.exit_code == 0, second.output
+    assert p8.read_bytes() == before
+    fp = [ln for ln in first.output.splitlines() if "fingerprint" in ln]
+    assert fp and fp == [ln for ln in second.output.splitlines() if "fingerprint" in ln]
+    assert "Reused key pair" in second.output
+    # A differing existing secret is reported by name, never rewritten or echoed.
+    assert (tmp_path / "ci" / "secrets" / "SNOWFLAKE_ACCOUNT").read_text() == ACCOUNT
+    assert "secrets/SNOWFLAKE_ACCOUNT differs" in second.output
+    assert "other-acct" not in second.output
+
+
+def test_mismatched_public_key_is_refused(tmp_path):
+    _create(tmp_path / "a")
+    _create(tmp_path / "b")
+    shutil.copy(
+        tmp_path / "b" / "ci" / "streamsnow_ci_rsa_key.pub",
+        tmp_path / "a" / "ci" / "streamsnow_ci_rsa_key.pub",
+    )
+    res = _create(tmp_path / "a")
+    assert res.exit_code == 2
+    assert "does not match" in res.output
+
+
+def test_missing_openssl_exits_2(tmp_path, monkeypatch):
+    monkeypatch.setattr(ci_key.shutil, "which", lambda _name: None)
+    res = _create(tmp_path)
+    assert res.exit_code == 2
+    assert "openssl is not on PATH" in res.output
+    assert not (tmp_path / "ci").exists()
+
+
+def test_existing_directory_is_never_repermissioned(tmp_path):
+    d = tmp_path / "ci"
+    d.mkdir(mode=0o755)
+    d.chmod(0o755)
+    res = _create(tmp_path)
+    assert res.exit_code == 0, res.output
+    assert _mode(d) == 0o755
+    assert "readable by other users" in res.output
+    assert _mode(d / "secrets") == 0o700  # created by the command, so locked down
+
+
+def test_refuses_a_directory_inside_a_git_repo(tmp_path):
+    (tmp_path / ".git").mkdir()
+    res = _create(tmp_path)
+    assert res.exit_code == 2
+    assert "inside a git repository" in res.output
+    assert not (tmp_path / "ci").exists()
+
+
+def test_refuses_a_symlinked_private_key(tmp_path):
+    d = tmp_path / "ci"
+    d.mkdir()
+    elsewhere = tmp_path / "elsewhere.p8"
+    (d / "streamsnow_ci_rsa_key.p8").symlink_to(elsewhere)  # dangling
+    res = _create(tmp_path)
+    assert res.exit_code == 2
+    assert "symlink" in res.output
+    assert not elsewhere.exists()
+
+
+def test_kept_secret_files_are_tightened_to_600(tmp_path):
+    _create(tmp_path)
+    role = tmp_path / "ci" / "secrets" / "SNOWFLAKE_ROLE"
+    role.chmod(0o644)
+    assert _create(tmp_path).exit_code == 0
+    assert _mode(role) == 0o600

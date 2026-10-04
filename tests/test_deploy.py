@@ -260,7 +260,7 @@ def test_admin_sql_container_objects_custom_pool():
     data["snowflake"]["objects"]["compute_pool"] = "STREAMLIT_POOL"  # a pool you create
     sql = generate_admin_sql(Config.from_dict(data))
     acct = _stmts(_sections(sql)["ACCOUNTADMIN"])
-    assert "CREATE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION" in acct
+    assert "CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION" in acct
     assert "snowflake.external_access.pypi_rule" in acct
     assert (
         "GRANT USAGE ON INTEGRATION PYPI_ACCESS_INTEGRATION TO ROLE STREAMSNOW_DEPLOY_ROLE;" in acct
@@ -407,11 +407,7 @@ def test_cli_deploy_sql_refresh_is_a_no_op_for_old_workflows(tmp_path):
     assert lines and all(ln.startswith("--") for ln in lines)
 
 
-def test_admin_sql_eai_uses_valid_create_syntax():
-    # Snowflake's CREATE EXTERNAL ACCESS INTEGRATION has no IF NOT EXISTS clause.
-    stmts = _stmts(generate_admin_sql(_cfg()))
-    assert "EXTERNAL ACCESS INTEGRATION IF NOT EXISTS" not in stmts
-    assert "CREATE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION" in stmts
+# The EAI statement's re-run guard is covered in tests/test_admin_setup.py.
 
 
 def test_admin_sql_viewer_role_gets_no_data_grants_by_default():

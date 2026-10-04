@@ -21,8 +21,12 @@ they are rendered into SQL directly (the config layer is the injection gate).
 This module is pure (no DB calls); the CLI / generated deploy workflow runs it.
 """
 
+import base64
+import binascii
 import dataclasses
 import re
+from collections.abc import Sequence
+from pathlib import Path
 
 from .config import (
     DEPLOY_SOURCES,
@@ -32,6 +36,7 @@ from .config import (
     github_owner,
     validate_choice,
     validate_github_origin,
+    validate_identifier,
 )
 
 # slug + sha reach SQL/object names — validate at the boundary (defense in depth
@@ -258,12 +263,53 @@ def _schema_of(fqn: str) -> str:
     return fqn.rsplit(".", 1)[0]
 
 
-def _ci_user_name(ci_role: str) -> str:
+def ci_user_name(ci_role: str) -> str:
     base = ci_role[: -len("_ROLE")] if ci_role.upper().endswith("_ROLE") else ci_role
     return f"{base}_USER"
 
 
-def generate_admin_sql(cfg: Config) -> str:
+_PEM_PUBLIC_HEADER = "-----BEGIN PUBLIC KEY-----"
+_PEM_PUBLIC_FOOTER = "-----END PUBLIC KEY-----"
+# Roles Snowflake provides; teardown must never name one in a DROP.
+_SYSTEM_ROLES = ("ACCOUNTADMIN", "ORGADMIN", "SECURITYADMIN", "SYSADMIN", "USERADMIN", "PUBLIC")
+
+
+def read_public_key(path: Path) -> str:
+    """The base64 body of a PEM ``PUBLIC KEY`` file, as ``RSA_PUBLIC_KEY`` takes it.
+
+    Refuses anything that is not a single PEM public key, above all a private
+    key, and never echoes the file's contents in the error.
+    """
+    path = Path(path).expanduser()
+    try:
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError(f"--public-key-file: cannot read {path} ({type(exc).__name__}).") from exc
+    if "PRIVATE KEY" in text:
+        raise ConfigError(
+            f"--public-key-file: {path} is a PRIVATE key. Pass the public key (.pub) instead; "
+            "the private key stays in the CI secret SNOWFLAKE_PRIVATE_KEY_RAW."
+        )
+    lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+    if len(lines) < 3 or lines[0] != _PEM_PUBLIC_HEADER or lines[-1] != _PEM_PUBLIC_FOOTER:
+        raise ConfigError(
+            f"--public-key-file: {path} is not a PEM public key (expected "
+            f"{_PEM_PUBLIC_HEADER} ... {_PEM_PUBLIC_FOOTER})."
+        )
+    body = "".join(lines[1:-1])
+    try:
+        base64.b64decode(body, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ConfigError(f"--public-key-file: {path} has an invalid base64 body.") from exc
+    return body
+
+
+def generate_admin_sql(
+    cfg: Config,
+    *,
+    public_key: str | None = None,
+    viewer_users: Sequence[str] = (),
+) -> str:
     """The full, reviewable one-time admin bootstrap for a first deploy.
 
     ``deploy-setup`` alone assumed the database, schema, warehouse, CI and
@@ -273,9 +319,15 @@ def generate_admin_sql(cfg: Config) -> str:
     ``USE ROLE`` sections so each statement runs under the narrowest system
     role that can: SYSADMIN creates objects, USERADMIN creates roles and the
     user, SECURITYADMIN grants, ACCOUNTADMIN handles account-level objects,
-    and the CI role creates what it will own. Re-runnable (``IF NOT EXISTS``)
-    except the external access integration, which Snowflake cannot guard that
-    way: skip that statement on a re-run.
+    and the CI role creates what it will own. Safe to re-run: objects use
+    ``IF NOT EXISTS``, grants are idempotent, the CI user's key is re-applied
+    with ``ALTER USER``, and the external access integration (which has no
+    ``IF NOT EXISTS``) is replaced with ``OR REPLACE`` and re-granted.
+
+    ``public_key`` (the base64 body from :func:`read_public_key`) fills the CI
+    user's ``RSA_PUBLIC_KEY``; without it the placeholder stays for a human to
+    paste. The viewer role is granted to whoever runs the script, plus each
+    name in ``viewer_users``.
     """
     o = cfg.snowflake.objects
     ci = cfg.snowflake.roles.ci_role
@@ -286,7 +338,8 @@ def generate_admin_sql(cfg: Config) -> str:
     stage_schema = f"{o.stage_database}.{o.stage_schema}"
     databases = list(dict.fromkeys([o.app_database, o.stage_database]))
     schemas = list(dict.fromkeys([app_schema, stage_schema]))
-    ci_user = _ci_user_name(ci)
+    ci_user = ci_user_name(ci)
+    viewer_users = [validate_identifier(u, "--viewer-user") for u in viewer_users]
     shared_gov = gov.database.upper() in _SHARED_DATABASES
 
     out: list[str] = [
@@ -294,8 +347,8 @@ def generate_admin_sql(cfg: Config) -> str:
         f"-- Generated from streamsnow.config.yaml ({cfg.runtime} runtime, "
         f"{cfg.deploy.source} deploy source).",
         "-- Review every statement, then run it once as an account admin (Snowsight",
-        "-- worksheet, or `snow sql --stdin` on an admin connection). Re-runnable except",
-        "-- the external access integration statement (see section 4).",
+        "-- worksheet, or `snow sql --stdin` on an admin connection). Safe to re-run:",
+        "-- every statement skips or re-applies what already exists.",
         "-- Deployed apps run with owner's rights: queries execute as the CI role that",
         "-- deploys them, and viewers need only USAGE on each app.",
         "",
@@ -313,22 +366,46 @@ def generate_admin_sql(cfg: Config) -> str:
         "USE ROLE USERADMIN;",
         f"CREATE ROLE IF NOT EXISTS {ci};  -- deploys and owns the apps (CI)",
         f"CREATE ROLE IF NOT EXISTS {viewer};  -- opens the apps (no data grants by default)",
-        "-- Key-pair auth (no password): generate a key pair, paste the PUBLIC key",
-        "-- below, and store the private key as the SNOWFLAKE_PRIVATE_KEY_RAW repo",
-        "-- secret. Rename the user freely; SNOWFLAKE_USER must match.",
+    ]
+    if public_key:
+        out += [
+            "-- Key-pair auth (no password). The private key is the SNOWFLAKE_PRIVATE_KEY_RAW",
+            "-- repo secret; SNOWFLAKE_USER must match this user. The ALTER re-applies the",
+            "-- key on a re-run (CREATE ... IF NOT EXISTS leaves an existing user untouched).",
+        ]
+    else:
+        out += [
+            "-- Key-pair auth (no password): generate a key pair, paste the PUBLIC key",
+            "-- below, and store the private key as the SNOWFLAKE_PRIVATE_KEY_RAW repo",
+            "-- secret. Rename the user freely; SNOWFLAKE_USER must match.",
+            "-- (`streamsnow ci-key create` makes the key pair; `--public-key-file` fills this in.)",
+        ]
+    out += [
         f"CREATE USER IF NOT EXISTS {ci_user}",
         "  TYPE = SERVICE",
         f"  DEFAULT_ROLE = {ci}",
         f"  DEFAULT_WAREHOUSE = {o.default_warehouse}",
-        "  RSA_PUBLIC_KEY = '<paste public key>';",
+        f"  RSA_PUBLIC_KEY = '{public_key or '<paste public key>'}';",
+    ]
+    if public_key:
+        out += [
+            "-- (USERADMIN owns a user this script created; a user someone else created needs",
+            "-- its owner, or ACCOUNTADMIN, to run the ALTER.)",
+            f"ALTER USER IF EXISTS {ci_user} SET RSA_PUBLIC_KEY = '{public_key}';",
+        ]
+    out += [
         "",
         "-- 3. Grants -------------------------------------------------------------",
         "USE ROLE SECURITYADMIN;",
         f"GRANT ROLE {ci} TO USER {ci_user};",
         f"GRANT ROLE {ci} TO ROLE SYSADMIN;",
         f"GRANT ROLE {viewer} TO ROLE SYSADMIN;",
-        f"-- So you can open the apps yourself: GRANT ROLE {viewer} TO USER <your_user>;",
+        "-- So you can open the apps yourself: the viewer role goes to whoever runs this",
+        "-- (quoted, so any user name resolves exactly).",
+        "SET streamsnow_me = '\"' || CURRENT_USER() || '\"';",
+        f"GRANT ROLE {viewer} TO USER IDENTIFIER($streamsnow_me);",
     ]
+    out += [f"GRANT ROLE {viewer} TO USER {u};" for u in viewer_users]
     for role in both:
         out += [f"GRANT USAGE ON DATABASE {db} TO ROLE {role};" for db in databases]
         out += [f"GRANT USAGE ON SCHEMA {s} TO ROLE {role};" for s in schemas]
@@ -400,8 +477,10 @@ def generate_admin_sql(cfg: Config) -> str:
             "-- PyPI access for the container image build. Uses Snowflake's managed",
             "-- network rule for PyPI. If your account prefers an artifact repository,",
             "-- skip this: configuring both disables the EAI.",
-            "-- (Snowflake has no IF NOT EXISTS for this statement: skip it on a re-run.)",
-            f"CREATE EXTERNAL ACCESS INTEGRATION {eai}",
+            "-- Snowflake has no IF NOT EXISTS for this statement, so a re-run replaces it;",
+            "-- deployed apps keep working (verified live), and the GRANT below restores",
+            "-- the CI role's usage. Grants or settings added to it by hand are reset.",
+            f"CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION {eai}",
             "  ALLOWED_NETWORK_RULES = (snowflake.external_access.pypi_rule)",
             "  ENABLED = TRUE;",
             "-- Without the managed rule, create your own and list it above instead:",
@@ -440,4 +519,104 @@ def generate_admin_sql(cfg: Config) -> str:
         out += _stage_objects(cfg)
     else:
         out += _git_secret_and_repo(cfg)
+    return "\n".join(out)
+
+
+def generate_teardown_sql(cfg: Config) -> str:
+    """Reviewable reverse of :func:`generate_admin_sql`: the start-fresh path.
+
+    Printed, never run. Everything the bootstrap created goes, in an order
+    where each DROP succeeds: the app database first (it holds the apps,
+    stage, secret and git repository the CI role owns), then the warehouse,
+    the CI user, the roles, and the account-level integrations. The
+    governance database the apps read and Snowflake's pre-provisioned
+    compute pool are never named, system roles are refused, and every DROP of
+    something that may predate StreamSnow says so. Every statement uses
+    ``IF EXISTS``, so a partial teardown can simply be re-run.
+    """
+    o = cfg.snowflake.objects
+    ci = cfg.snowflake.roles.ci_role
+    viewer = cfg.snowflake.roles.viewer_role
+    gov = cfg.governance.database.upper()
+    protected = {gov, *_SHARED_DATABASES}
+    for field, db in (("app_database", o.app_database), ("stage_database", o.stage_database)):
+        if db.upper() in protected:
+            raise ConfigError(
+                f"snowflake.objects.{field} = {db!r} is the governance or a Snowflake-shared "
+                "database; teardown would drop data the apps read. Refusing: point "
+                f"{field} at a StreamSnow-only database first, or drop objects by hand."
+            )
+    for field, role in (("ci_role", ci), ("viewer_role", viewer)):
+        if role.upper() in _SYSTEM_ROLES:
+            raise ConfigError(
+                f"snowflake.roles.{field} = {role!r} is a Snowflake system role; teardown "
+                "would drop it. Refusing: use a StreamSnow-only role."
+            )
+    existed = "-- Existed before StreamSnow and used by other work? Delete the next line."
+
+    out: list[str] = [
+        "-- StreamSnow teardown: removes what `streamsnow deploy-setup --admin` created,",
+        "-- so you can start fresh. REVIEW EVERY LINE before running; this cannot be undone.",
+        f"-- Generated from streamsnow.config.yaml ({cfg.runtime} runtime, "
+        f"{cfg.deploy.source} deploy source).",
+        f"-- Kept: the governance database {cfg.governance.database} and its data, and "
+        f"{SYSTEM_POOL}.",
+        "-- Every DROP uses IF EXISTS, so re-running a partial teardown is safe.",
+        "-- Run as ACCOUNTADMIN, which owns or inherits everything the bootstrap made.",
+        "USE ROLE ACCOUNTADMIN;",
+        "",
+        f"-- 1. App database: every deployed app, plus the {cfg.deploy.source} objects in it.",
+        existed,
+        f"DROP DATABASE IF EXISTS {o.app_database};",
+    ]
+    if o.stage_database.upper() != o.app_database.upper() and cfg.deploy.source == "stage-copy":
+        out += [
+            f"-- The stage lives in {o.stage_database}, which may hold other things: drop the",
+            "-- stage only, not that database.",
+            f"DROP STAGE IF EXISTS {o.stage_database}.{o.stage_schema}.{o.stage_name};",
+        ]
+    if cfg.deploy.source == "git-repository":
+        app_db = o.app_database.upper()
+        outside = [
+            f"DROP {kind} IF EXISTS {fqn};"
+            for kind, fqn in (
+                ("GIT REPOSITORY", cfg.deploy.git_repository_fqn),
+                ("SECRET", cfg.deploy.secret_name if _uses_secret(cfg) else ""),
+            )
+            if fqn and fqn.split(".", 1)[0].upper() != app_db
+        ]
+        if outside:
+            out += ["-- Deploy-source objects that live outside the app database:", *outside]
+    out += [
+        "",
+        "-- 2. Warehouse, CI service user, roles (after the objects they own are gone).",
+        existed,
+        f"DROP WAREHOUSE IF EXISTS {o.default_warehouse};",
+        f"DROP USER IF EXISTS {ci_user_name(ci)};",
+        f"DROP ROLE IF EXISTS {viewer};",
+        f"DROP ROLE IF EXISTS {ci};",
+        "",
+        "-- 3. Account-level objects.",
+    ]
+    account: list[str] = []
+    if cfg.runtime == "container":
+        account += [
+            existed,
+            f"DROP EXTERNAL ACCESS INTEGRATION IF EXISTS {o.external_access_integration};",
+        ]
+        if o.compute_pool.upper() != SYSTEM_POOL:
+            account += [
+                "-- STOP ALL stops EVERY service on this pool, not only StreamSnow's apps.",
+                "-- If the DROP then fails because services are still stopping, re-run it.",
+                existed,
+                f"ALTER COMPUTE POOL IF EXISTS {o.compute_pool} STOP ALL;",
+                f"DROP COMPUTE POOL IF EXISTS {o.compute_pool};",
+            ]
+    if cfg.deploy.source == "git-repository":
+        account += [
+            "-- Other Git repositories in the account may use this integration:",
+            existed,
+            f"DROP API INTEGRATION IF EXISTS {cfg.deploy.api_integration_name};",
+        ]
+    out += account or ["-- Nothing account-level for this configuration."]
     return "\n".join(out)
