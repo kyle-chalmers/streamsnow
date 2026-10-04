@@ -32,6 +32,18 @@ owns the whole lifecycle so callers never hand-roll ``nohup``/PID bookkeeping:
         page (a connection opened by the first script run), after ``start``
         already reported ready, so ``logs`` is where their hint surfaces.
 
+Native Windows has no process groups, signals or ``ps``, so the process
+control there goes through psutil (a Windows-only dependency), for three
+reasons. ``os.kill(pid, 0)``, the POSIX liveness probe, TERMINATES the process
+on Windows instead of probing it. ``streamlit.exe`` is a launcher that starts a
+separate ``python.exe``, so stop must take the whole tree, not the PID it
+recorded. And reading another process's command line (the PID-reuse guard
+below) has no stdlib route there. The preview launches detached in a new
+process group and first tries to break away from any job object it was started
+in: a tool call that runs inside a kill-on-close job would otherwise take the
+preview down with it the moment the call returns. macOS and Linux keep the
+original POSIX path unchanged.
+
 State lives per-repo under ``<repo>/.streamsnow/preview/<slug>.json`` next to
 ``<slug>.log`` — no global state, nothing outside the repo. Recommend adding
 ``.streamsnow/`` to the repo's ``.gitignore`` (runtime artifacts, never
@@ -66,6 +78,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+_WINDOWS = sys.platform == "win32"
 _DEFAULT_PORT = 8501
 _DEFAULT_TIMEOUT = 60.0
 _STOP_GRACE_SECONDS = 5.0
@@ -321,6 +334,15 @@ def _read_state(repo: Path, slug: str) -> dict[str, Any] | None:
 def _pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if _WINDOWS:
+        import psutil
+
+        try:
+            return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            return False
+        except psutil.AccessDenied:  # exists, owned by someone else
+            return True
     # When the caller is also the process that launched the preview (one
     # session doing start→stop), the dead child lingers as a zombie that
     # os.kill(pid, 0) still "sees". Reap it if it's ours; WNOHANG leaves a
@@ -337,7 +359,15 @@ def _pid_alive(pid: int) -> bool:
 
 
 def _process_command(pid: int) -> str:
-    """The live command line of ``pid`` via ``ps`` (POSIX), or "" when unknown."""
+    """The live command line of ``pid`` (``ps`` on POSIX, psutil on Windows), or ""
+    when unknown."""
+    if _WINDOWS:
+        import psutil
+
+        try:
+            return subprocess.list2cmdline(psutil.Process(pid).cmdline())
+        except psutil.Error:
+            return ""
     proc = subprocess.run(
         ["ps", "-o", "command=", "-p", str(pid)],
         capture_output=True,
@@ -376,6 +406,9 @@ def _state_owns_pid(state: dict[str, Any]) -> bool:
         # claim ownership of an arbitrary PID.
         return False
     live = _process_command(pid)
+    if _WINDOWS:  # case-blind paths, either separator
+        live = live.lower().replace("/", "\\")
+        tokens = [t.lower().replace("/", "\\") for t in tokens]
     return bool(live) and any(t in live for t in tokens)
 
 
@@ -407,9 +440,36 @@ def probe_health(port: int, timeout: float = 1.0) -> bool:
         return False
 
 
+def _kill_tree_windows(pid: int, grace: float) -> bool:
+    """Terminate ``pid`` and every descendant, then kill what survives ``grace``.
+
+    Windows has no SIGTERM a detached console process can catch, so terminate is
+    the honest equivalent. The tree matters: streamlit.exe is a launcher whose
+    child python.exe is the actual server holding the port.
+    """
+    import psutil
+
+    try:
+        parent = psutil.Process(pid)
+        procs = [*parent.children(recursive=True), parent]
+    except psutil.NoSuchProcess:
+        return True
+    for p in procs:
+        with contextlib.suppress(psutil.Error):
+            p.terminate()
+    _, alive = psutil.wait_procs(procs, timeout=grace)
+    for p in alive:
+        with contextlib.suppress(psutil.Error):
+            p.kill()
+    psutil.wait_procs(alive, timeout=grace)
+    return not _pid_alive(pid)
+
+
 def _kill(pid: int, grace: float = _STOP_GRACE_SECONDS) -> bool:
     """SIGTERM (whole process group when the PID leads one), escalate to
     SIGKILL after ``grace`` seconds. Returns True when the process is gone."""
+    if _WINDOWS:
+        return _kill_tree_windows(pid, grace)
 
     def _signal(sig: int) -> None:
         try:
@@ -431,6 +491,28 @@ def _kill(pid: int, grace: float = _STOP_GRACE_SECONDS) -> bool:
             return True
         time.sleep(0.05)
     return not _pid_alive(pid)
+
+
+def _launch_detached(cmd: list[str], log_fh: Any, cwd: Path) -> subprocess.Popen:
+    """Start the preview so it outlives this CLI and can be stopped as a unit."""
+    common: dict[str, Any] = {
+        "stdout": log_fh,
+        "stderr": subprocess.STDOUT,
+        "stdin": subprocess.DEVNULL,
+        "cwd": cwd,
+    }
+    if not _WINDOWS:
+        # detach: survives this CLI's exit; killable as a group
+        return subprocess.Popen(cmd, start_new_session=True, **common)  # noqa: S603
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    try:
+        # Leave the caller's job object, if it allows that, so a tool call
+        # running in a kill-on-close job does not take the preview with it.
+        return subprocess.Popen(  # noqa: S603
+            cmd, creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB, **common
+        )
+    except PermissionError:  # the job forbids breakaway
+        return subprocess.Popen(cmd, creationflags=flags, **common)  # noqa: S603
 
 
 def _emit(payload: dict[str, Any], as_json: bool) -> None:
@@ -489,14 +571,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     cmd = build_command(entrypoint, args.port)
     try:
         with log_path.open("wb") as log_fh:
-            proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-                cmd,
-                stdout=log_fh,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                cwd=repo,
-                start_new_session=True,  # detach: survives this CLI's exit; killable as a group
-            )
+            proc = _launch_detached(cmd, log_fh, repo)
     except FileNotFoundError:
         _emit(
             {

@@ -15,8 +15,6 @@ import shutil
 import sys
 from pathlib import Path
 
-import pytest
-
 _WINDOWS_ESSENTIALS = ("SYSTEMROOT", "SYSTEMDRIVE", "PATHEXT", "TEMP", "TMP", "COMSPEC")
 
 
@@ -30,12 +28,3 @@ def bare_env(**extra: str) -> dict[str, str]:
         env.update({k: os.environ[k] for k in _WINDOWS_ESSENTIALS if k in os.environ})
     env.update(extra)
     return env
-
-
-#: Tests that drive a real preview process through POSIX process control
-#: (signals, process groups, ``ps``). Windows has its own path in preview_app;
-#: until it lands, running these there would call ``os.kill(pid, 0)``, which on
-#: Windows terminates the process instead of probing it.
-posix_process_control = pytest.mark.skipif(
-    sys.platform == "win32", reason="preview process control is POSIX-only for now"
-)

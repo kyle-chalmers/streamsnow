@@ -9,13 +9,14 @@ launch failures for the timeout/death paths.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from _portable import posix_process_control
+import pytest
 
 from streamsnow.tools import preview_app
 
@@ -46,6 +47,19 @@ server = socketserver.TCPServer(("127.0.0.1", int(sys.argv[1])), Handler)
 print("You can now view your Streamlit app in your browser.", flush=True)
 print("Local URL: http://127.0.0.1:" + sys.argv[1], flush=True)
 server.serve_forever()
+"""
+
+# Stand-in like streamlit.exe on Windows: a launcher whose CHILD process is the
+# real server. Stop must take the whole tree, or the child keeps the port.
+FAKE_LAUNCHER_WITH_CHILD = """\
+import subprocess
+import sys
+from pathlib import Path
+
+server = Path(sys.argv[0]).with_name("fake_streamlit_server.py")
+child = subprocess.Popen([sys.executable, str(server), sys.argv[1]])
+Path(sys.argv[0]).with_name("child.pid").write_text(str(child.pid), encoding="utf-8")
+child.wait()
 """
 
 # Stand-in that hangs without ever serving health (secrets misconfiguration).
@@ -106,7 +120,6 @@ def _start_args(repo: Path, port: int, timeout: float = 15.0) -> list[str]:
     ]
 
 
-@posix_process_control
 def test_start_ready_status_logs_stop_lifecycle(tmp_path, monkeypatch, capsys):
     repo = _repo(tmp_path)
     _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
@@ -143,7 +156,6 @@ def test_start_ready_status_logs_stop_lifecycle(tmp_path, monkeypatch, capsys):
         preview_app.main(["stop", SLUG, "--dir", str(repo)])
 
 
-@posix_process_control
 def test_start_timeout_kills_and_classifies_missing_secrets(tmp_path, monkeypatch, capsys):
     repo = _repo(tmp_path)
     _fake_launcher(tmp_path, FAKE_HANG, monkeypatch)
@@ -195,7 +207,6 @@ def test_missing_entrypoint_is_tool_error(tmp_path, capsys):
     assert "not found" in capsys.readouterr().out
 
 
-@posix_process_control
 def test_stale_state_cleaned_up_not_an_error(tmp_path, capsys):
     repo = _repo(tmp_path)
     # A genuinely dead PID: spawn a trivial process and wait for it to exit.
@@ -217,7 +228,6 @@ def test_stale_state_cleaned_up_not_an_error(tmp_path, capsys):
     assert preview_app.main(["stop", SLUG, "--dir", str(repo)]) == 0
 
 
-@posix_process_control
 def test_stale_state_does_not_block_restart(tmp_path, monkeypatch, capsys):
     repo = _repo(tmp_path)
     _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
@@ -234,6 +244,111 @@ def test_stale_state_does_not_block_restart(tmp_path, monkeypatch, capsys):
         assert "serving at" in capsys.readouterr().out
     finally:
         preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_stop_takes_the_whole_process_tree(tmp_path, monkeypatch, capsys):
+    """streamlit.exe on Windows is a launcher whose child python.exe holds the
+    port; stopping only the recorded PID would leave the server running."""
+    repo = _repo(tmp_path)
+    (tmp_path / "fake_streamlit_server.py").write_text(FAKE_SERVER, encoding="utf-8")
+    _fake_launcher(tmp_path, FAKE_LAUNCHER_WITH_CHILD, monkeypatch)
+    port = _free_port()
+    try:
+        assert preview_app.main(_start_args(repo, port)) == 0, capsys.readouterr().out
+        child = int((tmp_path / "child.pid").read_text(encoding="utf-8"))
+        assert preview_app._pid_alive(child)
+        assert preview_app.main(["stop", SLUG, "--dir", str(repo)]) == 0
+        deadline = time.monotonic() + 10
+        while preview_app._pid_alive(child) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not preview_app._pid_alive(child), "the server child outlived stop"
+        assert not preview_app._port_in_use(port)
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+# --- the Windows (psutil) branches, exercised on every OS ------------------
+def test_windows_liveness_and_command_line_via_psutil(monkeypatch):
+    monkeypatch.setattr(preview_app, "_WINDOWS", True)
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        assert preview_app._pid_alive(sleeper.pid)
+        assert "time.sleep(60)" in preview_app._process_command(sleeper.pid)
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+    assert not preview_app._pid_alive(sleeper.pid)
+    assert preview_app._process_command(sleeper.pid) == ""
+
+
+def test_windows_pid_alive_never_signals(monkeypatch):
+    """On Windows os.kill(pid, 0) TERMINATES the process; liveness must not
+    go anywhere near it."""
+    monkeypatch.setattr(preview_app, "_WINDOWS", True)
+
+    def _boom(*_args):
+        raise AssertionError("os.kill called on the Windows path")
+
+    monkeypatch.setattr(preview_app.os, "kill", _boom)
+    assert preview_app._pid_alive(os.getpid())
+
+
+def test_windows_tree_kill_takes_children(monkeypatch, tmp_path):
+    monkeypatch.setattr(preview_app, "_WINDOWS", True)
+    pidfile = tmp_path / "child.pid"
+    parent = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import subprocess, sys, time; "
+            "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+            f"open({str(pidfile)!r}, 'w').write(str(c.pid)); time.sleep(60)",
+        ]
+    )
+    deadline = time.monotonic() + 10
+    while not pidfile.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    child = int(pidfile.read_text(encoding="utf-8") or 0)
+    assert preview_app._kill(parent.pid, grace=5) is True
+    parent.wait(timeout=10)
+    deadline = time.monotonic() + 10
+    while preview_app._pid_alive(child) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not preview_app._pid_alive(child)
+
+
+def test_windows_owner_check_is_case_and_separator_blind(monkeypatch):
+    monkeypatch.setattr(preview_app, "_WINDOWS", True)
+    monkeypatch.setattr(preview_app, "_pid_alive", lambda _pid: True)
+    monkeypatch.setattr(
+        preview_app,
+        "_process_command",
+        lambda _pid: (
+            "C:\\Repo\\.venv\\Scripts\\streamlit.exe run C:\\Repo\\apps\\x\\streamlit_app.py"
+        ),
+    )
+    state = {"pid": 4242, "entrypoint": "c:/repo/apps/x/streamlit_app.py", "cmd": []}
+    assert preview_app._state_owns_pid(state)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows creation flags")
+def test_windows_launch_falls_back_when_the_job_forbids_breakaway(monkeypatch, tmp_path):
+    calls = []
+    real_popen = subprocess.Popen
+
+    def fake_popen(cmd, **kwargs):
+        calls.append(kwargs["creationflags"])
+        if kwargs["creationflags"] & subprocess.CREATE_BREAKAWAY_FROM_JOB:
+            raise PermissionError(5, "Access is denied")
+        return real_popen(cmd, **kwargs)
+
+    monkeypatch.setattr(preview_app.subprocess, "Popen", fake_popen)
+    with (tmp_path / "log").open("wb") as log_fh:
+        proc = preview_app._launch_detached([sys.executable, "-c", "pass"], log_fh, tmp_path)
+    proc.wait(timeout=30)
+    assert len(calls) == 2
+    assert not calls[1] & subprocess.CREATE_BREAKAWAY_FROM_JOB
+    assert calls[1] & subprocess.DETACHED_PROCESS
 
 
 def test_classify_log_patterns():

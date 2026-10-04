@@ -40,7 +40,9 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Pytest
-        run: uv run pytest -q
+        # -rs lists every skip with its reason, so a platform skip is visible
+        # rather than read as a pass.
+        run: uv run pytest -q -rs
 
   privacy-gate:
     # Pre-publish gate: fail if any proprietary/internal term or secret leaks

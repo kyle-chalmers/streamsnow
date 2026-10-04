@@ -26,6 +26,9 @@ dependencies = [
     "pyyaml>=6",
     "jinja2>=3.1",
     "packaging>=21",
+    # Windows only: preview process control (liveness, command line, tree kill)
+    # has no stdlib route there. macOS and Linux use POSIX calls instead.
+    "psutil>=5.9; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +36,8 @@ dev = [
     "ruff>=0.15",
     "pytest>=8",
     "pre-commit>=4",
+    # On every OS in dev, so the psutil branches of preview_app run in all CI rows.
+    "psutil>=5.9",
 ]
 
 [project.urls]
