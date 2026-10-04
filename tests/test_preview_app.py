@@ -12,6 +12,7 @@ import json
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from _portable import posix_process_control
@@ -316,6 +317,31 @@ def test_logs_missing_file(tmp_path, capsys):
     repo = _repo(tmp_path)
     assert preview_app.main(["logs", SLUG, "--dir", str(repo)]) == 1
     assert "no preview log" in capsys.readouterr().err
+
+
+def test_probe_health_ignores_proxy_settings(tmp_path, monkeypatch):
+    """A proxy in the environment (corporate machines, CI runners) must not
+    capture the localhost probe; it once made a serving app read unhealthy."""
+    monkeypatch.setenv("HTTP_PROXY", "http://10.255.255.1:9")
+    monkeypatch.setenv("http_proxy", "http://10.255.255.1:9")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    port = _free_port()
+    script = tmp_path / "fake_streamlit.py"
+    script.write_text(FAKE_SERVER, encoding="utf-8")
+    server = subprocess.Popen(
+        [sys.executable, str(script), str(port)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+    )
+    try:
+        assert server.stdout is not None
+        server.stdout.readline()  # the "You can now view" line: about to bind
+        deadline = time.monotonic() + 10
+        while not preview_app.probe_health(port, timeout=0.5):
+            assert time.monotonic() < deadline, "probe never reached the local server"
+            time.sleep(0.05)
+    finally:
+        server.kill()
+        server.wait(timeout=10)
 
 
 def test_probe_health_refused_port_is_false():

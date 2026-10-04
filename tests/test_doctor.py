@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 from streamsnow.tools import doctor
@@ -44,6 +46,7 @@ def test_result_contract_shape(tmp_path, monkeypatch):
         "pre-commit-hook",
         "node",
         "ci-secrets",
+        *(["platform"] if sys.platform == "win32" else []),
     ]
 
 
@@ -766,6 +769,10 @@ def test_pre_commit_hook_must_be_executable(tmp_path, monkeypatch):
     hook.chmod(0o644)
     _hook_run(monkeypatch, str(hook))
     res = doctor.check_pre_commit_hook(cfg)
+    if os.name == "nt":
+        # No executable bit on Windows; git runs the hook regardless.
+        assert res["ok"]
+        return
     assert not res["ok"] and res["level"] == "required"
     assert "pre-commit install" in res["hint"]
     hook.chmod(0o755)

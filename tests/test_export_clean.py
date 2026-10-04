@@ -105,7 +105,7 @@ def test_scanner_source_names_no_organization():
     gitignored local denylist; the gitignore entry is what keeps it local."""
     src = Path(check_export_clean.__file__).read_text(encoding="utf-8")
     assert "DENY_TERMS" not in src
-    assert str(LOCAL_DENYLIST) in (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert LOCAL_DENYLIST.as_posix() in (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
 
 
 def test_repo_tree_is_clean_under_generic_checks():

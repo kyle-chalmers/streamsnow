@@ -24,8 +24,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCANNED = ["streamsnow", "hooks", "scripts", "tests"]
 _TEXT_IO = {"read_text", "write_text"}
 _SUBPROCESS = {"run", "check_output", "Popen"}
-#: ``X.open(...)`` receivers that are not files (urllib openers, archives, os).
-_NON_FILE_OPENERS = {"os", "tarfile", "zipfile", "webbrowser", "opener"}
+#: ``X.open(...)`` receivers that are not files: modules, plus any name ending in
+#: "opener" (urllib openers, by convention).
+_NON_FILE_OPENERS = {"os", "tarfile", "zipfile", "webbrowser"}
 
 
 def _mode(call: ast.Call, positional_index: int) -> object:
@@ -54,7 +55,7 @@ def _missing_encoding(call: ast.Call) -> str | None:
         if (
             isinstance(func, ast.Attribute)
             and isinstance(func.value, ast.Name)
-            and func.value.id in _NON_FILE_OPENERS
+            and (func.value.id in _NON_FILE_OPENERS or func.value.id.lower().endswith("opener"))
         ):
             return None
         # open(path, mode) vs Path.open(mode)
@@ -102,6 +103,7 @@ def test_every_text_io_call_names_its_encoding() -> None:
         ("p.read_bytes()", False),
         ("subprocess.run(cmd, capture_output=True)", False),
         ("opener.open(req, timeout=5)", False),
+        ("_DIRECT_OPENER.open(url, timeout=1)", False),
     ],
 )
 def test_scanner_flags_exactly_the_risky_calls(source: str, flagged: bool) -> None:

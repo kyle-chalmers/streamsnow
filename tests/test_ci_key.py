@@ -7,6 +7,7 @@ import hashlib
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -37,13 +38,20 @@ def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
 
+#: Windows has no POSIX permission bits (st_mode reads 0o777/0o666 and chmod only
+#: toggles read-only); the key directory is protected by the user profile's ACLs.
+_POSIX = sys.platform != "win32"
+posix_permissions = pytest.mark.skipif(not _POSIX, reason="POSIX permission bits")
+
+
 def test_creates_the_layout_the_deploy_workflow_reads(tmp_path):
     res = _create(tmp_path)
     assert res.exit_code == 0, res.output
     d = tmp_path / "ci"
     p8, pub = d / "streamsnow_ci_rsa_key.p8", d / "streamsnow_ci_rsa_key.pub"
-    assert _mode(d) == 0o700 and _mode(d / "secrets") == 0o700
-    assert _mode(p8) == 0o600
+    if _POSIX:
+        assert _mode(d) == 0o700 and _mode(d / "secrets") == 0o700
+        assert _mode(p8) == 0o600
     assert "BEGIN PRIVATE KEY" in p8.read_text(
         encoding="utf-8"
     )  # unencrypted PKCS#8, as the workflow expects
@@ -62,7 +70,7 @@ def test_creates_the_layout_the_deploy_workflow_reads(tmp_path):
         assert (secrets / name).read_text(
             encoding="utf-8"
         ) == value  # no trailing newline for gh secret set
-        assert _mode(secrets / name) == 0o600
+        assert not _POSIX or _mode(secrets / name) == 0o600
 
 
 def test_output_never_contains_a_secret_value(tmp_path):
@@ -125,6 +133,7 @@ def test_missing_openssl_exits_2(tmp_path, monkeypatch):
     assert not (tmp_path / "ci").exists()
 
 
+@posix_permissions
 def test_existing_directory_is_never_repermissioned(tmp_path):
     d = tmp_path / "ci"
     d.mkdir(mode=0o755)
@@ -155,6 +164,7 @@ def test_refuses_a_symlinked_private_key(tmp_path):
     assert not elsewhere.exists()
 
 
+@posix_permissions
 def test_kept_secret_files_are_tightened_to_600(tmp_path):
     _create(tmp_path)
     role = tmp_path / "ci" / "secrets" / "SNOWFLAKE_ROLE"

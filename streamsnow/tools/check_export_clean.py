@@ -188,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--denylist",
         default=None,
-        help=f"Org-specific denylist file (default: <root>/{LOCAL_DENYLIST}, if present).",
+        help=f"Org-specific denylist file (default: <root>/{LOCAL_DENYLIST.as_posix()}, if present).",
     )
     ap.add_argument("--format", choices=("md", "json"), default="md")
     args = ap.parse_args(argv)

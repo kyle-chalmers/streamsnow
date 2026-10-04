@@ -66,6 +66,13 @@ All notable changes to StreamSnow are recorded here. This project follows
   slashes. CI now runs the tests on Windows and macOS as well as Linux. The
   `/start-app --setup` routing to WSL stays until local preview and the hooks
   work natively.
+- **`streamsnow preview start` behind a proxy.** The health probe of
+  `127.0.0.1` honored `HTTP_PROXY` and the macOS/Windows system proxy, so on a
+  machine whose proxy does not exempt localhost a serving app read as "not
+  healthy" after the full timeout. The probe now always connects directly.
+  `ci-key create` no longer warns on Windows that the key directory is
+  readable by other users (Windows reports every directory as 0o777 and
+  protects it with ACLs instead).
 
 ## [0.7.5] - 2026-10-03
 

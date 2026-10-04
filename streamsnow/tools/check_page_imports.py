@@ -207,7 +207,7 @@ def _display(path: Path) -> str:
     try:
         return path.relative_to(Path.cwd()).as_posix()
     except ValueError:
-        return str(path)
+        return path.as_posix()
 
 
 def _check_file(

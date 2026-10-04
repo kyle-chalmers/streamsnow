@@ -458,7 +458,8 @@ def test_crlf_checkout_of_inputs_is_not_drift(repo: Path) -> None:
         *app.glob("sql_review/manifests/*.json"),
         *app.rglob("*.py"),
     ]:
-        p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
+        # Normalize first: on Windows the fixture writes are already CRLF.
+        p.write_bytes(p.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
     assert _check(repo) == 0
 
 

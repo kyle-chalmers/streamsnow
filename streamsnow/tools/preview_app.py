@@ -390,11 +390,18 @@ def _port_in_use(port: int) -> bool:
         sock.close()
 
 
+#: Never route the localhost probe through a proxy. ``urlopen`` honors
+#: HTTP_PROXY and, on macOS and Windows, the system proxy settings; behind a
+#: proxy that does not exempt 127.0.0.1 the probe went to the proxy and
+#: ``start`` reported a serving app as "not healthy" after the full timeout.
+_DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def probe_health(port: int, timeout: float = 1.0) -> bool:
     """One GET against Streamlit's liveness endpoint. 200 = serving."""
     url = f"http://127.0.0.1:{port}/_stcore/health"
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 - localhost only
+        with _DIRECT_OPENER.open(url, timeout=timeout) as resp:  # noqa: S310 - localhost only
             return resp.status == 200
     except (urllib.error.URLError, OSError):
         return False
