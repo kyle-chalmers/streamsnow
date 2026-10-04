@@ -107,7 +107,9 @@ each question you cannot answer on my behalf.
    skills call it by name). Run `streamsnow doctor` and fix each failing required
    check one at a time, re-running doctor after each fix.
 
-4. If the repo already has Streamlit apps, read
+4. If the repo already has a `streamsnow.config.yaml`, it is set up: run `streamsnow doctor`,
+   and run `streamsnow init --no-starter-app` only if its `repo-files` row lists missing files.
+   Otherwise, if the repo already has Streamlit apps, read
    https://github.com/kyle-chalmers/streamsnow/blob/main/skills/start-app/adopt.md and
    follow that instead of scaffolding. Otherwise run `streamsnow init --no-starter-app`.
    It is an interactive wizard; if you cannot answer its prompts, hand it to me.
@@ -201,7 +203,7 @@ StreamSnow's one-line session-start message first appears in your next session.
 doctor, walks each missing prerequisite one confirmation at a time, runs
 `streamsnow init --no-starter-app` (the five-question wizard plus the governed
 repo files: `AGENTS.md`, pre-commit hooks, CI, `.gitignore`, README; no example
-app), and hands you to `/start-app` to build your first app. In a repo that already has Streamlit apps it switches to adopt
+app), and hands you to `/start-app` to build your first app. In a repo that already has Streamlit apps but no `streamsnow.config.yaml` it switches to adopt
 mode (maps onto what exists, writes `MIGRATION.md`, never scaffolds over you).
 
 ### CLI only
@@ -353,6 +355,16 @@ All hooks are repo-gated on `streamsnow.config.yaml` — zero cost in unrelated 
 declare explicit timeouts so a hung hook can never stall a session. To turn them off, disable
 the plugin (`claude plugin disable streamsnow`). Hook additions do not reach installed copies
 automatically — see [Upgrading](#upgrading).
+
+### The bundled browser tool
+
+The plugin also ships one MCP server, in `.mcp.json`: Microsoft's
+[Playwright MCP](https://github.com/microsoft/playwright-mcp), pinned to an exact version.
+The skills use it to click through each page of your running app and screenshot it, so you see
+a broken page before it ships. Unlike the hooks it does use the network: `npx` downloads the
+pinned package from npm the first time, and a browser opens only when a skill walks your app.
+It needs Node.js 20+; without Node the walkthroughs are skipped and everything else works.
+`streamsnow doctor` and `/start-app --setup` check it for you.
 
 ## How it's organized
 

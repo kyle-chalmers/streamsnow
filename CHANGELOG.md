@@ -3,6 +3,31 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [Unreleased]
+
+### Added
+
+- **The plugin bundles the Playwright MCP** (`.mcp.json`, an exact
+  `@playwright/mcp` pin). Five skills already walked running apps in a browser,
+  but nothing set the browser tool up, so the walkthrough was silently skipped
+  for anyone who had not configured one by hand.
+- **Onboarding rows in `streamsnow doctor`:** `repo-files`, `git-identity`
+  (reports only whether name and email are set) and `pre-commit-hook` (pre-commit's
+  own hook, honoring `core.hooksPath`), all required once a config exists;
+  `node` (warning) for the browser tool; `ci-secrets`, which reads secret names
+  through `gh` and says "not checked", never "missing", when it cannot list them.
+  On native Windows a `platform` row points to WSL.
+- **`/start-app --setup` runs the setup and explains each step.** Before every
+  install it says in a line or two what it is and why the user needs it, then
+  waits for a yes. It routes a teammate cloning a configured repo straight to
+  machine setup, adds a browser check, saves the plugin at project scope, and
+  sets the deploy workflow's non-secret GitHub secrets (the user sets the key).
+
+### Fixed
+
+- `docs/getting-started.md` promised a git-identity check that doctor did not
+  have.
+
 ## [0.7.3] - 2026-10-03
 
 ### Removed

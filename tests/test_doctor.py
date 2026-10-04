@@ -39,6 +39,11 @@ def test_result_contract_shape(tmp_path, monkeypatch):
         "snow-connection",
         "snow-key-file",
         "container-python",
+        "repo-files",
+        "git-identity",
+        "pre-commit-hook",
+        "node",
+        "ci-secrets",
     ]
 
 
@@ -287,6 +292,15 @@ def _scripted_run(script: dict[tuple[str, ...], object], seen: list | None = Non
     return fake
 
 
+# A bare tmp_path repo is correctly not onboarded (no governed files, git
+# repo or hook); tests about other checks gate on everything but these rows.
+_ONBOARDING_ROWS = {"repo-files", "git-identity", "pre-commit-hook"}
+
+
+def _required_ok_ignoring_onboarding(results: list[dict]) -> bool:
+    return doctor.required_ok([r for r in results if r["name"] not in _ONBOARDING_ROWS])
+
+
 def _cold_start():
     return doctor.subprocess.TimeoutExpired(cmd="snow", timeout=doctor._SNOW_TIMEOUT_S)
 
@@ -341,7 +355,7 @@ def test_snow_timeout_still_runs_the_connection_checks(tmp_path, monkeypatch):
     assert by_name["snow-connection"]["ok"], by_name["snow-connection"]
     assert by_name["snow-key-file"]["ok"], by_name["snow-key-file"]
     assert [k for k, _ in seen].count(_LIST) == 1
-    assert doctor.required_ok(results)
+    assert _required_ok_ignoring_onboarding(results)
 
 
 def test_snow_that_stays_silent_says_the_connection_checks_were_not_checked(tmp_path, monkeypatch):
@@ -358,7 +372,7 @@ def test_snow_that_stays_silent_says_the_connection_checks_were_not_checked(tmp_
         assert "snow connection add" not in hint, name
     # One listing attempt, not one per dependent check (each can wait 45 s).
     assert [k for k, _ in seen].count(_LIST) == 1
-    assert doctor.required_ok(results)
+    assert _required_ok_ignoring_onboarding(results)
     text = doctor.render_text(results)
     assert "[warn   ] snow " in text and "BROKEN" not in text
 
@@ -504,3 +518,215 @@ def test_snow_connection_hint_points_at_an_existing_default_before_adding_one(
     assert not res["ok"]
     assert "snowflake.connection_name: tutorial" in res["hint"]
     assert "snow connection add --connection-name acme" in res["hint"]
+
+
+# --------------------------------------------------------------------------- #
+# 0.7.4: onboarding checks. A teammate cloning a configured repo, or a stranger
+# setting one up, must not be told "ok" while governance is silently off.
+# --------------------------------------------------------------------------- #
+_IDENTITY_NAME = ("git", "config", "user.name")
+_IDENTITY_EMAIL = ("git", "config", "user.email")
+_HOOK_PATH = ("git", "rev-parse", "--path-format=absolute")
+_SECRETS = ("gh", "secret", "list")
+_NODE = ("node", "--version")
+_ALL_SECRETS = [{"name": n} for n in doctor.CI_SECRET_NAMES]
+
+
+def _configured(tmp_path: Path) -> dict:
+    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    return doctor.check_config(start=tmp_path)
+
+
+def test_repo_files_skipped_without_config(tmp_path):
+    res = doctor.check_repo_files(start=tmp_path)
+    assert not res["ok"] and res["level"] == "optional" and "skipped" in res["detail"]
+
+
+def test_repo_files_missing_is_required_and_names_the_fix(tmp_path):
+    _configured(tmp_path)
+    res = doctor.check_repo_files(start=tmp_path)
+    assert not res["ok"] and res["level"] == "required"
+    assert ".gitignore" in res["detail"]["missing"]
+    assert "streamsnow init --no-starter-app" in res["hint"]
+    for rel in res["detail"]["missing"]:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x")
+    assert doctor.check_repo_files(start=tmp_path)["ok"]
+
+
+def test_git_identity_reports_presence_only_never_values(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git"))
+    monkeypatch.setattr(
+        doctor.subprocess,
+        "run",
+        _scripted_run({_IDENTITY_NAME: (0, "Acme Dev\n"), _IDENTITY_EMAIL: (0, "dev@acme.test\n")}),
+    )
+    res = doctor.check_git_identity(config_present=True)
+    assert res["ok"] and res["detail"] == {"name_set": True, "email_set": True}
+    blob = json.dumps(res)
+    assert "Acme Dev" not in blob and "dev@acme.test" not in blob
+
+
+def test_git_identity_missing_is_required_only_in_a_configured_repo(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git"))
+    monkeypatch.setattr(
+        doctor.subprocess,
+        "run",
+        _scripted_run({_IDENTITY_NAME: (0, "Acme Dev\n"), _IDENTITY_EMAIL: (1, "")}),
+    )
+    res = doctor.check_git_identity(config_present=True)
+    assert not res["ok"] and res["level"] == "required"
+    assert "git config user.email" in res["hint"] and "user.name" not in res["hint"]
+    assert "Acme Dev" not in json.dumps(res)
+    bare = doctor.check_git_identity(config_present=False)
+    assert not bare["ok"] and bare["level"] == "optional" and bare["detail"]["warn"]
+
+
+def test_git_identity_skipped_without_git_and_not_checked_on_timeout(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", _which_only())
+    res = doctor.check_git_identity(config_present=True)
+    assert not res["ok"] and res["level"] == "optional" and "skipped" in res["detail"]
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git"))
+    timeout = doctor.subprocess.TimeoutExpired(cmd="git", timeout=15)
+    monkeypatch.setattr(doctor.subprocess, "run", _scripted_run({_IDENTITY_NAME: timeout}))
+    res = doctor.check_git_identity(config_present=True)
+    assert not res["ok"] and res["level"] == "optional" and "not checked" in res["hint"]
+
+
+def _hook_run(monkeypatch, out: str, code: int = 0):
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git"))
+    monkeypatch.setattr(doctor.subprocess, "run", _scripted_run({_HOOK_PATH: (code, out)}))
+
+
+def test_pre_commit_hook_skipped_without_config(tmp_path):
+    res = doctor.check_pre_commit_hook(doctor.check_config(start=tmp_path))
+    assert not res["ok"] and res["level"] == "optional" and "skipped" in res["detail"]
+
+
+def test_pre_commit_hook_missing_is_required(tmp_path, monkeypatch):
+    cfg = _configured(tmp_path)
+    _hook_run(monkeypatch, str(tmp_path / ".git" / "hooks" / "pre-commit") + "\n")
+    res = doctor.check_pre_commit_hook(cfg)
+    assert not res["ok"] and res["level"] == "required"
+    assert "pre-commit install" in res["hint"]
+
+
+def test_pre_commit_hook_must_be_pre_commits_own(tmp_path, monkeypatch):
+    cfg = _configured(tmp_path)
+    hook = tmp_path / "hooks" / "pre-commit"
+    hook.parent.mkdir()
+    hook.write_text("#!/bin/sh\necho some other hook\n")
+    _hook_run(monkeypatch, str(hook))
+    res = doctor.check_pre_commit_hook(cfg)
+    assert not res["ok"] and res["level"] == "required"
+    assert "pre-commit.legacy" in res["hint"]  # install keeps and still runs the old hook
+    hook.write_text("#!/usr/bin/env bash\n# File generated by pre-commit: https://pre-commit.com\n")
+    hook.chmod(0o755)
+    assert doctor.check_pre_commit_hook(cfg)["ok"]
+
+
+def test_pre_commit_hook_resolves_a_relative_hooks_path_against_the_repo(tmp_path, monkeypatch):
+    cfg = _configured(tmp_path)
+    (tmp_path / ".githooks").mkdir()
+    (tmp_path / ".githooks" / "pre-commit").write_text("# File generated by pre-commit\n")
+    (tmp_path / ".githooks" / "pre-commit").chmod(0o755)
+    _hook_run(monkeypatch, ".githooks/pre-commit\n")  # core.hooksPath, older git
+    assert doctor.check_pre_commit_hook(cfg)["ok"]
+
+
+def test_pre_commit_hook_not_checked_outside_a_git_repo(tmp_path, monkeypatch):
+    cfg = _configured(tmp_path)
+    _hook_run(monkeypatch, "", code=128)
+    res = doctor.check_pre_commit_hook(cfg)
+    assert not res["ok"] and res["level"] == "optional" and "not checked" in res["hint"]
+
+
+def test_node_ok_old_missing_and_no_npx(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("node", "npx"))
+    monkeypatch.setattr(doctor.subprocess, "run", _scripted_run({_NODE: (0, "v20.11.1\n")}))
+    res = doctor.check_node()
+    assert res["ok"] and res["level"] == "optional" and res["detail"]["version"] == "20.11.1"
+    monkeypatch.setattr(doctor.subprocess, "run", _scripted_run({_NODE: (0, "v18.19.1\n")}))
+    res = doctor.check_node()
+    assert not res["ok"] and res["detail"]["warn"] and "20" in res["hint"]
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("node"))
+    monkeypatch.setattr(doctor.subprocess, "run", _scripted_run({_NODE: (0, "v20.11.1\n")}))
+    res = doctor.check_node()
+    assert not res["ok"] and "npx" in res["hint"]
+    monkeypatch.setattr(doctor.shutil, "which", _which_only())
+    res = doctor.check_node()
+    assert not res["ok"] and res["level"] == "optional" and res["detail"]["warn"]
+    assert doctor.required_ok([res])  # the UI walk is advisory: never gates
+
+
+def test_ci_secrets_skipped_without_config_or_gh(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("gh"))
+    res = doctor.check_ci_secrets(doctor.check_config(start=tmp_path))
+    assert not res["ok"] and "skipped" in res["detail"]
+    cfg = _configured(tmp_path)
+    monkeypatch.setattr(doctor.shutil, "which", _which_only())
+    res = doctor.check_ci_secrets(cfg)
+    assert not res["ok"] and "skipped" in res["detail"] and doctor.required_ok([res])
+
+
+def test_ci_secrets_all_present_and_missing(tmp_path, monkeypatch):
+    cfg = _configured(tmp_path)
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("gh"))
+    monkeypatch.setattr(
+        doctor.subprocess, "run", _scripted_run({_SECRETS: (0, json.dumps(_ALL_SECRETS))})
+    )
+    assert doctor.check_ci_secrets(cfg)["ok"]
+    partial = [s for s in _ALL_SECRETS if s["name"] != "SNOWFLAKE_PRIVATE_KEY_RAW"]
+    monkeypatch.setattr(
+        doctor.subprocess, "run", _scripted_run({_SECRETS: (0, json.dumps(partial))})
+    )
+    res = doctor.check_ci_secrets(cfg)
+    assert not res["ok"] and res["level"] == "optional" and res["detail"]["warn"]
+    assert res["detail"]["missing"] == ["SNOWFLAKE_PRIVATE_KEY_RAW"]
+    assert "SNOWFLAKE_PRIVATE_KEY_RAW" in res["hint"]
+
+
+def test_ci_secrets_access_denied_is_not_checked_never_missing(tmp_path, monkeypatch):
+    cfg = _configured(tmp_path)
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("gh"))
+    for outcome in [
+        (1, ""),
+        (0, "not json"),
+        doctor.subprocess.TimeoutExpired(cmd="gh", timeout=15),
+    ]:
+        monkeypatch.setattr(doctor.subprocess, "run", _scripted_run({_SECRETS: outcome}))
+        res = doctor.check_ci_secrets(cfg)
+        assert not res["ok"] and "not checked" in res["hint"]
+        assert "missing" not in res["detail"]
+
+
+def test_ci_secret_names_match_the_deploy_workflow_templates():
+    import re
+
+    templates = REPO_ROOT / "streamsnow" / "_templates" / "repo"
+    for name in ("deploy.yml.j2", "deploy.git.yml.j2"):
+        used = set(re.findall(r"secrets\.(SNOWFLAKE_\w+)", (templates / name).read_text()))
+        assert used == set(doctor.CI_SECRET_NAMES) | set(doctor.OPTIONAL_CI_SECRET_NAMES), name
+
+
+def test_platform_row_only_on_native_windows():
+    res = doctor.check_platform("win32")
+    assert res is not None and not res["ok"] and res["detail"]["warn"]
+    assert "WSL" in res["hint"] and res["level"] == "optional"
+    assert doctor.check_platform("linux") is None and doctor.check_platform("darwin") is None
+
+
+def test_pre_commit_hook_must_be_executable(tmp_path, monkeypatch):
+    """Git silently ignores a hook without the executable bit, so a restored or
+    copied hook can carry pre-commit's marker and still run nothing."""
+    cfg = _configured(tmp_path)
+    hook = tmp_path / "hooks" / "pre-commit"
+    hook.parent.mkdir()
+    hook.write_text("#!/usr/bin/env bash\n# File generated by pre-commit: https://pre-commit.com\n")
+    hook.chmod(0o644)
+    _hook_run(monkeypatch, str(hook))
+    res = doctor.check_pre_commit_hook(cfg)
+    assert not res["ok"] and res["level"] == "required"
+    assert "pre-commit install" in res["hint"]
+    hook.chmod(0o755)
+    assert doctor.check_pre_commit_hook(cfg)["ok"]

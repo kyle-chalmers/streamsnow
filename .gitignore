@@ -39,3 +39,6 @@ streamsnow.config.local.yaml
 
 # Local-only working notes and fix evidence (never committed)
 .internal/
+
+# Local plans (working artifacts, not source)
+.planning/
