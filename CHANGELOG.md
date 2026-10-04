@@ -41,6 +41,25 @@ All notable changes to StreamSnow are recorded here. This project follows
 
 ### Changed
 
+- **The plugin's Python hooks launch through `uv`, not `python3`.** The deploy
+  guard and the review gate now run as `uv run --no-project --offline
+  --no-python-downloads ... ; exit 0`. That one command works in every shell
+  Claude Code runs hooks in (sh, Git Bash, and PowerShell on Windows without
+  Git Bash), needs no `python3` on PATH (Windows often has none, or only the
+  Microsoft Store stub), never touches your project's environment or the
+  network, and exits 0 whatever goes wrong, so a broken launcher can never
+  block your commands. uv is already a required prerequisite; if it is
+  missing from PATH the hooks are silently off, and `streamsnow doctor` flags
+  the missing uv. The guard costs about 0.1s more per shell command.
+- **The deploy guard watches PowerShell too.** On Windows the PowerShell tool
+  is Claude's default shell, so the guard now inspects it as well as Bash, and
+  catches the Windows shapes of the same commands: `snow.exe`, backslash
+  paths, the `&` call operator, PowerShell's backtick escape, and SQL piped in
+  with `Get-Content deploy.sql | snow sql --stdin`.
+- **`streamsnow preview` manages the process on native Windows.** Start,
+  status and stop now work there (psutil, installed on Windows only), and stop
+  takes the whole process tree, since `streamlit.exe` is a launcher whose
+  child process holds the port.
 - **The admin script is safe to re-run end to end.** The PyPI external access
   integration, which Snowflake cannot create with `IF NOT EXISTS`, now uses
   `CREATE OR REPLACE` followed by the CI role's `USAGE` grant. A deployed app

@@ -19,18 +19,27 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "deploy_safety.py"
 
 
-def _run_guard(command: str, project_dir: Path) -> str:
+def _run_guard(
+    command: str, project_dir: Path, *, tool: str = "Bash", stdin_encoding: str | None = None
+) -> str:
     payload = json.dumps(
-        {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(project_dir)}
+        {"tool_name": tool, "tool_input": {"command": command}, "cwd": str(project_dir)},
+        ensure_ascii=False,
     )
+    env = bare_env(CLAUDE_PROJECT_DIR=str(project_dir), PATH="")
+    if stdin_encoding:
+        env["PYTHONIOENCODING"] = stdin_encoding  # the Windows default for pipes
     proc = subprocess.run(
         [sys.executable, str(HOOK)],
-        input=payload,
+        input=payload.encode("utf-8"),  # Claude Code always sends UTF-8
         capture_output=True,
-        text=True,
-        env=bare_env(CLAUDE_PROJECT_DIR=str(project_dir), PATH=""),
-        encoding="utf-8",
-        errors="replace",
+        env=env,
+    )
+    proc = subprocess.CompletedProcess(
+        proc.args,
+        proc.returncode,
+        proc.stdout.decode("utf-8", "replace"),
+        proc.stderr.decode("utf-8", "replace"),
     )
     assert proc.returncode == 0, f"guard crashed: {proc.stderr}"
     return proc.stdout.strip()
@@ -92,6 +101,74 @@ def test_guard_defends_quote_and_path_evasion(tmp_path):
     )
 
 
+# --------------------------------------------------------------------------- #
+# Native Windows: the PowerShell tool and Windows-shaped commands
+# --------------------------------------------------------------------------- #
+def test_guard_inspects_the_powershell_tool(tmp_path):
+    """On Windows the PowerShell tool is on by default and is Claude's primary
+    shell; a guard that reads only the Bash tool misses most commands there."""
+    project = _project(tmp_path)
+    assert _asks(_run_guard("snow streamlit deploy my_app", project, tool="PowerShell"))
+    assert _asks(_run_guard('snow sql -q "DROP TABLE acme.t"', project, tool="PowerShell"))
+
+
+def test_guard_ignores_tools_that_do_not_run_commands(tmp_path):
+    assert _run_guard("snow streamlit deploy my_app", _project(tmp_path), tool="Read") == ""
+
+
+def test_guard_catches_windows_executable_shapes(tmp_path):
+    project = _project(tmp_path)
+    for command in [
+        "snow.exe streamlit deploy my_app",
+        "SNOW.EXE streamlit deploy my_app",
+        "C:\\tools\\snow.exe streamlit deploy my_app",
+        "& 'C:\\Program Files\\Snowflake CLI\\snow.exe' sql -q \"DROP TABLE acme.t\"",
+        "snow.cmd stage remove @app_stage/my_app",
+        'C:\\tools\\snow.exe sql -q "DELETE FROM acme.t"',
+    ]:
+        assert _asks(_run_guard(command, project, tool="PowerShell")), command
+
+
+def test_guard_strips_powershell_backtick_escapes(tmp_path):
+    assert _asks(_run_guard("sn`ow streamlit deploy my_app", _project(tmp_path), tool="PowerShell"))
+
+
+def test_guard_reads_sql_piped_from_get_content(tmp_path):
+    """PowerShell has no `<` redirect; SQL reaches the CLI through a pipe."""
+    project = _project(tmp_path)
+    (project / "deploy.sql").write_text("DROP TABLE acme.orders;\n", encoding="utf-8")
+    for command in [
+        "Get-Content deploy.sql | snow sql --stdin",
+        "gc deploy.sql | snow sql --stdin",
+        "Get-Content -Path deploy.sql | snow.exe sql --stdin",
+        "type deploy.sql | snow sql --stdin",
+    ]:
+        assert _asks(_run_guard(command, project, tool="PowerShell")), command
+
+
+def test_guard_reads_a_utf8_payload_whatever_the_stdin_default(tmp_path):
+    """Windows pipes default to cp1252; a UTF-8 payload with a character cp1252
+    cannot decode (here "Ł") made the guard bail out silently."""
+    out = _run_guard(
+        'snow sql -q "DROP TABLE acme.ŁÓDŹ"', _project(tmp_path), stdin_encoding="cp1252"
+    )
+    assert _asks(out)
+
+
+def test_guard_passes_windows_read_only(tmp_path):
+    project = _project(tmp_path)
+    for command in [
+        "snow.exe --version",
+        'snow.exe sql -q "SELECT 1"',
+        "snowman --help",
+        "Get-Content notes.txt",
+        "Get-Content deploy.sql",  # reading a file is not running it
+        "C:\\tools\\snowflake-report.exe --drop-cache",
+    ]:
+        (project / "deploy.sql").write_text("DROP TABLE acme.orders;\n", encoding="utf-8")
+        assert _run_guard(command, project, tool="PowerShell") == "", command
+
+
 def test_guard_passes_read_only(tmp_path):
     assert _run_guard('snow sql -q "SELECT 1"', _project(tmp_path)) == ""
     assert _run_guard("snow streamlit list", _project(tmp_path)) == ""
@@ -118,7 +195,7 @@ def test_guard_fails_open_on_garbage_stdin():
 def test_hooks_json_registers_the_guard_with_a_timeout():
     hooks = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
     pre = hooks["PreToolUse"][0]
-    assert pre["matcher"] == "Bash"
+    assert set(pre["matcher"].split("|")) == {"Bash", "PowerShell"}
     entry = pre["hooks"][0]
     assert "deploy_safety.py" in entry["command"]
     assert entry.get("timeout"), "PreToolUse guard must declare an explicit timeout"
