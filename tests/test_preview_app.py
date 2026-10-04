@@ -22,8 +22,12 @@ from streamsnow.tools import preview_app
 SLUG = "acme-sales-dashboard"
 
 # Stand-in "streamlit": binds the port and answers the health endpoint.
+# socketserver.TCPServer, not http.server.HTTPServer: HTTPServer calls
+# socket.getfqdn() between bind and listen, a reverse-DNS lookup that stalls on
+# GitHub's macOS runners, leaving the port bound but refusing connections.
 FAKE_SERVER = """\
 import http.server
+import socketserver
 import sys
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -37,9 +41,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+socketserver.TCPServer.allow_reuse_address = True  # as HTTPServer does
+server = socketserver.TCPServer(("127.0.0.1", int(sys.argv[1])), Handler)
 print("You can now view your Streamlit app in your browser.", flush=True)
 print("Local URL: http://127.0.0.1:" + sys.argv[1], flush=True)
-http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+server.serve_forever()
 """
 
 # Stand-in that hangs without ever serving health (secrets misconfiguration).
