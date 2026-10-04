@@ -91,7 +91,7 @@ def _normalize_phase(raw: str) -> str:
 def check_file(path: Path) -> dict:
     """Validate one REQUIREMENTS.md. Findings name the missing/malformed piece."""
     findings: list[dict] = []
-    text = path.read_text(errors="ignore")
+    text = path.read_text(errors="ignore", encoding="utf-8")
 
     section_match = _SECTION_RE.search(text)
     if not section_match:

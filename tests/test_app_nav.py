@@ -55,7 +55,7 @@ st.navigation({"All": pages}).run()
 def _app(tmp_path: Path, entry_text: str, slug: str = "acme-sales-dashboard") -> Path:
     app_dir = tmp_path / "apps" / slug
     app_dir.mkdir(parents=True)
-    (app_dir / "streamlit_app.py").write_text(entry_text)
+    (app_dir / "streamlit_app.py").write_text(entry_text, encoding="utf-8")
     return app_dir
 
 
@@ -102,9 +102,9 @@ def test_legacy_pages_dir_sorted_with_derived_titles(tmp_path):
     app_dir = _app(tmp_path, SINGLE_PAGE)
     pages = app_dir / "pages"
     pages.mkdir()
-    (pages / "02_sales_by_region.py").write_text("import streamlit as st\n")
-    (pages / "01_overview.py").write_text("import streamlit as st\n")
-    (pages / "_shared_header.py").write_text("# helper, not a page\n")
+    (pages / "02_sales_by_region.py").write_text("import streamlit as st\n", encoding="utf-8")
+    (pages / "01_overview.py").write_text("import streamlit as st\n", encoding="utf-8")
+    (pages / "_shared_header.py").write_text("# helper, not a page\n", encoding="utf-8")
     entries = app_nav.extract_nav(app_dir)
     assert [(e["title"], e["path"]) for e in entries] == [
         ("acme-sales-dashboard", "streamlit_app.py"),

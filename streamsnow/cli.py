@@ -14,8 +14,10 @@ streamsnow update         Re-vendor templates/tools and bump the plugin
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +80,26 @@ from .tools.review_gate import main as _review_gate_main
 from .tools.review_loop import main as _review_loop_main
 from .tools.sql_review import main as _sql_review_main
 from .tools.validate_app import main as _validate_app_main
+
+
+def _utf8_stdio() -> None:
+    """Make stdout/stderr UTF-8 when the platform default is not.
+
+    Windows pipes default to the ANSI code page (cp1252), which cannot encode the
+    ✓/✗ marks, arrows and dashes the CLI prints, so ``streamsnow validate-app`` or
+    ``doctor`` crashed with UnicodeEncodeError the moment its output went to a pipe,
+    which is how agents and pre-commit always run it. This runs at import, before
+    Typer renders even ``--help``. A no-op wherever the stream is already UTF-8
+    (macOS, Linux, the Windows console).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "")
+        if encoding != "utf8" and hasattr(stream, "reconfigure"):
+            with contextlib.suppress(Exception):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+_utf8_stdio()
 
 app = typer.Typer(
     name="streamsnow",
@@ -427,7 +449,7 @@ def _resolve_config(
 ) -> tuple[Config, str]:
     """Return (validated Config, YAML text to persist). Raises ConfigError."""
     if config is not None:
-        return load_config(config), Path(config).read_text()
+        return load_config(config), Path(config).read_text(encoding="utf-8")
     cfg_dict = _prompt_config(prefill, directory, given)
     return Config.from_dict(cfg_dict), _render_config_yaml(cfg_dict)
 
@@ -546,7 +568,7 @@ def _read_prefill(cfg_out: Path) -> dict | None:
     if not cfg_out.exists():
         return None
     try:
-        return yaml.safe_load(cfg_out.read_text())
+        return yaml.safe_load(cfg_out.read_text(encoding="utf-8"))
     except yaml.YAMLError:
         return None
 
@@ -633,7 +655,7 @@ def configure(
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
-    cfg_out.write_text(text)
+    cfg_out.write_text(text, encoding="utf-8")
     console.print(f"[green]✓[/] wrote {cfg_out}")
     console.print(
         "\nConnect your machine to Snowflake (one-time, one store — the snow CLI's\n"
@@ -714,7 +736,7 @@ def init(
             cfg, text = _resolve_config(
                 config, _read_prefill(cfg_out) if reconfigure else None, target, given
             )
-            cfg_out.write_text(text)
+            cfg_out.write_text(text, encoding="utf-8")
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
@@ -1026,6 +1048,8 @@ def _checkout_github_origin() -> str | None:
             text=True,
             timeout=5,
             check=False,
+            encoding="utf-8",
+            errors="replace",
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -1178,19 +1202,19 @@ def update(
             continue
         out = target / item.output
         new = render_item(cfg, item, cfg.project.slug)
-        old = out.read_text() if out.exists() else None
+        old = out.read_text(encoding="utf-8") if out.exists() else None
         if new != old:
             changed.append(item.output)
             if apply:
                 out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_text(new)
+                out.write_text(new, encoding="utf-8")
     for item in CREATE_IF_MISSING_ITEMS:
         out = target / item.output
         if not item.when(cfg) or out.exists():
             continue
         changed.append(f"{item.output} (new)")
         if apply:
-            out.write_text(render_item(cfg, item, cfg.project.slug))
+            out.write_text(render_item(cfg, item, cfg.project.slug), encoding="utf-8")
 
     if not changed:
         console.print("[green]✓[/] governance files already up to date")

@@ -89,7 +89,9 @@ def test_flags_write_the_same_file_as_the_wizard(tmp_path, monkeypatch, verb):
     _no_prompts(monkeypatch)
     r = runner.invoke(app, [verb, "--dir", str(flag_dir), *extra, *FLAGS])
     assert r.exit_code == 0, r.output
-    assert (flag_dir / CONFIG_FILENAME).read_text() == (wiz_dir / CONFIG_FILENAME).read_text()
+    assert (flag_dir / CONFIG_FILENAME).read_text(encoding="utf-8") == (
+        wiz_dir / CONFIG_FILENAME
+    ).read_text(encoding="utf-8")
 
 
 def test_init_with_flags_writes_the_governed_repo_files(tmp_path, monkeypatch):
@@ -162,7 +164,7 @@ def test_connection_flag_reads_the_account_without_printing_it(tmp_path, monkeyp
     flags = [f for f in FLAGS if f not in ("--account", ANSWERS["account"])]
     r = runner.invoke(app, ["configure", "--dir", str(tmp_path), "--connection", "acme", *flags])
     assert r.exit_code == 0, r.output
-    written = yaml.safe_load((tmp_path / CONFIG_FILENAME).read_text())
+    written = yaml.safe_load((tmp_path / CONFIG_FILENAME).read_text(encoding="utf-8"))
     # Stored as the locator (the hostname suffix would double up in the connector).
     assert written["snowflake"]["account"] == locator
     assert written["snowflake"]["connection_name"] == "acme"
@@ -212,13 +214,13 @@ def test_flags_never_silently_ignored_on_an_existing_config(tmp_path, monkeypatc
         runner.invoke(app, ["init", "--dir", str(tmp_path), "--no-starter-app", *FLAGS]).exit_code
         == 0
     )
-    before = (tmp_path / CONFIG_FILENAME).read_text()
+    before = (tmp_path / CONFIG_FILENAME).read_text(encoding="utf-8")
     r = runner.invoke(
         app, ["init", "--dir", str(tmp_path), "--no-starter-app", "--database", "OTHER_DB"]
     )
     assert r.exit_code == 2, r.output
     assert "--reconfigure" in r.output
-    assert (tmp_path / CONFIG_FILENAME).read_text() == before
+    assert (tmp_path / CONFIG_FILENAME).read_text(encoding="utf-8") == before
     # With --reconfigure the flags apply (the last --database wins).
     r = runner.invoke(
         app,
@@ -234,7 +236,7 @@ def test_flags_never_silently_ignored_on_an_existing_config(tmp_path, monkeypatc
         ],
     )
     assert r.exit_code == 0, r.output
-    after = yaml.safe_load((tmp_path / CONFIG_FILENAME).read_text())
+    after = yaml.safe_load((tmp_path / CONFIG_FILENAME).read_text(encoding="utf-8"))
     assert after["governance"]["database"] == "OTHER_DB"
     assert after["governance"]["schema_allow"] == ["MARTS", "REPORTING"]
 
@@ -274,7 +276,7 @@ def test_allowed_schema_conflicting_with_the_default_deny_list_exits_2(tmp_path,
 def test_deny_flag_conflicting_with_the_prefilled_allow_list_exits_2(tmp_path, monkeypatch):
     _no_prompts(monkeypatch)
     assert runner.invoke(app, ["configure", "--dir", str(tmp_path), *FLAGS]).exit_code == 0
-    before = (tmp_path / CONFIG_FILENAME).read_text()
+    before = (tmp_path / CONFIG_FILENAME).read_text(encoding="utf-8")
     # --schemas omitted: its prompt is answered with the prefilled default (Enter).
     monkeypatch.setattr(typer, "prompt", lambda text, default=None, **kw: default)
     r = runner.invoke(
@@ -283,11 +285,13 @@ def test_deny_flag_conflicting_with_the_prefilled_allow_list_exits_2(tmp_path, m
     )
     assert r.exit_code == 2, r.output
     assert "both allowed and denied" in r.output
-    assert (tmp_path / CONFIG_FILENAME).read_text() == before
+    assert (tmp_path / CONFIG_FILENAME).read_text(encoding="utf-8") == before
 
 
 def test_setup_skill_probes_are_shell_safe():
     """`-q "<query>"` would let the shell eat the "name" quotes and expand $1."""
-    text = (Path(__file__).resolve().parent.parent / "skills/start-app/setup.md").read_text()
+    text = (Path(__file__).resolve().parent.parent / "skills/start-app/setup.md").read_text(
+        encoding="utf-8"
+    )
     assert '-q "<query>"' not in text
     assert "-q '<query>'" in text

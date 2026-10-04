@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _portable import bare_env
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "hooks" / "deploy_safety.py"
 
@@ -26,7 +28,9 @@ def _run_guard(command: str, project_dir: Path) -> str:
         input=payload,
         capture_output=True,
         text=True,
-        env={"CLAUDE_PROJECT_DIR": str(project_dir), "PATH": ""},
+        env=bare_env(CLAUDE_PROJECT_DIR=str(project_dir), PATH=""),
+        encoding="utf-8",
+        errors="replace",
     )
     assert proc.returncode == 0, f"guard crashed: {proc.stderr}"
     return proc.stdout.strip()
@@ -37,7 +41,9 @@ def _asks(out: str) -> bool:
 
 
 def _project(tmp_path: Path) -> Path:
-    (tmp_path / "streamsnow.config.yaml").write_text("snowflake:\n  database: ANALYTICS_DB\n")
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        "snowflake:\n  database: ANALYTICS_DB\n", encoding="utf-8"
+    )
     return tmp_path
 
 
@@ -74,7 +80,7 @@ def test_guard_asks_on_destructive_sql(tmp_path):
 def test_guard_asks_on_sql_hidden_in_file(tmp_path):
     project = _project(tmp_path)
     (project / "deploy.sql").write_text(
-        "CREATE OR REPLACE STREAMLIT my_app ROOT_LOCATION = @stage;\n"
+        "CREATE OR REPLACE STREAMLIT my_app ROOT_LOCATION = @stage;\n", encoding="utf-8"
     )
     assert _asks(_run_guard("snow sql -f deploy.sql", project))
 
@@ -99,13 +105,18 @@ def test_guard_is_zero_cost_without_config(tmp_path):
 
 def test_guard_fails_open_on_garbage_stdin():
     proc = subprocess.run(
-        [sys.executable, str(HOOK)], input="not json", capture_output=True, text=True
+        [sys.executable, str(HOOK)],
+        input="not json",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     assert proc.returncode == 0 and proc.stdout.strip() == ""
 
 
 def test_hooks_json_registers_the_guard_with_a_timeout():
-    hooks = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+    hooks = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
     pre = hooks["PreToolUse"][0]
     assert pre["matcher"] == "Bash"
     entry = pre["hooks"][0]
@@ -117,5 +128,5 @@ def test_hooks_json_registers_the_guard_with_a_timeout():
 
 def test_session_start_announces_the_guard():
     # jobwright's lesson: an invisible safety net reads as no safety net.
-    text = (REPO_ROOT / "hooks" / "session_start.sh").read_text()
+    text = (REPO_ROOT / "hooks" / "session_start.sh").read_text(encoding="utf-8")
     assert "guard is ACTIVE" in text

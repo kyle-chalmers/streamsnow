@@ -518,7 +518,7 @@ def load_config(path: Path | None = None) -> Config:
             "'streamsnow init' to create one."
         )
     try:
-        data = yaml.safe_load(Path(cfg_path).read_text()) or {}
+        data = yaml.safe_load(Path(cfg_path).read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:  # pragma: no cover - passthrough
         raise ConfigError(f"{cfg_path}: invalid YAML: {exc}") from exc
     except OSError as exc:

@@ -150,7 +150,14 @@ def _git(args: list[str]) -> str:
     CI and pre-commit both invoke this tool from the repo root, and honoring
     cwd is what lets the tests drive the diff rule against throwaway repos.
     """
-    proc = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        ["git", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+    )
     if proc.returncode != 0:
         raise ToolError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
     return proc.stdout
@@ -279,7 +286,7 @@ def load_registry(path: Path) -> tuple[list[Tombstone], list[str]]:
     if not path.is_file():
         return [], []
     try:
-        data = yaml.safe_load(path.read_text())
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         return [], [f"{path}: invalid YAML: {exc}"]
 

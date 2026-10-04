@@ -16,12 +16,12 @@ EXAMPLE = REPO_ROOT / "streamsnow.config.example.yaml"
 
 
 def _cfg() -> Config:
-    return Config.from_dict(yaml.safe_load(EXAMPLE.read_text()))
+    return Config.from_dict(yaml.safe_load(EXAMPLE.read_text(encoding="utf-8")))
 
 
 def _write(p: Path, text: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text)
+    p.write_text(text, encoding="utf-8")
     return p
 
 
@@ -31,7 +31,7 @@ def _scaffold_app(tmp_path: Path) -> Path:
 
 
 def _artifacts(app: Path) -> list[str]:
-    data = yaml.safe_load((app / "snowflake.yml").read_text())
+    data = yaml.safe_load((app / "snowflake.yml").read_text(encoding="utf-8"))
     (entity,) = data["entities"].values()
     return entity["artifacts"]
 
@@ -60,20 +60,20 @@ def test_fix_is_idempotent(tmp_path):
     app = _scaffold_app(tmp_path)
     _write(app / "helpers.py", "X = 1\n")
     assert check_artifacts.fix_app(app)["changed"]
-    before = (app / "snowflake.yml").read_text()
+    before = (app / "snowflake.yml").read_text(encoding="utf-8")
     res = check_artifacts.fix_app(app)
     assert res["ok"] and not res["changed"]
-    assert (app / "snowflake.yml").read_text() == before
+    assert (app / "snowflake.yml").read_text(encoding="utf-8") == before
 
 
 def test_fix_preserves_lines_outside_the_artifacts_block(tmp_path):
     app = _scaffold_app(tmp_path)
     yml = app / "snowflake.yml"
-    original = yml.read_text()
-    yml.write_text("# deploy notes: reviewed by the platform team\n" + original)
+    original = yml.read_text(encoding="utf-8")
+    yml.write_text("# deploy notes: reviewed by the platform team\n" + original, encoding="utf-8")
     _write(app / "helpers.py", "X = 1\n")
     assert check_artifacts.fix_app(app)["changed"]
-    fixed = yml.read_text()
+    fixed = yml.read_text(encoding="utf-8")
     assert fixed.startswith("# deploy notes: reviewed by the platform team\n")
     # Every pre-existing non-artifacts line survives byte-for-byte.
     art_start = original.index("    artifacts:")
@@ -123,11 +123,11 @@ def test_fix_refuses_mapping_entries(tmp_path):
         "      - src: streamlit_app.py\n"
         "        dest: app/\n",
     )
-    before = (app / "snowflake.yml").read_text()
+    before = (app / "snowflake.yml").read_text(encoding="utf-8")
     res = check_artifacts.fix_app(app)
     assert not res["ok"] and not res["changed"]
     assert "manually" in res["detail"]
-    assert (app / "snowflake.yml").read_text() == before
+    assert (app / "snowflake.yml").read_text(encoding="utf-8") == before
 
 
 def test_fix_refuses_multiple_declaring_entities(tmp_path):
@@ -195,15 +195,19 @@ def test_main_fix_repairs_and_exits_clean(tmp_path, capsys):
 # 0.7: deploy.artifact_exclude — typed exclusion, never an opt-out for code
 # --------------------------------------------------------------------------- #
 def _cfg_with_exclude(*paths: str) -> Config:
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data.setdefault("deploy", {})["artifact_exclude"] = list(paths)
     return Config.from_dict(data)
 
 
 def _drop_from_artifacts(app: Path, rel: str) -> None:
     yml = app / "snowflake.yml"
-    lines = [ln for ln in yml.read_text().splitlines(keepends=True) if f"- {rel}" not in ln]
-    yml.write_text("".join(lines))
+    lines = [
+        ln
+        for ln in yml.read_text(encoding="utf-8").splitlines(keepends=True)
+        if f"- {rel}" not in ln
+    ]
+    yml.write_text("".join(lines), encoding="utf-8")
 
 
 def test_excluded_config_toml_is_not_demanded(tmp_path):
@@ -271,9 +275,9 @@ def test_scan_paths_reads_exclusions_from_the_repo_config(tmp_path):
     app = _scaffold_app(tmp_path)
     _drop_from_artifacts(app, ".streamlit/config.toml")
     cfg_path = tmp_path / "streamsnow.config.yaml"
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["deploy"]["artifact_exclude"] = [".streamlit/config.toml"]
-    cfg_path.write_text(yaml.safe_dump(data))
+    cfg_path.write_text(yaml.safe_dump(data), encoding="utf-8")
     assert check_artifacts.scan_paths([app])["ok"]  # discovered by walking up
     assert check_artifacts.main([str(app), "--config", str(cfg_path)]) == 0
     cfg_path.unlink()

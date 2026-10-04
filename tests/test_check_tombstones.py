@@ -54,7 +54,12 @@ CAMPAIGN_FQN = "STREAMSNOW_APPS.DASHBOARDS.MARKETING_CAMPAIGN_DASHBOARD"
 
 def _git(repo: Path, *args: str) -> str:
     proc = subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        encoding="utf-8",
+        errors="replace",
     )
     return proc.stdout.strip()
 
@@ -63,13 +68,17 @@ def _write_app(repo: Path, slug: str) -> None:
     module = slug.replace("-", "_")
     app = repo / "apps" / slug
     app.mkdir(parents=True)
-    (app / "snowflake.yml").write_text(MANIFEST.format(module=module, name=module.upper()))
-    (app / "streamlit_app.py").write_text("import streamlit as st\nst.title('Acme')\n")
+    (app / "snowflake.yml").write_text(
+        MANIFEST.format(module=module, name=module.upper()), encoding="utf-8"
+    )
+    (app / "streamlit_app.py").write_text(
+        "import streamlit as st\nst.title('Acme')\n", encoding="utf-8"
+    )
 
 
 def _init_repo(tmp_path: Path) -> str:
     """Two committed Acme apps; returns the base commit sha."""
-    (tmp_path / "streamsnow.config.yaml").write_text(CONFIG)
+    (tmp_path / "streamsnow.config.yaml").write_text(CONFIG, encoding="utf-8")
     _write_app(tmp_path, "acme-sales-dashboard")
     _write_app(tmp_path, "marketing-campaign-dashboard")
     subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
@@ -87,7 +96,7 @@ def _rename_sales(repo: Path) -> None:
 def _tombstone(repo: Path, body: str) -> Path:
     path = repo / "deploy" / "tombstones.yml"
     path.parent.mkdir(exist_ok=True)
-    path.write_text(body)
+    path.write_text(body, encoding="utf-8")
     return path
 
 
@@ -246,7 +255,7 @@ def test_git_mv_that_keeps_slug_contents_changed_is_clean(tmp_path, monkeypatch)
     # rule — identity is the slug, not the manifest content.
     base = _init_repo(tmp_path)
     yml = tmp_path / "apps" / "acme-sales-dashboard" / "snowflake.yml"
-    yml.write_text(yml.read_text() + "    # comment\n")
+    yml.write_text(yml.read_text(encoding="utf-8") + "    # comment\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     assert main(["--base-ref", base]) == 0
 
@@ -290,9 +299,10 @@ def test_namespace_move_requires_tombstones_for_old_fqns(tmp_path, monkeypatch, 
     _init_repo(tmp_path)
     cfg_path = tmp_path / "streamsnow.config.yaml"
     cfg_path.write_text(
-        cfg_path.read_text()
+        cfg_path.read_text(encoding="utf-8")
         .replace('app_database: "STREAMSNOW_APPS"', 'app_database: "NEW_APPS"')
-        .replace('app_schema: "DASHBOARDS"', 'app_schema: "NEW_SCHEMA"')
+        .replace('app_schema: "DASHBOARDS"', 'app_schema: "NEW_SCHEMA"'),
+        encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
     code = main(["--base-ref", "main"])

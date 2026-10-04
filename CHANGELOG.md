@@ -52,6 +52,27 @@ All notable changes to StreamSnow are recorded here. This project follows
 
 - `docs/getting-started.md` promised a git-identity check that doctor did not
   have.
+- **Text encoding and line endings on Windows.** Python on Windows reads and
+  writes text as cp1252 by default, and Git for Windows checks files out with
+  CRLF. `streamsnow init` and `new` crashed writing the scaffold's emoji, and
+  `validate-app`, `doctor` and `--help` crashed when their output went to a
+  pipe. Every file read and write now names UTF-8, a test fails any that does
+  not, and the CLI switches a non-UTF-8 stdout to UTF-8. `sql-review` writes LF
+  and hashes CRLF pairs as LF, so a Windows checkout no longer reads every
+  committed review file as hand-edited or its inputs as drifted (a lone CR, or
+  any other byte change, still counts as an edit). The cached Anaconda package
+  list no longer crashes on Windows, the review gate keeps its state in the
+  system temp dir instead of `/tmp`, and findings print paths with forward
+  slashes. CI now runs the tests on Windows and macOS as well as Linux. The
+  `/start-app --setup` routing to WSL stays until local preview and the hooks
+  work natively.
+- **`streamsnow preview start` behind a proxy.** The health probe of
+  `127.0.0.1` honored `HTTP_PROXY` and the macOS/Windows system proxy, so on a
+  machine whose proxy does not exempt localhost a serving app read as "not
+  healthy" after the full timeout. The probe now always connects directly.
+  `ci-key create` no longer warns on Windows that the key directory is
+  readable by other users (Windows reports every directory as 0o777 and
+  protects it with ACLs instead).
 
 ## [0.7.5] - 2026-10-03
 

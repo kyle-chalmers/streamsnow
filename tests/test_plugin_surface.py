@@ -59,16 +59,16 @@ def _body_lines(text: str) -> int:
 
 def test_every_skill_front_page_body_is_at_most_80_lines():
     over = {
-        p.parent.name: _body_lines(p.read_text())
+        p.parent.name: _body_lines(p.read_text(encoding="utf-8"))
         for p in sorted(SKILLS_DIR.glob("*/SKILL.md"))
-        if _body_lines(p.read_text()) > 80
+        if _body_lines(p.read_text(encoding="utf-8")) > 80
     }
     assert not over, f"SKILL.md body over the 80-line cap: {over}"
 
 
 def test_every_skill_has_matching_frontmatter_name_and_a_description():
     for skill in sorted(EXPECTED_SKILLS):
-        text = (SKILLS_DIR / skill / "SKILL.md").read_text()
+        text = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
         assert re.search(rf"^name: {re.escape(skill)}$", text, re.M), skill
         assert re.search(r"^description: .{40,}", text, re.M), skill
 
@@ -82,7 +82,7 @@ def test_every_skill_declares_argument_hint_and_allowed_tools():
     # jobwright-parity frontmatter: discoverable arguments + pre-approved tools
     # (fewer permission prompts is a first-class adoption concern).
     for skill in sorted(EXPECTED_SKILLS):
-        text = (SKILLS_DIR / skill / "SKILL.md").read_text()
+        text = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
         assert re.search(r"^argument-hint: .+", text, re.M), skill
         assert re.search(r"^allowed-tools: \[.+\]", text, re.M), skill
         has_flag = bool(re.search(r"^disable-model-invocation: true$", text, re.M))
@@ -103,7 +103,7 @@ def test_no_retired_skill_name_is_referenced_as_live_inside_skills():
     offenders = [
         f"{p.relative_to(REPO_ROOT)}: {m.group(0)}"
         for p in sorted(SKILLS_DIR.rglob("*.md"))
-        for m in [pattern.search(p.read_text())]
+        for m in [pattern.search(p.read_text(encoding="utf-8"))]
         if m
     ]
     assert not offenders, offenders
@@ -114,7 +114,7 @@ def test_manifest_does_not_redeclare_the_auto_loaded_hooks_file():
     # pointing at that same file is a duplicate declaration that aborts the
     # whole plugin ("Duplicate hooks file detected"). jobwright hit this in
     # the field (its v0.1.1 fix); this keeps it from coming back here.
-    manifest = json.loads(PLUGIN_MANIFEST.read_text())
+    manifest = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
     assert "hooks" not in manifest, (
         'plugin.json must not declare "hooks" — hooks/hooks.json is '
         "auto-loaded, and redeclaring it fails the plugin on Claude Code >=2.1"
@@ -124,7 +124,7 @@ def test_manifest_does_not_redeclare_the_auto_loaded_hooks_file():
 def test_every_relative_markdown_link_in_skills_resolves():
     broken = []
     for p in sorted(SKILLS_DIR.rglob("*.md")):
-        for target in _LINK_RE.findall(p.read_text()):
+        for target in _LINK_RE.findall(p.read_text(encoding="utf-8")):
             if target.startswith(("http://", "https://")):
                 continue
             if not (p.parent / target).resolve().exists():
@@ -139,7 +139,7 @@ def test_every_skill_declares_its_repo_overlay_point():
 
     skills_dir = pathlib.Path(__file__).resolve().parent.parent / "skills"
     for skill in sorted(d for d in skills_dir.iterdir() if d.is_dir() and d.name != "_shared"):
-        text = (skill / "SKILL.md").read_text()
+        text = (skill / "SKILL.md").read_text(encoding="utf-8")
         assert f".streamsnow/overlays/{skill.name}.md" in text, (
             f"{skill.name}/SKILL.md does not declare its repo-overlay point"
         )
@@ -151,16 +151,16 @@ def test_plugin_bundles_a_pinned_playwright_mcp():
     Bundling it in the plugin means nobody has to configure it by hand; an exact
     pin (never @latest) keeps a new upstream release from changing the walk
     under a released plugin. RELEASING.md owns the bump."""
-    servers = json.loads((REPO_ROOT / ".mcp.json").read_text())["mcpServers"]
+    servers = json.loads((REPO_ROOT / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
     pw = servers["playwright"]
     assert pw["command"] == "npx"
     pkg = next(a for a in pw["args"] if a.startswith("@playwright/mcp"))
     assert re.fullmatch(r"@playwright/mcp@\d+\.\d+\.\d+", pkg), pkg
-    assert "pin" in (REPO_ROOT / "RELEASING.md").read_text().lower()
-    assert "@playwright/mcp" in (REPO_ROOT / "RELEASING.md").read_text()
+    assert "pin" in (REPO_ROOT / "RELEASING.md").read_text(encoding="utf-8").lower()
+    assert "@playwright/mcp" in (REPO_ROOT / "RELEASING.md").read_text(encoding="utf-8")
 
 
 def test_walkthrough_degrade_line_points_at_the_bundled_setup():
-    text = (SKILLS_DIR / "_shared" / "playwright-walkthrough.md").read_text()
+    text = (SKILLS_DIR / "_shared" / "playwright-walkthrough.md").read_text(encoding="utf-8")
     assert "/reload-plugins" in text
     assert "restart the session" not in text

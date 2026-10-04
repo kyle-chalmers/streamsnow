@@ -30,7 +30,7 @@ FAKE_KEY_BODY = base64.b64encode(b"streamsnow-test-public-key" * 4).decode()
 
 
 def _data(**overrides) -> dict:
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     for dotted, value in overrides.items():
         node = data
         *parents, leaf = dotted.split(".")
@@ -69,7 +69,9 @@ def _cli(*args: str):
 def _pub_file(tmp_path: Path, body: str = FAKE_KEY_BODY) -> Path:
     path = tmp_path / "ci.pub"
     wrapped = "\n".join(body[i : i + 64] for i in range(0, len(body), 64))
-    path.write_text(f"-----BEGIN PUBLIC KEY-----\n{wrapped}\n-----END PUBLIC KEY-----\n")
+    path.write_text(
+        f"-----BEGIN PUBLIC KEY-----\n{wrapped}\n-----END PUBLIC KEY-----\n", encoding="utf-8"
+    )
     return path
 
 
@@ -136,7 +138,7 @@ def test_every_admin_statement_is_safe_to_rerun(cfg, key):
 
 def test_default_output_changes_only_where_intended():
     """Without the new flags, only the viewer grant and EAI hunks change vs 0.7.5."""
-    old = _statements(BASELINE.read_text())
+    old = _statements(BASELINE.read_text(encoding="utf-8"))
     new = _statements(generate_admin_sql(_cfg()))
     removed = [s for s in old if s not in new]
     added = [s for s in new if s not in old]
@@ -192,12 +194,12 @@ _PRIV = "PRIVATE " + "KEY-----"
 )
 def test_bad_key_files_are_refused_without_echoing_them(tmp_path, content):
     path = tmp_path / "key.pem"
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8")
     with pytest.raises(ConfigError) as exc:
         read_public_key(path)
     assert "TOPSECRETBODY" not in str(exc.value)
     cfg = tmp_path / "streamsnow.config.yaml"
-    cfg.write_text(EXAMPLE.read_text())
+    cfg.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
     res = _cli("deploy-setup", "--admin", "--config", str(cfg), "--public-key-file", str(path))
     assert res.exit_code == 2
     assert "TOPSECRETBODY" not in res.output
@@ -231,7 +233,7 @@ def test_viewer_role_goes_to_whoever_runs_the_script():
 
 def test_viewer_user_flag_adds_explicit_grants(tmp_path):
     cfg = tmp_path / "streamsnow.config.yaml"
-    cfg.write_text(EXAMPLE.read_text())
+    cfg.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
     res = _cli(
         "deploy-setup", "--admin", "--config", str(cfg),
         "--viewer-user", "ANALYST_1", "--viewer-user", "ANALYST_2",
@@ -342,7 +344,7 @@ def test_teardown_refuses_to_drop_the_governance_database(field, db):
 
 def test_cli_teardown(tmp_path):
     cfg = tmp_path / "streamsnow.config.yaml"
-    cfg.write_text(EXAMPLE.read_text())
+    cfg.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
     res = _cli("deploy-setup", "--teardown", "--config", str(cfg))
     assert res.exit_code == 0, res.output
     assert res.output.strip() == generate_teardown_sql(_cfg()).strip()

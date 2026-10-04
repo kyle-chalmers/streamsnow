@@ -89,7 +89,9 @@ def _ensure_private_dir(path: Path, warnings: list[str]) -> None:
         path.chmod(0o700)  # mkdir's mode is filtered by the umask
     elif not path.is_dir():
         raise CiKeyError(f"{path} exists and is not a directory.")
-    elif path.stat().st_mode & 0o077:
+    # POSIX only: Windows reports every directory as 0o777 and protects it with
+    # ACLs instead, so this warning would fire on every run there.
+    elif os.name == "posix" and path.stat().st_mode & 0o077:
         warnings.append(f"{path} is readable by other users; consider `chmod 700` on it.")
 
 
@@ -174,7 +176,7 @@ def create(
             kept.append(name)
             if path.is_file() and not path.is_symlink() and path.stat().st_mode & 0o077:
                 path.chmod(0o600)  # a secret file never stays readable by others
-            if path.read_text().strip() != values[name]:
+            if path.read_text(encoding="utf-8").strip() != values[name]:
                 mismatched.append(name)
         else:
             _write_private(path, values[name])

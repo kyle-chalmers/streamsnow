@@ -30,7 +30,7 @@ EXAMPLE = REPO_ROOT / "streamsnow.config.example.yaml"
 
 
 def _cfg() -> Config:
-    return Config.from_dict(yaml.safe_load(EXAMPLE.read_text()))
+    return Config.from_dict(yaml.safe_load(EXAMPLE.read_text(encoding="utf-8")))
 
 
 def _policy() -> SchemaPolicy:
@@ -39,7 +39,7 @@ def _policy() -> SchemaPolicy:
 
 def _write(p: Path, text: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text)
+    p.write_text(text, encoding="utf-8")
     return p
 
 
@@ -228,7 +228,7 @@ def test_translate_deps_pep440_to_conda(tmp_path):
     assert outputs["pandas"] == "pandas>=2,<3"  # source order preserved
     assert outputs["numpy"] == "numpy>=1.26,<2"  # ~=X.Y expands to a range
     assert outputs["snowflake-snowpark-python"] == "snowflake-snowpark-python"  # injected
-    data = yaml.safe_load(out.read_text())
+    data = yaml.safe_load(out.read_text(encoding="utf-8"))
     assert data["channels"] == ["snowflake"]
     assert "pandas>=2,<3" in data["dependencies"]
 
@@ -249,7 +249,7 @@ def test_translate_deps_drops_python_extras_and_markers(tmp_path):
     assert "extras" in reasons
     assert "environment marker" in reasons
     # None of the dropped specs may leak into the generated file.
-    deps = yaml.safe_load(out.read_text())["dependencies"]
+    deps = yaml.safe_load(out.read_text(encoding="utf-8"))["dependencies"]
     assert not any(d.split("=")[0] == "python" for d in deps)
     assert not any("plotly" in d or "requests" in d for d in deps)
 
@@ -290,7 +290,7 @@ def test_translate_deps_no_manifest_infers_suggestions_only(tmp_path):
     assert suggestions["altair"]["confidence"] == "high"  # imported from 2 files
     assert "helpers" not in suggestions and "os" not in suggestions
     # Default env.yml carries only the required deps — suggestions never auto-add.
-    deps = yaml.safe_load(out.read_text())["dependencies"]
+    deps = yaml.safe_load(out.read_text(encoding="utf-8"))["dependencies"]
     assert deps == ["streamlit=1.52.2", "snowflake-snowpark-python"]
 
 

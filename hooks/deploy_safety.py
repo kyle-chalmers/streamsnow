@@ -139,7 +139,7 @@ def referenced_sql(command: str, cwd: str) -> tuple[str, bool]:
         try:
             if p.is_file():
                 if p.stat().st_size <= _MAX_SCAN_BYTES:
-                    text += "\n" + p.read_text(errors="replace")
+                    text += "\n" + p.read_text(errors="replace", encoding="utf-8")
                 else:
                     unscannable = True
         except OSError:

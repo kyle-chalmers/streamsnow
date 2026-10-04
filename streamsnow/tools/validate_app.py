@@ -156,7 +156,7 @@ def _detect_runtime(app_dir: Path, default: str) -> str:
     yml = app_dir / "snowflake.yml"
     if yml.is_file():
         try:
-            data = yaml.safe_load(yml.read_text()) or {}
+            data = yaml.safe_load(yml.read_text(encoding="utf-8")) or {}
             entities = data.get("entities")
             if isinstance(entities, dict) and entities:
                 for entity in entities.values():
@@ -180,7 +180,7 @@ def _check_pyproject(app_dir: Path, container_python: str) -> list[str]:
     if not path.is_file():
         return []
     try:
-        data = tomllib.loads(path.read_text())
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
     except (tomllib.TOMLDecodeError, OSError) as exc:
         return [f"pyproject.toml is invalid TOML: {exc}"]
 
@@ -231,7 +231,7 @@ def _check_environment_yml(app_dir: Path) -> list[str]:
     if not path.is_file():
         return []
     try:
-        data = yaml.safe_load(path.read_text())
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         return [f"environment.yml is invalid YAML: {exc}"]
     if not isinstance(data, dict):
@@ -287,7 +287,7 @@ def _check_manifest(app_dir: Path, cfg: Config) -> list[str]:
     if not yml.is_file():
         return ["snowflake.yml missing"]
     try:
-        data = yaml.safe_load(yml.read_text()) or {}
+        data = yaml.safe_load(yml.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         return [f"snowflake.yml is invalid YAML: {exc}"]
 
@@ -395,7 +395,7 @@ def _check_placeholders(app_dir: Path) -> list[dict]:
             if m:
                 found.append(
                     {
-                        "file": str(path.relative_to(app_dir)),
+                        "file": path.relative_to(app_dir).as_posix(),
                         "line": text.count("\n", 0, m.start()) + 1,
                         "detail": detail,
                     }

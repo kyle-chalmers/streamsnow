@@ -226,7 +226,7 @@ def scaffold(
                 continue
             raise FileExistsError(f"{out} already exists (use --force to overwrite)")
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(env.get_template(item.template).render(**ctx))
+        out.write_text(env.get_template(item.template).render(**ctx), encoding="utf-8")
         written.append(out)
     return written
 

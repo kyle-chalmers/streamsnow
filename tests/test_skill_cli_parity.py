@@ -39,7 +39,7 @@ _SCAN_FILES = ("README.md", "CONTRIBUTING.md", "RELEASING.md")
 
 def _argparse_verbs(module) -> set[str]:
     """Names passed to `sub.add_parser("<name>", ...)` anywhere in the module."""
-    tree = ast.parse(Path(module.__file__).read_text())
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
     verbs: set[str] = set()
     for node in ast.walk(tree):
         if (
@@ -81,7 +81,7 @@ def _scan_files() -> list[Path]:
 @pytest.mark.parametrize("path", _scan_files(), ids=lambda p: str(p.relative_to(REPO_ROOT)))
 def test_every_cited_streamsnow_verb_exists(path: Path):
     verbs, subverbs = _cli_surface()
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     bad: list[str] = []
     for m in _CALL_RE.finditer(text):
         verb, second = m.group(1), m.group(2)
@@ -99,6 +99,6 @@ def test_every_cited_streamsnow_verb_exists(path: Path):
 
 def test_scan_actually_sees_verbs():
     """Guard the regex: the front-door skill must cite at least the core verbs."""
-    text = (REPO_ROOT / "skills" / "start-app" / "SKILL.md").read_text()
+    text = (REPO_ROOT / "skills" / "start-app" / "SKILL.md").read_text(encoding="utf-8")
     seen = {m.group(1) for m in _CALL_RE.finditer(text)}
     assert {"doctor", "validate-app"} <= seen

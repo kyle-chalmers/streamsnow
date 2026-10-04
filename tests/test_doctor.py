@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 from streamsnow.tools import doctor
@@ -44,6 +46,7 @@ def test_result_contract_shape(tmp_path, monkeypatch):
         "pre-commit-hook",
         "node",
         "ci-secrets",
+        *(["platform"] if sys.platform == "win32" else []),
     ]
 
 
@@ -79,14 +82,18 @@ def test_config_missing_is_optional_miss(tmp_path):
 
 
 def test_config_valid(tmp_path):
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     res = doctor.check_config(start=tmp_path)
     assert res["ok"] and res["level"] == "required"
     assert res["detail"]["schema_version"] == 1
 
 
 def test_config_invalid_is_required_failure(tmp_path):
-    (tmp_path / "streamsnow.config.yaml").write_text("project:\n  name: Acme\n")  # no snowflake
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        "project:\n  name: Acme\n", encoding="utf-8"
+    )  # no snowflake
     res = doctor.check_config(start=tmp_path)
     assert not res["ok"] and res["level"] == "required"
     assert res["detail"]["error"]
@@ -96,7 +103,7 @@ def test_main_exit_codes(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv"))
     assert doctor.main([]) == 0
-    (tmp_path / "streamsnow.config.yaml").write_text("project: {}\n")
+    (tmp_path / "streamsnow.config.yaml").write_text("project: {}\n", encoding="utf-8")
     assert doctor.main([]) == 1
     monkeypatch.setattr(doctor.shutil, "which", _which_only())
     assert doctor.main([]) == 1
@@ -156,7 +163,9 @@ def test_pre_commit_optional_without_config_required_with(tmp_path, monkeypatch)
     by_name = {r["name"]: r for r in doctor.run_checks(start=tmp_path)}
     assert not by_name["pre-commit"]["ok"] and by_name["pre-commit"]["level"] == "optional"
     assert doctor.required_ok(doctor.run_checks(start=tmp_path))
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     results = doctor.run_checks(start=tmp_path)
     by_name = {r["name"]: r for r in results}
     assert not by_name["pre-commit"]["ok"] and by_name["pre-commit"]["level"] == "required"
@@ -165,7 +174,9 @@ def test_pre_commit_optional_without_config_required_with(tmp_path, monkeypatch)
 
 
 def test_config_detail_carries_runtime_and_connection_name(tmp_path):
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     res = doctor.check_config(start=tmp_path)
     assert res["detail"]["runtime"] == "container"
     assert res["detail"]["connection_name"] == "acme"
@@ -175,7 +186,9 @@ def test_snow_connection_skipped_without_config_or_snow(tmp_path, monkeypatch):
     monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow"))
     res = doctor.check_snow_connection(doctor.check_config(start=tmp_path))
     assert not res["ok"] and res["level"] == "optional" and "skipped" in res["hint"]
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv"))
     res = doctor.check_snow_connection(doctor.check_config(start=tmp_path))
     assert not res["ok"] and res["level"] == "optional" and "snow CLI" in res["hint"]
@@ -184,7 +197,9 @@ def test_snow_connection_skipped_without_config_or_snow(tmp_path, monkeypatch):
 
 
 def test_snow_connection_found_and_missing(tmp_path, monkeypatch):
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow"))
     cfg = doctor.check_config(start=tmp_path)
     monkeypatch.setattr(
@@ -204,7 +219,9 @@ def test_snow_connection_found_and_missing(tmp_path, monkeypatch):
 
 
 def test_snow_connection_never_runs_connection_test(tmp_path, monkeypatch):
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow"))
     seen: list[list[str]] = []
 
@@ -218,7 +235,9 @@ def test_snow_connection_never_runs_connection_test(tmp_path, monkeypatch):
 
 
 def test_snow_checks_never_raise_on_timeout_or_garbage(tmp_path, monkeypatch):
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow", "pre-commit"))
     monkeypatch.chdir(tmp_path)
 
@@ -251,7 +270,7 @@ def test_no_snowflake_cli_labs_anywhere():
         *sorted((REPO_ROOT / "streamsnow" / "_templates" / "repo").glob("deploy*.yml.j2")),
         REPO_ROOT / "skills" / "start-app" / "setup.md",
     ]
-    offenders = [str(p) for p in targets if "snowflake-cli-labs" in p.read_text()]
+    offenders = [str(p) for p in targets if "snowflake-cli-labs" in p.read_text(encoding="utf-8")]
     assert not offenders, offenders
 
 
@@ -343,7 +362,9 @@ def test_snow_version_outcomes_ok_timeout_and_import_error(monkeypatch):
 def test_snow_timeout_still_runs_the_connection_checks(tmp_path, monkeypatch):
     """A `snow --version` that only timed out must not cascade into skipped
     connection checks: the listing usually answers once the cold start is over."""
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow", "pre-commit"))
     rows = json.dumps(_key_rows(authenticator="SNOWFLAKE_JWT", private_key_file="/k.p8"))
     seen: list = []
@@ -359,7 +380,9 @@ def test_snow_timeout_still_runs_the_connection_checks(tmp_path, monkeypatch):
 
 
 def test_snow_that_stays_silent_says_the_connection_checks_were_not_checked(tmp_path, monkeypatch):
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow", "pre-commit"))
     seen: list = []
     script = {_VERSION: _cold_start(), _LIST: _cold_start()}
@@ -378,7 +401,9 @@ def test_snow_that_stays_silent_says_the_connection_checks_were_not_checked(tmp_
 
 
 def test_snow_probes_wait_out_a_cold_start_and_local_probes_stay_short(tmp_path, monkeypatch):
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow", "pre-commit"))
     seen: list = []
     script = {_VERSION: (0, "Snowflake CLI version: 3.27.0"), _LIST: (0, "[]")}
@@ -410,7 +435,9 @@ def test_gh_is_an_optional_check_that_names_ship_app(tmp_path, monkeypatch):
 
 
 def _container_cfg(tmp_path):
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     return doctor.check_config(start=tmp_path)
 
 
@@ -433,9 +460,9 @@ def test_container_repo_warns_without_a_python_311(tmp_path, monkeypatch):
 def test_container_python_skipped_outside_container_repos(tmp_path, monkeypatch):
     res = doctor.check_container_python(doctor.check_config(start=tmp_path))
     assert not res["ok"] and "skipped" in res["detail"]
-    data = EXAMPLE.read_text().replace("runtime: container", "runtime: warehouse")
+    data = EXAMPLE.read_text(encoding="utf-8").replace("runtime: container", "runtime: warehouse")
     data = data.replace('compute_pool: "SYSTEM_COMPUTE_POOL_CPU"', 'compute_pool: ""')
-    (tmp_path / "streamsnow.config.yaml").write_text(data)
+    (tmp_path / "streamsnow.config.yaml").write_text(data, encoding="utf-8")
     res = doctor.check_container_python(doctor.check_config(start=tmp_path))
     assert "skipped" in res["detail"]
 
@@ -492,7 +519,9 @@ def test_snow_key_file_skips_without_snow_or_a_default_connection(monkeypatch):
 
 
 def test_run_checks_lists_snow_connections_once(tmp_path, monkeypatch):
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv", "snow"))
     seen: list[tuple[str, ...]] = []
     rows = json.dumps(_key_rows(authenticator="SNOWFLAKE_JWT", private_key_file="/k.p8"))
@@ -510,7 +539,9 @@ def test_run_checks_lists_snow_connections_once(tmp_path, monkeypatch):
 def test_snow_connection_hint_points_at_an_existing_default_before_adding_one(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     cfg = doctor.check_config(start=tmp_path)
     rows = [{"connection_name": "tutorial", "is_default": True}]
     monkeypatch.setattr(doctor.shutil, "which", _which_only("snow"))
@@ -533,7 +564,9 @@ _ALL_SECRETS = [{"name": n} for n in doctor.CI_SECRET_NAMES]
 
 
 def _configured(tmp_path: Path) -> dict:
-    (tmp_path / "streamsnow.config.yaml").write_text(EXAMPLE.read_text())
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     return doctor.check_config(start=tmp_path)
 
 
@@ -550,7 +583,7 @@ def test_repo_files_missing_is_required_and_names_the_fix(tmp_path):
     assert "streamsnow init --no-starter-app" in res["hint"]
     for rel in res["detail"]["missing"]:
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / rel).write_text("x")
+        (tmp_path / rel).write_text("x", encoding="utf-8")
     assert doctor.check_repo_files(start=tmp_path)["ok"]
 
 
@@ -615,12 +648,15 @@ def test_pre_commit_hook_must_be_pre_commits_own(tmp_path, monkeypatch):
     cfg = _configured(tmp_path)
     hook = tmp_path / "hooks" / "pre-commit"
     hook.parent.mkdir()
-    hook.write_text("#!/bin/sh\necho some other hook\n")
+    hook.write_text("#!/bin/sh\necho some other hook\n", encoding="utf-8")
     _hook_run(monkeypatch, str(hook))
     res = doctor.check_pre_commit_hook(cfg)
     assert not res["ok"] and res["level"] == "required"
     assert "pre-commit.legacy" in res["hint"]  # install keeps and still runs the old hook
-    hook.write_text("#!/usr/bin/env bash\n# File generated by pre-commit: https://pre-commit.com\n")
+    hook.write_text(
+        "#!/usr/bin/env bash\n# File generated by pre-commit: https://pre-commit.com\n",
+        encoding="utf-8",
+    )
     hook.chmod(0o755)
     assert doctor.check_pre_commit_hook(cfg)["ok"]
 
@@ -628,7 +664,9 @@ def test_pre_commit_hook_must_be_pre_commits_own(tmp_path, monkeypatch):
 def test_pre_commit_hook_resolves_a_relative_hooks_path_against_the_repo(tmp_path, monkeypatch):
     cfg = _configured(tmp_path)
     (tmp_path / ".githooks").mkdir()
-    (tmp_path / ".githooks" / "pre-commit").write_text("# File generated by pre-commit\n")
+    (tmp_path / ".githooks" / "pre-commit").write_text(
+        "# File generated by pre-commit\n", encoding="utf-8"
+    )
     (tmp_path / ".githooks" / "pre-commit").chmod(0o755)
     _hook_run(monkeypatch, ".githooks/pre-commit\n")  # core.hooksPath, older git
     assert doctor.check_pre_commit_hook(cfg)["ok"]
@@ -705,7 +743,9 @@ def test_ci_secret_names_match_the_deploy_workflow_templates():
 
     templates = REPO_ROOT / "streamsnow" / "_templates" / "repo"
     for name in ("deploy.yml.j2", "deploy.git.yml.j2"):
-        used = set(re.findall(r"secrets\.(SNOWFLAKE_\w+)", (templates / name).read_text()))
+        used = set(
+            re.findall(r"secrets\.(SNOWFLAKE_\w+)", (templates / name).read_text(encoding="utf-8"))
+        )
         assert used == set(doctor.CI_SECRET_NAMES) | set(doctor.OPTIONAL_CI_SECRET_NAMES), name
 
 
@@ -722,10 +762,17 @@ def test_pre_commit_hook_must_be_executable(tmp_path, monkeypatch):
     cfg = _configured(tmp_path)
     hook = tmp_path / "hooks" / "pre-commit"
     hook.parent.mkdir()
-    hook.write_text("#!/usr/bin/env bash\n# File generated by pre-commit: https://pre-commit.com\n")
+    hook.write_text(
+        "#!/usr/bin/env bash\n# File generated by pre-commit: https://pre-commit.com\n",
+        encoding="utf-8",
+    )
     hook.chmod(0o644)
     _hook_run(monkeypatch, str(hook))
     res = doctor.check_pre_commit_hook(cfg)
+    if os.name == "nt":
+        # No executable bit on Windows; git runs the hook regardless.
+        assert res["ok"]
+        return
     assert not res["ok"] and res["level"] == "required"
     assert "pre-commit install" in res["hint"]
     hook.chmod(0o755)

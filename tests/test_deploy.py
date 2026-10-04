@@ -32,13 +32,13 @@ GIT_DEPLOY = {
 
 
 def _git_cfg(**deploy) -> Config:
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["deploy"] = {**GIT_DEPLOY, **deploy}
     return Config.from_dict(data)
 
 
 def _cfg(**overrides) -> Config:
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     for k, v in overrides.items():
         data[k] = v
     return Config.from_dict(data)
@@ -63,7 +63,7 @@ def test_stage_copy_container_create_sql():
 
 
 def test_warehouse_create_sql_has_no_runtime_alter():
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["runtime"] = "warehouse"
     data["snowflake"]["objects"]["compute_pool"] = ""
     data["snowflake"]["objects"]["external_access_integration"] = ""
@@ -94,7 +94,7 @@ def test_setup_sql_per_source():
     stage = generate_setup_sql(_cfg())
     assert "CREATE STAGE IF NOT EXISTS STREAMSNOW_APPS.DASHBOARDS.STREAMSNOW_CODE_STAGE" in stage
 
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["deploy"] = {
         "source": "git-repository",
         "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
@@ -256,7 +256,7 @@ def test_admin_sql_creates_every_object_a_first_deploy_needs():
 
 
 def test_admin_sql_container_objects_custom_pool():
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["snowflake"]["objects"]["compute_pool"] = "STREAMLIT_POOL"  # a pool you create
     sql = generate_admin_sql(Config.from_dict(data))
     acct = _stmts(_sections(sql)["ACCOUNTADMIN"])
@@ -270,7 +270,7 @@ def test_admin_sql_container_objects_custom_pool():
 
 
 def test_admin_sql_system_pool_is_never_created():
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["snowflake"]["objects"]["compute_pool"] = "SYSTEM_COMPUTE_POOL_CPU"
     sql = generate_admin_sql(Config.from_dict(data))
     assert "CREATE COMPUTE POOL" not in _stmts(sql)
@@ -285,7 +285,7 @@ def test_admin_sql_system_pool_is_never_created():
 
 
 def test_admin_sql_warehouse_runtime_has_no_container_objects():
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["runtime"] = "warehouse"
     data["snowflake"]["objects"]["compute_pool"] = ""
     data["snowflake"]["objects"]["external_access_integration"] = ""
@@ -294,7 +294,7 @@ def test_admin_sql_warehouse_runtime_has_no_container_objects():
 
 
 def test_admin_sql_shared_database_uses_imported_privileges():
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["governance"]["database"] = "SNOWFLAKE_SAMPLE_DATA"
     data["governance"]["schema_allow"] = ["TPCH_SF1"]
     sql = generate_admin_sql(Config.from_dict(data))
@@ -307,7 +307,7 @@ def test_admin_sql_shared_database_uses_imported_privileges():
 
 
 def test_admin_sql_git_repository_source():
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["deploy"] = {
         "source": "git-repository",
         "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
@@ -350,7 +350,7 @@ def test_cli_deploy_setup_admin_flag(tmp_path):
     from streamsnow.cli import app
 
     cfg = tmp_path / "streamsnow.config.yaml"
-    cfg.write_text(EXAMPLE.read_text())
+    cfg.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
     res = CliRunner().invoke(app, ["deploy-setup", "--admin", "--config", str(cfg)])
     assert res.exit_code == 0, res.output
     assert "USE ROLE USERADMIN;" in res.output
@@ -368,8 +368,8 @@ def _cli(*args: str):
 
 def test_cli_deploy_setup_source_override_previews_without_touching_config(tmp_path):
     cfg = tmp_path / "streamsnow.config.yaml"
-    cfg.write_text(EXAMPLE.read_text())
-    before = cfg.read_text()
+    cfg.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+    before = cfg.read_text(encoding="utf-8")
     res = _cli(
         "deploy-setup", "--admin", "--source", "git-repository", "--git-origin", ORIGIN,
         "--config", str(cfg),
@@ -378,7 +378,7 @@ def test_cli_deploy_setup_source_override_previews_without_touching_config(tmp_p
     assert res.output.startswith("-- PREVIEW of the git-repository deploy source.")
     assert "Your config uses stage-copy" in res.output
     assert generate_admin_sql(_git_cfg()) in res.output
-    assert cfg.read_text() == before
+    assert cfg.read_text(encoding="utf-8") == before
     # Without the override, the stage-copy output carries no preview banner.
     plain = _cli("deploy-setup", "--admin", "--config", str(cfg))
     assert plain.exit_code == 0, plain.output
@@ -388,7 +388,7 @@ def test_cli_deploy_setup_source_override_previews_without_touching_config(tmp_p
 
 def test_cli_deploy_setup_git_override_without_an_origin_exits_2(tmp_path):
     cfg = tmp_path / "streamsnow.config.yaml"
-    cfg.write_text(EXAMPLE.read_text())
+    cfg.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
     res = _cli("deploy-setup", "--source", "git-repository", "--config", str(cfg))
     assert res.exit_code == 2
     assert "--git-origin" in res.output
@@ -397,10 +397,10 @@ def test_cli_deploy_setup_git_override_without_an_origin_exits_2(tmp_path):
 def test_cli_deploy_sql_refresh_is_a_no_op_for_old_workflows(tmp_path):
     """Workflows rendered before 0.7.4 still run `deploy-sql --refresh` and pipe
     it to `snow sql ... || true`; it must print SQL that runs nothing."""
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["deploy"] = GIT_DEPLOY
     cfg = tmp_path / "streamsnow.config.yaml"
-    cfg.write_text(yaml.safe_dump(data))
+    cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
     res = _cli("deploy-sql", "my-app", "--refresh", "--config", str(cfg))
     assert res.exit_code == 0, res.output
     lines = [ln for ln in res.output.splitlines() if ln.strip()]
@@ -427,7 +427,7 @@ def test_admin_sql_viewer_role_gets_no_data_grants_by_default():
 
 
 def test_admin_sql_shared_database_imported_privileges_ci_role_only():
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["governance"]["database"] = "SNOWFLAKE_SAMPLE_DATA"
     sql = generate_admin_sql(Config.from_dict(data))
     stmts = _stmts(sql)
