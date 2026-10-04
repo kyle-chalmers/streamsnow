@@ -146,6 +146,25 @@ def test_guard_reads_sql_piped_from_get_content(tmp_path):
         assert _asks(_run_guard(command, project, tool="PowerShell")), command
 
 
+def test_guard_reads_quoted_and_optioned_sql_file_arguments(tmp_path):
+    """A quoted path with a space, or an option before the path, once hid the
+    file (the pattern captured `"deploy` or `-Raw` as the filename)."""
+    project = _project(tmp_path)
+    for name in ("deploy.sql", "deploy script.sql"):
+        (project / name).write_text("DROP TABLE acme.orders;\n", encoding="utf-8")
+    cases = [
+        ('Get-Content "deploy script.sql" | snow sql --stdin', "PowerShell"),
+        ("Get-Content 'deploy script.sql' | snow sql --stdin", "PowerShell"),
+        ("Get-Content -Raw deploy.sql | snow sql --stdin", "PowerShell"),
+        ("Get-Content -Encoding utf8 -Path deploy.sql | snow sql --stdin", "PowerShell"),
+        ('gc -Raw -LiteralPath "deploy script.sql" | snow.exe sql --stdin', "PowerShell"),
+        ('snow sql -f "deploy script.sql"', "Bash"),
+        ("snow sql --filename='deploy script.sql'", "Bash"),
+    ]
+    for command, tool in cases:
+        assert _asks(_run_guard(command, project, tool=tool)), command
+
+
 def test_guard_reads_a_utf8_payload_whatever_the_stdin_default(tmp_path):
     """Windows pipes default to cp1252; a UTF-8 payload with a character cp1252
     cannot decode (here "Ł") made the guard bail out silently."""

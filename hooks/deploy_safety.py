@@ -99,13 +99,15 @@ STREAMLIT_DESTRUCTIVE: list[dict[str, str]] = [
 ]
 
 # SQL can live in a file (-f/--file) or a stdin redirect (`psql db < deploy.sql`).
-_FILE_FLAG = re.compile(r"(?:-f|-i|--file|--filename|--input-file|--query)[=\s]+([^\s;|&]+)")
+# One shell argument: a double- or single-quoted string (spaces allowed), or a bare word.
+_ARG = r"(\"[^\"]*\"|'[^']*'|[^\s;|&]+)"
+_FILE_FLAG = re.compile(rf"(?:-f|-i|--file|--filename|--input-file|--query)[=\s]+{_ARG}")
 _STDIN_REDIR = re.compile(r"<\s*([^\s;|&<>]+)")
 # PowerShell has no `<`; SQL is piped in: `Get-Content deploy.sql | snow sql --stdin`.
-_PIPED_FILE = re.compile(
-    r"\b(?:Get-Content|gc|cat|type)\s+(?:-(?:Path|LiteralPath)\s+)?([^\s;|&]+)",
-    re.IGNORECASE,
-)
+# Options can come first (`-Raw`, `-Encoding utf8 -Path x`), so every non-option
+# argument before the pipe is a candidate file; only one that exists is read.
+_PIPED_SOURCE = re.compile(r"\b(?:Get-Content|gc|cat|type)\b([^|;&]*)", re.IGNORECASE)
+_ARG_TOKEN = re.compile(_ARG)
 _MAX_SCAN_BYTES = 2_000_000
 
 
@@ -152,9 +154,13 @@ def referenced_sql(command: str, cwd: str) -> tuple[str, bool]:
     """
     text = ""
     unscannable = False
-    for raw in (
-        _FILE_FLAG.findall(command) + _STDIN_REDIR.findall(command) + _PIPED_FILE.findall(command)
-    ):
+    piped = [
+        token
+        for segment in _PIPED_SOURCE.findall(command)
+        for token in _ARG_TOKEN.findall(segment)
+        if not token.startswith("-")
+    ]
+    for raw in _FILE_FLAG.findall(command) + _STDIN_REDIR.findall(command) + piped:
         raw = raw.strip("'\"")  # `-f "deploy.sql"` -> deploy.sql
         if not raw:
             continue
