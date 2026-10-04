@@ -27,9 +27,9 @@ All notable changes to StreamSnow are recorded here. This project follows
 ### Changed
 
 - **The admin script is safe to re-run end to end.** The PyPI external access
-  integration, which Snowflake cannot create with `IF NOT EXISTS`, is created
-  inside an `EXECUTE IMMEDIATE` block that skips it when it already exists
-  instead of replacing it under live apps.
+  integration, which Snowflake cannot create with `IF NOT EXISTS`, now uses
+  `CREATE OR REPLACE` followed by the CI role's `USAGE` grant. A deployed app
+  kept serving through a replace in a live test.
 - **The admin script grants the viewer role to whoever runs it**, through
   `CURRENT_USER()`, instead of leaving a commented `GRANT` to fill in.
 

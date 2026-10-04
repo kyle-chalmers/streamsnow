@@ -41,9 +41,11 @@ CI user's key is re-applied with `ALTER USER`, so running the script again after
 rotating the key, or just to check, changes nothing else. Snowflake has no
 `IF NOT EXISTS` for `CREATE EXTERNAL ACCESS INTEGRATION`
 ([syntax](https://docs.snowflake.com/en/sql-reference/sql/create-external-access-integration)),
-and `OR REPLACE` would swap the integration out from under deployed apps, so the
-script creates it inside an `EXECUTE IMMEDIATE` block that skips it when it
-already exists and still fails on any other error.
+so the script uses `CREATE OR REPLACE` and re-grants `USAGE` to the CI role on
+the next line. A deployed app keeps working when its integration is replaced:
+tested live, it kept serving, and a redeploy against the replaced integration
+passed `verify-deploy`. The cost is that grants or settings someone added to
+the integration by hand are reset on each run, so manage it through this script.
 
 Two things to check before running it:
 

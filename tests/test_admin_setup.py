@@ -103,7 +103,9 @@ _RERUN_SAFE = (
         re.S,
     ),  # fmt: skip
     re.compile(r"^ALTER USER IF EXISTS \w+ SET RSA_PUBLIC_KEY = '[A-Za-z0-9+/=]+';$"),
-    re.compile(r"^EXECUTE IMMEDIATE \$\$\nBEGIN\n  CREATE EXTERNAL ACCESS INTEGRATION ", re.S),
+    # No IF NOT EXISTS exists for EAIs; replacing is safe for live apps and the
+    # CI role's grant follows (see test_eai_is_replaced_then_regranted).
+    re.compile(r"^CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION ", re.S),
 )
 
 
@@ -128,7 +130,8 @@ def test_every_admin_statement_is_safe_to_rerun(cfg, key):
     assert stmts
     for stmt in stmts:
         assert any(p.match(stmt) for p in _RERUN_SAFE), f"not re-run safe:\n{stmt}"
-        assert "OR REPLACE" not in stmt, stmt
+        if "OR REPLACE" in stmt:
+            assert stmt.startswith("CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION"), stmt
 
 
 def test_default_output_changes_only_where_intended():
@@ -137,16 +140,17 @@ def test_default_output_changes_only_where_intended():
     new = _statements(generate_admin_sql(_cfg()))
     removed = [s for s in old if s not in new]
     added = [s for s in new if s not in old]
-    assert removed == [
-        "CREATE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION\n"
+    body = (
+        " EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION\n"
         "  ALLOWED_NETWORK_RULES = (snowflake.external_access.pypi_rule)\n"
         "  ENABLED = TRUE;"
-    ]
-    assert added[:2] == [
+    )
+    assert removed == ["CREATE" + body]
+    assert added == [
         "SET streamsnow_me = '\"' || CURRENT_USER() || '\"';",
         "GRANT ROLE STREAMSNOW_VIEWER_ROLE TO USER IDENTIFIER($streamsnow_me);",
+        "CREATE OR REPLACE" + body,
     ]
-    assert len(added) == 3 and added[2].startswith("EXECUTE IMMEDIATE $$")
     # Every other statement is identical and in the same order.
     assert [s for s in old if s in new] == [s for s in new if s in old]
 
@@ -250,26 +254,26 @@ def test_admin_only_flags_need_admin(flag):
 
 
 # --------------------------------------------------------------------------- #
-# External access integration: created once, never replaced
+# External access integration: replaced on a re-run, then re-granted
 # --------------------------------------------------------------------------- #
 
 
-def test_eai_create_is_guarded_and_still_granted():
+def test_eai_is_replaced_then_regranted():
     stmts = _statements(generate_admin_sql(_cfg()))
-    block = next(s for s in stmts if s.startswith("EXECUTE IMMEDIATE $$"))
-    assert "CREATE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION" in block
-    assert "IF NOT EXISTS" not in block  # Snowflake has no such clause for EAIs
-    assert "WHEN STATEMENT_ERROR THEN" in block
-    assert "IF (SQLCODE = 2002 OR SQLSTATE = '42710') THEN RETURN 'already exists';" in block
-    assert "ELSE RAISE;" in block
-    bare = [s for s in stmts if s.startswith("CREATE EXTERNAL ACCESS INTEGRATION")]
-    assert bare == []
+    eai = [s for s in stmts if "EXTERNAL ACCESS INTEGRATION" in s and s.startswith("CREATE")]
+    assert len(eai) == 1
+    assert eai[0].startswith(
+        "CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION"
+    )
+    assert "IF NOT EXISTS" not in eai[0]  # Snowflake has no such clause for EAIs
+    # OR REPLACE drops the integration's grants, so the CI role's must follow it.
     grant = "GRANT USAGE ON INTEGRATION PYPI_ACCESS_INTEGRATION TO ROLE STREAMSNOW_DEPLOY_ROLE;"
-    assert stmts.index(grant) > stmts.index(block)
+    assert stmts.index(grant) > stmts.index(eai[0])
 
 
-def test_warehouse_runtime_has_no_eai_block():
-    assert "EXECUTE IMMEDIATE" not in generate_admin_sql(_cfg(runtime="warehouse"))
+def test_warehouse_runtime_has_no_eai():
+    stmts = _statements(generate_admin_sql(_cfg(runtime="warehouse")))
+    assert not any("EXTERNAL ACCESS INTEGRATION" in s for s in stmts)
 
 
 # --------------------------------------------------------------------------- #

@@ -260,7 +260,7 @@ def test_admin_sql_container_objects_custom_pool():
     data["snowflake"]["objects"]["compute_pool"] = "STREAMLIT_POOL"  # a pool you create
     sql = generate_admin_sql(Config.from_dict(data))
     acct = _stmts(_sections(sql)["ACCOUNTADMIN"])
-    assert "CREATE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION" in acct
+    assert "CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION PYPI_ACCESS_INTEGRATION" in acct
     assert "snowflake.external_access.pypi_rule" in acct
     assert (
         "GRANT USAGE ON INTEGRATION PYPI_ACCESS_INTEGRATION TO ROLE STREAMSNOW_DEPLOY_ROLE;" in acct

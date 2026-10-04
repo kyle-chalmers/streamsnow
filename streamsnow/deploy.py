@@ -270,9 +270,6 @@ def ci_user_name(ci_role: str) -> str:
 
 _PEM_PUBLIC_HEADER = "-----BEGIN PUBLIC KEY-----"
 _PEM_PUBLIC_FOOTER = "-----END PUBLIC KEY-----"
-# Snowflake's "object already exists" error: code 002002, SQLSTATE 42710.
-_ALREADY_EXISTS_SQLCODE = 2002
-_ALREADY_EXISTS_SQLSTATE = "42710"
 # Roles Snowflake provides; teardown must never name one in a DROP.
 _SYSTEM_ROLES = ("ACCOUNTADMIN", "ORGADMIN", "SECURITYADMIN", "SYSADMIN", "USERADMIN", "PUBLIC")
 
@@ -307,31 +304,6 @@ def read_public_key(path: Path) -> str:
     return body
 
 
-def _guarded_eai(eai: str) -> list[str]:
-    """``CREATE EXTERNAL ACCESS INTEGRATION`` that a re-run skips.
-
-    Snowflake has no ``IF NOT EXISTS`` for this statement, and ``OR REPLACE``
-    would swap the integration out from under deployed apps. The block creates
-    it once and swallows only the "already exists" error; anything else
-    still fails the script.
-    """
-    return [
-        "EXECUTE IMMEDIATE $$",
-        "BEGIN",
-        f"  CREATE EXTERNAL ACCESS INTEGRATION {eai}",
-        "    ALLOWED_NETWORK_RULES = (snowflake.external_access.pypi_rule)",
-        "    ENABLED = TRUE;",
-        "EXCEPTION",
-        "  WHEN STATEMENT_ERROR THEN",
-        f"    IF (SQLCODE = {_ALREADY_EXISTS_SQLCODE} OR SQLSTATE = '{_ALREADY_EXISTS_SQLSTATE}') "
-        "THEN RETURN 'already exists';",
-        "    ELSE RAISE;",
-        "    END IF;",
-        "END;",
-        "$$;",
-    ]
-
-
 def generate_admin_sql(
     cfg: Config,
     *,
@@ -350,7 +322,7 @@ def generate_admin_sql(
     and the CI role creates what it will own. Safe to re-run: objects use
     ``IF NOT EXISTS``, grants are idempotent, the CI user's key is re-applied
     with ``ALTER USER``, and the external access integration (which has no
-    ``IF NOT EXISTS``) is created inside a block that skips it when present.
+    ``IF NOT EXISTS``) is replaced with ``OR REPLACE`` and re-granted.
 
     ``public_key`` (the base64 body from :func:`read_public_key`) fills the CI
     user's ``RSA_PUBLIC_KEY``; without it the placeholder stays for a human to
@@ -505,9 +477,12 @@ def generate_admin_sql(
             "-- PyPI access for the container image build. Uses Snowflake's managed",
             "-- network rule for PyPI. If your account prefers an artifact repository,",
             "-- skip this: configuring both disables the EAI.",
-            "-- Snowflake has no IF NOT EXISTS for this statement, so the block below creates",
-            "-- it once and skips it on a re-run (OR REPLACE would swap it under live apps).",
-            *_guarded_eai(eai),
+            "-- Snowflake has no IF NOT EXISTS for this statement, so a re-run replaces it;",
+            "-- deployed apps keep working (verified live), and the GRANT below restores",
+            "-- the CI role's usage. Grants or settings added to it by hand are reset.",
+            f"CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION {eai}",
+            "  ALLOWED_NETWORK_RULES = (snowflake.external_access.pypi_rule)",
+            "  ENABLED = TRUE;",
             "-- Without the managed rule, create your own and list it above instead:",
             f"--   CREATE NETWORK RULE {app_schema}.PYPI_NETWORK_RULE MODE = EGRESS TYPE = HOST_PORT",
             "--     VALUE_LIST = ('pypi.org', 'files.pythonhosted.org');",
