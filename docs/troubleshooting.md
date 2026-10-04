@@ -168,10 +168,17 @@ caught it. Runtime-specific facts link to the official page in
 
 ### 15. Git-repository deploy shows stale or no content
 
-- **Symptom:** the app opens blank after a fetch.
+- **Symptom:** the app opens blank, shows an older version, or verify-deploy
+  fails `version-source` with a `last_version_git_commit_hash` that is not the
+  merged commit.
 - **Cause:** a Streamlit created `FROM @repo/…` needs `ADD LIVE VERSION FROM
-  LAST`; repositories over 2 GB are unsupported ([Git overview](https://docs.snowflake.com/en/developer-guide/git/git-overview)).
-- **Fix:** `streamsnow deploy-sql <slug> --refresh` emits the refresh statements.
+  LAST` before it serves; the fetch did not run or did not pick up the merge;
+  or a deploy workflow rendered before 0.7.4 is still in use (it skips the
+  commit check, so it can pass while stale). Repositories over 2 GB are
+  unsupported ([Git overview](https://docs.snowflake.com/en/developer-guide/git/git-overview)).
+- **Fix:** re-render the workflow (`streamsnow update --apply`) so each deploy
+  runs `snow git fetch` and then `CREATE OR REPLACE STREAMLIT` (from
+  `streamsnow deploy-sql <slug>`), which ends with the live-version statement.
 
 ### 19. Every CI deploy fails with `Connection default is not configured`
 

@@ -17,3 +17,10 @@ from streamsnow import cli
 @pytest.fixture(autouse=True)
 def _no_real_snow_connections(monkeypatch):
     monkeypatch.setattr(cli, "_snow_connections", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_git_origin(monkeypatch):
+    # `deploy-setup --source git-repository` falls back to the checkout's origin
+    # remote; the suite runs inside StreamSnow's own checkout, so stub it.
+    monkeypatch.setattr(cli, "_checkout_github_origin", lambda: None)

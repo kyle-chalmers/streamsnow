@@ -31,13 +31,15 @@ from .config import (
     Config,
     ConfigError,
     load_config,
+    normalize_account,
+    validate_github_origin,
 )
 from .deploy import (
     generate_admin_sql,
     generate_create_sql,
-    generate_refresh_sql,
     generate_setup_sql,
     stage_path,
+    with_source,
 )
 from .scaffolder import (
     APP_ITEMS,
@@ -193,8 +195,19 @@ def _detect_connection_name(account: str, slug: str) -> str:
     return slug
 
 
-def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -> dict:
-    """Interactive setup wizard: detect first, ask at most 5 questions.
+def _split_schemas(value: str) -> list[str]:
+    return [s.strip() for s in value.split(",") if s.strip()]
+
+
+# The five wizard questions, as the keys ``_prompt_config``'s ``given`` accepts
+# (``deny_schemas`` and ``connection`` are extra answers the wizard never asks).
+_QUESTIONS = ("runtime", "account", "database", "schemas", "deploy_source")
+
+
+def _prompt_config(
+    prefill: dict | None = None, directory: Path | None = None, given: dict | None = None
+) -> dict:
+    """Setup wizard: detect first, ask at most 5 questions.
 
     Only the values nothing can detect or default are asked — runtime, account,
     the governed database, the allowed schemas, and the deploy source.
@@ -203,38 +216,72 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
     config being updated), its values become the defaults everywhere — and the
     result is deep-merged over the prefill so hand-edited keys the wizard
     doesn't ask about survive the rewrite.
+
+    ``given`` holds answers passed as flags (``_QUESTIONS`` plus
+    ``deny_schemas`` and ``connection``); each one replaces its prompt, so the
+    same answers build the same dict whether typed or passed. All five given
+    means no prompt fires (the non-interactive path ``/start-app --setup`` uses).
     """
-    console.print(
-        "[bold]StreamSnow setup[/] — 5 questions (Enter accepts the default);\n"
-        "everything else is written as an editable, commented default.\n"
-    )
+    given = {k: v for k, v in (given or {}).items() if v is not None}
+    left = sum(1 for q in _QUESTIONS if q not in given)
+    if left == len(_QUESTIONS):
+        console.print(
+            "[bold]StreamSnow setup[/] — 5 questions (Enter accepts the default);\n"
+            "everything else is written as an editable, commented default.\n"
+        )
+    elif left:
+        console.print(
+            f"[bold]StreamSnow setup:[/] {5 - left} answers from flags, {left} "
+            "question(s) left (Enter accepts the default).\n"
+        )
+    else:
+        console.print(
+            "[bold]StreamSnow setup:[/] all 5 answers from flags; everything else is\n"
+            "written as an editable, commented default.\n"
+        )
     p = typer.prompt
     # Detected / defaulted (never asked; prefill wins so hand-edits survive).
     dir_slug = _slugify(directory.name) if directory is not None else "my-dashboards"
     slug = _pf(prefill, "project.slug", dir_slug)
     name = _pf(prefill, "project.name", slug.replace("-", " ").title())
     # The five questions.
-    runtime = _prompt_choice("Runtime", RUNTIMES, _pf(prefill, "runtime", "container"))
-    account = p(
+    runtime = given.get("runtime") or _prompt_choice(
+        "Runtime", RUNTIMES, _pf(prefill, "runtime", "container")
+    )
+    account = given.get("account") or p(
         "Snowflake account locator (no .snowflakecomputing.com)",
         default=_pf(prefill, "snowflake.account", None),
     )
-    # The snow connection: the default one when it opens this account, else the slug
-    # (see _detect_connection_name). snow is only asked when the config does not
-    # already name a connection; missing or broken snow falls back to the slug.
-    connection_name = _pf(prefill, "snowflake.connection_name", None)
+    # The snow connection: the one named by --connection, else the default one when
+    # it opens this account, else the slug (see _detect_connection_name). snow is
+    # only asked when the config does not already name a connection; missing or
+    # broken snow falls back to the slug.
+    connection_name = given.get("connection") or _pf(prefill, "snowflake.connection_name", None)
     if connection_name is None:
         connection_name = _detect_connection_name(account, slug)
-    gov_db = p(
+    gov_db = given.get("database") or p(
         "Database your apps query", default=_pf(prefill, "governance.database", "ANALYTICS_DB")
     )
-    allow = p(
+    allow = given.get("schemas") or p(
         "Schemas apps may query (comma-separated)",
         default=",".join(_pf(prefill, "governance.schema_allow", ["ANALYTICS", "REPORTING"])),
     )
-    source = _prompt_choice(
+    source = given.get("deploy_source") or _prompt_choice(
         "Deploy source", DEPLOY_SOURCES, _pf(prefill, "deploy.source", "stage-copy")
     )
+    if "deny_schemas" in given:
+        deny = _split_schemas(given["deny_schemas"])
+    else:
+        deny = _pf(prefill, "governance.schema_deny", ["RAW", "STAGING"])
+    if given:
+        # Flags can meet a default or prefilled list they never named (--schemas RAW
+        # against the RAW,STAGING default), so check the lists that will be written.
+        both = {s.upper() for s in _split_schemas(allow)} & {s.upper() for s in deny}
+        if both:
+            raise ConfigError(
+                f"schema(s) {', '.join(sorted(both))} are both allowed and denied; "
+                "drop them from --schemas or set --deny-schemas."
+            )
     # Everything below ships as a commented default in the written file.
     app_db = _pf(prefill, "snowflake.objects.app_database", "STREAMSNOW_APPS")
     app_schema = _pf(prefill, "snowflake.objects.app_schema", "DASHBOARDS")
@@ -284,8 +331,8 @@ def _prompt_config(prefill: dict | None = None, directory: Path | None = None) -
         },
         "governance": {
             "database": gov_db,
-            "schema_allow": [s.strip() for s in allow.split(",") if s.strip()],
-            "schema_deny": _pf(prefill, "governance.schema_deny", ["RAW", "STAGING"]),
+            "schema_allow": _split_schemas(allow),
+            "schema_deny": deny,
         },
         "deploy": deploy,
     }
@@ -313,7 +360,7 @@ _DEFAULT_COMMENTS: dict[str, str] = {
     "deploy.git_branch": "branch the deploy tracks",
     "deploy.api_integration_name": "TODO: confirm before first deploy",
     "deploy.secret_name": "TODO: confirm before first deploy",
-    "deploy.github_auth_mode": "pat or github-app",
+    "deploy.github_auth_mode": "pat | github-app | public (a public repo needs no token)",
 }
 
 
@@ -362,13 +409,126 @@ def _render_config_yaml(cfg_dict: dict) -> str:
 
 
 def _resolve_config(
-    config: Path | None, prefill: dict | None, directory: Path | None = None
+    config: Path | None,
+    prefill: dict | None,
+    directory: Path | None = None,
+    given: dict | None = None,
 ) -> tuple[Config, str]:
     """Return (validated Config, YAML text to persist). Raises ConfigError."""
     if config is not None:
         return load_config(config), Path(config).read_text()
-    cfg_dict = _prompt_config(prefill, directory)
+    cfg_dict = _prompt_config(prefill, directory, given)
     return Config.from_dict(cfg_dict), _render_config_yaml(cfg_dict)
+
+
+# Help text for the answer flags, shared by `init` and `configure`.
+_ANSWER_HELP = {
+    "runtime": f"Wizard answer: runtime ({' | '.join(RUNTIMES)}).",
+    "account": "Wizard answer: Snowflake account locator (no .snowflakecomputing.com).",
+    "connection": "Read the account from this snow connection (never printed) and use it "
+    "as snowflake.connection_name. Instead of --account.",
+    "database": "Wizard answer: the database your apps query (governance.database).",
+    "schemas": "Wizard answer: schemas apps may query, comma-separated (governance.schema_allow).",
+    "deny_schemas": "Schemas apps must never query, comma-separated (governance.schema_deny; "
+    "default RAW,STAGING; '' denies none).",
+    "deploy_source": f"Wizard answer: deploy source ({' | '.join(DEPLOY_SOURCES)}).",
+}
+
+
+def _account_from_connection(name: str) -> str:
+    """The account locator a ``snow`` connection opens. Raises ConfigError.
+
+    Errors name connections, never an account value: the point of
+    ``--connection`` is that the locator never reaches the screen.
+    """
+    rows = _snow_connections()
+    if rows is None:
+        raise ConfigError(
+            f"--connection {name}: could not read `snow connection list` (snow missing or "
+            "broken); pass --account instead or answer the wizard's prompt."
+        )
+    row = next((r for r in rows if (r.get("connection_name") or r.get("name")) == name), None)
+    if row is None:
+        known = ", ".join(sorted(str(r.get("connection_name") or r.get("name")) for r in rows))
+        raise ConfigError(
+            f"--connection {name}: no snow connection by that name (known: {known or 'none'})."
+        )
+    params = row.get("parameters") if isinstance(row.get("parameters"), dict) else {}
+    account = params.get("account")
+    if not isinstance(account, str) or not account.strip():
+        raise ConfigError(
+            f"--connection {name}: that snow connection names no account; pass --account instead."
+        )
+    try:
+        return normalize_account(account)
+    except ConfigError:
+        raise ConfigError(
+            f"--connection {name}: its account is not a valid locator; pass --account instead."
+        ) from None
+
+
+def _flag_answers(
+    *,
+    runtime: str | None,
+    account: str | None,
+    connection: str | None,
+    database: str | None,
+    schemas: str | None,
+    deny_schemas: str | None,
+    deploy_source: str | None,
+    config: Path | None,
+) -> dict:
+    """Validate the answer flags into ``_prompt_config``'s ``given``. Raises ConfigError.
+
+    Everything is checked before the wizard runs, so a bad flag never leaves a
+    half-asked wizard or a written file behind.
+    """
+    given = {
+        "runtime": runtime,
+        "account": account,
+        "connection": connection,
+        "database": database,
+        "schemas": schemas,
+        "deny_schemas": deny_schemas,
+        "deploy_source": deploy_source,
+    }
+    given = {k: v for k, v in given.items() if v is not None}
+    if not given:
+        return {}
+    if config is not None:
+        raise ConfigError("--config imports a whole file; it cannot be combined with answer flags.")
+    if runtime is not None and runtime not in RUNTIMES:
+        raise ConfigError(f"--runtime must be one of {', '.join(RUNTIMES)} (got {runtime!r}).")
+    if deploy_source is not None and deploy_source not in DEPLOY_SOURCES:
+        raise ConfigError(
+            f"--deploy-source must be one of {', '.join(DEPLOY_SOURCES)} (got {deploy_source!r})."
+        )
+    if database is not None and not database.strip():
+        raise ConfigError("--database is empty.")
+    if schemas is not None and not _split_schemas(schemas):
+        raise ConfigError("--schemas must name at least one schema.")
+    if account is not None and connection is not None:
+        raise ConfigError("pass --account or --connection, not both.")
+    if account is not None:
+        try:
+            normalize_account(account)
+        except ConfigError:
+            raise ConfigError(
+                "--account must be an account locator such as ab12345.us-east-1 "
+                "(no .snowflakecomputing.com)."
+            ) from None
+    if schemas is not None and deny_schemas is not None:
+        both = {s.upper() for s in _split_schemas(schemas)} & {
+            s.upper() for s in _split_schemas(deny_schemas)
+        }
+        if both:
+            raise ConfigError(
+                f"schema(s) {', '.join(sorted(both))} are both allowed and denied; "
+                "drop them from --schemas or --deny-schemas."
+            )
+    if connection is not None:
+        given["account"] = _account_from_connection(connection)
+    return given
 
 
 def _read_prefill(cfg_out: Path) -> dict | None:
@@ -418,23 +578,47 @@ def _connection_hint(cfg: Config, rows: list[dict] | None = None) -> str:
 def configure(
     directory: Path = typer.Option(Path("."), "--dir", help="Repo directory."),
     config: Path = typer.Option(None, "--config", help="Import an existing config file."),
+    runtime: str = typer.Option(None, "--runtime", help=_ANSWER_HELP["runtime"]),
+    account: str = typer.Option(None, "--account", help=_ANSWER_HELP["account"]),
+    connection: str = typer.Option(None, "--connection", help=_ANSWER_HELP["connection"]),
+    database: str = typer.Option(None, "--database", help=_ANSWER_HELP["database"]),
+    schemas: str = typer.Option(None, "--schemas", help=_ANSWER_HELP["schemas"]),
+    deny_schemas: str = typer.Option(None, "--deny-schemas", help=_ANSWER_HELP["deny_schemas"]),
+    deploy_source: str = typer.Option(None, "--deploy-source", help=_ANSWER_HELP["deploy_source"]),
 ) -> None:
     """Set up (or update) streamsnow.config.yaml for your Snowflake environment.
 
     Run after `streamsnow doctor` (machine setup) and before/around
     building apps. Idempotent: re-running prefills from the current config, so
-    it's an edit rather than a restart. Writes no secrets.
+    it's an edit rather than a restart. Writes no secrets. The answer flags
+    (--runtime, --account or --connection, --database, --schemas,
+    --deploy-source, plus --deny-schemas) skip their questions; all five skip
+    the prompts entirely.
     """
     target = directory.resolve()
     target.mkdir(parents=True, exist_ok=True)
     cfg_out = target / CONFIG_FILENAME
+    try:
+        given = _flag_answers(
+            runtime=runtime,
+            account=account,
+            connection=connection,
+            database=database,
+            schemas=schemas,
+            deny_schemas=deny_schemas,
+            deploy_source=deploy_source,
+            config=config,
+        )
+    except ConfigError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
     prefill = _read_prefill(cfg_out) if config is None else None
     if prefill is not None:
         console.print(
             f"[dim]updating existing {CONFIG_FILENAME} (Enter keeps the current value)[/]"
         )
     try:
-        cfg, text = _resolve_config(config, prefill, target)
+        cfg, text = _resolve_config(config, prefill, target, given)
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
@@ -467,6 +651,13 @@ def init(
         help="Write the governed repo files (AGENTS.md, hooks, CI, .gitignore, README, "
         "tombstones) without the example app. The setup path for /start-app.",
     ),
+    runtime: str = typer.Option(None, "--runtime", help=_ANSWER_HELP["runtime"]),
+    account: str = typer.Option(None, "--account", help=_ANSWER_HELP["account"]),
+    connection: str = typer.Option(None, "--connection", help=_ANSWER_HELP["connection"]),
+    database: str = typer.Option(None, "--database", help=_ANSWER_HELP["database"]),
+    schemas: str = typer.Option(None, "--schemas", help=_ANSWER_HELP["schemas"]),
+    deny_schemas: str = typer.Option(None, "--deny-schemas", help=_ANSWER_HELP["deny_schemas"]),
+    deploy_source: str = typer.Option(None, "--deploy-source", help=_ANSWER_HELP["deploy_source"]),
 ) -> None:
     """Set up a governed repo: configure + repo files + a starter app.
 
@@ -474,6 +665,8 @@ def init(
     given, so re-running init to add the scaffold is safe. Repo-level files that
     already exist are left alone. --no-starter-app skips the example app, which
     is what `/start-app --setup` runs before `streamsnow new` builds the real one.
+    The answer flags (see `configure`) replace the wizard's questions; on an
+    existing config they need --reconfigure, so they are never silently ignored.
     """
     if no_starter_app:
         app_slug = ""
@@ -484,6 +677,22 @@ def init(
     cfg_out = target / CONFIG_FILENAME
 
     try:
+        given = _flag_answers(
+            runtime=runtime,
+            account=account,
+            connection=connection,
+            database=database,
+            schemas=schemas,
+            deny_schemas=deny_schemas,
+            deploy_source=deploy_source,
+            config=config,
+        )
+        if given and cfg_out.exists() and not reconfigure:
+            _err(
+                f"{cfg_out} already exists, so these answers would be ignored: add "
+                "--reconfigure to apply them (or drop the flags to reuse the file as is)."
+            )
+            raise typer.Exit(2)
         if cfg_out.exists() and config is None and not reconfigure:
             cfg = load_config(cfg_out)
             console.print(f"[dim]using existing {CONFIG_FILENAME}[/]")
@@ -492,7 +701,7 @@ def init(
                 _err(f"{cfg_out} already exists (use --reconfigure to edit, or --force).")
                 raise typer.Exit(2)
             cfg, text = _resolve_config(
-                config, _read_prefill(cfg_out) if reconfigure else None, target
+                config, _read_prefill(cfg_out) if reconfigure else None, target, given
             )
             cfg_out.write_text(text)
     except ConfigError as exc:
@@ -646,6 +855,23 @@ def deploy_setup(
         help="Emit the full one-time admin bootstrap: database, schema, warehouse, roles, "
         "CI service user, grants, and container/git account objects.",
     ),
+    source: str = typer.Option(
+        None,
+        "--source",
+        help="Print the setup for this deploy source (stage-copy | git-repository) instead "
+        "of the one in your config, to review before switching. Changes nothing.",
+    ),
+    git_origin: str = typer.Option(
+        None,
+        "--git-origin",
+        help="git-repository: the repo's HTTPS URL (default: deploy.git_origin, else this "
+        "checkout's GitHub origin remote).",
+    ),
+    github_auth: str = typer.Option(
+        None,
+        "--github-auth",
+        help="git-repository: pat | github-app | public (a public repo needs no token).",
+    ),
 ) -> None:
     """Emit the one-time Snowflake DDL for your configured deploy source.
 
@@ -657,10 +883,59 @@ def deploy_setup(
     """
     try:
         cfg = load_config(Path(config) if config else None)
+        configured = cfg.deploy.source
+        if source or git_origin or github_auth:
+            target = source or configured
+            origin = git_origin
+            if target == "git-repository" and not origin and not cfg.deploy.git_origin:
+                origin = _checkout_github_origin()
+            cfg = with_source(cfg, target, git_origin=origin, github_auth=github_auth)
+        sql = generate_admin_sql(cfg) if admin else generate_setup_sql(cfg)
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
-    print(generate_admin_sql(cfg) if admin else generate_setup_sql(cfg))
+    if cfg.deploy.source != configured:
+        sql = (
+            f"-- PREVIEW of the {cfg.deploy.source} deploy source. Your config uses {configured};\n"
+            "-- nothing here takes effect until you switch deploy.source (`streamsnow configure`)\n"
+            "-- and re-render the deploy workflow (`streamsnow update --apply`). See\n"
+            "-- docs/git-repository.md. Review only: this command never runs SQL.\n" + sql
+        )
+    print(sql)
+
+
+_SSH_GITHUB_RE = re.compile(
+    r"^(?:ssh://)?git@github\.com[:/](?P<path>[^/\s]+/[^/\s]+?)(?:\.git)?/?$"
+)
+
+
+def _checkout_github_origin() -> str | None:
+    """This checkout's ``origin`` remote as a GitHub HTTPS URL, or None.
+
+    SSH remotes (the ``git@`` form) become HTTPS, the form a
+    Snowflake GIT REPOSITORY clones from; anything else is left for the user
+    to pass with --git-origin rather than guessed at.
+    """
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    url = proc.stdout.strip().rstrip("/") if proc.returncode == 0 else ""
+    m = _SSH_GITHUB_RE.match(url)
+    if m:
+        url = f"https://github.com/{m.group('path')}.git"
+    try:
+        return validate_github_origin(url, "origin remote")
+    except ConfigError:
+        return None
 
 
 @app.command(name="config-get")
@@ -703,14 +978,23 @@ def deploy_sql(
     refresh: bool = typer.Option(
         False,
         "--refresh",
-        help="git-repository: emit the ABORT/PULL/COMMIT refresh for an existing app.",
+        hidden=True,
+        help="Deprecated no-op: git-repository deploys now CREATE OR REPLACE.",
     ),
     config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
 ) -> None:
     """Emit the CREATE OR REPLACE STREAMLIT SQL for one app (used by the deploy workflow)."""
     try:
         cfg = load_config(Path(config) if config else None)
-        sql = generate_refresh_sql(cfg, slug) if refresh else generate_create_sql(cfg, slug, sha)
+        # Workflows rendered before 0.7.4 still run `deploy-sql --refresh` (an
+        # ABORT/PULL/COMMIT refresh, piped to `snow sql ... || true`) after the
+        # create step. The create step now redeploys on its own, so the refresh
+        # is a comment that runs nothing.
+        sql = (
+            "-- refresh is no longer needed: the create step redeploys with CREATE OR REPLACE."
+            if refresh
+            else generate_create_sql(cfg, slug, sha)
+        )
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
@@ -723,7 +1007,9 @@ def deploy_sql(
 @app.command(name="verify-deploy")
 def verify_deploy_cmd(
     slug: str = typer.Argument(..., help="App slug to verify."),
-    sha: str = typer.Option(None, "--sha", help="Expected commit SHA (stage-copy source check)."),
+    sha: str = typer.Option(
+        None, "--sha", help="Expected commit SHA: the version-source check confirms it is live."
+    ),
     attempts: int = typer.Option(3, "--attempts", help="Retries for cold-start absorption."),
     delay: float = typer.Option(20.0, "--delay", help="Seconds between retries."),
     temporary_connection: bool = typer.Option(

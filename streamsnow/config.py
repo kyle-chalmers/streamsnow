@@ -37,7 +37,15 @@ CONFIG_SCHEMA_VERSION = 1
 
 RUNTIMES = ("container", "warehouse")
 DEPLOY_SOURCES = ("stage-copy", "git-repository")
-GITHUB_AUTH_MODES = ("pat", "github-app")
+# pat / github-app: a token stored in deploy.secret_name; public: a public
+# GitHub repo, no token and no secret.
+GITHUB_AUTH_MODES = ("pat", "github-app", "public")
+# The HTTPS clone URL of a GitHub repository. It is rendered into the GIT
+# REPOSITORY's ORIGIN and the API integration's allowed prefix, so it is
+# validated strictly: no credentials, query string or quotes.
+_GITHUB_ORIGIN_RE = re.compile(
+    r"^https://github\.com/([A-Za-z0-9][A-Za-z0-9-]*)/[A-Za-z0-9._-]+?(?:\.git)?$"
+)
 
 # Snowflake unquoted identifier: starts with letter/underscore, then
 # letters/digits/underscore/dollar. Case-insensitive in Snowflake.
@@ -81,6 +89,28 @@ def validate_branch(value: str, field_name: str) -> str:
     if not isinstance(value, str) or ".." in value or not _BRANCH_RE.match(value):
         raise ConfigError(f"{field_name!r} = {value!r} is not a valid git branch name.")
     return value
+
+
+def validate_github_origin(value: str, field_name: str) -> str:
+    """Return ``value`` if it is a plain ``https://github.com/<owner>/<repo>`` URL."""
+    if (
+        not isinstance(value, str)
+        or not _GITHUB_ORIGIN_RE.fullmatch(value)
+        or value.removesuffix(".git").rsplit("/", 1)[-1] in ("", ".", "..")
+    ):
+        raise ConfigError(
+            f"{field_name!r} = {value!r} is not a GitHub HTTPS URL "
+            "(expected https://github.com/<owner>/<repo>.git, no credentials)."
+        )
+    return value
+
+
+def github_owner(origin: str) -> str:
+    """``https://github.com/acme/apps.git`` -> ``acme``."""
+    m = _GITHUB_ORIGIN_RE.fullmatch(origin)
+    if not m:
+        raise ConfigError(f"{origin!r} is not a GitHub HTTPS URL")
+    return m.group(1)
 
 
 def validate_choice(value: str, choices: tuple[str, ...], field_name: str) -> str:
@@ -377,6 +407,7 @@ class SqlReviewCfg:
 class DeployCfg:
     source: str = "stage-copy"
     git_repository_fqn: str = ""
+    git_origin: str = ""
     git_branch: str = "main"
     api_integration_name: str = ""
     secret_name: str = ""
@@ -395,25 +426,33 @@ class DeployCfg:
             validate_artifact_exclude(str(s), "deploy.artifact_exclude[]") for s in raw_exclude
         )
         if source == "git-repository":
+            auth = validate_choice(
+                str(d.get("github_auth_mode", "pat")),
+                GITHUB_AUTH_MODES,
+                "deploy.github_auth_mode",
+            )
+            # The origin is required only where it is rendered (deploy-setup),
+            # so a pre-0.8 git config without it still loads.
+            origin = d.get("git_origin") or ""
             return cls(
                 source=source,
                 artifact_exclude=artifact_exclude,
                 git_repository_fqn=validate_fqn(
                     str(_require(d, "git_repository_fqn", "deploy")), "deploy.git_repository_fqn"
                 ),
+                git_origin=validate_github_origin(str(origin), "deploy.git_origin")
+                if origin
+                else "",
                 git_branch=validate_branch(str(d.get("git_branch", "main")), "deploy.git_branch"),
                 api_integration_name=validate_identifier(
                     str(_require(d, "api_integration_name", "deploy")),
                     "deploy.api_integration_name",
                 ),
-                secret_name=validate_fqn(
-                    str(_require(d, "secret_name", "deploy")), "deploy.secret_name"
-                ),
-                github_auth_mode=validate_choice(
-                    str(d.get("github_auth_mode", "pat")),
-                    GITHUB_AUTH_MODES,
-                    "deploy.github_auth_mode",
-                ),
+                # A public repo needs no token, so no secret.
+                secret_name=""
+                if auth == "public"
+                else validate_fqn(str(_require(d, "secret_name", "deploy")), "deploy.secret_name"),
+                github_auth_mode=auth,
             )
         return cls(source=source, artifact_exclude=artifact_exclude)
 

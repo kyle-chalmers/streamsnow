@@ -521,7 +521,7 @@ def test_snow_connection_hint_points_at_an_existing_default_before_adding_one(
 
 
 # --------------------------------------------------------------------------- #
-# 0.7.4: onboarding checks. A teammate cloning a configured repo, or a stranger
+# 0.7.6: onboarding checks. A teammate cloning a configured repo, or a stranger
 # setting one up, must not be told "ok" while governance is silently off.
 # --------------------------------------------------------------------------- #
 _IDENTITY_NAME = ("git", "config", "user.name")

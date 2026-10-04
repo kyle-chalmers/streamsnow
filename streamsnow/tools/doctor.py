@@ -46,7 +46,7 @@ connector with ``TypeError: Expected bytes, RSAPrivateKey, ... got NoneType``.
 The check reads parameter NAMES only, never values, and never edits the
 connection; the hint names the rename that works for both tools.
 
-Onboarding checks (0.7.4), each closing a way a new user or a teammate cloning
+Onboarding checks (0.7.6), each closing a way a new user or a teammate cloning
 a configured repo could be told "ok" while governance was silently off:
 ``repo-files`` (required once a config exists: ``configure`` alone writes the
 config but no hooks, CI or ``.gitignore``, so config presence never means
