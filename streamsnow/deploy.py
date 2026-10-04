@@ -282,7 +282,7 @@ def read_public_key(path: Path) -> str:
     """
     path = Path(path).expanduser()
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise ConfigError(f"--public-key-file: cannot read {path} ({type(exc).__name__}).") from exc
     if "PRIVATE KEY" in text:

@@ -17,7 +17,7 @@ U = "jane"  # a fictional developer username, interpolated into fixture paths
 
 def _write(p: Path, text: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text)
+    p.write_text(text, encoding="utf-8")
     return p
 
 

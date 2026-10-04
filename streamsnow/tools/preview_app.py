@@ -252,7 +252,9 @@ def local_install_command(app_dir: Path) -> str:
         py = _LOCAL_PYTHON
         try:
             spec = (
-                tomllib.loads(pyproject.read_text()).get("project", {}).get("requires-python", "")
+                tomllib.loads(pyproject.read_text(encoding="utf-8"))
+                .get("project", {})
+                .get("requires-python", "")
             )
             m = _REQUIRES_PY_FLOOR.search(str(spec))
             if m:
@@ -265,7 +267,7 @@ def local_install_command(app_dir: Path) -> str:
         import yaml
 
         try:
-            data = yaml.safe_load(env.read_text()) or {}
+            data = yaml.safe_load(env.read_text(encoding="utf-8")) or {}
         except (yaml.YAMLError, OSError):
             data = {}
         deps = [
@@ -340,6 +342,8 @@ def _process_command(pid: int) -> str:
         ["ps", "-o", "command=", "-p", str(pid)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     return proc.stdout.strip() if proc.returncode == 0 else ""
 

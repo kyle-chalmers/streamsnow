@@ -36,7 +36,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.online:
         print("pass --online to fetch; this script makes network calls by design.")
         return 2
-    urls = sorted({m.group(0).rstrip(".,;:") for m in _URL_RE.finditer(REGISTRY.read_text())})
+    urls = sorted(
+        {m.group(0).rstrip(".,;:") for m in _URL_RE.finditer(REGISTRY.read_text(encoding="utf-8"))}
+    )
     opener = urllib.request.build_opener(_NoRedirect)
     bad = 0
     for url in urls:

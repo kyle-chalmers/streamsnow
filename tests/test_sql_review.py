@@ -53,11 +53,11 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     app = root / "apps" / SLUG
     (app / "queries").mkdir(parents=True)
-    (app / "snowflake.yml").write_text("definition_version: 2\n")
-    (app / "queries" / "revenue_daily.sql").write_text(QUERY)
+    (app / "snowflake.yml").write_text("definition_version: 2\n", encoding="utf-8")
+    (app / "queries" / "revenue_daily.sql").write_text(QUERY, encoding="utf-8")
     mdir = app / "sql_review" / "manifests"
     mdir.mkdir(parents=True)
-    (mdir / "revenue.json").write_text(json.dumps(MANIFEST, indent=2))
+    (mdir / "revenue.json").write_text(json.dumps(MANIFEST, indent=2), encoding="utf-8")
     return root
 
 
@@ -80,7 +80,7 @@ def _check(repo: Path) -> int:
 
 def test_generate_renders_paste_runnable_sql(repo: Path, capsys: pytest.CaptureFixture) -> None:
     assert _generate(repo) == 0
-    text = _review_file(repo).read_text()
+    text = _review_file(repo).read_text(encoding="utf-8")
     # Tokens and binds fully substituted — nothing that errors on paste.
     # (The Params: banner COMMENT documents the original :N slots on purpose;
     # only executable lines must be bind-free.)
@@ -98,9 +98,9 @@ def test_generate_renders_paste_runnable_sql(repo: Path, capsys: pytest.CaptureF
 
 def test_double_colon_cast_survives_bind_substitution(repo: Path) -> None:
     q = repo / "apps" / SLUG / "queries" / "revenue_daily.sql"
-    q.write_text(QUERY.replace("SUM(revenue)", "SUM(revenue)::NUMBER(18,2)"))
+    q.write_text(QUERY.replace("SUM(revenue)", "SUM(revenue)::NUMBER(18,2)"), encoding="utf-8")
     _generate(repo)
-    assert "::NUMBER(18,2)" in _review_file(repo).read_text()
+    assert "::NUMBER(18,2)" in _review_file(repo).read_text(encoding="utf-8")
 
 
 def test_single_combo_drops_suffix_multi_combo_keeps_it(repo: Path) -> None:
@@ -112,7 +112,7 @@ def test_single_combo_drops_suffix_multi_combo_keeps_it(repo: Path) -> None:
         {"name": "east", "description": "e"},
     ]
     mp = repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json"
-    mp.write_text(json.dumps(manifest))
+    mp.write_text(json.dumps(manifest), encoding="utf-8")
     _generate(repo)
     rd = repo / "apps" / SLUG / "sql_review"
     assert (rd / "revenue.west.review.sql").exists()
@@ -123,7 +123,7 @@ def test_unresolved_token_is_an_error(repo: Path, capsys: pytest.CaptureFixture)
     manifest = dict(MANIFEST)
     manifest["token_dispatchers"] = {}
     mp = repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json"
-    mp.write_text(json.dumps(manifest))
+    mp.write_text(json.dumps(manifest), encoding="utf-8")
     assert _generate(repo) == 2
     assert "no dispatcher" in capsys.readouterr().err
 
@@ -135,7 +135,7 @@ def test_unresolved_token_is_an_error(repo: Path, capsys: pytest.CaptureFixture)
 
 def test_write_statement_refused(repo: Path, capsys: pytest.CaptureFixture) -> None:
     q = repo / "apps" / SLUG / "queries" / "revenue_daily.sql"
-    q.write_text(QUERY + ";\nDELETE FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY")
+    q.write_text(QUERY + ";\nDELETE FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY", encoding="utf-8")
     code = _generate(repo)
     assert code == 2
     assert "not allowed" in capsys.readouterr().err
@@ -145,7 +145,7 @@ def test_write_statement_refused(repo: Path, capsys: pytest.CaptureFixture) -> N
 def test_sneaky_statement_roots_refused(repo: Path, capsys: pytest.CaptureFixture) -> None:
     # Allowlist, not a write-verb denylist: an unanticipated root must fail.
     q = repo / "apps" / SLUG / "queries" / "revenue_daily.sql"
-    q.write_text(QUERY + ";\nCALL some_procedure()")
+    q.write_text(QUERY + ";\nCALL some_procedure()", encoding="utf-8")
     assert _generate(repo) == 2
 
 
@@ -167,7 +167,7 @@ def test_round_trip_clean(repo: Path) -> None:
 def test_template_edit_reads_as_drift(repo: Path, capsys: pytest.CaptureFixture) -> None:
     _generate(repo)
     q = repo / "apps" / SLUG / "queries" / "revenue_daily.sql"
-    q.write_text(QUERY.replace("SUM(revenue)", "AVG(revenue)"))
+    q.write_text(QUERY.replace("SUM(revenue)", "AVG(revenue)"), encoding="utf-8")
     assert _check(repo) == 1
     assert "DRIFT" in capsys.readouterr().out
 
@@ -177,14 +177,14 @@ def test_manifest_edit_reads_as_drift(repo: Path) -> None:
     mp = repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json"
     manifest = dict(MANIFEST)
     manifest["token_dispatchers"] = {"REGION_FILTER": {"literal": "AND region = 'East'"}}
-    mp.write_text(json.dumps(manifest))
+    mp.write_text(json.dumps(manifest), encoding="utf-8")
     assert _check(repo) == 1
 
 
 def test_hand_edited_review_file_reads_as_edited(repo: Path, capsys: pytest.CaptureFixture) -> None:
     _generate(repo)
     f = _review_file(repo)
-    f.write_text(f.read_text().replace("'West'", "'North'"))
+    f.write_text(f.read_text(encoding="utf-8").replace("'West'", "'North'"), encoding="utf-8")
     assert _check(repo) == 1
     assert "edited by hand" in capsys.readouterr().out
 
@@ -197,22 +197,22 @@ def test_regenerating_on_a_later_day_is_not_drift(repo: Path) -> None:
     # Simulate a file generated on a different date: only the volatile
     # Generated line differs. The normalized output hash must not change,
     # and check must stay clean — otherwise the gate is a daily false alarm.
-    text = f.read_text()
+    text = f.read_text(encoding="utf-8")
     aged = _re.sub(
         r"Generated: \d{4}-\d{2}-\d{2} by streamsnow sql-review",
         "Generated: 2020-01-01 by streamsnow sql-review",
         text,
     )
     assert aged != text
-    f.write_text(aged)
+    f.write_text(aged, encoding="utf-8")
     assert _check(repo) == 0
 
 
 def _set_coverage_policy(repo: Path, policy: str) -> None:
     """Write a minimal valid streamsnow.config.yaml with the given sql_review policy."""
     example = Path(__file__).resolve().parent.parent / "streamsnow.config.example.yaml"
-    text = example.read_text().replace("coverage: warn", f"coverage: {policy}")
-    (repo / "streamsnow.config.yaml").write_text(text)
+    text = example.read_text(encoding="utf-8").replace("coverage: warn", f"coverage: {policy}")
+    (repo / "streamsnow.config.yaml").write_text(text, encoding="utf-8")
 
 
 def test_uncovered_query_is_a_finding_whose_severity_follows_the_policy(
@@ -223,7 +223,7 @@ def test_uncovered_query_is_a_finding_whose_severity_follows_the_policy(
     drift check on a fleet mid-backfill; `coverage: fail` gates on it."""
     _generate(repo)
     (repo / "apps" / SLUG / "queries" / "orders_by_channel.sql").write_text(
-        "-- Query: orders_by_channel\n-- Feeds: Channels page\nSELECT 1\n"
+        "-- Query: orders_by_channel\n-- Feeds: Channels page\nSELECT 1\n", encoding="utf-8"
     )
     assert _check(repo) == 0  # no config → warn
     out = capsys.readouterr().out
@@ -241,7 +241,9 @@ def test_uncovered_query_is_a_finding_whose_severity_follows_the_policy(
 def test_check_json_carries_kind_and_policy(repo: Path, capsys: pytest.CaptureFixture) -> None:
     _generate(repo)
     capsys.readouterr()  # drain generate's output
-    (repo / "apps" / SLUG / "queries" / "orders_by_channel.sql").write_text("SELECT 1\n")
+    (repo / "apps" / SLUG / "queries" / "orders_by_channel.sql").write_text(
+        "SELECT 1\n", encoding="utf-8"
+    )
     assert sr.main(["check", SLUG, "--dir", str(repo), "--format", "json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True and payload["coverage_policy"] == "warn"
@@ -255,7 +257,9 @@ def test_correctness_findings_fail_regardless_of_policy(repo: Path) -> None:
     """Drift is never downgraded: warn only softens coverage."""
     _generate(repo)
     _set_coverage_policy(repo, "warn")
-    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(QUERY + "-- edited\n")
+    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(
+        QUERY + "-- edited\n", encoding="utf-8"
+    )
     assert _check(repo) == 1
 
 
@@ -269,13 +273,15 @@ def test_check_never_imports_app_code(repo: Path) -> None:
     sits in an app whose manifest uses token_strategy 'manifest'. check must
     pass/fail on hashes alone without ever executing it."""
     app = repo / "apps" / SLUG
-    (app / "data.py").write_text("raise SystemExit('check imported consumer code!')\n")
+    (app / "data.py").write_text(
+        "raise SystemExit('check imported consumer code!')\n", encoding="utf-8"
+    )
     manifest = dict(MANIFEST)
     manifest["token_strategy"] = "manifest"
     manifest["modules"] = {"data": "data"}
     manifest["token_dispatchers"] = {"REGION_FILTER": {"literal": "AND region = 'West'"}}
     mp = app / "sql_review" / "manifests" / "revenue.json"
-    mp.write_text(json.dumps(manifest))
+    mp.write_text(json.dumps(manifest), encoding="utf-8")
     # No review file yet → finding; the assertion is that this RETURNS (1),
     # rather than dying on the module's SystemExit.
     assert _check(repo) == 1
@@ -295,7 +301,8 @@ def test_manifest_strategy_calls_app_token_producers(repo: Path) -> None:
     app = repo / "apps" / SLUG
     (app / "data.py").write_text(
         "def region_filter_sql(region):\n"
-        "    return '' if region == 'All' else f\"AND region = '{region}'\"\n"
+        "    return '' if region == 'All' else f\"AND region = '{region}'\"\n",
+        encoding="utf-8",
     )
     manifest = dict(MANIFEST)
     manifest["token_strategy"] = "manifest"
@@ -305,13 +312,13 @@ def test_manifest_strategy_calls_app_token_producers(repo: Path) -> None:
     }
     manifest["combos"] = [{"name": "west", "description": "West only", "region": "West"}]
     mp = app / "sql_review" / "manifests" / "revenue.json"
-    mp.write_text(json.dumps(manifest))
+    mp.write_text(json.dumps(manifest), encoding="utf-8")
     assert _generate(repo) == 0
-    text = (app / "sql_review" / "revenue.review.sql").read_text()
+    text = (app / "sql_review" / "revenue.review.sql").read_text(encoding="utf-8")
     assert "AND region = 'West'" in text
     # And an app-module edit AFTER generation reads as drift, import-free.
     (app / "data.py").write_text(
-        "def region_filter_sql(region):\n    return \"AND region = 'East'\"\n"
+        "def region_filter_sql(region):\n    return \"AND region = 'East'\"\n", encoding="utf-8"
     )
     assert _check(repo) == 1
 
@@ -326,7 +333,8 @@ def test_discover_proposes_static_skeletons(repo: Path, capsys: pytest.CaptureFi
         "-- Query: orders_by_channel\n-- Feeds: Channels page\n"
         "-- Tokens: CHANNEL_FILTER\n"
         "SELECT channel, COUNT(*) FROM ANALYTICS_DB.REPORTING.VW_ORDERS "
-        "WHERE 1=1 {CHANNEL_FILTER} GROUP BY channel\n"
+        "WHERE 1=1 {CHANNEL_FILTER} GROUP BY channel\n",
+        encoding="utf-8",
     )
     code = sr.main(["discover", SLUG, "--dir", str(repo), "--write"])
     assert code == 1  # gaps existed
@@ -343,16 +351,16 @@ def test_index_builds_table_and_preserves_narrative(repo: Path) -> None:
     _generate(repo)
     readme = repo / "apps" / SLUG / "sql_review" / "README.md"
     sr.main(["index", SLUG, "--dir", str(repo)])
-    text = readme.read_text()
+    text = readme.read_text(encoding="utf-8")
     assert "| `revenue_daily` |" in text
     # Human narrative + verified column survive a rebuild.
     text = text.replace(
         "| `revenue_daily` | _(fill via /review-app --sql)_ | Overview | `revenue.review.sql` | no |",
         "| `revenue_daily` | ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY | Overview | `revenue.review.sql` | 2026-08-31 |",
     )
-    readme.write_text(text + "\nHand-written lineage narrative.\n")
+    readme.write_text(text + "\nHand-written lineage narrative.\n", encoding="utf-8")
     sr.main(["index", SLUG, "--dir", str(repo)])
-    rebuilt = readme.read_text()
+    rebuilt = readme.read_text(encoding="utf-8")
     assert "ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY" in rebuilt
     assert "2026-08-31" in rebuilt
     assert "Hand-written lineage narrative." in rebuilt
@@ -387,7 +395,7 @@ def test_scaffolded_app_ships_manifest_and_companion(tmp_path: Path) -> None:
     companion = app_dir / "sql_review" / "example_metric.review.sql"
     assert manifest.is_file()
     assert companion.is_file()
-    assert "-- Provenance:" in companion.read_text()
+    assert "-- Provenance:" in companion.read_text(encoding="utf-8")
     # And the fresh scaffold passes its own gate.
     assert sr.main(["check", "acme-sales-dashboard", "--dir", str(tmp_path)]) == 0
 
@@ -414,7 +422,10 @@ def test_with_cte_prefixed_write_refused() -> None:
 def test_content_after_provenance_is_a_finding(repo: Path, capsys: pytest.CaptureFixture) -> None:
     _generate(repo)
     f = _review_file(repo)
-    f.write_text(f.read_text() + "DELETE FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY;\n")
+    f.write_text(
+        f.read_text(encoding="utf-8") + "DELETE FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY;\n",
+        encoding="utf-8",
+    )
     assert _check(repo) == 1
     assert "content after the provenance line" in capsys.readouterr().out
 
@@ -422,26 +433,59 @@ def test_content_after_provenance_is_a_finding(repo: Path, capsys: pytest.Captur
 def test_second_provenance_line_is_a_finding(repo: Path, capsys: pytest.CaptureFixture) -> None:
     _generate(repo)
     f = _review_file(repo)
-    text = f.read_text()
+    text = f.read_text(encoding="utf-8")
     prov = [ln for ln in text.splitlines() if ln.startswith("-- Provenance: ")][0]
-    f.write_text(text.replace("SET start_date", f"{prov}\nSET start_date"))
+    f.write_text(text.replace("SET start_date", f"{prov}\nSET start_date"), encoding="utf-8")
     assert _check(repo) == 1
     assert "multiple provenance lines" in capsys.readouterr().out
 
 
-def test_crlf_conversion_reads_as_edit(repo: Path, capsys: pytest.CaptureFixture) -> None:
+def test_crlf_checkout_of_review_file_reads_clean(repo: Path) -> None:
+    """Git for Windows (core.autocrlf) checks committed LF files out as CRLF.
+    That conversion is not an edit; reading it as one failed every untouched
+    Windows clone."""
     _generate(repo)
     f = _review_file(repo)
     f.write_bytes(f.read_bytes().replace(b"\n", b"\r\n"))
+    assert _check(repo) == 0
+
+
+def test_crlf_checkout_of_inputs_is_not_drift(repo: Path) -> None:
+    _generate(repo)
+    app = repo / "apps" / SLUG
+    for p in [
+        *app.glob("queries/*.sql"),
+        *app.glob("sql_review/manifests/*.json"),
+        *app.rglob("*.py"),
+    ]:
+        p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
+    assert _check(repo) == 0
+
+
+def test_lone_carriage_return_still_reads_as_edit(repo: Path) -> None:
+    """Only CRLF pairs are normalized; any other byte change is still an edit."""
+    _generate(repo)
+    f = _review_file(repo)
+    f.write_bytes(f.read_bytes().replace(b"\n", b"\r\n", 1).replace(b"\r\n", b"\r", 1))
     assert _check(repo) == 1
+
+
+def test_generate_writes_lf_on_every_platform(repo: Path) -> None:
+    """Text-mode writes turn \\n into \\r\\n on Windows; generated review files
+    are committed, so they must be byte-identical whichever OS produced them."""
+    _generate(repo)
+    assert b"\r\n" not in _review_file(repo).read_bytes()
 
 
 def test_transitive_module_edit_reads_as_drift(repo: Path) -> None:
     # data.py delegates to helper.py; only helper.py changes after generation.
     app = repo / "apps" / SLUG
-    (app / "helper.py").write_text("def frag(region):\n    return f\"AND region = '{region}'\"\n")
+    (app / "helper.py").write_text(
+        "def frag(region):\n    return f\"AND region = '{region}'\"\n", encoding="utf-8"
+    )
     (app / "data.py").write_text(
-        "from helper import frag\n\ndef region_filter_sql(region):\n    return frag(region)\n"
+        "from helper import frag\n\ndef region_filter_sql(region):\n    return frag(region)\n",
+        encoding="utf-8",
     )
     manifest = dict(MANIFEST)
     manifest["token_strategy"] = "manifest"
@@ -450,10 +494,12 @@ def test_transitive_module_edit_reads_as_drift(repo: Path) -> None:
         "REGION_FILTER": {"call": "region_filter_sql", "args": ["West"]}
     }
     mp = app / "sql_review" / "manifests" / "revenue.json"
-    mp.write_text(json.dumps(manifest))
+    mp.write_text(json.dumps(manifest), encoding="utf-8")
     assert _generate(repo) == 0
     assert _check(repo) == 0
-    (app / "helper.py").write_text("def frag(region):\n    return \"AND region = 'East'\"\n")
+    (app / "helper.py").write_text(
+        "def frag(region):\n    return \"AND region = 'East'\"\n", encoding="utf-8"
+    )
     assert _check(repo) == 1
 
 
@@ -464,7 +510,7 @@ def test_traversal_combo_name_rejected(repo: Path, capsys: pytest.CaptureFixture
         {"name": "../../../evil", "description": "y"},
     ]
     mp = repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json"
-    mp.write_text(json.dumps(manifest))
+    mp.write_text(json.dumps(manifest), encoding="utf-8")
     assert _generate(repo) == 2
     assert "combo name" in capsys.readouterr().err
 
@@ -473,7 +519,7 @@ def test_traversal_source_query_rejected(repo: Path, capsys: pytest.CaptureFixtu
     manifest = dict(MANIFEST)
     manifest["query_specs"] = {"revenue_daily": {"source_query": "../../secret"}}
     mp = repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json"
-    mp.write_text(json.dumps(manifest))
+    mp.write_text(json.dumps(manifest), encoding="utf-8")
     assert _generate(repo) == 2
     assert "bare query name" in capsys.readouterr().err
 
@@ -487,10 +533,12 @@ def test_orphaned_review_file_is_a_finding_and_generate_cleans_it(
         {"name": "east", "description": "e"},
     ]
     mp = repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json"
-    mp.write_text(json.dumps(manifest))
+    mp.write_text(json.dumps(manifest), encoding="utf-8")
     _generate(repo)
     # Drop the east combo: check flags the orphan; regenerate removes it.
-    mp.write_text(json.dumps({**manifest, "combos": [{"name": "west", "description": "w"}]}))
+    mp.write_text(
+        json.dumps({**manifest, "combos": [{"name": "west", "description": "w"}]}), encoding="utf-8"
+    )
     assert _check(repo) == 1
     assert "orphaned review file" in capsys.readouterr().out
     _generate(repo)
@@ -512,13 +560,13 @@ def test_hand_added_write_statement_fails_even_with_forged_hashes(repo: Path) ->
     check-time allowlist re-verification refuses a write statement."""
     _generate(repo)
     f = _review_file(repo)
-    text = f.read_text()
+    text = f.read_text(encoding="utf-8")
     body, _, _ = text.rpartition("-- Provenance:")
     evil_body = body + "DELETE FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY;\n"
     forged_output = sr._output_digest(evil_body + sr._FINAL_PROVENANCE_PLACEHOLDER + "\n")
     prov_line = [ln for ln in text.splitlines() if ln.startswith("-- Provenance: ")][0]
     forged_prov = prov_line[: prov_line.rfind("output=")] + f"output={forged_output}"
-    f.write_text(evil_body + forged_prov + "\n")
+    f.write_text(evil_body + forged_prov + "\n", encoding="utf-8")
     assert _check(repo) == 1
 
 
@@ -541,7 +589,7 @@ def test_semicolon_inside_string_literal_is_legit(repo: Path) -> None:
     ok = "SELECT 'a; DROP TABLE x' AS s FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY;"
     assert sr._verify_read_only(ok) == []
     q = repo / "apps" / SLUG / "queries" / "revenue_daily.sql"
-    q.write_text(QUERY.replace("SUM(revenue)", "'a; DROP' || SUM(revenue)"))
+    q.write_text(QUERY.replace("SUM(revenue)", "'a; DROP' || SUM(revenue)"), encoding="utf-8")
     assert _generate(repo) == 0
 
 
@@ -561,7 +609,7 @@ def test_unterminated_literal_fails_closed() -> None:
 def test_manifest_feature_collision_is_detected(repo: Path, capsys: pytest.CaptureFixture) -> None:
     # Second manifest with the same feature: generate refuses, check flags.
     mdir = repo / "apps" / SLUG / "sql_review" / "manifests"
-    (mdir / "revenue2.json").write_text(json.dumps(MANIFEST))
+    (mdir / "revenue2.json").write_text(json.dumps(MANIFEST), encoding="utf-8")
     assert _generate(repo) == 2
     assert "output collision" in capsys.readouterr().err
     assert _check(repo) == 1
@@ -572,10 +620,12 @@ def test_index_duplicate_markers_hard_error(repo: Path, capsys: pytest.CaptureFi
     _generate(repo)
     readme = repo / "apps" / SLUG / "sql_review" / "README.md"
     sr.main(["index", SLUG, "--dir", str(repo)])
-    text = readme.read_text()
+    text = readme.read_text(encoding="utf-8")
     # A second (stray, reversed) marker pair in the narrative must hard-error,
     # never silently splice the wrong region.
-    readme.write_text(f"{sr._README_TABLE_END}\n\nsomeone quoting the marker syntax\n\n{text}")
+    readme.write_text(
+        f"{sr._README_TABLE_END}\n\nsomeone quoting the marker syntax\n\n{text}", encoding="utf-8"
+    )
     code = sr.main(["index", SLUG, "--dir", str(repo)])
     assert code == 2
     assert "index markers" in capsys.readouterr().err
@@ -585,7 +635,7 @@ def test_index_unrelated_table_cannot_clobber_signoff(repo: Path) -> None:
     _generate(repo)
     readme = repo / "apps" / SLUG / "sql_review" / "README.md"
     sr.main(["index", SLUG, "--dir", str(repo)])
-    text = readme.read_text()
+    text = readme.read_text(encoding="utf-8")
     # Reviewer signs off inside the marked block…
     text = text.replace(
         "| `revenue_daily` | _(fill via /review-app --sql)_ | Overview | `revenue.review.sql` | no |",
@@ -594,9 +644,9 @@ def test_index_unrelated_table_cannot_clobber_signoff(repo: Path) -> None:
     # …and an unrelated illustrative 5-column table appears in the narrative
     # BELOW the block, first cell colliding with the query name.
     text += "\n\nNarrative example (not the index):\n\n| `revenue_daily` | a | b | c | table |\n"
-    readme.write_text(text)
+    readme.write_text(text, encoding="utf-8")
     assert sr.main(["index", SLUG, "--dir", str(repo)]) == 0
-    rebuilt = readme.read_text()
+    rebuilt = readme.read_text(encoding="utf-8")
     # The sign-off survives; the narrative's bogus 'table' value did not win.
     assert "| yes |" in rebuilt.split(sr._README_TABLE_END)[0]
     assert "Narrative example (not the index):" in rebuilt
@@ -639,13 +689,14 @@ def metrics_repo(repo: Path) -> Path:
     (mdir / "avg_daily_revenue.sql").write_text(
         "-- Query: avg_daily_revenue\n-- Feeds: Overview KPI\n"
         "SELECT AVG(revenue) FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY\n"
-        "WHERE order_date BETWEEN :1 AND :2\n"
+        "WHERE order_date BETWEEN :1 AND :2\n",
+        encoding="utf-8",
     )
     # The token-mode manifest from `repo` also claims revenue_daily; replace it
     # with the metrics manifest to keep this fixture single-manifest.
     (app / "sql_review" / "manifests" / "revenue.json").unlink()
     (app / "sql_review" / "manifests" / "overview_metrics.json").write_text(
-        json.dumps(METRICS_MANIFEST, indent=2)
+        json.dumps(METRICS_MANIFEST, indent=2), encoding="utf-8"
     )
     return repo
 
@@ -653,7 +704,7 @@ def metrics_repo(repo: Path) -> Path:
 def test_metrics_mode_renders_per_visual_blocks(metrics_repo: Path) -> None:
     assert sr.main(["generate", SLUG, "--dir", str(metrics_repo)]) == 0
     out = metrics_repo / "apps" / SLUG / "sql_review" / "overview_metrics.review.sql"
-    text = out.read_text()
+    text = out.read_text(encoding="utf-8")
     assert "DASHBOARD MAP" in text
     assert "-- avg_daily_revenue" in text and "-- revenue_trend" in text
     assert "[Overview] Avg daily revenue" in text
@@ -667,7 +718,9 @@ def test_metrics_mode_renders_per_visual_blocks(metrics_repo: Path) -> None:
 def test_metrics_source_edit_reads_as_drift(metrics_repo: Path) -> None:
     sr.main(["generate", SLUG, "--dir", str(metrics_repo)])
     src = metrics_repo / "apps" / SLUG / "sql_review" / "_metrics" / "avg_daily_revenue.sql"
-    src.write_text(src.read_text().replace("AVG(revenue)", "MEDIAN(revenue)"))
+    src.write_text(
+        src.read_text(encoding="utf-8").replace("AVG(revenue)", "MEDIAN(revenue)"), encoding="utf-8"
+    )
     assert _check(metrics_repo) == 1
 
 
@@ -675,14 +728,18 @@ def test_metrics_traversal_source_rejected(metrics_repo: Path, capsys) -> None:
     manifest = json.loads(json.dumps(METRICS_MANIFEST))
     manifest["metrics"][0]["source"] = "../../secrets.toml"
     mp = metrics_repo / "apps" / SLUG / "sql_review" / "manifests" / "overview_metrics.json"
-    mp.write_text(json.dumps(manifest))
+    mp.write_text(json.dumps(manifest), encoding="utf-8")
     assert sr.main(["generate", SLUG, "--dir", str(metrics_repo)]) == 2
     assert "app-relative path under" in capsys.readouterr().err
 
 
 def test_metrics_write_statement_refused(metrics_repo: Path, capsys) -> None:
     src = metrics_repo / "apps" / SLUG / "sql_review" / "_metrics" / "avg_daily_revenue.sql"
-    src.write_text(src.read_text() + ";\nTRUNCATE TABLE ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY")
+    src.write_text(
+        src.read_text(encoding="utf-8")
+        + ";\nTRUNCATE TABLE ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY",
+        encoding="utf-8",
+    )
     assert sr.main(["generate", SLUG, "--dir", str(metrics_repo)]) == 2
     assert "not allowed" in capsys.readouterr().err
 
@@ -690,7 +747,7 @@ def test_metrics_write_statement_refused(metrics_repo: Path, capsys) -> None:
 def test_metrics_index_rows(metrics_repo: Path) -> None:
     sr.main(["generate", SLUG, "--dir", str(metrics_repo)])
     sr.main(["index", SLUG, "--dir", str(metrics_repo)])
-    text = (metrics_repo / "apps" / SLUG / "sql_review" / "README.md").read_text()
+    text = (metrics_repo / "apps" / SLUG / "sql_review" / "README.md").read_text(encoding="utf-8")
     assert "| `avg_daily_revenue` |" in text
     assert "Overview > Revenue trend" in text
 
@@ -702,7 +759,7 @@ def test_metrics_symlink_source_refused(metrics_repo: Path, capsys) -> None:
 
     app = metrics_repo / "apps" / SLUG
     outside = metrics_repo / "outside.sql"
-    outside.write_text("SELECT 1\n")
+    outside.write_text("SELECT 1\n", encoding="utf-8")
     target = app / "sql_review" / "_metrics" / "avg_daily_revenue.sql"
     target.unlink()
     _os.symlink(outside, target)
@@ -731,15 +788,17 @@ GROUP BY 1
 
 def test_no_set_block_when_queries_self_anchor(repo: Path) -> None:
     """A query taking no date binds must not get a SET block it ignores."""
-    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(_SELF_ANCHORED)
+    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(
+        _SELF_ANCHORED, encoding="utf-8"
+    )
     manifest = dict(MANIFEST)
     manifest["query_specs"] = {"revenue_daily": {"params_doc": "(none)"}}
     manifest["token_dispatchers"] = {}
     mdir = repo / "apps" / SLUG / "sql_review" / "manifests"
-    (mdir / "revenue.json").write_text(json.dumps(manifest, indent=2))
+    (mdir / "revenue.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     assert _generate(repo) == 0
-    text = _review_file(repo).read_text()
+    text = _review_file(repo).read_text(encoding="utf-8")
     assert "SET start_date" not in text, "emitted a SET line nothing references"
     assert "SET end_date" not in text
     # And the header must not promise an editable window that does not exist.
@@ -750,13 +809,13 @@ def test_no_set_block_when_queries_self_anchor(repo: Path) -> None:
 
 def test_set_block_pruned_to_referenced_vars_only(repo: Path) -> None:
     """Half-used SET blocks emit only the half that is actually referenced."""
-    q = (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").read_text()
+    q = (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").read_text(encoding="utf-8")
     # Drop the :2 (end_date) bind; keep :1.
     (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(
-        q.replace("AND order_date <= :2", "").replace(":2", ":1")
+        q.replace("AND order_date <= :2", "").replace(":2", ":1"), encoding="utf-8"
     )
     assert _generate(repo) == 0
-    text = _review_file(repo).read_text()
+    text = _review_file(repo).read_text(encoding="utf-8")
     assert "SET start_date" in text
     assert "SET end_date" not in text, "end_date is unreferenced but was emitted"
     # A surviving variable means the editable-window promise is still accurate.
@@ -783,18 +842,21 @@ def test_var_used_is_case_insensitive_like_snowflake_identifiers() -> None:
 
 def test_uppercase_reference_keeps_its_set_line(repo: Path) -> None:
     """End-to-end: an uppercase reference must not lose its SET line."""
-    q = (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").read_text()
+    q = (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").read_text(encoding="utf-8")
     (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(
         q.replace("BETWEEN :1 AND :2", "BETWEEN :1 AND :2").replace(
             "WHERE order_date", "WHERE order_date"
-        )
+        ),
+        encoding="utf-8",
     )
     assert _generate(repo) == 0
     rf = _review_file(repo)
     # Force the emitted body to reference the variable in upper case, as a
     # hand-authored metrics source legitimately might.
-    rf.write_text(rf.read_text().replace("$start_date", "$START_DATE"))
-    text = rf.read_text()
+    rf.write_text(
+        rf.read_text(encoding="utf-8").replace("$start_date", "$START_DATE"), encoding="utf-8"
+    )
+    text = rf.read_text(encoding="utf-8")
     body = "\n".join(ln for ln in text.splitlines() if not ln.startswith("SET "))
     assert sr._var_used("start_date", body), "uppercase use went undetected"
 
@@ -804,10 +866,10 @@ def test_metrics_mode_also_prunes_unused_set_block(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     app = root / "apps" / SLUG
     (app / "queries").mkdir(parents=True)
-    (app / "snowflake.yml").write_text("definition_version: 2\n")
+    (app / "snowflake.yml").write_text("definition_version: 2\n", encoding="utf-8")
     metrics_dir = app / "sql_review" / "_metrics"
     metrics_dir.mkdir(parents=True)
-    (metrics_dir / "revenue_card.sql").write_text(_SELF_ANCHORED)
+    (metrics_dir / "revenue_card.sql").write_text(_SELF_ANCHORED, encoding="utf-8")
     mdir = app / "sql_review" / "manifests"
     mdir.mkdir(parents=True)
     (mdir / "revenue.json").write_text(
@@ -827,10 +889,11 @@ def test_metrics_mode_also_prunes_unused_set_block(tmp_path: Path) -> None:
                 ],
             },
             indent=2,
-        )
+        ),
+        encoding="utf-8",
     )
     assert sr.main(["generate", SLUG, "--dir", str(root)]) == 0
-    text = (app / "sql_review" / "revenue.review.sql").read_text()
+    text = (app / "sql_review" / "revenue.review.sql").read_text(encoding="utf-8")
     assert "SET start_date" not in text
     assert "No SET block" in text
     assert "DASHBOARD MAP (in on-screen order)" in text
@@ -882,7 +945,8 @@ def test_generate_refuses_to_write_a_quote_hidden_write(repo: Path) -> None:
         "-- Query: revenue_daily\n"
         "-- Feeds: Overview\n"
         "-- Schemas: ANALYTICS.ORDERS\n"
-        'WITH x AS (SELECT 1 AS "x) SELECT y") DELETE FROM ANALYTICS.ORDERS\n'
+        'WITH x AS (SELECT 1 AS "x) SELECT y") DELETE FROM ANALYTICS.ORDERS\n',
+        encoding="utf-8",
     )
     assert _generate(repo) != 0
     assert not _review_file(repo).exists(), "wrote a file containing a write statement"
@@ -911,11 +975,13 @@ def _query_with_third_bind() -> str:
 
 def test_generate_refuses_unsubstituted_bind(repo: Path, capsys: pytest.CaptureFixture) -> None:
     """An undeclared :3 must fail generation, not ship an unrunnable file."""
-    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(_query_with_third_bind())
+    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(
+        _query_with_third_bind(), encoding="utf-8"
+    )
     manifest = dict(MANIFEST)
     manifest["token_dispatchers"] = {}
     (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
-        json.dumps(manifest, indent=2)
+        json.dumps(manifest, indent=2), encoding="utf-8"
     )
     assert _generate(repo) != 0
     assert "unsubstituted bind :3" in capsys.readouterr().err
@@ -924,7 +990,9 @@ def test_generate_refuses_unsubstituted_bind(repo: Path, capsys: pytest.CaptureF
 
 def test_declaring_the_bind_makes_generation_succeed(repo: Path) -> None:
     """The remedy the error names must actually work."""
-    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(_query_with_third_bind())
+    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(
+        _query_with_third_bind(), encoding="utf-8"
+    )
     manifest = dict(MANIFEST)
     manifest["token_dispatchers"] = {}
     manifest["set_block"] = {
@@ -934,10 +1002,10 @@ def test_declaring_the_bind_makes_generation_succeed(repo: Path) -> None:
     }
     manifest["param_bindings"] = {"1": "$start_date", "2": "$end_date", "3": "$cutoff_date"}
     (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
-        json.dumps(manifest, indent=2)
+        json.dumps(manifest, indent=2), encoding="utf-8"
     )
     assert _generate(repo) == 0
-    text = _review_file(repo).read_text()
+    text = _review_file(repo).read_text(encoding="utf-8")
     assert "$cutoff_date" in text
     sql_lines = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("--"))
     assert ":3" not in sql_lines
@@ -949,10 +1017,10 @@ def test_check_flags_a_committed_file_with_an_unbound_bind(
     """check is import-free but must still audit the committed bytes."""
     assert _generate(repo) == 0
     rf = _review_file(repo)
-    text = rf.read_text()
+    text = rf.read_text(encoding="utf-8")
     # Simulate a hand-edit / a file generated before the guard existed, keeping
     # provenance intact so ONLY the byte-level audit can catch it.
-    rf.write_text(text.replace("$end_date", ":3"))
+    rf.write_text(text.replace("$end_date", ":3"), encoding="utf-8")
     assert _check(repo) != 0
     assert "unsubstituted bind :3" in capsys.readouterr().out
 
@@ -960,7 +1028,7 @@ def test_check_flags_a_committed_file_with_an_unbound_bind(
 def test_params_banner_comment_is_not_mistaken_for_an_unbound_bind(repo: Path) -> None:
     """`Params: :1 start_date` documentation lines must stay exempt."""
     assert _generate(repo) == 0
-    text = _review_file(repo).read_text()
+    text = _review_file(repo).read_text(encoding="utf-8")
     assert "Params: :1 start_date" in text  # the banner survives
     assert _check(repo) == 0  # and does not trip the audit
 
@@ -978,13 +1046,14 @@ def _add_fragment(repo: Path, declare: bool, *, reason: str = "inlined as {REGIO
         "-- Query: _region_ctes\n"
         "-- Feeds: (fragment — inlined into other queries)\n"
         "-- Schemas: ANALYTICS.ORDERS\n"
-        "SELECT 1 AS region\n"
+        "SELECT 1 AS region\n",
+        encoding="utf-8",
     )
     manifest = dict(MANIFEST)
     if declare:
         manifest["fragments"] = [{"file": "_region_ctes.sql", "reason": reason}]
     (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
-        json.dumps(manifest, indent=2)
+        json.dumps(manifest, indent=2), encoding="utf-8"
     )
 
 
@@ -1011,7 +1080,7 @@ def test_declared_fragment_reason_reaches_the_index(repo: Path) -> None:
     _add_fragment(repo, declare=True, reason="produces REGION_CASE; inlined, never joined")
     _generate(repo)
     assert sr.main(["index", SLUG, "--dir", str(repo)]) == 0
-    readme = (repo / "apps" / SLUG / "sql_review" / "README.md").read_text()
+    readme = (repo / "apps" / SLUG / "sql_review" / "README.md").read_text(encoding="utf-8")
     assert "produces REGION_CASE; inlined, never joined" in readme
     assert "_region_ctes" in readme
 
@@ -1033,10 +1102,10 @@ def test_set_block_note_renders_above_the_set_lines(repo: Path) -> None:
         "capping on another source asks for a day this view has no rows for."
     )
     (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
-        json.dumps(manifest, indent=2)
+        json.dumps(manifest, indent=2), encoding="utf-8"
     )
     assert _generate(repo) == 0
-    text = _review_file(repo).read_text()
+    text = _review_file(repo).read_text(encoding="utf-8")
     assert "Bounds derive from this page's OWN freshness source" in text
     note_at = text.index("Bounds derive")
     set_at = text.index("SET start_date")
@@ -1151,12 +1220,13 @@ def test_wellformed_fragment_declaration_is_accepted() -> None:
 def test_path_shaped_fragment_cannot_exempt_a_real_query(repo: Path) -> None:
     """The traversal form must not silence coverage for `queries/_x.sql`."""
     (repo / "apps" / SLUG / "queries" / "_x.sql").write_text(
-        "-- Query: _x\n-- Feeds: (fragment)\n-- Schemas: ANALYTICS.ORDERS\nSELECT 1\n"
+        "-- Query: _x\n-- Feeds: (fragment)\n-- Schemas: ANALYTICS.ORDERS\nSELECT 1\n",
+        encoding="utf-8",
     )
     manifest = dict(MANIFEST)
     manifest["fragments"] = [{"file": "../../_x.sql", "reason": "r"}]
     (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
-        json.dumps(manifest, indent=2)
+        json.dumps(manifest, indent=2), encoding="utf-8"
     )
     cov = sr.coverage(repo / "apps" / SLUG)
     assert "_x" in cov["uncovered"], "traversal path silenced coverage"
@@ -1227,7 +1297,12 @@ def test_planted_write_in_a_committed_file_is_reported_once(
     """One defect, one finding — duplicates bury the real one."""
     assert _generate(repo) == 0
     rf = _review_file(repo)
-    rf.write_text(rf.read_text().replace("-- Provenance:", "DELETE FROM t;\n-- Provenance:", 1))
+    rf.write_text(
+        rf.read_text(encoding="utf-8").replace(
+            "-- Provenance:", "DELETE FROM t;\n-- Provenance:", 1
+        ),
+        encoding="utf-8",
+    )
     assert _check(repo) != 0
     out = capsys.readouterr().out
     assert out.count("statement root 'DELETE' is not allowed") == 1, out
@@ -1365,7 +1440,7 @@ def test_referenced_but_undeclared_session_var_is_refused(
     manifest["param_bindings"] = {"1": "$window_start", "2": "$window_end"}
     manifest["token_dispatchers"] = {"REGION_FILTER": {"literal": ""}}
     (repo / "apps" / SLUG / "sql_review" / "manifests" / "revenue.json").write_text(
-        json.dumps(manifest, indent=2)
+        json.dumps(manifest, indent=2), encoding="utf-8"
     )
     assert _generate(repo) != 0
     err = capsys.readouterr().err
@@ -1378,7 +1453,9 @@ def test_check_flags_an_undeclared_session_var_in_committed_text(
 ) -> None:
     assert _generate(repo) == 0
     rf = _review_file(repo)
-    rf.write_text(rf.read_text().replace("$start_date", "$window_start"))
+    rf.write_text(
+        rf.read_text(encoding="utf-8").replace("$start_date", "$window_start"), encoding="utf-8"
+    )
     assert _check(repo) != 0
     assert "referenced but never SET" in capsys.readouterr().out
 
@@ -1394,7 +1471,8 @@ def test_query_claimed_in_one_manifest_and_a_fragment_in_another_conflicts(
     """
     app = repo / "apps" / SLUG
     (app / "queries" / "orders_daily.sql").write_text(
-        "-- Query: orders_daily\n-- Feeds: Other\n-- Schemas: ANALYTICS.ORDERS\nSELECT 1\n"
+        "-- Query: orders_daily\n-- Feeds: Other\n-- Schemas: ANALYTICS.ORDERS\nSELECT 1\n",
+        encoding="utf-8",
     )
     md = app / "sql_review" / "manifests"
     (md / "other.json").write_text(
@@ -1408,7 +1486,8 @@ def test_query_claimed_in_one_manifest_and_a_fragment_in_another_conflicts(
                 "fragments": [{"file": "revenue_daily.sql", "reason": "inlined"}],
             },
             indent=2,
-        )
+        ),
+        encoding="utf-8",
     )
     cov = sr.coverage(app)
     assert cov["fragments_conflicting"] == ["revenue_daily"]
@@ -1433,19 +1512,19 @@ def test_provenance_is_independent_of_the_checkout_path(tmp_path: Path) -> None:
         root = tmp_path / parent / "repo"
         app = root / "apps" / SLUG
         (app / "queries").mkdir(parents=True)
-        (app / "snowflake.yml").write_text("definition_version: 2\n")
-        (app / "queries" / "revenue_daily.sql").write_text(QUERY)
-        (app / "data.py").write_text("REGION_SQL = \"AND region = 'West'\"\n")
+        (app / "snowflake.yml").write_text("definition_version: 2\n", encoding="utf-8")
+        (app / "queries" / "revenue_daily.sql").write_text(QUERY, encoding="utf-8")
+        (app / "data.py").write_text("REGION_SQL = \"AND region = 'West'\"\n", encoding="utf-8")
         md = app / "sql_review" / "manifests"
         md.mkdir(parents=True)
-        (md / "revenue.json").write_text(json.dumps(manifest, indent=2))
+        (md / "revenue.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         digests.append(sr._inputs_digest(app, md / "revenue.json", manifest))
     assert digests[0] == digests[1], (
         f"provenance depends on checkout path: plain={digests[0]} dotted={digests[1]}"
     )
     # And it must actually hash the module, not silently skip it everywhere.
     root = tmp_path / "plain" / "repo" / "apps" / SLUG
-    (root / "data.py").write_text("REGION_SQL = \"AND region = 'East'\"\n")
+    (root / "data.py").write_text("REGION_SQL = \"AND region = 'East'\"\n", encoding="utf-8")
     assert (
         sr._inputs_digest(root, root / "sql_review" / "manifests" / "revenue.json", manifest)
         != (digests[0])
@@ -1612,15 +1691,15 @@ def test_symlinked_module_keeps_provenance_checkout_independent(tmp_path: Path) 
         root = tmp_path / f"c{i}" / "repo"
         app = root / "apps" / SLUG
         (app / "queries").mkdir(parents=True)
-        (app / "snowflake.yml").write_text("definition_version: 2\n")
-        (app / "queries" / "revenue_daily.sql").write_text(QUERY)
+        (app / "snowflake.yml").write_text("definition_version: 2\n", encoding="utf-8")
+        (app / "queries" / "revenue_daily.sql").write_text(QUERY, encoding="utf-8")
         outside = tmp_path / f"c{i}" / "outside.py"
-        outside.write_text(f'REGION_SQL = "{payload}"\n')
+        outside.write_text(f'REGION_SQL = "{payload}"\n', encoding="utf-8")
         # A RELATIVE link, which is what git stores and what a real repo has.
         (app / "data.py").symlink_to(Path("../../../outside.py"))
         md = app / "sql_review" / "manifests"
         md.mkdir(parents=True)
-        (md / "revenue.json").write_text(json.dumps(manifest, indent=2))
+        (md / "revenue.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         digests.append(sr._inputs_digest(app, md / "revenue.json", manifest))
     assert digests[0] == digests[1], (
         "provenance still depends on what the symlink target holds in this checkout"
@@ -1776,7 +1855,8 @@ def test_duplicate_fragment_across_manifests_is_reported(
     """A named CHANGELOG 'Fixed' item that had no test at all."""
     app = repo / "apps" / SLUG
     (app / "queries" / "_shared.sql").write_text(
-        "-- Query: _shared\n-- Feeds: (fragment)\n-- Schemas: ANALYTICS.ORDERS\nSELECT 1\n"
+        "-- Query: _shared\n-- Feeds: (fragment)\n-- Schemas: ANALYTICS.ORDERS\nSELECT 1\n",
+        encoding="utf-8",
     )
     md = app / "sql_review" / "manifests"
     frag = [{"file": "_shared.sql", "reason": "inlined"}]
@@ -1792,7 +1872,8 @@ def test_duplicate_fragment_across_manifests_is_reported(
                     "fragments": frag,
                 },
                 indent=2,
-            )
+            ),
+            encoding="utf-8",
         )
     assert sr._duplicate_fragments(app) == ["_shared"]
     assert _check(repo) != 0
@@ -2062,7 +2143,7 @@ ANCHORED_WINDOW = {
 def _historical_repo(repo: Path, set_block: dict | None) -> Path:
     app = repo / "apps" / SLUG
     (app / "queries" / "revenue_daily.sql").unlink()
-    (app / "queries" / "daily_sales.sql").write_text(HISTORICAL_QUERY)
+    (app / "queries" / "daily_sales.sql").write_text(HISTORICAL_QUERY, encoding="utf-8")
     manifest = {
         "schema_version": 1,
         "feature": "revenue",
@@ -2072,7 +2153,9 @@ def _historical_repo(repo: Path, set_block: dict | None) -> Path:
     }
     if set_block is not None:
         manifest["set_block"] = set_block
-    (app / "sql_review" / "manifests" / "revenue.json").write_text(json.dumps(manifest))
+    (app / "sql_review" / "manifests" / "revenue.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
     assert _generate(repo) == 0
     return _review_file(repo)
 
@@ -2091,7 +2174,7 @@ def test_implicit_window_misses_historical_data_and_check_says_so(
     reported clean. The default is kept, but check now names it."""
     from datetime import date, timedelta
 
-    text = _historical_repo(repo, None).read_text()
+    text = _historical_repo(repo, None).read_text(encoding="utf-8")
     assert "SET start_date = DATEADD('year', -1, CURRENT_DATE);" in text
     assert "SET end_date = CURRENT_DATE;" in text
     # What that window means for this data: not one historical date falls inside it.
@@ -2118,7 +2201,7 @@ def test_implicit_window_never_gates_even_under_coverage_fail(repo: Path) -> Non
 def test_data_anchored_window_renders_and_checks_clean(
     repo: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    text = _historical_repo(repo, ANCHORED_WINDOW).read_text()
+    text = _historical_repo(repo, ANCHORED_WINDOW).read_text(encoding="utf-8")
     assert (
         "SET end_date = (SELECT MAX(sold_date) FROM ANALYTICS_DB.REPORTING.STORE_SALES)::DATE;"
         in text
@@ -2132,7 +2215,7 @@ def test_explicit_current_date_window_is_the_authors_call(
     repo: Path, capsys: pytest.CaptureFixture
 ) -> None:
     """Callers that set a window explicitly keep today's behavior, byte for byte."""
-    text = _historical_repo(repo, dict(sr._DEFAULT_SET)).read_text()
+    text = _historical_repo(repo, dict(sr._DEFAULT_SET)).read_text(encoding="utf-8")
     assert "SET end_date = CURRENT_DATE;" in text
     _, payload = _json_check(repo, capsys)
     assert payload["warnings"] == []
@@ -2144,12 +2227,15 @@ def test_no_window_warning_when_no_section_binds_a_date(
     app = repo / "apps" / SLUG
     (app / "queries" / "revenue_daily.sql").write_text(
         "-- Query: revenue_daily\n-- Feeds: Overview\nSELECT COUNT(*) AS n\n"
-        "FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY\n"
+        "FROM ANALYTICS_DB.REPORTING.VW_REVENUE_DAILY\n",
+        encoding="utf-8",
     )
     manifest = {k: v for k, v in MANIFEST.items() if k != "token_dispatchers"}
-    (app / "sql_review" / "manifests" / "revenue.json").write_text(json.dumps(manifest))
+    (app / "sql_review" / "manifests" / "revenue.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
     assert _generate(repo) == 0
-    text = _review_file(repo).read_text()
+    text = _review_file(repo).read_text(encoding="utf-8")
     assert not [ln for ln in text.splitlines() if ln.startswith("SET ")]  # pruned
     _, payload = _json_check(repo, capsys)
     assert [w for w in payload["warnings"] if w["kind"] == "window"] == []

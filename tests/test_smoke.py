@@ -56,11 +56,15 @@ def test_schema_policy_denies_case_insensitively():
 
 
 def test_plugin_manifest_is_valid_json_with_name():
-    manifest = json.loads((REPO_ROOT / ".claude-plugin" / "plugin.json").read_text())
+    manifest = json.loads(
+        (REPO_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
     assert manifest["name"] == "streamsnow"
 
 
 def test_marketplace_lists_the_plugin():
-    market = json.loads((REPO_ROOT / ".claude-plugin" / "marketplace.json").read_text())
+    market = json.loads(
+        (REPO_ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
     names = {p["name"] for p in market["plugins"]}
     assert "streamsnow" in names

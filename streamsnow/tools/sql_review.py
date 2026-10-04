@@ -1222,23 +1222,29 @@ def _verify_read_only(text: str) -> list[str]:
     return problems
 
 
+def _lf(data: bytes) -> bytes:
+    """CRLF pairs to LF, so a Windows (autocrlf) checkout hashes like any other."""
+    return data.replace(b"\r\n", b"\n")
+
+
 def _inputs_digest(app: Path, manifest_path: Path, manifest: dict) -> str:
     """Digest of everything the rendered output is a function of.
 
     Recomputable WITHOUT importing anything: manifest bytes, every referenced
     query template's bytes, the app module files (manifest strategy), and the
-    generator schema version.
+    generator schema version. CRLF pairs hash as LF (``_lf``): a Windows
+    checkout converts line endings, and that must not read as input drift.
     """
     h = hashlib.sha256()
     h.update(f"schema={GENERATOR_SCHEMA}".encode())
-    h.update(manifest_path.read_bytes())
+    h.update(_lf(manifest_path.read_bytes()))
     for rel in sorted(_referenced_sources(manifest)):
         try:
             spath = _metric_source_path(app, rel) if not rel.startswith("queries/") else app / rel
         except ToolError:
             spath = None  # unresolvable/symlinked source digests as missing → drift
         h.update(f"\nsource:{rel}\n".encode())
-        h.update(spath.read_bytes() if spath is not None and spath.is_file() else b"<missing>")
+        h.update(_lf(spath.read_bytes()) if spath is not None and spath.is_file() else b"<missing>")
     if manifest.get("mode", "tokens") == "tokens" and manifest.get("token_strategy") == "manifest":
         # Conservative closure: hash EVERY app Python source, not just the
         # named modules. A dispatcher module can import sibling helpers, and
@@ -1279,7 +1285,7 @@ def _inputs_digest(app: Path, manifest_path: Path, manifest: dict) -> str:
                 stable = link if not os.path.isabs(link) else "<abs>/" + os.path.basename(link)
                 h.update(b"<external-symlink>" + stable.encode())
             else:
-                h.update(py.read_bytes())
+                h.update(_lf(py.read_bytes()))
     return h.hexdigest()[:16]
 
 
@@ -1313,15 +1319,20 @@ def _normalize_for_output_hash(text: str) -> str:
 
     Exactly two things may differ between two legitimate generations of the
     same inputs: the Generated date, and the provenance record itself (which
-    contains the output hash and so cannot be part of it). Everything else —
-    including line endings and trailing whitespace — participates in the
-    digest: a CRLF conversion or an appended statement after the provenance
-    line is an edit, and must read as one. The split preserves ``\\r`` (we
-    split on ``\\n`` only), so CRLF text hashes differently from the LF text
-    the generator writes.
+    contains the output hash and so cannot be part of it). Everything else,
+    including trailing whitespace and any lone ``\\r``, participates in the
+    digest: an appended statement after the provenance line is an edit, and
+    must read as one.
+
+    The one exception is a CRLF pair, which hashes as LF. Git for Windows
+    checks text files out with CRLF by default (``core.autocrlf``), so hashing
+    ``\\r\\n`` literally made every committed review file read as "edited by
+    hand" on a Windows clone that nobody had touched. A line-ending conversion
+    carries no SQL meaning, and ``check`` re-runs the read-only allowlist on
+    the body regardless, so normalizing it gives up nothing the gate relies on.
     """
     lines = []
-    for line in text.split("\n"):
+    for line in text.replace("\r\n", "\n").split("\n"):
         stripped = line.rstrip("\r")
         if _GENERATED_RE.match(stripped):
             lines.append("-- Generated: <date> by streamsnow sql-review")
@@ -1599,7 +1610,9 @@ def cmd_discover(args: argparse.Namespace) -> int:
             mdir.mkdir(parents=True, exist_ok=True)
             out = mdir / f"{skeleton['feature']}.json"
             if not out.exists():
-                out.write_text(json.dumps(skeleton, indent=2) + "\n", encoding="utf-8")
+                out.write_text(
+                    json.dumps(skeleton, indent=2) + "\n", encoding="utf-8", newline="\n"
+                )
     print(json.dumps({"app": app.name, "coverage": cov, "proposed_manifests": proposals}, indent=2))
     return 1 if cov["uncovered"] else 0
 
@@ -1735,9 +1748,9 @@ def cmd_generate(args: argparse.Namespace) -> int:
             text = render_metrics_file(app, manifest)
             out = _review_dir(app) / _manifest_outputs(manifest)[0]
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(_stamp_provenance(text, inputs), encoding="utf-8")
+            out.write_text(_stamp_provenance(text, inputs), encoding="utf-8", newline="\n")
             produced.add(out.name)
-            written.append(str(out.relative_to(repo)))
+            written.append(out.relative_to(repo).as_posix())
         else:
             modules: dict = {}
             if manifest.get("token_strategy") == "manifest":
@@ -1748,9 +1761,9 @@ def cmd_generate(args: argparse.Namespace) -> int:
                 text = render_review_file(app, mp, manifest, combo, modules)
                 out = _review_dir(app) / _out_filename(manifest, combo["name"], single)
                 out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_text(_stamp_provenance(text, inputs), encoding="utf-8")
+                out.write_text(_stamp_provenance(text, inputs), encoding="utf-8", newline="\n")
                 produced.add(out.name)
-                written.append(str(out.relative_to(repo)))
+                written.append(out.relative_to(repo).as_posix())
         # A combo removed from the manifest takes its rendered file with it —
         # a stale generated file nobody accounts for is unexamined surface.
         feature = manifest["feature"]
@@ -1900,7 +1913,7 @@ def _check_app(repo: Path, app: Path) -> list[dict]:
             findings.append(
                 {
                     "kind": KIND_PROVENANCE,
-                    "file": str(mp.relative_to(repo)),
+                    "file": mp.relative_to(repo).as_posix(),
                     "line": 1,
                     "detail": str(exc),
                 }
@@ -2187,7 +2200,7 @@ def cmd_index(args: argparse.Namespace) -> int:
             "## Coverage\n\n" + table + "\n"
         )
     readme.parent.mkdir(parents=True, exist_ok=True)
-    readme.write_text(new, encoding="utf-8")
+    readme.write_text(new, encoding="utf-8", newline="\n")
     print(f"wrote {readme.relative_to(repo)}")
     return 0
 

@@ -154,7 +154,10 @@ def _cache_dir() -> Path | None:
     try:
         d.mkdir(mode=0o700, exist_ok=True)
         st = d.stat()
-        if st.st_uid != os.getuid() or (st.st_mode & 0o077):
+        # POSIX only: os.getuid does not exist on Windows, and st_mode there
+        # never reflects ACLs. Windows' %TEMP% is already per-user, so the
+        # shared-temp pre-seeding this guards against does not apply.
+        if os.name == "posix" and (st.st_uid != os.getuid() or (st.st_mode & 0o077)):
             return None
         return d
     except OSError:

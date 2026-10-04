@@ -13,22 +13,34 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _portable import bare_env
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WRAPPER = REPO_ROOT / "hooks" / "review_gate_stop.py"
 
 #: A bare interpreter environment: no venv, no pip-installed streamsnow.
-_BARE_ENV = {"PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+_BARE_ENV = bare_env(CLAUDE_PLUGIN_ROOT=str(REPO_ROOT))
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+    subprocess.run(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 def _make_streamsnow_repo(root: Path) -> Path:
     app = root / "apps" / "acme-sales-dashboard"
     (app / "pages").mkdir(parents=True)
-    (app / "pages" / "overview.py").write_text("import streamlit as st\nst.metric('Revenue', 1)\n")
-    (root / "streamsnow.config.yaml").write_text("project:\n  name: Acme\n")
+    (app / "pages" / "overview.py").write_text(
+        "import streamlit as st\nst.metric('Revenue', 1)\n", encoding="utf-8"
+    )
+    (root / "streamsnow.config.yaml").write_text("project:\n  name: Acme\n", encoding="utf-8")
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@example.com")
     _git(root, "config", "user.name", "T")
@@ -48,13 +60,15 @@ def _run_wrapper(payload: dict | str, cwd: Path, tmpdir: Path) -> subprocess.Com
         cwd=cwd,
         env={**_BARE_ENV, "TMPDIR": str(tmpdir)},
         timeout=30,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
 def test_plugin_only_install_emits_nudge_for_unreviewed_change(tmp_path: Path) -> None:
     repo = _make_streamsnow_repo(tmp_path / "repo")
     page = repo / "apps" / "acme-sales-dashboard" / "pages" / "overview.py"
-    page.write_text("import streamlit as st\nst.metric('Orders', 2)\n")
+    page.write_text("import streamlit as st\nst.metric('Orders', 2)\n", encoding="utf-8")
     proc = _run_wrapper({"cwd": str(repo), "session_id": "hook-s1"}, repo, tmp_path / "st")
     assert proc.returncode == 0, proc.stderr
     out = json.loads(proc.stdout)
@@ -93,22 +107,24 @@ def test_fail_open_when_gate_file_missing(tmp_path: Path) -> None:
     fake_root = tmp_path / "plugin"
     (fake_root / "hooks").mkdir(parents=True)
     wrapper_copy = fake_root / "hooks" / "review_gate_stop.py"
-    wrapper_copy.write_text(WRAPPER.read_text())
+    wrapper_copy.write_text(WRAPPER.read_text(encoding="utf-8"), encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, str(wrapper_copy)],
         input="{}",
         capture_output=True,
         text=True,
         cwd=tmp_path,
-        env={"PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": str(fake_root)},
+        env=bare_env(CLAUDE_PLUGIN_ROOT=str(fake_root)),
         timeout=30,
+        encoding="utf-8",
+        errors="replace",
     )
     assert proc.returncode == 0
     assert proc.stdout == ""
 
 
 def test_hooks_json_declares_stop_with_timeout() -> None:
-    data = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())
+    data = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
     stop = data["hooks"]["Stop"]
     entry = stop[0]["hooks"][0]
     assert "review_gate_stop.py" in entry["command"]
@@ -127,17 +143,21 @@ def test_nonzero_gate_exit_is_clamped_to_zero(tmp_path: Path) -> None:
     fake_root = tmp_path / "plugin"
     (fake_root / "hooks").mkdir(parents=True)
     (fake_root / "streamsnow" / "tools").mkdir(parents=True)
-    (fake_root / "streamsnow" / "tools" / "review_gate.py").write_text("import sys\nsys.exit(2)\n")
+    (fake_root / "streamsnow" / "tools" / "review_gate.py").write_text(
+        "import sys\nsys.exit(2)\n", encoding="utf-8"
+    )
     wrapper_copy = fake_root / "hooks" / "review_gate_stop.py"
-    wrapper_copy.write_text(WRAPPER.read_text())
+    wrapper_copy.write_text(WRAPPER.read_text(encoding="utf-8"), encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, str(wrapper_copy)],
         input="{}",
         capture_output=True,
         text=True,
         cwd=tmp_path,
-        env={"PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": str(fake_root)},
+        env=bare_env(CLAUDE_PLUGIN_ROOT=str(fake_root)),
         timeout=30,
+        encoding="utf-8",
+        errors="replace",
     )
     assert proc.returncode == 0
     assert proc.stdout == ""
@@ -146,7 +166,7 @@ def test_nonzero_gate_exit_is_clamped_to_zero(tmp_path: Path) -> None:
 def test_silent_when_stop_hook_active(tmp_path: Path) -> None:
     repo = _make_streamsnow_repo(tmp_path / "repo")
     page = repo / "apps" / "acme-sales-dashboard" / "pages" / "overview.py"
-    page.write_text("import streamlit as st\nst.metric('Orders', 2)\n")
+    page.write_text("import streamlit as st\nst.metric('Orders', 2)\n", encoding="utf-8")
     proc = _run_wrapper(
         {"cwd": str(repo), "session_id": "hook-s3", "stop_hook_active": True},
         repo,
@@ -158,9 +178,11 @@ def test_silent_when_stop_hook_active(tmp_path: Path) -> None:
 
 def test_silent_when_disabled_in_config(tmp_path: Path) -> None:
     repo = _make_streamsnow_repo(tmp_path / "repo")
-    (repo / "streamsnow.config.yaml").write_text("review_gate:\n  enabled: false\n")
+    (repo / "streamsnow.config.yaml").write_text(
+        "review_gate:\n  enabled: false\n", encoding="utf-8"
+    )
     page = repo / "apps" / "acme-sales-dashboard" / "pages" / "overview.py"
-    page.write_text("import streamlit as st\nst.metric('Orders', 2)\n")
+    page.write_text("import streamlit as st\nst.metric('Orders', 2)\n", encoding="utf-8")
     proc = _run_wrapper({"cwd": str(repo), "session_id": "hook-s4"}, repo, tmp_path / "st")
     assert proc.returncode == 0
     assert proc.stdout == ""

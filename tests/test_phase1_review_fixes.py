@@ -12,20 +12,31 @@ import sys
 from pathlib import Path
 
 import pytest
+from _portable import posix_process_control
 
 from streamsnow.tools import check_requirements, preview_app, review_gate
 from streamsnow.tools import doctor as doctor_mod
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+    subprocess.run(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 def _make_repo(root: Path, slug: str = "acme-sales-dashboard") -> Path:
     app = root / "apps" / slug
     (app / "pages").mkdir(parents=True)
-    (app / "pages" / "overview.py").write_text("import streamlit as st\nst.metric('Revenue', 1)\n")
-    (root / "streamsnow.config.yaml").write_text("project:\n  name: Acme\n")
+    (app / "pages" / "overview.py").write_text(
+        "import streamlit as st\nst.metric('Revenue', 1)\n", encoding="utf-8"
+    )
+    (root / "streamsnow.config.yaml").write_text("project:\n  name: Acme\n", encoding="utf-8")
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@example.com")
     _git(root, "config", "user.name", "T")
@@ -67,7 +78,7 @@ def test_stop_hook_uses_payload_cwd_over_stale_env(
     # is clean. A hook firing for a turn in B must not notify about A.
     repo_a = _make_repo(tmp_path / "a")
     (repo_a / "apps" / "acme-sales-dashboard" / "pages" / "overview.py").write_text(
-        "import streamlit as st\nst.metric('Orders', 2)\n"
+        "import streamlit as st\nst.metric('Orders', 2)\n", encoding="utf-8"
     )
     repo_b = _make_repo(tmp_path / "b")
 
@@ -85,6 +96,7 @@ def test_stop_hook_uses_payload_cwd_over_stale_env(
 # --------------------------------------------------------------------------- #
 
 
+@posix_process_control
 def test_stop_refuses_pid_that_is_not_our_process(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
@@ -104,7 +116,8 @@ def test_stop_refuses_pid_that_is_not_our_process(
                 "cmd": ["streamlit", "run", str(repo / "apps" / slug / "streamlit_app.py")],
                 "entrypoint": str(repo / "apps" / slug / "streamlit_app.py"),
             }
-        )
+        ),
+        encoding="utf-8",
     )
     code = preview_app.main(["stop", slug, "--dir", str(repo), "--json"])
     out = json.loads(capsys.readouterr().out)
@@ -130,7 +143,8 @@ def test_requirements_section_terminated_by_level3_heading(tmp_path: Path) -> No
         "## 11. Build Progress\n\n"
         "**Current phase:** build\n\n"
         "### 12. Appendix\n\n"
-        "### Sessions\n- 2026-08-31 built the overview page. Next: /preview-app\n"
+        "### Sessions\n- 2026-08-31 built the overview page. Next: /preview-app\n",
+        encoding="utf-8",
     )
     result = check_requirements.check_file(req)
     # The Sessions block lives under §12, not §11 — §11 has no session log and
@@ -176,6 +190,7 @@ def test_validate_app_dir_flag_anchors_config(tmp_path: Path, monkeypatch: pytes
 # --------------------------------------------------------------------------- #
 
 
+@posix_process_control
 def test_stop_refuses_pid_of_a_different_apps_preview(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
@@ -190,7 +205,7 @@ def test_stop_refuses_pid_of_a_different_apps_preview(
     # A live process that LOOKS like a preview of app B: generic streamlit-ish
     # flags in argv, but app B's path — not app A's.
     sleeper = tmp_path / "sleeper.py"
-    sleeper.write_text("import time; time.sleep(30)\n")
+    sleeper.write_text("import time; time.sleep(30)\n", encoding="utf-8")
     other_entry = str(tmp_path / "apps" / "acme-inventory-dashboard" / "streamlit_app.py")
     proc = subprocess.Popen(
         [sys.executable, str(sleeper), other_entry, "--server.headless", "true"],
@@ -215,7 +230,8 @@ def test_stop_refuses_pid_of_a_different_apps_preview(
                     ],
                     "entrypoint": str(repo / "apps" / slug_a / "streamlit_app.py"),
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         code = preview_app.main(["stop", slug_a, "--dir", str(repo), "--json"])
         out = json.loads(capsys.readouterr().out)
@@ -235,7 +251,7 @@ def test_tombstones_honors_custom_apps_dir_on_both_sides(tmp_path: Path) -> None
     root = tmp_path / "repo"
     dash = root / "dashboards" / "acme-sales-dashboard"
     dash.mkdir(parents=True)
-    (dash / "snowflake.yml").write_text("definition_version: 2\n")
+    (dash / "snowflake.yml").write_text("definition_version: 2\n", encoding="utf-8")
     (root / "streamsnow.config.yaml").write_text(
         "schema_version: 1\n"
         "runtime: warehouse\n"
@@ -250,7 +266,8 @@ def test_tombstones_honors_custom_apps_dir_on_both_sides(tmp_path: Path) -> None
         "    stage_schema: DASHBOARDS\n"
         "    default_warehouse: STREAMSNOW_WH\n"
         "  roles: {ci_role: STREAMSNOW_DEPLOY_ROLE, viewer_role: STREAMSNOW_VIEWER_ROLE}\n"
-        "governance: {database: ANALYTICS_DB, schema_allow: [ANALYTICS]}\n"
+        "governance: {database: ANALYTICS_DB, schema_allow: [ANALYTICS]}\n",
+        encoding="utf-8",
     )
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@example.com")
@@ -294,7 +311,3 @@ def test_cli_doctor_accepts_format_json() -> None:
     result = CliRunner().invoke(cli_app, ["doctor", "--format", "json"])
     assert result.exit_code in (0, 1)
     assert json.loads(result.output)["checks"]
-
-
-if sys.platform == "win32":  # pragma: no cover
-    pytest.skip("POSIX process semantics", allow_module_level=True)

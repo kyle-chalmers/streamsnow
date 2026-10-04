@@ -230,7 +230,7 @@ def _cache_decorator(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[bool, 
 def scan_file(path: Path) -> list[dict]:
     findings: list[dict] = []
     try:
-        text = path.read_text(errors="ignore")
+        text = path.read_text(errors="ignore", encoding="utf-8")
         tree = ast.parse(text)
     except SyntaxError:
         return findings

@@ -258,7 +258,7 @@ def fix_app(app_dir: Path, exclude: tuple[str, ...] = ()) -> dict:
     yml = app_dir / "snowflake.yml"
     if not yml.is_file():
         return {"ok": True, "changed": False, "detail": "no snowflake.yml", "artifacts": []}
-    old_text = yml.read_text()
+    old_text = yml.read_text(encoding="utf-8")
     try:
         manifest = yaml.safe_load(old_text) or {}
     except yaml.YAMLError:
@@ -323,7 +323,7 @@ def fix_app(app_dir: Path, exclude: tuple[str, ...] = ()) -> dict:
             "detail": "rewrite failed round-trip verification — not written; fix manually",
             "artifacts": entries,
         }
-    yml.write_text(new_text)
+    yml.write_text(new_text, encoding="utf-8")
     dropped = [e for e in entries if e not in kept]
     return {
         "ok": True,
@@ -341,7 +341,7 @@ def check_app(app_dir: Path, exclude: tuple[str, ...] = ()) -> dict:
         # Manifest presence is the required-files/manifest checks' concern.
         return {"ok": True, "findings": []}
     try:
-        manifest = yaml.safe_load(yml.read_text()) or {}
+        manifest = yaml.safe_load(yml.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         return {"ok": True, "findings": []}  # invalid YAML is the manifest check's finding
 

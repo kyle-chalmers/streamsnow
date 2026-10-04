@@ -48,13 +48,13 @@ def _scan() -> dict[str, set[Path]]:
             continue
         if p == REGISTRY or p.parts[-2:] == ("tests", "test_docs_links.py"):
             continue
-        for m in _URL_RE.finditer(p.read_text(errors="ignore")):
+        for m in _URL_RE.finditer(p.read_text(errors="ignore", encoding="utf-8")):
             seen.setdefault(_clean(m.group(0)), set()).add(p.relative_to(REPO_ROOT))
     return seen
 
 
 def _registry() -> set[str]:
-    return {_clean(m.group(0)) for m in _URL_RE.finditer(REGISTRY.read_text())}
+    return {_clean(m.group(0)) for m in _URL_RE.finditer(REGISTRY.read_text(encoding="utf-8"))}
 
 
 def test_registry_exists_and_is_non_trivial():
@@ -74,6 +74,6 @@ def test_no_known_404_or_legacy_paths_anywhere():
 
 
 def test_registry_urls_are_canonical():
-    raw = [m.group(0) for m in _URL_RE.finditer(REGISTRY.read_text())]
+    raw = [m.group(0) for m in _URL_RE.finditer(REGISTRY.read_text(encoding="utf-8"))]
     assert all(not u.endswith("/") for u in raw), [u for u in raw if u.endswith("/")]
     assert all("#" not in u for u in raw), [u for u in raw if "#" in u]

@@ -14,10 +14,15 @@ concurrency:
 
 jobs:
   lint-and-test:
-    runs-on: ubuntu-latest
+    # Every OS a user can run StreamSnow on. Windows catches what macOS and Linux
+    # hide: cp1252 as the default text encoding, CRLF checkouts, and no POSIX
+    # process control. Ruff runs everywhere so the Windows row also proves
+    # .gitattributes keeps the checkout LF (format --check fails on CRLF).
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4

@@ -31,12 +31,12 @@ EXAMPLE = REPO_ROOT / "streamsnow.config.example.yaml"
 
 
 def _cfg() -> Config:
-    return Config.from_dict(yaml.safe_load(EXAMPLE.read_text()))
+    return Config.from_dict(yaml.safe_load(EXAMPLE.read_text(encoding="utf-8")))
 
 
 def _write(p: Path, text: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text)
+    p.write_text(text, encoding="utf-8")
     return p
 
 
@@ -59,7 +59,9 @@ def _finish_starter(app: Path) -> Path:
     this happens."""
     for rel in ("queries/example_metric.sql", "sql_review/manifests/example_metric.json"):
         f = app / rel
-        f.write_text(f.read_text().replace("YOUR_TABLE", "ORDERS"))
+        f.write_text(
+            f.read_text(encoding="utf-8").replace("YOUR_TABLE", "ORDERS"), encoding="utf-8"
+        )
     page = app / "pages/overview.py"
     text, n = re.subn(
         r"# STREAMSNOW_STARTER_PLACEHOLDER.*?st\.plotly_chart\(fig, use_container_width=True\)\n",
@@ -67,11 +69,11 @@ def _finish_starter(app: Path) -> Path:
         'branded_metric("Rows", f"{int(df[\'N\'].sum()):,}")\n'
         'fig = px.bar(df, x="DT", y="N", color_discrete_sequence=BRAND_CHART_COLORS)\n'
         "st.plotly_chart(fig, use_container_width=True)\n",
-        page.read_text(),
+        page.read_text(encoding="utf-8"),
         flags=re.S,
     )
     assert n == 1, "starter page sample block not found"
-    page.write_text(text.replace("YOUR_TABLE", "ORDERS"))
+    page.write_text(text.replace("YOUR_TABLE", "ORDERS"), encoding="utf-8")
     assert sql_review.main(["generate", app.name, "--dir", str(app.parent.parent)]) == 0
     return app
 
@@ -604,7 +606,9 @@ def test_schema_refs_check_paths_skips_dotted_dirs(tmp_path):
 def test_validate_app_fails_on_invalid_manifest(tmp_path):
     cfg = _cfg()
     scaffold(cfg, tmp_path, "m-app")
-    (tmp_path / "apps/m-app/snowflake.yml").write_text("entities: [oops\n")  # invalid YAML
+    (tmp_path / "apps/m-app/snowflake.yml").write_text(
+        "entities: [oops\n", encoding="utf-8"
+    )  # invalid YAML
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/m-app", policy, cfg)
     by_name = {c["name"]: c["ok"] for c in res["checks"]}
@@ -639,10 +643,10 @@ def test_manifest_container_missing_compute_pool_fails(tmp_path):
     cfg = _cfg()
     scaffold(cfg, tmp_path, "c-app")
     yml = tmp_path / "apps/c-app/snowflake.yml"
-    data = yaml.safe_load(yml.read_text())
+    data = yaml.safe_load(yml.read_text(encoding="utf-8"))
     ent = next(iter(data["entities"].values()))
     del ent["compute_pool"]
-    yml.write_text(yaml.safe_dump(data))
+    yml.write_text(yaml.safe_dump(data), encoding="utf-8")
     by_name, res = _manifest(tmp_path / "apps/c-app")
     assert by_name["manifest"]["ok"] is False
     assert any("compute_pool" in p for p in by_name["manifest"]["findings"])
@@ -653,10 +657,10 @@ def test_manifest_container_wrong_runtime_name_fails(tmp_path):
     cfg = _cfg()
     scaffold(cfg, tmp_path, "c2-app")
     yml = tmp_path / "apps/c2-app/snowflake.yml"
-    data = yaml.safe_load(yml.read_text())
+    data = yaml.safe_load(yml.read_text(encoding="utf-8"))
     ent = next(iter(data["entities"].values()))
     ent["runtime_name"] = "SYSTEM$WRONG_RUNTIME"
-    yml.write_text(yaml.safe_dump(data))
+    yml.write_text(yaml.safe_dump(data), encoding="utf-8")
     by_name, _ = _manifest(tmp_path / "apps/c2-app")
     assert by_name["manifest"]["ok"] is False
     assert any("runtime_name" in p for p in by_name["manifest"]["findings"])
@@ -664,7 +668,7 @@ def test_manifest_container_wrong_runtime_name_fails(tmp_path):
 
 def test_manifest_warehouse_with_compute_pool_fails(tmp_path):
     # Warehouse runtime, but a stray container-only field leaks in.
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["runtime"] = "warehouse"
     data["snowflake"]["objects"] = dict(data["snowflake"]["objects"])
     data["snowflake"]["objects"]["compute_pool"] = ""
@@ -672,10 +676,10 @@ def test_manifest_warehouse_with_compute_pool_fails(tmp_path):
     cfg = Config.from_dict(data)
     scaffold(cfg, tmp_path, "w-app")
     yml = tmp_path / "apps/w-app/snowflake.yml"
-    ydata = yaml.safe_load(yml.read_text())
+    ydata = yaml.safe_load(yml.read_text(encoding="utf-8"))
     ent = next(iter(ydata["entities"].values()))
     ent["compute_pool"] = "STREAMLIT_POOL"  # forbidden in warehouse mode
-    yml.write_text(yaml.safe_dump(ydata))
+    yml.write_text(yaml.safe_dump(ydata), encoding="utf-8")
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/w-app", policy, cfg)
     by_name = {c["name"]: c for c in res["checks"]}
@@ -684,7 +688,7 @@ def test_manifest_warehouse_with_compute_pool_fails(tmp_path):
 
 
 def test_manifest_warehouse_env_yml_python_pin_fails(tmp_path):
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["runtime"] = "warehouse"
     data["snowflake"]["objects"] = dict(data["snowflake"]["objects"])
     data["snowflake"]["objects"]["compute_pool"] = ""
@@ -692,9 +696,9 @@ def test_manifest_warehouse_env_yml_python_pin_fails(tmp_path):
     cfg = Config.from_dict(data)
     scaffold(cfg, tmp_path, "wpy-app")
     env = tmp_path / "apps/wpy-app/environment.yml"
-    edata = yaml.safe_load(env.read_text())
+    edata = yaml.safe_load(env.read_text(encoding="utf-8"))
     edata["dependencies"].append("python=3.11")  # the CREATE STREAMLIT landmine
-    env.write_text(yaml.safe_dump(edata))
+    env.write_text(yaml.safe_dump(edata), encoding="utf-8")
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/wpy-app", policy, cfg)
     by_name = {c["name"]: c for c in res["checks"]}
@@ -706,9 +710,9 @@ def test_manifest_definition_version_must_be_2(tmp_path):
     cfg = _cfg()
     scaffold(cfg, tmp_path, "dv-app")
     yml = tmp_path / "apps/dv-app/snowflake.yml"
-    data = yaml.safe_load(yml.read_text())
+    data = yaml.safe_load(yml.read_text(encoding="utf-8"))
     data["definition_version"] = 1
-    yml.write_text(yaml.safe_dump(data))
+    yml.write_text(yaml.safe_dump(data), encoding="utf-8")
     by_name, _ = _manifest(tmp_path / "apps/dv-app")
     assert by_name["manifest"]["ok"] is False
     assert any("definition_version" in p for p in by_name["manifest"]["findings"])
@@ -718,10 +722,10 @@ def test_manifest_query_warehouse_must_be_allowed(tmp_path):
     cfg = _cfg()
     scaffold(cfg, tmp_path, "qw-app")
     yml = tmp_path / "apps/qw-app/snowflake.yml"
-    data = yaml.safe_load(yml.read_text())
+    data = yaml.safe_load(yml.read_text(encoding="utf-8"))
     ent = next(iter(data["entities"].values()))
     ent["query_warehouse"] = "SOME_RANDOM_WH"
-    yml.write_text(yaml.safe_dump(data))
+    yml.write_text(yaml.safe_dump(data), encoding="utf-8")
     by_name, _ = _manifest(tmp_path / "apps/qw-app")
     assert by_name["manifest"]["ok"] is False
     assert any("query_warehouse" in p for p in by_name["manifest"]["findings"])
@@ -729,7 +733,7 @@ def test_manifest_query_warehouse_must_be_allowed(tmp_path):
 
 def _warehouse_cfg() -> Config:
     """Example config flipped to warehouse runtime (drops container-only fields)."""
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["runtime"] = "warehouse"
     data["snowflake"]["objects"] = dict(data["snowflake"]["objects"])
     data["snowflake"]["objects"]["compute_pool"] = ""
@@ -743,7 +747,8 @@ def test_manifest_container_pyproject_missing_required_dep_fails(tmp_path):
     # Valid TOML, valid python, but missing snowflake-snowpark-python.
     (tmp_path / "apps/pp-app/pyproject.toml").write_text(
         '[project]\nname = "pp-app"\nrequires-python = ">=3.11,<3.12"\n'
-        'dependencies = ["streamlit==1.50.0"]\n'
+        'dependencies = ["streamlit==1.50.0"]\n',
+        encoding="utf-8",
     )
     by_name, res = _manifest(tmp_path / "apps/pp-app")
     assert by_name["manifest"]["ok"] is False
@@ -757,7 +762,8 @@ def test_manifest_container_pyproject_wrong_python_fails(tmp_path):
     # Pinned to 3.10 only — does not allow the container's 3.11.
     (tmp_path / "apps/ppy-app/pyproject.toml").write_text(
         '[project]\nname = "ppy-app"\nrequires-python = "==3.10.*"\n'
-        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n'
+        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n',
+        encoding="utf-8",
     )
     by_name, _ = _manifest(tmp_path / "apps/ppy-app")
     assert by_name["manifest"]["ok"] is False
@@ -771,7 +777,8 @@ def test_manifest_container_pyproject_broad_python_passes(tmp_path):
     scaffold(cfg, tmp_path, "pbroad-app")
     (tmp_path / "apps/pbroad-app/pyproject.toml").write_text(
         '[project]\nname = "pbroad-app"\nrequires-python = ">=3.10"\n'
-        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n'
+        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n',
+        encoding="utf-8",
     )
     by_name, _ = _manifest(tmp_path / "apps/pbroad-app")
     assert by_name["manifest"]["ok"] is True, by_name["manifest"]["findings"]
@@ -784,7 +791,8 @@ def test_manifest_container_pyproject_excludes_311_fails(tmp_path):
     scaffold(cfg, tmp_path, "pex-app")
     (tmp_path / "apps/pex-app/pyproject.toml").write_text(
         '[project]\nname = "pex-app"\nrequires-python = ">=3.10,<3.11"\n'
-        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n'
+        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n',
+        encoding="utf-8",
     )
     by_name, _ = _manifest(tmp_path / "apps/pex-app")
     assert by_name["manifest"]["ok"] is False
@@ -797,7 +805,8 @@ def test_manifest_container_pyproject_missing_name_fails(tmp_path):
     scaffold(cfg, tmp_path, "pnm-app")
     (tmp_path / "apps/pnm-app/pyproject.toml").write_text(
         '[project]\nrequires-python = ">=3.11,<3.12"\n'
-        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n'
+        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n',
+        encoding="utf-8",
     )
     by_name, _ = _manifest(tmp_path / "apps/pnm-app")
     assert by_name["manifest"]["ok"] is False
@@ -811,7 +820,8 @@ def test_manifest_container_pyproject_noncanonical_dep_name_ok(tmp_path):
     scaffold(cfg, tmp_path, "puc-app")
     (tmp_path / "apps/puc-app/pyproject.toml").write_text(
         '[project]\nname = "puc-app"\nrequires-python = ">=3.11,<3.12"\n'
-        'dependencies = ["Streamlit==1.50.0", "snowflake_snowpark_python"]\n'
+        'dependencies = ["Streamlit==1.50.0", "snowflake_snowpark_python"]\n',
+        encoding="utf-8",
     )
     by_name, _ = _manifest(tmp_path / "apps/puc-app")
     assert by_name["manifest"]["ok"] is True, by_name["manifest"]["findings"]
@@ -823,7 +833,8 @@ def test_manifest_container_pyproject_malformed_python_fails(tmp_path):
     scaffold(cfg, tmp_path, "pmal-app")
     (tmp_path / "apps/pmal-app/pyproject.toml").write_text(
         '[project]\nname = "pmal-app"\nrequires-python = "not-a-version"\n'
-        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n'
+        'dependencies = ["streamlit==1.50.0", "snowflake-snowpark-python"]\n',
+        encoding="utf-8",
     )
     by_name, _ = _manifest(tmp_path / "apps/pmal-app")
     assert by_name["manifest"]["ok"] is False
@@ -833,7 +844,9 @@ def test_manifest_container_pyproject_malformed_python_fails(tmp_path):
 def test_manifest_container_pyproject_invalid_toml_fails(tmp_path):
     cfg = _cfg()
     scaffold(cfg, tmp_path, "ppt-app")
-    (tmp_path / "apps/ppt-app/pyproject.toml").write_text("[project\nname = nope\n")
+    (tmp_path / "apps/ppt-app/pyproject.toml").write_text(
+        "[project\nname = nope\n", encoding="utf-8"
+    )
     by_name, _ = _manifest(tmp_path / "apps/ppt-app")
     assert by_name["manifest"]["ok"] is False
     assert any("invalid TOML" in p for p in by_name["manifest"]["findings"])
@@ -852,11 +865,11 @@ def test_manifest_warehouse_env_yml_missing_dep_fails(tmp_path):
     cfg = _warehouse_cfg()
     scaffold(cfg, tmp_path, "wdep-app")
     env = tmp_path / "apps/wdep-app/environment.yml"
-    edata = yaml.safe_load(env.read_text())
+    edata = yaml.safe_load(env.read_text(encoding="utf-8"))
     edata["dependencies"] = [
         d for d in edata["dependencies"] if not str(d).startswith("snowflake-snowpark-python")
     ]
-    env.write_text(yaml.safe_dump(edata))
+    env.write_text(yaml.safe_dump(edata), encoding="utf-8")
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/wdep-app", policy, cfg)
     by_name = {c["name"]: c for c in res["checks"]}
@@ -871,7 +884,8 @@ def test_manifest_warehouse_env_yml_operator_deps_pass(tmp_path):
     scaffold(cfg, tmp_path, "wop-app")
     (tmp_path / "apps/wop-app/environment.yml").write_text(
         "name: sf_env\nchannels:\n  - snowflake\ndependencies:\n"
-        "  - streamlit>=1.50\n  - snowflake-snowpark-python\n  - pandas\n"
+        "  - streamlit>=1.50\n  - snowflake-snowpark-python\n  - pandas\n",
+        encoding="utf-8",
     )
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/wop-app", policy, cfg)
@@ -885,7 +899,8 @@ def test_manifest_warehouse_env_yml_noncanonical_dep_name_ok(tmp_path):
     scaffold(cfg, tmp_path, "wuc-app")
     (tmp_path / "apps/wuc-app/environment.yml").write_text(
         "name: sf_env\nchannels:\n  - snowflake\ndependencies:\n"
-        "  - streamlit=1.50.0\n  - snowflake_snowpark_python\n"
+        "  - streamlit=1.50.0\n  - snowflake_snowpark_python\n",
+        encoding="utf-8",
     )
     policy = SchemaPolicy.from_governance(cfg.governance)
     res = validate_app(tmp_path / "apps/wuc-app", policy, cfg)
@@ -1152,10 +1167,10 @@ def test_artifacts_no_key_passes(tmp_path):
     scaffold(cfg, tmp_path, "art-app")
     app = tmp_path / "apps/art-app"
     yml = app / "snowflake.yml"
-    data = yaml.safe_load(yml.read_text())
+    data = yaml.safe_load(yml.read_text(encoding="utf-8"))
     for ent in data["entities"].values():
         ent.pop("artifacts", None)
-    yml.write_text(yaml.safe_dump(data))
+    yml.write_text(yaml.safe_dump(data), encoding="utf-8")
     _write(app / "helpers.py", "X = 1\n")  # would fail if the list were present
     assert check_artifacts.check_app(app)["ok"]
 
@@ -1175,11 +1190,11 @@ def test_artifacts_glob_entry_supported(tmp_path):
     scaffold(cfg, tmp_path, "art-app")
     app = tmp_path / "apps/art-app"
     yml = app / "snowflake.yml"
-    data = yaml.safe_load(yml.read_text())
+    data = yaml.safe_load(yml.read_text(encoding="utf-8"))
     for ent in data["entities"].values():
         if "artifacts" in ent:
             ent["artifacts"] = [e for e in ent["artifacts"] if e != "queries/"] + ["queries/*.sql"]
-    yml.write_text(yaml.safe_dump(data))
+    yml.write_text(yaml.safe_dump(data), encoding="utf-8")
     _write(app / "queries/extra.sql", "SELECT 1\n")
     assert check_artifacts.check_app(app)["ok"]
 
@@ -1470,7 +1485,7 @@ def test_app_security_scans_whatever_the_checkout_path_looks_like(tmp_path, shap
 
     repo = tmp_path / shape / "repo"
     (repo / "apps" / "x").mkdir(parents=True)
-    (repo / "apps" / "x" / "bad.py").write_text(_EGRESS)
+    (repo / "apps" / "x" / "bad.py").write_text(_EGRESS, encoding="utf-8")
     res = scan_paths(_iter_files(repo / "apps"), repo / "apps")
     assert len(res["findings"]) == 1, f"scanned nothing under a {shape!r} checkout"
 
@@ -1483,7 +1498,7 @@ def test_schema_refs_scans_whatever_the_checkout_path_looks_like(tmp_path, shape
     policy = SP(database="DB", schema_allow=("ANALYTICS",), schema_deny=("BRIDGE",))
     repo = tmp_path / shape / "repo"
     (repo / "apps" / "x" / "queries").mkdir(parents=True)
-    (repo / "apps" / "x" / "queries" / "q.sql").write_text(_DENIED)
+    (repo / "apps" / "x" / "queries" / "q.sql").write_text(_DENIED, encoding="utf-8")
     res = check_paths(_iter_files(repo / "apps"), policy, repo / "apps")
     assert len(res["findings"]) == 1, f"scanned nothing under a {shape!r} checkout"
 
@@ -1495,8 +1510,8 @@ def test_junk_dirs_inside_the_repo_are_still_skipped(tmp_path):
     repo = tmp_path / "repo"
     for sub in (".review", ".venv", "__pycache__"):
         (repo / "apps" / "x" / sub).mkdir(parents=True)
-        (repo / "apps" / "x" / sub / "junk.py").write_text(_EGRESS)
-    (repo / "apps" / "x" / "real.py").write_text(_EGRESS)
+        (repo / "apps" / "x" / sub / "junk.py").write_text(_EGRESS, encoding="utf-8")
+    (repo / "apps" / "x" / "real.py").write_text(_EGRESS, encoding="utf-8")
     res = scan_paths(_iter_files(repo / "apps"), repo / "apps")
     files = {f["file"] for f in res["findings"]}
     assert len(files) == 1 and any("real.py" in f for f in files), files
@@ -1511,9 +1526,12 @@ def test_junk_dirs_inside_the_repo_are_still_skipped(tmp_path):
 
 def _mini_repo(tmp_path, sql: str):
     (tmp_path / "apps" / "x" / "queries").mkdir(parents=True)
-    (tmp_path / "apps" / "x" / "queries" / "q.sql").write_text(sql)
+    (tmp_path / "apps" / "x" / "queries" / "q.sql").write_text(sql, encoding="utf-8")
     (tmp_path / "streamsnow.config.yaml").write_text(
-        (Path(__file__).parent.parent / "streamsnow.config.example.yaml").read_text()
+        (Path(__file__).parent.parent / "streamsnow.config.example.yaml").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
     )
     return tmp_path
 
@@ -1567,7 +1585,9 @@ FLEET_APPS = sorted(p.name for p in (FLEET / "apps").iterdir() if p.is_dir())
 
 
 def _fleet_cfg() -> Config:
-    return Config.from_dict(yaml.safe_load((FLEET / "streamsnow.config.yaml").read_text()))
+    return Config.from_dict(
+        yaml.safe_load((FLEET / "streamsnow.config.yaml").read_text(encoding="utf-8"))
+    )
 
 
 @pytest.mark.parametrize("slug", FLEET_APPS)
@@ -1584,9 +1604,9 @@ def test_fleet_fixture_app_passes_validate(slug):
 
 def test_fleet_fixture_still_covers_the_migration_shapes():
     """Guard against a later cleanup hollowing the fixture out."""
-    text = {p: p.read_text() for p in FLEET.rglob("*") if p.is_file()}
+    text = {p: p.read_text(encoding="utf-8") for p in FLEET.rglob("*") if p.is_file()}
     joined = "\n".join(text.values())
-    assert "artifact_exclude" in (FLEET / "streamsnow.config.yaml").read_text()
+    assert "artifact_exclude" in (FLEET / "streamsnow.config.yaml").read_text(encoding="utf-8")
     assert "**Phase notes:**" in joined
     assert "# noqa: session-fallback" in joined
     assert "-- Tokens: SEGMENT_EXPR" in joined and "{SEGMENT_EXPR}" in joined
@@ -1599,7 +1619,7 @@ def test_fleet_fixture_still_covers_the_migration_shapes():
 def test_fleet_fixture_has_no_personal_paths_or_secrets():
     for p in FLEET.rglob("*"):
         if p.is_file():
-            body = p.read_text()
+            body = p.read_text(encoding="utf-8")
             assert "/Users/" not in body and "/home/" not in body, p
             assert "password" not in body.lower() or "secrets.toml.example" in p.name, p
 
@@ -1618,7 +1638,7 @@ def test_fleet_fixture_coverage_warnings_do_not_fail_under_warn_policy():
 
 
 def test_coverage_policy_fail_gates_validate_app(tmp_path):
-    cfg_data = yaml.safe_load(EXAMPLE.read_text())
+    cfg_data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     cfg_data["sql_review"] = {"coverage": "fail"}
     cfg = Config.from_dict(cfg_data)
     app = _scaffold_with_trail(cfg, tmp_path, "gated-app")
@@ -1637,16 +1657,16 @@ def test_implicit_review_window_is_a_validate_warning_never_a_failure(tmp_path):
     import json as _json
 
     for policy in ("warn", "fail"):
-        cfg_data = yaml.safe_load(EXAMPLE.read_text())
+        cfg_data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
         cfg_data["sql_review"] = {"coverage": policy}
         cfg = Config.from_dict(cfg_data)
         root = tmp_path / policy
         app = _scaffold_with_trail(cfg, root, "window-app")
         mp = app / "sql_review/manifests/example_metric.json"
-        manifest = _json.loads(mp.read_text())
+        manifest = _json.loads(mp.read_text(encoding="utf-8"))
         assert "MAX(metric_date)" in manifest["set_block"]["end_date"]  # the starter anchors it
         del manifest["set_block"], manifest["set_block_note"]
-        mp.write_text(_json.dumps(manifest))
+        mp.write_text(_json.dumps(manifest), encoding="utf-8")
         assert sql_review.main(["generate", "window-app", "--dir", str(root)]) == 0
         res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
         sqlr = next(c for c in res["checks"] if c["name"].startswith("sql-review"))

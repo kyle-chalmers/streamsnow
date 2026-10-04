@@ -167,7 +167,14 @@ def _run(
     other failure to run, with empty output)."""
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False, cwd=cwd
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            cwd=cwd,
+            encoding="utf-8",
+            errors="replace",
         )
         return proc.returncode, proc.stdout or ""
     except subprocess.TimeoutExpired:
@@ -604,7 +611,7 @@ def check_pre_commit_hook(cfg_result: dict) -> dict:
             "(if it refuses because core.hooksPath is set, ask before unsetting it)",
         )
     try:
-        ours = _PRE_COMMIT_MARKER in hook.read_text(errors="replace").lower()
+        ours = _PRE_COMMIT_MARKER in hook.read_text(errors="replace", encoding="utf-8").lower()
     except OSError:
         return _not_checked("pre-commit-hook", "could not read the hook file")
     if not ours:

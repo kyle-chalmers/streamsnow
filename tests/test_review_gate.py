@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+from _portable import bare_env
 
 from streamsnow.tools import review_gate as rg
 
@@ -61,7 +63,15 @@ def render() -> None:
 
 
 def _git(root: Path, *args: str) -> str:
-    proc = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     return proc.stdout
 
 
@@ -73,9 +83,9 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "repo"
     app = root / "apps" / "acme-sales-dashboard"
     (app / "pages").mkdir(parents=True)
-    (app / "pages" / "overview.py").write_text(PAGE_V1)
-    (app / "streamlit_app.py").write_text("import streamlit as st\n")
-    (root / "streamsnow.config.yaml").write_text("project:\n  name: Acme\n")
+    (app / "pages" / "overview.py").write_text(PAGE_V1, encoding="utf-8")
+    (app / "streamlit_app.py").write_text("import streamlit as st\n", encoding="utf-8")
+    (root / "streamsnow.config.yaml").write_text("project:\n  name: Acme\n", encoding="utf-8")
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "test@example.com")
     _git(root, "config", "user.name", "Test")
@@ -137,7 +147,7 @@ def test_classify_trivial_paths() -> None:
 
 
 def test_classify_flags_substantive_change(repo: Path) -> None:
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     verdicts = rg.classify(repo, SLUG, "main")
     assert len(verdicts) == 1
     v = verdicts[0]
@@ -147,7 +157,7 @@ def test_classify_flags_substantive_change(repo: Path) -> None:
 
 
 def test_classify_trivial_for_comment_edit(repo: Path) -> None:
-    _overview(repo).write_text(PAGE_V1_TRIVIAL_EDIT)
+    _overview(repo).write_text(PAGE_V1_TRIVIAL_EDIT, encoding="utf-8")
     v = rg.classify(repo, SLUG, "main")[0]
     assert v.verdict == rg.VERDICT_TRIVIAL
     assert not v.needs_review
@@ -168,10 +178,10 @@ def test_deleted_file_reads_unreviewed(repo: Path) -> None:
 
 
 def test_skip_marker_suppresses_needs_review(repo: Path) -> None:
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     marker = repo / "apps" / SLUG / ".review" / "SKIP"
     marker.parent.mkdir(parents=True)
-    marker.write_text("")
+    marker.write_text("", encoding="utf-8")
     v = rg.classify(repo, SLUG, "main")[0]
     assert v.skipped
     assert not v.needs_review
@@ -187,7 +197,7 @@ def _stamp_current(repo: Path, artifact_name: str) -> Path:
     review_dir.mkdir(parents=True, exist_ok=True)
     artifact = review_dir / artifact_name
     if not artifact.exists():
-        artifact.write_text("# Review report\n\n## SQL\n\n### BLOCK\n- _none_\n")
+        artifact.write_text("# Review report\n\n## SQL\n\n### BLOCK\n- _none_\n", encoding="utf-8")
     baseline = rg.compute_baseline(repo, SLUG)
     blobs = rg.app_substantive_blobs(repo, SLUG, "main")
     rg.stamp_artifact(artifact, baseline, blobs)
@@ -195,7 +205,7 @@ def _stamp_current(repo: Path, artifact_name: str) -> Path:
 
 
 def test_stamped_change_reads_reviewed(repo: Path) -> None:
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     _stamp_current(repo, "review-20260831-120000.md")
     v = rg.classify(repo, SLUG, "main")[0]
     assert v.reviewed
@@ -206,28 +216,30 @@ def test_stamped_change_reads_reviewed(repo: Path) -> None:
 def test_uppercase_artifact_dialect_also_counts(repo: Path) -> None:
     # Artifacts from other tooling use REVIEW-<ts>.md; coverage must match
     # case-insensitively or stamping silently never applies.
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     _stamp_current(repo, "REVIEW-20260831-120000.md")
     v = rg.classify(repo, SLUG, "main")[0]
     assert v.reviewed
 
 
 def test_comment_edit_after_review_stays_reviewed(repo: Path) -> None:
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     _stamp_current(repo, "review-1.md")
     # Now reword a comment in the reviewed file: coverage key is AST-shaped,
     # so the review must NOT reopen.
-    _overview(repo).write_text(PAGE_V2.replace("# KPI row", "# KPI row (top)"))
+    _overview(repo).write_text(PAGE_V2.replace("# KPI row", "# KPI row (top)"), encoding="utf-8")
     v = rg.classify(repo, SLUG, "main")[0]
     assert v.reviewed
 
 
 def test_real_edit_after_review_reopens_only_that_file(repo: Path) -> None:
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     (repo / "apps" / SLUG / "queries").mkdir()
-    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text("SELECT 1\n")
+    (repo / "apps" / SLUG / "queries" / "revenue_daily.sql").write_text(
+        "SELECT 1\n", encoding="utf-8"
+    )
     _stamp_current(repo, "review-1.md")
-    _overview(repo).write_text(PAGE_V2.replace('"Orders"', '"Units"'))
+    _overview(repo).write_text(PAGE_V2.replace('"Orders"', '"Units"'), encoding="utf-8")
     v = rg.classify(repo, SLUG, "main")[0]
     assert not v.reviewed
     assert v.unreviewed_files == [f"apps/{SLUG}/pages/overview.py"]
@@ -235,15 +247,15 @@ def test_real_edit_after_review_reopens_only_that_file(repo: Path) -> None:
 
 
 def test_restamp_is_idempotent_and_fenced(repo: Path) -> None:
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     artifact = _stamp_current(repo, "review-1.md")
     # Add a body line that LOOKS like a coverage line; re-stamping must not
     # eat it, and it must not count as coverage (it is outside the fence).
     body_line = "deadbeefdeadbeef  apps/acme-sales-dashboard/pages/other.py"
-    artifact.write_text(artifact.read_text() + f"\n{body_line}\n")
+    artifact.write_text(artifact.read_text(encoding="utf-8") + f"\n{body_line}\n", encoding="utf-8")
     baseline = rg.compute_baseline(repo, SLUG)
     rg.stamp_artifact(artifact, baseline, rg.app_substantive_blobs(repo, SLUG, "main"))
-    text = artifact.read_text()
+    text = artifact.read_text(encoding="utf-8")
     assert text.count(rg.BASELINE_HEADER) == 1
     assert text.count(rg.FILES_END) == 1
     assert body_line in text
@@ -252,10 +264,10 @@ def test_restamp_is_idempotent_and_fenced(repo: Path) -> None:
 
 
 def test_reverting_to_reviewed_content_reads_reviewed(repo: Path) -> None:
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     _stamp_current(repo, "review-1.md")
-    _overview(repo).write_text(PAGE_V2.replace('"Orders"', '"Units"'))
-    _overview(repo).write_text(PAGE_V2)  # revert
+    _overview(repo).write_text(PAGE_V2.replace('"Orders"', '"Units"'), encoding="utf-8")
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")  # revert
     v = rg.classify(repo, SLUG, "main")[0]
     assert v.reviewed
 
@@ -272,7 +284,9 @@ def test_apps_dir_from_env(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_apps_dir_from_config(tmp_path: Path) -> None:
     root = tmp_path
-    (root / "streamsnow.config.yaml").write_text("review_gate:\n  apps_dir: dashboards\n")
+    (root / "streamsnow.config.yaml").write_text(
+        "review_gate:\n  apps_dir: dashboards\n", encoding="utf-8"
+    )
     assert rg.apps_dir_name(root) == "dashboards"
 
 
@@ -314,7 +328,7 @@ def _hook_payload(repo: Path) -> dict:
 def test_stop_hook_emits_system_message_only_by_default(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     code, out = _run_stop_hook(repo, monkeypatch, capsys, _hook_payload(repo))
     assert code == 0
     data = json.loads(out)
@@ -329,7 +343,7 @@ def test_stop_hook_dedupes_within_session(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("TMPDIR", str(tmp_path / "state"))
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     code, out = _run_stop_hook(repo, monkeypatch, capsys, _hook_payload(repo))
     assert json.loads(out)
     code, out = _run_stop_hook(repo, monkeypatch, capsys, _hook_payload(repo))
@@ -351,8 +365,10 @@ def test_stop_hook_silent_outside_streamsnow_repo(
 def test_stop_hook_silent_when_disabled_in_config(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    (repo / "streamsnow.config.yaml").write_text("review_gate:\n  enabled: false\n")
-    _overview(repo).write_text(PAGE_V2)
+    (repo / "streamsnow.config.yaml").write_text(
+        "review_gate:\n  enabled: false\n", encoding="utf-8"
+    )
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     code, out = _run_stop_hook(repo, monkeypatch, capsys, _hook_payload(repo))
     assert code == 0
     assert out == ""
@@ -362,7 +378,7 @@ def test_stop_hook_silent_on_main_branch(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _git(repo, "checkout", "-q", "main")
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     code, out = _run_stop_hook(repo, monkeypatch, capsys, _hook_payload(repo))
     assert code == 0
     assert out == ""
@@ -372,7 +388,7 @@ def test_stop_hook_respects_env_off_switch(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     monkeypatch.setenv("REVIEW_GATE_OFF", "1")
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     code, out = _run_stop_hook(repo, monkeypatch, capsys, _hook_payload(repo))
     assert code == 0
     assert out == ""
@@ -390,7 +406,7 @@ def test_stop_hook_fail_open_when_stop_hook_active(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     payload = {**_hook_payload(repo), "stop_hook_active": True}
-    _overview(repo).write_text(PAGE_V2)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
     code, out = _run_stop_hook(repo, monkeypatch, capsys, payload)
     assert code == 0
     assert out == ""
@@ -415,11 +431,15 @@ def test_module_runs_standalone_by_path(repo: Path) -> None:
     script with no package imports."""
     tool = Path(rg.__file__)
     proc = subprocess.run(
-        ["python3", str(tool), "baseline", SLUG],
+        # -S: no site-packages, so any import beyond the stdlib fails here exactly
+        # as it would on a plugin-only install with no streamsnow package.
+        [sys.executable, "-S", str(tool), "baseline", SLUG],
         cwd=repo,
         capture_output=True,
         text=True,
-        env={"PATH": "/usr/bin:/bin", "HOME": str(repo)},
+        env=bare_env(HOME=str(repo)),
+        encoding="utf-8",
+        errors="replace",
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip()

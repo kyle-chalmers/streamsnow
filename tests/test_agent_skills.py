@@ -64,15 +64,15 @@ def test_repo_install_lays_out_skills_and_shared_so_links_resolve(tmp_path):
     broken = [
         f"{p.relative_to(dest)} -> {target}"
         for p in sorted(dest.rglob("*.md"))
-        for target in _LINK_RE.findall(p.read_text())
+        for target in _LINK_RE.findall(p.read_text(encoding="utf-8"))
         if not target.startswith(("http://", "https://"))
         and not (p.parent / target).resolve().exists()
     ]
     assert not broken, broken
     # The one link out of the skills tree (into the repo's docs/) points at GitHub instead.
-    gotchas = (dest / "_shared" / "production-gotchas.md").read_text()
+    gotchas = (dest / "_shared" / "production-gotchas.md").read_text(encoding="utf-8")
     assert f"({ags.REPO_BLOB_URL}/docs/production-lessons.md)" in gotchas
-    manifest = json.loads((dest / ags.MANIFEST_NAME).read_text())
+    manifest = json.loads((dest / ags.MANIFEST_NAME).read_text(encoding="utf-8"))
     assert manifest["agent"] == "codex"
     assert "_shared" in manifest["entries"]
     assert "start-app/SKILL.md" in manifest["files"]
@@ -90,9 +90,9 @@ def test_human_only_skills_are_explicit_only_in_codex(tmp_path):
         if human_only:
             import yaml
 
-            data = yaml.safe_load(policy.read_text())
+            data = yaml.safe_load(policy.read_text(encoding="utf-8"))
             assert data == {"policy": {"allow_implicit_invocation": False}}
-            assert f"${skill.name}" in policy.read_text()
+            assert f"${skill.name}" in policy.read_text(encoding="utf-8")
 
 
 def test_dry_run_writes_nothing(tmp_path):
@@ -121,31 +121,35 @@ def test_refuses_to_overwrite_an_edited_skill_without_force(tmp_path, capsys):
     args = ["install", "--agent", "codex", "--dir", str(tmp_path)]
     assert ags.main(args) == 0
     edited = tmp_path / ".agents" / "skills" / "start-app" / "SKILL.md"
-    edited.write_text(edited.read_text() + "\nlocal note\n")
+    edited.write_text(edited.read_text(encoding="utf-8") + "\nlocal note\n", encoding="utf-8")
     assert ags.main(args) == 1
     assert "start-app/SKILL.md was edited" in capsys.readouterr().out
-    assert "local note" in edited.read_text()  # nothing written
+    assert "local note" in edited.read_text(encoding="utf-8")  # nothing written
     assert ags.main([*args, "--force"]) == 0
-    assert "local note" not in edited.read_text()
+    assert "local note" not in edited.read_text(encoding="utf-8")
 
 
 def test_refuses_a_same_named_folder_it_did_not_write(tmp_path, capsys):
     foreign = tmp_path / ".agents" / "skills" / "review-app"
     foreign.mkdir(parents=True)
-    (foreign / "SKILL.md").write_text("---\nname: review-app\ndescription: mine\n---\n")
+    (foreign / "SKILL.md").write_text(
+        "---\nname: review-app\ndescription: mine\n---\n", encoding="utf-8"
+    )
     args = ["install", "--agent", "codex", "--dir", str(tmp_path)]
     assert ags.main(args) == 1
     assert "not installed by streamsnow" in capsys.readouterr().out
-    assert "description: mine" in (foreign / "SKILL.md").read_text()
+    assert "description: mine" in (foreign / "SKILL.md").read_text(encoding="utf-8")
     assert not (tmp_path / ".agents" / "skills" / "start-app").exists()
 
 
 def _fake_source(root: Path, skills: list[str]) -> Path:
     for name in skills:
         (root / name).mkdir(parents=True)
-        (root / name / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {name} d\n---\n")
+        (root / name / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {name} d\n---\n", encoding="utf-8"
+        )
     (root / "_shared").mkdir()
-    (root / "_shared" / "notes.md").write_text("shared\n")
+    (root / "_shared" / "notes.md").write_text("shared\n", encoding="utf-8")
     return root
 
 
@@ -155,14 +159,16 @@ def test_upgrade_updates_changed_skills_and_removes_retired_ones(tmp_path):
     ags.apply_install(ags.plan_install(old, dest, CODEX))
 
     new = _fake_source(tmp_path / "v2", ["start-app"])
-    (new / "start-app" / "SKILL.md").write_text("---\nname: start-app\ndescription: v2\n---\n")
+    (new / "start-app" / "SKILL.md").write_text(
+        "---\nname: start-app\ndescription: v2\n---\n", encoding="utf-8"
+    )
     plan = ags.plan_install(new, dest, CODEX)
     assert plan.conflicts == []
     assert plan.updated == ["start-app"] and plan.removed == ["retired-app"]
     ags.apply_install(plan)
-    assert "v2" in (dest / "start-app" / "SKILL.md").read_text()
+    assert "v2" in (dest / "start-app" / "SKILL.md").read_text(encoding="utf-8")
     assert not (dest / "retired-app").exists()
-    assert json.loads((dest / ags.MANIFEST_NAME).read_text())["entries"] == [
+    assert json.loads((dest / ags.MANIFEST_NAME).read_text(encoding="utf-8"))["entries"] == [
         "_shared",
         "start-app",
     ]
@@ -172,7 +178,7 @@ def test_a_file_added_inside_an_installed_skill_blocks_the_upgrade(tmp_path):
     dest = tmp_path / "dest"
     src = _fake_source(tmp_path / "v1", ["start-app"])
     ags.apply_install(ags.plan_install(src, dest, CODEX))
-    (dest / "start-app" / "team-notes.md").write_text("ours\n")
+    (dest / "start-app" / "team-notes.md").write_text("ours\n", encoding="utf-8")
     plan = ags.plan_install(src, dest, CODEX)
     assert plan.conflicts == ["start-app/team-notes.md was added after the install"]
 
@@ -186,11 +192,11 @@ def test_a_manifest_entry_outside_the_skills_folder_is_refused(tmp_path, bad):
     ags.apply_install(ags.plan_install(src, dest, CODEX))
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "keep.txt").write_text("keep\n")
+    (outside / "keep.txt").write_text("keep\n", encoding="utf-8")
     manifest_path = dest / ags.MANIFEST_NAME
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["entries"].append(bad)
-    manifest_path.write_text(json.dumps(manifest))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ags.AgentSkillsError, match="unsafe entry"):
         ags.plan_install(src, dest, CODEX, force=True)
     assert (outside / "keep.txt").is_file()
@@ -199,7 +205,7 @@ def test_a_manifest_entry_outside_the_skills_folder_is_refused(tmp_path, bad):
 def test_a_symlinked_skills_folder_is_refused(tmp_path):
     elsewhere = tmp_path / "elsewhere"
     (elsewhere / "start-app").mkdir(parents=True)
-    (elsewhere / "start-app" / "keep.txt").write_text("keep\n")
+    (elsewhere / "start-app" / "keep.txt").write_text("keep\n", encoding="utf-8")
     dest = tmp_path / "repo" / ".agents" / "skills"
     dest.parent.mkdir(parents=True)
     dest.symlink_to(elsewhere, target_is_directory=True)
@@ -212,7 +218,7 @@ def test_a_symlinked_skills_folder_is_refused(tmp_path):
 def test_an_upgrade_that_drops_a_file_is_not_drift(tmp_path):
     dest = tmp_path / "dest"
     old = _fake_source(tmp_path / "v1", ["start-app"])
-    (old / "start-app" / "extra.md").write_text("old recipe\n")
+    (old / "start-app" / "extra.md").write_text("old recipe\n", encoding="utf-8")
     ags.apply_install(ags.plan_install(old, dest, CODEX))
     new = _fake_source(tmp_path / "v2", ["start-app"])
     plan = ags.plan_install(new, dest, CODEX)

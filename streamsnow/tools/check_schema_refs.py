@@ -276,7 +276,7 @@ def check_paths(paths: list[Path], policy: SchemaPolicy, root: Path | None = Non
             continue
         if _has_dotted_dir(p, root):
             continue  # dotted dir (.review/, .git/, ...) — not real app code
-        text = p.read_text(errors="ignore")
+        text = p.read_text(errors="ignore", encoding="utf-8")
         for line_no, schema in find_denied_refs(text, policy, is_python=p.suffix == ".py"):
             findings.append({"file": str(p), "line": line_no, "schema": schema})
     return {"ok": not findings, "findings": findings, "denylist": list(policy.schema_deny)}

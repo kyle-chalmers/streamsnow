@@ -174,7 +174,7 @@ def create(
             kept.append(name)
             if path.is_file() and not path.is_symlink() and path.stat().st_mode & 0o077:
                 path.chmod(0o600)  # a secret file never stays readable by others
-            if path.read_text().strip() != values[name]:
+            if path.read_text(encoding="utf-8").strip() != values[name]:
                 mismatched.append(name)
         else:
             _write_private(path, values[name])

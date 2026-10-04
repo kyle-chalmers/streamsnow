@@ -38,7 +38,7 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
 def _cfg() -> Config:
-    return Config.from_dict(yaml.safe_load(EXAMPLE.read_text()))
+    return Config.from_dict(yaml.safe_load(EXAMPLE.read_text(encoding="utf-8")))
 
 
 def _show_row() -> dict:
@@ -325,7 +325,7 @@ def test_verify_app_describe_error_is_skipped_with_the_error_after_retries():
 
 
 def _git_data() -> dict:
-    data = yaml.safe_load(EXAMPLE.read_text())
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
     data["deploy"] = {
         "source": "git-repository",
         "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",

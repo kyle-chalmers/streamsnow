@@ -18,18 +18,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 def _denylist(root: Path, body: str) -> Path:
     path = root / LOCAL_DENYLIST
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body)
+    path.write_text(body, encoding="utf-8")
     return path
 
 
 def test_clean_tree_passes(tmp_path):
-    (tmp_path / "a.md").write_text("A generic Streamlit + Snowflake toolkit. Query ANALYTICS.")
+    (tmp_path / "a.md").write_text(
+        "A generic Streamlit + Snowflake toolkit. Query ANALYTICS.", encoding="utf-8"
+    )
     assert scan_tree(tmp_path)["ok"]
 
 
 def test_local_denylist_term_is_detected_case_insensitively(tmp_path):
     _denylist(tmp_path, "# org names\n\nacme-internal-corp\n")
-    (tmp_path / "b.md").write_text("This job reads from ACME-Internal-Corp.\n")
+    (tmp_path / "b.md").write_text("This job reads from ACME-Internal-Corp.\n", encoding="utf-8")
     res = scan_tree(tmp_path)
     assert not res["ok"]
     assert [f["match"] for f in res["findings"]] == ["acme-internal-corp"]
@@ -38,7 +40,7 @@ def test_local_denylist_term_is_detected_case_insensitively(tmp_path):
 def test_local_denylist_regex_lines(tmp_path):
     _denylist(tmp_path, "re:\\bTKT-\\d{2,}\\b\n")
     ticket = "TKT" + "-1339"
-    (tmp_path / "c.py").write_text(f"# tracked in {ticket}\n")
+    (tmp_path / "c.py").write_text(f"# tracked in {ticket}\n", encoding="utf-8")
     res = scan_tree(tmp_path)
     assert not res["ok"]
     assert res["findings"][0]["match"] == ticket
@@ -50,7 +52,7 @@ def test_denylist_file_itself_is_never_a_finding(tmp_path):
 
 
 def test_without_local_denylist_only_generic_checks_run(tmp_path):
-    (tmp_path / "b.md").write_text("This job reads from acme-internal-corp.\n")
+    (tmp_path / "b.md").write_text("This job reads from acme-internal-corp.\n", encoding="utf-8")
     res = scan_tree(tmp_path)
     assert res["ok"] and res["denylist_terms"] == 0
 
@@ -65,22 +67,22 @@ def test_load_denylist_skips_blanks_and_comments(tmp_path):
 
 def test_explicit_denylist_path(tmp_path, capsys):
     outside = tmp_path / "elsewhere.txt"
-    outside.write_text("acme-internal-corp\n")
+    outside.write_text("acme-internal-corp\n", encoding="utf-8")
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "x.md").write_text("acme-internal-corp\n")
+    (repo / "x.md").write_text("acme-internal-corp\n", encoding="utf-8")
     assert main([str(repo), "--denylist", str(outside)]) == 1
     assert main([str(repo), "--denylist", str(tmp_path / "nope.txt")]) == 2
 
 
 def test_detects_personal_path(tmp_path):
-    (tmp_path / "c.py").write_text("P = '/Users/someone/secret/x'\n")
+    (tmp_path / "c.py").write_text("P = '/Users/someone/secret/x'\n", encoding="utf-8")
     assert not scan_tree(tmp_path)["ok"]
 
 
 def test_detects_private_key_block(tmp_path):
     (tmp_path / "k.txt").write_text(
-        "-----BEGIN RSA PRIVATE KEY-----\nabcd\n-----END RSA PRIVATE KEY-----\n"
+        "-----BEGIN RSA PRIVATE KEY-----\nabcd\n-----END RSA PRIVATE KEY-----\n", encoding="utf-8"
     )
     assert not scan_tree(tmp_path)["ok"]
 
@@ -88,10 +90,11 @@ def test_detects_private_key_block(tmp_path):
 def test_detects_real_email_but_allows_reserved_domains(tmp_path):
     (tmp_path / "ok.md").write_text(
         "a@example.com b@acme.example c@corp.test d@example.org\n"
-        "@st.cache_data\ndef f(): ...\nfn@st.cache_data\n"
+        "@st.cache_data\ndef f(): ...\nfn@st.cache_data\n",
+        encoding="utf-8",
     )
     assert scan_tree(tmp_path)["ok"]
-    (tmp_path / "bad.md").write_text("contact jane.doe@realcorp.io for access\n")
+    (tmp_path / "bad.md").write_text("contact jane.doe@realcorp.io for access\n", encoding="utf-8")
     res = scan_tree(tmp_path)
     assert not res["ok"]
     assert res["findings"][0]["match"] == "jane.doe@realcorp.io"
@@ -100,9 +103,9 @@ def test_detects_real_email_but_allows_reserved_domains(tmp_path):
 def test_scanner_source_names_no_organization():
     """The committed scanner holds generic patterns only. Org terms live in the
     gitignored local denylist; the gitignore entry is what keeps it local."""
-    src = Path(check_export_clean.__file__).read_text()
+    src = Path(check_export_clean.__file__).read_text(encoding="utf-8")
     assert "DENY_TERMS" not in src
-    assert str(LOCAL_DENYLIST) in (REPO_ROOT / ".gitignore").read_text()
+    assert str(LOCAL_DENYLIST) in (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
 
 
 def test_repo_tree_is_clean_under_generic_checks():

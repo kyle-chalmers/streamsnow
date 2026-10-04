@@ -44,7 +44,9 @@ def test_creates_the_layout_the_deploy_workflow_reads(tmp_path):
     p8, pub = d / "streamsnow_ci_rsa_key.p8", d / "streamsnow_ci_rsa_key.pub"
     assert _mode(d) == 0o700 and _mode(d / "secrets") == 0o700
     assert _mode(p8) == 0o600
-    assert "BEGIN PRIVATE KEY" in p8.read_text()  # unencrypted PKCS#8, as the workflow expects
+    assert "BEGIN PRIVATE KEY" in p8.read_text(
+        encoding="utf-8"
+    )  # unencrypted PKCS#8, as the workflow expects
     read_public_key(pub)  # a valid PEM public key for --public-key-file
     secrets = d / "secrets"
     assert sorted(p.name for p in secrets.iterdir()) == sorted(ci_key.SECRET_NAMES)
@@ -57,13 +59,17 @@ def test_creates_the_layout_the_deploy_workflow_reads(tmp_path):
         "SNOWFLAKE_ROLE": "STREAMSNOW_DEPLOY_ROLE",
     }
     for name, value in expected.items():
-        assert (secrets / name).read_text() == value  # no trailing newline for gh secret set
+        assert (secrets / name).read_text(
+            encoding="utf-8"
+        ) == value  # no trailing newline for gh secret set
         assert _mode(secrets / name) == 0o600
 
 
 def test_output_never_contains_a_secret_value(tmp_path):
     res = _create(tmp_path)
-    p8_body = (tmp_path / "ci" / "streamsnow_ci_rsa_key.p8").read_text().splitlines()[1]
+    p8_body = (
+        (tmp_path / "ci" / "streamsnow_ci_rsa_key.p8").read_text(encoding="utf-8").splitlines()[1]
+    )
     assert p8_body not in res.output
     assert ACCOUNT not in res.output
     assert "PRIVATE KEY-----" not in res.output
@@ -92,7 +98,9 @@ def test_rerun_reuses_the_key_and_keeps_secret_files(tmp_path):
     assert fp and fp == [ln for ln in second.output.splitlines() if "fingerprint" in ln]
     assert "Reused key pair" in second.output
     # A differing existing secret is reported by name, never rewritten or echoed.
-    assert (tmp_path / "ci" / "secrets" / "SNOWFLAKE_ACCOUNT").read_text() == ACCOUNT
+    assert (tmp_path / "ci" / "secrets" / "SNOWFLAKE_ACCOUNT").read_text(
+        encoding="utf-8"
+    ) == ACCOUNT
     assert "secrets/SNOWFLAKE_ACCOUNT differs" in second.output
     assert "other-acct" not in second.output
 
