@@ -7,6 +7,8 @@ streamsnow new            Scaffold another app in an existing StreamSnow repo
 streamsnow doctor         Check the local environment for prerequisites
 streamsnow check ...      Run a governance check (e.g. schema-refs)
 streamsnow deploy-setup   Emit the one-time Snowflake DDL for your deploy source
+                          (--admin: full bootstrap; --teardown: start-fresh reverse)
+streamsnow ci-key create  Make the CI user's key pair + the deploy secret files
 streamsnow update         Re-vendor templates/tools and bump the plugin
 """
 
@@ -22,6 +24,7 @@ import yaml
 from rich.console import Console
 
 from . import __version__
+from . import ci_key as _ci_key
 from .agent_skills import main as _agent_skills_main
 from .config import (
     CONFIG_FILENAME,
@@ -35,9 +38,12 @@ from .config import (
     validate_github_origin,
 )
 from .deploy import (
+    ci_user_name,
     generate_admin_sql,
     generate_create_sql,
     generate_setup_sql,
+    generate_teardown_sql,
+    read_public_key,
     stage_path,
     with_source,
 )
@@ -81,6 +87,11 @@ app = typer.Typer(
 )
 check_app = typer.Typer(help="Run a governance check (config-driven).", no_args_is_help=True)
 app.add_typer(check_app, name="check")
+ci_key_app = typer.Typer(
+    help="Create the CI service user's key pair and the deploy secret files.",
+    no_args_is_help=True,
+)
+app.add_typer(ci_key_app, name="ci-key")
 console = Console()
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -750,7 +761,8 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
         lines += [
             "  4. streamsnow new <domain> <function>   (or /start-app) to scaffold your first app",
             "  One-time Snowflake objects for the first deploy: streamsnow deploy-setup --admin",
-            "  (review it, then hand it to your Snowflake admin).",
+            "  (review it, then hand it to your Snowflake admin). streamsnow ci-key create",
+            "  makes the CI key pair; pass its .pub to deploy-setup --admin --public-key-file.",
         ]
         return "\n".join(lines)
     install = local_install_command(target / "apps" / app_slug)
@@ -872,6 +884,24 @@ def deploy_setup(
         "--github-auth",
         help="git-repository: pat | github-app | public (a public repo needs no token).",
     ),
+    public_key_file: Path = typer.Option(
+        None,
+        "--public-key-file",
+        help="With --admin: the CI user's PEM public key (e.g. from `streamsnow ci-key "
+        "create`), filled into RSA_PUBLIC_KEY and re-applied on a re-run.",
+    ),
+    viewer_users: list[str] = typer.Option(
+        None,
+        "--viewer-user",
+        help="With --admin: also grant the viewer role to this user (repeatable). The user "
+        "running the script always gets it.",
+    ),
+    teardown: bool = typer.Option(
+        False,
+        "--teardown",
+        help="Print (never run) the reverse of --admin: DROP the app database, warehouse, "
+        "roles, CI user and integrations, to start fresh. Keeps the governance database.",
+    ),
 ) -> None:
     """Emit the one-time Snowflake DDL for your configured deploy source.
 
@@ -880,7 +910,14 @@ def deploy_setup(
     With --admin, emit everything a first deploy needs, in USE ROLE sections
     (SYSADMIN, USERADMIN, SECURITYADMIN, ACCOUNTADMIN, then the CI role): the
     block to hand a Snowflake admin when you cannot create these yourself.
+    With --teardown, emit the reviewable reverse, to uninstall or start fresh.
     """
+    if teardown and admin:
+        _err("--teardown and --admin are separate scripts: pass one of them.")
+        raise typer.Exit(2)
+    if (public_key_file or viewer_users) and not admin:
+        _err("--public-key-file and --viewer-user only apply to --admin.")
+        raise typer.Exit(2)
     try:
         cfg = load_config(Path(config) if config else None)
         configured = cfg.deploy.source
@@ -890,7 +927,13 @@ def deploy_setup(
             if target == "git-repository" and not origin and not cfg.deploy.git_origin:
                 origin = _checkout_github_origin()
             cfg = with_source(cfg, target, git_origin=origin, github_auth=github_auth)
-        sql = generate_admin_sql(cfg) if admin else generate_setup_sql(cfg)
+        if teardown:
+            sql = generate_teardown_sql(cfg)
+        elif admin:
+            key = read_public_key(public_key_file) if public_key_file else None
+            sql = generate_admin_sql(cfg, public_key=key, viewer_users=viewer_users or ())
+        else:
+            sql = generate_setup_sql(cfg)
     except ConfigError as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
@@ -902,6 +945,64 @@ def deploy_setup(
             "-- docs/git-repository.md. Review only: this command never runs SQL.\n" + sql
         )
     print(sql)
+
+
+@ci_key_app.command(name="create")
+def ci_key_create(
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+    directory: Path = typer.Option(
+        _ci_key.DEFAULT_DIR,
+        "--dir",
+        help="Where to write the key pair and secrets/ (keep it OUTSIDE the repo).",
+    ),
+    account: str = typer.Option(
+        None, "--account", help="Account locator for SNOWFLAKE_ACCOUNT (default: the config's)."
+    ),
+) -> None:
+    """Create (or reuse) the CI user's key pair and the five deploy secret files.
+
+    Never overwrites an existing key or secret file, and never prints a secret
+    value: only file names, the public-key fingerprint, and the next commands.
+    """
+    try:
+        cfg = load_config(Path(config) if config else None)
+        result = _ci_key.create(
+            directory,
+            account=normalize_account(account) if account else cfg.snowflake.account,
+            user=ci_user_name(cfg.snowflake.roles.ci_role),
+            warehouse=cfg.snowflake.objects.default_warehouse,
+            role=cfg.snowflake.roles.ci_role,
+        )
+    except (ConfigError, _ci_key.CiKeyError) as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    d = result.directory
+    print(f"{'Created' if result.key_created else 'Reused'} key pair in {d}:")
+    print(f"  {result.private_key.name}   private key, mode 600 (never commit or share it)")
+    print(f"  {result.public_key.name}  public key")
+    print(f"  fingerprint {result.fingerprint}  (DESC USER shows it as RSA_PUBLIC_KEY_FP)")
+    if result.written:
+        print(f"Wrote secrets/: {', '.join(result.written)}")
+    if result.kept:
+        print(f"Kept existing secrets/: {', '.join(result.kept)}")
+    for warning in result.warnings:
+        console.print(f"[yellow]warning:[/] {warning}")
+    for name in result.mismatched:
+        console.print(
+            f"[yellow]warning:[/] secrets/{name} differs from this config; left unchanged. "
+            "Delete it and re-run to rewrite it."
+        )
+    print("")
+    print("Next:")
+    print(
+        "  1. streamsnow deploy-setup --admin --public-key-file "
+        f"{result.public_key} > admin-setup.sql"
+    )
+    print("     (review, then run it as ACCOUNTADMIN)")
+    print("  2. In your repo, store the five secrets (values go straight from file to GitHub;")
+    print("     SNOWFLAKE_ACCOUNT last, since it switches the deploy job on):")
+    names = " ".join(_ci_key.SECRET_NAMES)
+    print(f'     for s in {names}; do gh secret set "$s" < "{d}/secrets/$s"; done')
 
 
 _SSH_GITHUB_RE = re.compile(

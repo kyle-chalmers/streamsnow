@@ -58,7 +58,8 @@ output to your admin; it asks for, in plain terms:
 - a database, schema and `XSMALL` warehouse for the apps (auto-suspending);
 - two roles: a **CI role** that deploys and owns the apps, and a **viewer role**
   that opens them;
-- a **CI service user** with key-pair auth (you paste the public key);
+- a **CI service user** with key-pair auth (`streamsnow ci-key create` makes the
+  key pair; `--public-key-file` puts the public key in the script);
 - `CREATE STREAMLIT` (and `CREATE STAGE`) on the app schema for the CI role, and
   read access to the schemas your apps query;
 - container runtime only: `USAGE` on a PyPI external access integration and on

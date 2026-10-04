@@ -22,6 +22,31 @@ All notable changes to StreamSnow are recorded here. This project follows
   waits for a yes. It routes a teammate cloning a configured repo straight to
   machine setup, adds a browser check, saves the plugin at project scope, and
   sets the deploy workflow's non-secret GitHub secrets (the user sets the key).
+- **`streamsnow deploy-setup --teardown` prints the start-fresh reverse of
+  `--admin`.** Reviewable DROP statements, never run: the app database (and
+  every deployed app in it), warehouse, CI service user, viewer and CI roles,
+  then the external access integration, the configured compute pool (never
+  `SYSTEM_COMPUTE_POOL_CPU`), and the git API integration. Every DROP uses
+  `IF EXISTS`. It keeps the governance database, refuses when the app or stage database is the governance
+  database or a Snowflake-shared one or a role is a system role, and marks each
+  object that could predate StreamSnow.
+- **`streamsnow ci-key create` makes the CI key pair and the five secret
+  files.** It writes them to `~/.streamsnow-ci` with `openssl`, reuses an
+  existing key, never overwrites a secret file, and prints only file names,
+  the `SHA256:` fingerprint `DESC USER` shows, and the `gh secret set` loop.
+- **`deploy-setup --admin --public-key-file` fills in the CI user's key**, so
+  the stage-copy admin script runs unedited, and re-applies it with
+  `ALTER USER` on a re-run. `--viewer-user NAME` (repeatable) grants the
+  viewer role to more users.
+
+### Changed
+
+- **The admin script is safe to re-run end to end.** The PyPI external access
+  integration, which Snowflake cannot create with `IF NOT EXISTS`, now uses
+  `CREATE OR REPLACE` followed by the CI role's `USAGE` grant. A deployed app
+  kept serving through a replace in a live test.
+- **The admin script grants the viewer role to whoever runs it**, through
+  `CURRENT_USER()`, instead of leaving a commented `GRANT` to fill in.
 
 ### Fixed
 

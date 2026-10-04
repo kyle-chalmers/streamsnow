@@ -329,7 +329,9 @@ to the repository the probe found.
   the CLI-only path; in this skill the real app comes from `/start-app`, so pass the flag.
 - The first deploy needs one-time Snowflake objects (database, schema, warehouse, roles, a CI
   service user, grants). `streamsnow deploy-setup --admin` prints the reviewable DDL; surface it
-  for the user's Snowflake admin, never run it yourself.
+  for the user's Snowflake admin, never run it yourself. The user runs `streamsnow ci-key create`
+  in their own terminal for the CI key pair, then adds `--public-key-file <its .pub>` so the file
+  runs unedited; it is safe to re-run, and `deploy-setup --teardown` prints the start-fresh reverse.
 
 ## 2d · Shared repo settings (once per repo; a teammate usually finds them done)
 
@@ -348,16 +350,16 @@ It needs the CI service user from the admin script (§2): if the admin has not r
 "waiting on your Snowflake admin" and come back on the next run.
 Order matters: `SNOWFLAKE_ACCOUNT` switches the deploy job on, so it goes last, or every merge
 fails at sign-in while the key is still missing.
-- The key pair is created by the user or their admin with the commands in
-  [docs/deploy-setup.md](../../docs/deploy-setup.md) §2, never by you: the public half goes into
-  the admin script, the private half only into GitHub.
+- The key pair is created by the user or their admin, never by you: `streamsnow ci-key create` in
+  their own terminal (or the commands in [docs/deploy-setup.md](../../docs/deploy-setup.md) §2).
+  The public half goes into the admin script (`--public-key-file`), the private half only into GitHub.
 - Set these yourself after confirming each value with the user, with
   `gh secret set NAME --body "<value>"`: `SNOWFLAKE_ROLE` (`roles.ci_role`),
   `SNOWFLAKE_WAREHOUSE` (a warehouse the CI role can use, usually `objects.default_warehouse`),
   and `SNOWFLAKE_USER` (the `CREATE USER` name in the admin script; the admin may have renamed it).
 - The private key is theirs to set. Give the command and the reason in one line: "This one is a
   password-like key, so you run it and I never see it":
-  `gh secret set SNOWFLAKE_PRIVATE_KEY_RAW < path/to/ci_key.p8` (plus
+  `gh secret set SNOWFLAKE_PRIVATE_KEY_RAW < ~/.streamsnow-ci/streamsnow_ci_rsa_key.p8` (plus
   `SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` only if the key is encrypted).
 - Re-run doctor. Only when `ci-secrets` lists nothing but `SNOWFLAKE_ACCOUNT`, set it
   (`snowflake.account`) and tell the user the next merge to `main` will deploy.
