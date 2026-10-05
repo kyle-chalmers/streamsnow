@@ -28,7 +28,8 @@
 > agent-skills) and the Claude Code plugin (8 skills + shared recipes) are
 > implemented and CI-green for
 > both runtimes and both deploy sources. Published on PyPI (`uvx streamsnow` /
-> `pip install streamsnow`); APIs may still evolve toward 1.0.
+> `pip install streamsnow`); APIs may still evolve toward 1.0 — see
+> [Versioning and stability](docs/versioning.md) for what is already promised.
 
 ## Mission
 
@@ -424,6 +425,19 @@ code — one implementation, many consumers.
   plugin) and why there's no separate copy-paste kit.
 - **[Migrating a consumer repo](docs/migrating-a-consumer-repo.md)** — bring a
   repo with home-grown skills onto the plugin (skill map + incremental path).
+- **[Versioning and stability](docs/versioning.md)** — what counts as a breaking
+  change, the deprecation policy, and the path to 1.0.
+
+## Feedback and community
+
+- **Questions and ideas:** [Discussions](https://github.com/kyle-chalmers/streamsnow/discussions).
+- **Bugs and scoped feature requests:** [open an issue](https://github.com/kyle-chalmers/streamsnow/issues/new/choose)
+  with one of the forms. Issues are triaged automatically, and the ones the maintainer
+  approves are often implemented by an AI agent and reviewed before merge
+  ([how issues move](CONTRIBUTING.md#how-issues-move)).
+- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md), including the AI-assisted
+  contribution policy. Everyone agrees to the [Code of Conduct](CODE_OF_CONDUCT.md).
+- **Security:** report privately, per [SECURITY.md](SECURITY.md).
 
 ## License
 
