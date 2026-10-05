@@ -1,82 +1,83 @@
 # explainability
 
-Purpose: the defaults that let someone open an app cold, with no demo and no author nearby, and
-know what each page is for, what each number means, and what to do about it. They build on the
-four-block contract and the glossary module in [page-conventions.md](page-conventions.md). These
-are defaults with reasons, not rules: the repo's overlay or `AGENTS.md` and the app's audience
-(REQUIREMENTS.md §2) can change the tone and depth, and `/review-app` raises departures.
+Purpose: defaults that let someone open the app cold and know what a page is for, what each number
+means, and what to do next, **with as few words as that takes**. Builds on the four-block contract
+and glossary in [page-conventions.md](page-conventions.md); framing in
+[page-conventions.md § Related defaults](page-conventions.md#related-defaults).
 
-## Every page answers a named question
+## Text budget
 
-- **The caption under the title states the decision the page supports, in the reader's words:**
-  "Which regions are behind on collections this month, and by how much?", not "Collections
-  dashboard".
-  - *Why:* a reader who knows the question can tell in seconds whether this is the right page,
-    and can judge whether the page answers it.
-- **Order the page by that question.** The KPI that answers it comes first; the context that
-  explains it comes after. A visual that doesn't serve the question moves to another page or goes.
-- **REQUIREMENTS.md §4 records the question per page,** so `/review-app` and the next author can
-  check the page against it.
+Pages are read in seconds, so every line of text costs attention. Fit the copy to the audience,
+but start from these limits:
 
-## Every number carries its definition
+| Text | Default limit |
+|---|---|
+| Page caption | One sentence, about 20 words: the question the page answers |
+| Subheader caption | Grain and population, about 12 words ("daily, active accounts only") |
+| `help=` / glossary entry | The definition and its formula. No examples or history |
+| Takeaway line | At most one per section, computed from the data, never hard-coded |
+| Body text | No `st.markdown` paragraphs. If a chart needs a paragraph, change the chart |
 
-- **Every KPI card and every metric column gets `help=`** from the app's glossary
-  (`metric_help`, `column_help`). Every chart's hover repeats the metric's name and unit
-  (`hover_definition`).
-  - *Why:* the definition belongs where the number is. A reader hovering a surprising value is
-    the reader who most needs to know how it was computed.
-- **State the grain and the population in the subheader's caption:** "daily, active accounts
-  only". Two numbers that look like they should match usually differ on exactly this.
-- **Name every comparison:** "vs. prior 30 days", "vs. plan". A delta whose baseline the reader
-  has to guess is a delta they will misread.
+Prefer the reader's words to the table's ("customers", not `DIM_CUST`). Cut any sentence a reader
+could skip without losing a fact.
 
-## A "How to read this page" expander
+## Name the page's question
 
-One `st.expander("How to read this page")` near the top, collapsed by default, in three or four
-short lines:
-- what the page shows and at what grain
-- how the filters change it
-- what a good or bad reading looks like ("below the dashed target line means behind plan")
-- where to go next ("drill into an account on the Accounts page")
+- **The page caption is the decision the page supports** ("Which regions are behind plan this
+  month?"), not its topic ("Regional dashboard"). The reader can tell at once whether this is the
+  right page.
+- **Order the page by that question:** the number that answers it comes first. A visual that
+  doesn't serve the question moves to another page or goes.
+- **The spec records the question.** REQUIREMENTS.md §2 holds the decision the app drives. Keep
+  each page's question in its §4 entry, so a reviewer can check the page against it.
 
-*Why:* collapsed, it costs a returning user one line; expanded, it replaces the walkthrough a new
-user never got.
+## Definitions live at the number
 
-Put the full metric list in the glossary expander (`render_glossary`), not here.
+Every number has a definition the reader can reach from where it appears: `help=` on a metric or
+column, the tooltip on a chart, or the glossary expander ([page-conventions.md](page-conventions.md)).
+When a definition departs from the obvious ("average of store rates", not an overall rate), the
+definition says so.
 
-## Empty, stale and broken states say what happened
+## How to read the page (only when needed)
+
+When the encoding or the workflow isn't obvious (a cohort grid, a target band, a drill-down
+path), add up to three lines to the page's existing glossary expander:
+- what the page shows
+- what good or bad looks like
+- where to go next
+
+A page has one expander for this, not two. An obvious chart gets none.
+
+## Empty, stale and broken states
 
 | State | Default |
 |---|---|
-| Filters return no rows | `st.info` naming the filter that emptied it and what to widen. Never draw empty axes ([visualization-guide.md](visualization-guide.md)) |
-| Data older than its refresh cadence | `st.warning` above the KPIs: "Data as of <date>; expected daily. Numbers may be behind." The footer's `Data as of` stays either way |
-| A query fails | `st.error` in plain words ("Couldn't load collections data"), plus what the reader can do (retry, who to contact) from the overlay. No stack trace on the page |
-| A number is partial (the current day or month still loading) | Mark it in the label or caption ("Oct (to date)") so a dip isn't read as a drop |
+| Filters return no rows | `st.info` naming what to widen. No empty axes |
+| Data older than its refresh cadence | `st.warning` above the KPIs naming the "as of" date |
+| A query fails | `st.error` in plain words and what to do next. No stack trace |
+| A partial period (today, this month) | Marked in the label ("Oct, to date") |
 
-*Why:* a silent empty or stale page reads as "the numbers are zero" or "nothing changed". Both
-are wrong, and both lead to a bad decision.
+A silent empty or stale page reads as "zero" or "no change", and both lead to wrong decisions.
 
-## Point out what matters
+## Cold-reader check
 
-- **Annotate the one notable point on a chart** (a launch date, an outage, the peak) with a short
-  label on the chart itself, not in a paragraph below.
-- **Use emphasis, not more color,** when one series is the story ([visualization-guide.md](visualization-guide.md)).
-- **When a page has a clear takeaway,** a one-line `st.caption` under the chart may say it, as
-  long as it's computed from the data ("West is 12% behind plan, the largest gap"). A hard-coded
-  sentence goes stale.
-
-## The cold-reader check
-
-Before a page is called done, test it the way a new viewer meets it.
-
-**Who reads it:** someone, or a subagent, who has not seen the spec or the code. They see only a
-screenshot of the page under its default filters and the page's text.
-
-**They answer three questions:**
+Before calling a page done, have someone show a screenshot of it, under default filters, to a
+reader (a person or a subagent) who hasn't seen the spec or the code. The reader answers three
+questions:
 1. What decision is this page for?
-2. What does each KPI mean, and is it good or bad right now?
-3. What would you look at next?
+2. What does each number mean, and is it good or bad right now?
+3. Where would you look next?
 
-**A wrong or missing answer is a finding against the page's copy, not against the reader.** Fix
-the caption, the `help=`, the "How to read" lines or the layout, then ask again. The UI walkthrough
-in [playwright-walkthrough.md](playwright-walkthrough.md) produces the screenshots.
+A wrong or missing answer is a finding against the page, not the reader. The fix is usually
+better copy or layout, not more text. The UI walkthrough
+([playwright-walkthrough.md](playwright-walkthrough.md)) produces the screenshots.
+
+## Further reading
+
+- Nielsen Norman Group: [How users read on the web](https://www.nngroup.com/articles/how-users-read-on-the-web),
+  [Tooltip guidelines](https://www.nngroup.com/articles/tooltip-guidelines),
+  [Empty states in complex applications](https://www.nngroup.com/articles/empty-state-interface-design)
+- GOV.UK: [Sentence length: why 25 words is our limit](https://insidegovuk.blog.gov.uk/2014/08/04/sentence-length-why-25-words-is-our-limit)
+- Streamlit: [st.metric](https://docs.streamlit.io/develop/api-reference/data/st.metric) and
+  [st.column_config](https://docs.streamlit.io/develop/api-reference/data/st.column_config)
+  (`help=` tooltips)

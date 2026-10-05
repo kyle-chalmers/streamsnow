@@ -1,103 +1,92 @@
 # visualization-guide
 
-Purpose: the defaults for choosing and drawing a page's charts and KPIs, so a page reads as one
-designed system and every visual is in the form that answers its question fastest. These are
-defaults with reasons, not rules.
-- **The house style wins:** the repo's `brand:` block in `streamsnow.config.yaml` (colors, font,
-  `chart_sequence`), then its overlay or `AGENTS.md`, then the app's REQUIREMENTS.md §2 audience
-  notes.
-- **The check is review, not a gate:** `/review-app`'s UI reviewer raises departures from the
-  default, and a stated house rule always beats one. Data, audience and style vary.
+**Design for the use case and the people who read the page** (REQUIREMENTS.md §2). These are
+starting points with reasons; the house style wins
+([page-conventions.md § Related defaults](page-conventions.md#related-defaults)).
 
-## Start from the question, then pick the form
+## Pick the form from the reader's question
 
-Name what the reader must do with the visual before picking a chart type. Sometimes the answer is
-not a chart.
-
-| The reader needs to… | Default form | Not |
+| The reader needs to… | Start from | Usually not |
 |---|---|---|
-| Know one current number (plus its direction) | KPI card: value, delta, optional sparkline | A one-bar bar chart |
-| Scan a few headline numbers | A KPI row of 3 to 5 cards | A grouped bar of unrelated measures |
-| See a trend over time | Line (area only for a single series) | Bars for 50+ time points |
-| Compare categories | Bar sorted by value, horizontal when labels are long | Alphabetical order, pie |
-| See one series against the rest | Emphasis: that series in the brand color, the rest gray | Five equal hues |
-| See a part of a whole | Stacked bar, or 100% stacked for shares | Pie with more than 3 slices |
-| See above or below a target | Bar or line against a labelled target line | Two y-axes |
+| Know one current number and its direction | KPI card: value, delta, optional sparkline | A one-bar chart |
+| Scan a few headline numbers | A KPI row (3 to 5 cards) | A bar chart of unrelated measures |
+| See change over time | Line | Bars for dozens of time points |
+| Compare categories | Bar, sorted by value unless the categories have a natural order; horizontal for long labels | Pie, alphabetical order |
+| Follow one series among many | Emphasis: that series in color, the rest gray | Many equal hues |
+| See parts of a whole | Stacked bar, or 100% stacked for shares | Pie with more than a few slices |
+| See distance from a target | Bar or line against a labelled target | A second y-axis |
 | See a distribution | Histogram or box plot | An average alone |
-| See a relationship | Scatter, with the outlier labelled | A table of pairs |
-| Look up exact values for many items | A table with `column_config` formats | A chart with a label on every mark |
+| Look up exact values | A table formatted with `st.column_config` | A chart crowded with labels |
 
-*Why:* the right form lets the reader skip a step. A sorted bar answers "which is biggest" before
-the reader reads an axis.
+## Departures to tell the reader about
 
-## Layout: one reading order
+Breaking these silently misleads. Break one when the use case calls for it, and say so on the
+page:
 
-**Default order:**
-1. The four-block contract from [page-conventions.md](page-conventions.md): title and caption, then
-   one shared time control.
-2. KPI row.
-3. Main trend.
-4. Breakdown.
-5. Detail table.
-6. Sources and freshness footer.
+| Default | When you depart, say so |
+|---|---|
+| Bar and area values start at zero | Name the axis range in its title, or use a dot or line instead |
+| One y-axis per chart | Label each series with its own axis and unit |
+| Charts shown side by side share a scale | Note "scales differ" in the caption |
+| Color isn't the only signal ([WCAG 1.4.1](https://www.w3.org/WAI/WCAG22/Understanding/use-of-color.html)) | Add labels, icons or patterns. A heatmap needs a legend |
 
-*Why:* a viewer who stops reading after the first screen still leaves with the answer, and every
-page in the app reads the same way.
+## Label the data
 
-- **At most two charts side by side** in `st.columns` on a wide layout; a chart narrower than about
-  a third of the page loses its axis labels.
-- **One filter row,** above everything it scopes. Filters inside one chart's container imply they
-  affect only that chart; say so in its caption if they do.
+- **On a single-series bar chart with a handful of bars,** show each bar's value at its end and
+  lighten or drop the value axis. Readers want the number, not an estimate from gridlines.
+- **On a line chart,** name each series at the end of its line instead of in a legend.
+- **When labels would collide** (many bars, dense lines, small multiples), label only the mark that
+  matters (latest, largest, target) and leave the rest to tooltips or a table.
+- **Format labels exactly like the KPI cards:** the same units, rounding and locale.
+
+## Layout
+
+- **Default reading order:** KPIs, main trend, breakdown, then detail, inside the four-block
+  contract ([page-conventions.md](page-conventions.md)), so the first screen holds the answer.
+- **Filters go in one place** (a row above the content, or the sidebar), the same on every page.
+- **At most two charts side by side** on a wide layout. Narrower charts lose their labels.
 
 ## KPI cards
 
-- **A delta needs a named comparison:** "vs. prior 30 days", "vs. target". A bare "+5%" makes
-  the reader guess.
-- **Color the delta by meaning, not by sign.** A rise in cost is bad. `st.metric`'s
-  `delta_color="inverse"` covers that case.
-- **Format for reading:** `1.2M`, `$48.6k`, `34.5%`, and counts as integers (`f"{int(n):,}"`, never
-  `23.0`).
-  - Percentage-point changes say "pts", not "%".
-- **Put the definition in the card's `help=`** from the glossary
-  ([page-conventions.md](page-conventions.md)), not in a paragraph above the row.
+- **A delta names its baseline** ("vs. prior 30 days") and is colored by meaning, not sign: a
+  rise in cost is bad (`st.metric(delta_color="inverse")`). Partial periods say so ("Oct, to date").
+- **Format for reading** in the house currency and locale: `1.2M`, `34.5%`, and integer counts
+  (`23`, not `23.0`). Percentage-point changes say "pts".
+- **Put the definition on the card** with `st.metric(help=…)`. The scaffold's `branded_metric`
+  has no `help=`, so with it the definition goes in the caption or glossary.
 
 ## Color
 
-- **Categorical colors follow the entity, never its rank.** Fix a color per entity (region,
-  product, team) once, in a shared dict or the brand sequence order, and reuse it on every page.
-  - *Why:* a filter that removes a series must not repaint the survivors, or the reader's "West is
-    blue" becomes wrong.
-- **Use the fewest hues that do the job.**
-  - **Magnitude:** one hue, light to dark.
-  - **Above or below a midpoint:** two opposite hues with a gray middle.
-  - **Five or more series:** fold the tail into "Other" or split into small multiples rather than
-    adding hues.
-- **Keep status colors for status.** Green, amber and red mean good, warning and bad. Don't use
-  them for series 3, 4 and 5, and pair them with a label or icon so color is never the only
-  signal.
-- **Check the palette for colorblind readers** (adjacent series must stay distinct under common
-  color-vision deficiencies) and for contrast against both light and dark themes. A brand palette
-  that fails gets direct labels or a table view alongside.
+- **Color follows the entity, never its rank:** one color per region or product on every page,
+  so a filter never repaints the survivors.
+- **Use the fewest hues that do the job:**
+  - magnitude: one hue, light to dark
+  - above or below a midpoint: two opposite hues with a neutral middle
+  - more series than the palette holds: fold into "Other" or use small multiples
+- **Status hues (green, amber, red) mean good, warning and bad.** If a page shows status and the
+  brand sequence contains those hues, skip them for ordinary series.
+- **Check contrast and colorblind separation** against the app's theme. Marks need 3:1
+  ([WCAG 1.4.11](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html)); a palette
+  that falls short gets direct labels.
 
-## Marks and chrome
+## Chrome
 
-- **Bars start at zero.** Lines may start elsewhere when the change is the point; say so in the
-  axis title.
-- **Never two y-axes on one chart.** Two measures on different scales become two charts, or both
-  are indexed to 100 at the start.
-  - *Why:* the alignment of two scales is arbitrary and invents a correlation.
-- **Label directly and selectively:** the last point of a line, the largest bar, the one series
-  that matters. Keep a legend for two or more series. Never put a number on every mark.
-- **Keep gridlines and axes faint, solid and few.** Titles say what is measured and in what unit
-  ("Revenue, $k"). Hover templates repeat the unit and use the same number format as the KPI
-  cards.
-- **Use one chart library per app,** with the brand Plotly template applied in the entrypoint
-  (`apply_branding()`).
-  - *Why:* two libraries mean two looks and two sets of formatting bugs.
+- **Axis titles name the measure and unit** ("Revenue, $k"). Gridlines are faint or absent.
+  Tooltips repeat the name, unit and format.
+- **Use one chart library per app,** themed once in the entrypoint. The scaffold's
+  `apply_branding()` registers a Plotly template; Altair and the native `st.*_chart` functions
+  theme their own way.
 
-## When a chart has nothing to show
+## Further reading
 
-An empty chart under default filters reads as a broken query
-([playwright-walkthrough.md](playwright-walkthrough.md) treats a band of them as critical).
-- **When a filter returns no rows,** say what happened and what to try in `st.info`
-  ("No accounts match these filters; widen the date range"), instead of drawing empty axes.
+- [FT Visual Vocabulary](https://github.com/Financial-Times/chart-doctor/tree/main/visual-vocabulary):
+  which chart answers which question
+- UK Analysis Function: [Data visualisation: charts](https://analysisfunction.civilservice.gov.uk/policy-store/data-visualisation-charts)
+  (bars from zero, data labels, dual axes, pies) and
+  [colours](https://analysisfunction.civilservice.gov.uk/policy-store/data-visualisation-colours-in-charts)
+- [ColorBrewer](https://colorbrewer2.org): sequential, diverging and colorblind-safe palettes
+- Stephen Few: [Dual-scaled axes](https://www.perceptualedge.com/articles/visual_business_intelligence/dual-scaled_axes.pdf),
+  [Save the pies for dessert](https://www.perceptualedge.com/articles/visual_business_intelligence/save_the_pies_for_dessert.pdf)
+- Cleveland & McGill, [Graphical Perception](https://doi.org/10.1080/01621459.1984.10478080) (1984):
+  why position beats angle and area
+- Tufte, *The Visual Display of Quantitative Information* (2nd ed., 2001)

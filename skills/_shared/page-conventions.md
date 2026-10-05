@@ -72,11 +72,13 @@ in the StreamSnow repo is a complete, validate-clean example.
 
 ## Related defaults
 
-Three companion guides cover what the contract above leaves open. Like this file, they are
-defaults with reasons that `/review-app` raises, not gates:
+Design for the use case and the people who read the page. The three guides below are starting
+points with their reasons, not rules. The repo's house style (`brand:` config, its overlay,
+`AGENTS.md`) wins, and so does a judgment that fits this audience better. `/review-app` raises
+departures; nothing blocks on them.
 - [streamlit-performance.md](streamlit-performance.md): fetch less, cache by what changes the
-  answer, share loaders across pages, rerun less.
-- [visualization-guide.md](visualization-guide.md): which form answers which question, layout,
-  KPI cards, color.
-- [explainability.md](explainability.md): the page's question, definitions where the numbers are,
-  empty and stale states, the cold-reader check.
+  answer, share across pages, rerun less.
+- [visualization-guide.md](visualization-guide.md): form from the question, labels, layout, KPI
+  cards, color.
+- [explainability.md](explainability.md): a text budget, the page's question, definitions at the
+  number, empty and stale states, the cold-reader check.
