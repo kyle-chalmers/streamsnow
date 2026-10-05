@@ -38,5 +38,6 @@ Write only `.streamsnow/sql-review/<slug>/<run_id>/verdict-page-NN.json` (or `ve
 
 ## Verify
 
-The orchestrator merges every `kept` list into `findings.json` and runs `streamsnow sql-review log
-<slug> --run <run_id> --findings findings.json --dry-run`.
+The orchestrator merges every `kept` list into
+`.streamsnow/sql-review/<slug>/<run_id>/findings.json` and runs `streamsnow sql-review log <slug>
+--run <run_id> --findings .streamsnow/sql-review/<slug>/<run_id>/findings.json --dry-run`.

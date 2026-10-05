@@ -176,15 +176,40 @@ def parse_output(stdout: str, expected: int) -> list[ResultSet]:
     return data
 
 
+#: A quoted value in an error is kept only after a word that names an object.
+_KEEP_QUOTED_RE = re.compile(
+    r"(?i)\b(identifier|object|schema|database|table|view|column|role|warehouse|function|"
+    r"connection|stage|integration)\s+$"
+)
+
+
+def _mask_values(text: str) -> str:
+    """Replace quoted values with '…' unless they name an object.
+
+    A conversion error quotes the offending cell (``Numeric value 'Jane …' is
+    not recognized``), and error text lands in the run's JSON files, which must
+    hold aggregates only.
+    """
+    out: list[str] = []
+    last = 0
+    for m in re.finditer(r"'[^']*'", text):
+        out.append(text[last : m.start()])
+        out.append(m.group(0) if _KEEP_QUOTED_RE.search(text[: m.start()]) else "'…'")
+        last = m.end()
+    out.append(text[last:])
+    return "".join(out)
+
+
 def _error_detail(stderr: str, stdout: str) -> str:
-    """The useful part of a ``snow`` failure, without its box-drawing frame."""
+    """The useful part of a ``snow`` failure, without its box-drawing frame
+    or any quoted data value."""
     text = stderr.strip() or stdout.strip()
     lines = []
     for raw in text.splitlines():
         line = raw.strip().strip("│╭╮╰╯─ ").strip()
         if line and not set(line) <= set("─╭╮╰╯│ "):
             lines.append(line)
-    return " ".join(lines)[-600:] or "no error output"
+    return _mask_values(" ".join(lines))[-600:] or "no error output"
 
 
 class SnowExec:
@@ -229,8 +254,8 @@ class SnowExec:
             "json",
             "--enable-templating",
             "NONE",
-            "-c",
-            self.session.connection,
+            # One token: a connection name can never read as another flag.
+            f"--connection={self.session.connection}",
         ]
 
     def run(self, statements: list[str], *, result_cache: bool = True) -> list[ResultSet]:
@@ -255,7 +280,7 @@ class SnowExec:
             detail = _error_detail(err, out)
             hint = ""
             if self.session.role and re.search(
-                r"role .* (does not exist|not authorized)", detail, re.I
+                r"role .*(does not exist|not authorized|not assigned)", detail, re.I
             ):
                 hint = (
                     f" (this review runs as role {self.session.role}; pass --role with a role "

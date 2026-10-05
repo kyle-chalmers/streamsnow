@@ -61,6 +61,11 @@ LIVE_VIEW_DDL = (
 )
 
 
+def qid(n: int) -> str:
+    """A query id shaped like Snowflake's."""
+    return f"01c00000-0000-0000-0000-{n:012x}"
+
+
 class FakeSnow:
     """Answers ``snow sql --stdin --format json`` the way snow 3.x prints it.
 
@@ -136,11 +141,12 @@ class FakeSnow:
                 row = {k: v for k, v in row.items() if not k.endswith(("_SUM", "_N"))}
             return [row]
         if stmt.startswith("SELECT LAST_QUERY_ID()"):
-            return [{"QUERY_ID": f"q{self.qid}"}]
+            return [{"QUERY_ID": qid(self.qid)}]
         if "QUERY_HISTORY_BY_USER" in stmt:
+            wanted = re.findall(r"'([0-9a-f-]{36})'", stmt)
             return [
-                {"QUERY_ID": f"q{i}", "TOTAL_ELAPSED_TIME": str(100 * i), "BYTES_SCANNED": "2048"}
-                for i in range(1, self.qid + 1)
+                {"QUERY_ID": q, "TOTAL_ELAPSED_TIME": str(100 * (i + 1)), "BYTES_SCANNED": "2048"}
+                for i, q in enumerate(wanted)
             ]
         if "GET_QUERY_OPERATOR_STATS" in stmt:
             return [{"PARTITIONS_SCANNED": "3", "PARTITIONS_TOTAL": "10"}]
@@ -216,8 +222,9 @@ def test_run_reports_aggregates_with_stable_ids(repo: Path, capsys: pytest.Captu
     assert rev["key"] == "total_revenue" and rev["page_file"] == "01_overview.sql"
     assert rev["query_id"] and rev["elapsed_ms"] is not None
     assert by_id["run:01#2"]["totals"] == {"REVENUE": "9999.00"}  # DATE is not a total
-    # Two logins for the whole app: compile + columns, then the measures.
-    assert len(fake.calls) == 2
+    # Three logins for the whole app: compile + columns, the measures, their timings.
+    assert len(fake.calls) == 3
+    assert "USE_CACHED_RESULT = FALSE" in fake.calls[1][1]  # a cached rerun reads as instant
 
 
 def test_run_files_are_per_page_and_ignored_by_git(
@@ -256,7 +263,7 @@ def test_the_session_is_pinned(repo: Path) -> None:
     _live(repo, fake, "run")
     argv, stdin = fake.calls[0]
     assert argv[:2] == ["snow", "sql"] and "--stdin" in argv
-    assert argv[argv.index("-c") + 1] == "acme"
+    assert "--connection=acme" in argv
     assert argv[argv.index("--enable-templating") + 1] == "NONE"
     head = stdin.split("\n;\n")[:5]
     assert head == [
@@ -454,7 +461,7 @@ def test_bench_compares_a_rewrite_with_the_cache_off(
     assert after["equivalent"] is True and after["runs"] == 3
     assert before["partitions_scanned"] == 3 and before["partitions_total"] == 10
     assert before["median_elapsed_ms"] is not None
-    timed = fake.calls[-1][1]
+    timed = fake.calls[-2][1]  # the last call reads timings
     assert "USE_CACHED_RESULT = FALSE" in timed
     assert (_run_dir(repo) / "bench-02-1.json").is_file()
 
@@ -672,3 +679,142 @@ def test_log_dry_run_validates_and_writes_nothing(
     assert not (repo / "apps" / SLUG / "sql_review" / live.REVIEW_LOG_DIR).exists()
     readme = (repo / "apps" / SLUG / "sql_review" / "README.md").read_text(encoding="utf-8")
     assert "No live review logged yet." in readme
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes: nothing ran, history, overflow, evidence files, privacy
+# --------------------------------------------------------------------------- #
+class NoConnection(FakeSnow):
+    def __call__(self, argv: list[str], stdin: str, timeout: float) -> tuple[int, str, str]:
+        self.calls.append((argv, stdin))
+        return 1, "", "Error: Connection acme is not configured"
+
+
+@pytest.mark.parametrize("verb", ["probe", "run"])
+def test_a_connection_that_never_logs_in_is_exit_2_after_one_call(repo: Path, verb: str) -> None:
+    fake = NoConnection()
+    with pytest.raises(live.ToolError, match="not configured"):
+        _live(repo, fake, verb)
+    assert len(fake.calls) == 1  # no per-section retries, no login storm
+
+
+class RoleRefused(FakeSnow):
+    def answer(self, stmt: str) -> list[dict]:
+        if stmt.startswith("USE ROLE"):
+            raise RuntimeError
+        return super().answer(stmt)
+
+    def __call__(self, argv: list[str], stdin: str, timeout: float) -> tuple[int, str, str]:
+        self.calls.append((argv, stdin))
+        return 1, "", "003013 (42501): Requested role is not assigned to the executing user."
+
+
+def test_a_role_the_user_does_not_hold_is_exit_2(repo: Path) -> None:
+    fake = RoleRefused()
+    with pytest.raises(live.ToolError, match="pass --role"):
+        _live(repo, fake, "run")
+    assert len(fake.calls) == 2  # the batch, then the session alone; never every section
+
+
+class NoHistory(FakeSnow):
+    def answer(self, stmt: str) -> list[dict]:
+        if "QUERY_HISTORY_BY_USER" in stmt:
+            raise RuntimeError
+        return super().answer(stmt)
+
+    def __call__(self, argv: list[str], stdin: str, timeout: float) -> tuple[int, str, str]:
+        if "QUERY_HISTORY_BY_USER" in stdin:
+            self.calls.append((argv, stdin))
+            return 1, "", "002003 (02000): SQL compilation error: does not exist or not authorized."
+        return super().__call__(argv, stdin, timeout)
+
+
+def test_unreadable_history_never_reruns_the_measures(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    fake = NoHistory()
+    assert _live(repo, fake, "run") == 0
+    out = _out(capsys)
+    assert all(r["status"] == "pass" and r["elapsed_ms"] is None for r in out["results"])
+    assert any("query history" in w for w in out["warnings"])
+    measures = [c for c in fake.calls if '"__ROWS"' in c[1]]
+    assert len(measures) == 1
+
+
+class Overflow(FakeSnow):
+    def __call__(self, argv: list[str], stdin: str, timeout: float) -> tuple[int, str, str]:
+        if "SUM($2)" in stdin and "REGION_ROLLUP" in stdin:
+            self.calls.append((argv, stdin))
+            return 1, "", "100046 (22003): Number out of representable range"
+        return super().__call__(argv, stdin, timeout)
+
+
+def test_a_sum_overflow_keeps_the_count_and_says_totals_are_missing(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    assert _live(repo, Overflow(), "run") == 0
+    entry = {r["id"]: r for r in _out(capsys)["results"]}["run:02#1"]
+    assert entry["rows"] == 4 and entry["totals"] is None and "overflowed" in entry["totals_detail"]
+    assert "not computed" in live.headline(entry)
+
+
+def test_agent_written_files_cannot_mint_evidence(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    run_id = _full_run(repo, capsys)
+    run_dir = repo / live.RUNS_DIR / SLUG / run_id
+    (run_dir / "findings-page-01.json").write_text("[]", encoding="utf-8")
+    (run_dir / "verdict-page-01.json").write_text(
+        json.dumps({"results": [{"id": "run:01#9"}]}), encoding="utf-8"
+    )
+    forged = {**GOOD, "evidence": ["run:01#9"]}
+    code = _live(
+        repo,
+        FakeSnow(),
+        "log",
+        "--run",
+        run_id,
+        "--findings",
+        str(_findings_file(tmp_path, [forged])),
+    )
+    assert code == 1
+    assert any("not a result in this run" in p for p in _out(capsys)["problems"])
+
+
+@pytest.mark.parametrize("change", [{"metric": ["a"]}, {"page": ["02"]}, {"metric": {"k": 1}}])
+def test_log_reports_wrongly_typed_fields_instead_of_crashing(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture, change: dict
+) -> None:
+    run_id = _full_run(repo, capsys)
+    bad = {**GOOD, **change}
+    path = str(_findings_file(tmp_path, [bad]))
+    assert _live(repo, FakeSnow(), "log", "--run", run_id, "--findings", path, "--dry-run") == 1
+    assert _out(capsys)["ok"] is False
+
+
+def test_latest_skips_a_run_that_produced_nothing(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    run_id = _full_run(repo, capsys)
+    with pytest.raises(live.ToolError):
+        _live(repo, NoConnection(), "probe")  # leaves an empty run behind
+    app = repo / "apps" / SLUG
+    assert live.resolve_run(repo, app, "latest", None).name == run_id
+
+
+def test_ddl_drift_ignores_spacing_around_operators_and_a_leading_use() -> None:
+    committed = "USE ROLE X;\n" + base.DDL.replace("COUNT(*) AS n", "COUNT(*)+0 AS n")
+    live_ddl = LIVE_VIEW_DDL.replace("count(*) as n", "count( * ) + 0 as n")
+    assert live.ddl_drift(committed, live_ddl)["drift"] is False
+
+
+def test_error_text_never_carries_a_cell_value() -> None:
+    from streamsnow import sf_exec as sx
+
+    detail = sx._error_detail(
+        "100038 (22018): Numeric value 'Jane Doe' is not recognized; "
+        "Object 'ANALYTICS_DB.REPORTING.ORDERS' does not exist; invalid identifier 'REVENUE'",
+        "",
+    )
+    assert "Jane" not in detail and "'…'" in detail
+    assert "'ANALYTICS_DB.REPORTING.ORDERS'" in detail and "'REVENUE'" in detail

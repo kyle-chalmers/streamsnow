@@ -34,13 +34,14 @@ never recommend a bigger warehouse: size is a cost decision for people, and it h
 
 ## Files owned
 
-Only `candidate-NN-n.sql` files and `findings-optimizer.json` in the run directory. Never edit
-`queries/*.sql`, page files, or DDL: the user approves the diff first.
+Only `candidate-NN-n.sql` and `findings-optimizer-NN-n.json` in the run directory (one optimizer
+per metric, so files never collide). Never edit `queries/*.sql`, page files, or DDL: the user
+approves the diff first.
 
 ## Result
 
-`{"findings": [...]}` in the shape of the sql-review skill's `findings.md`: ids `X<n>`, severity
-`minor` (or `major` for a section over a minute), a claim with before and after medians,
+`{"findings": [...]}` in the shape of the sql-review skill's `findings.md`: ids `X<NN>-<n>-<k>`,
+severity `minor` (or `major` for a section over a minute), a claim with before and after medians,
 evidence citing `bench:NN#n:before` and `bench:NN#n:after`, and the change as a diff summary in
 `suggested_fix`.
 

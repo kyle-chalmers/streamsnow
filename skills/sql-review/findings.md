@@ -22,7 +22,7 @@ it and refuses the whole file when one finding is wrong, naming the finding and 
 
 | Field | Rule |
 |---|---|
-| `id` | Short and unique in the file: `P<page>-<n>` (page), `O<n>` (object), `X<n>` (optimizer). |
+| `id` | Unique across the whole review, so merged files never collide: `P<NN>-<n>` (page reviewer for page NN), `O<k>-<n>` (object reviewer for object k, numbered by the orchestrator), `X<NN>-<n>-<k>` (optimizer for metric NN#n). |
 | `severity` | `blocker`, `major` or `minor` (below). |
 | `page` | Two-digit page number (`"02"`), or `null` for an object finding. |
 | `metric` | The metric key on that page, or `null`. |

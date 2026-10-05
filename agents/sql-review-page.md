@@ -43,7 +43,7 @@ Write only `.streamsnow/sql-review/<slug>/<run_id>/findings-page-NN.json`. Edit 
 
 ## Result
 
-`{"findings": [...]}` in the shape of the sql-review skill's `findings.md`: ids `PNN-<n>`,
+`{"findings": [...]}` in the shape of the sql-review skill's `findings.md`: ids `P<NN>-<n>`,
 `page: "NN"`, the metric key, a claim a person can check, and evidence that cites `probe:NN#n` or
 `run:NN#n` ids from this run. No row-level values, no small-group totals. No finding is a valid
 result: return an empty list rather than a weak finding.

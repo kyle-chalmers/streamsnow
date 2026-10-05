@@ -12,7 +12,8 @@ pages that read it.
 
 ## Inputs
 
-- The slug, the run id, and the object's `DATABASE.SCHEMA.OBJECT` name.
+- The slug, the run id, the object's `DATABASE.SCHEMA.OBJECT` name, and its number `k` (the
+  orchestrator numbers the objects it hands out, so ids never collide).
 - Its committed DDL file in `app_specific_reporting_objects/` and its `objects:` entry (grants)
   in `sql_review/index.yaml`.
 - `.streamsnow/sql-review/<slug>/<run_id>/probe.json`: the object's result (`probe:<FQN>`): exists,
@@ -36,12 +37,12 @@ You never touch Snowflake yourself: the probe already did.
 
 ## Files owned
 
-Write only `.streamsnow/sql-review/<slug>/<run_id>/findings-object-<n>.json`. Propose DDL changes
+Write only `.streamsnow/sql-review/<slug>/<run_id>/findings-object-<k>.json`. Propose DDL changes
 as a diff in `suggested_fix`; never edit the DDL file or run DDL. A human applies DDL.
 
 ## Result
 
-`{"findings": [...]}` in the shape of the sql-review skill's `findings.md`: ids `O<n>`,
+`{"findings": [...]}` in the shape of the sql-review skill's `findings.md`: ids `O<k>-<n>`,
 `page: null`, `metric: null`, `object` set, evidence citing `probe:<FQN>` (and `run:` ids where
 access or results matter). An empty list is a valid result.
 

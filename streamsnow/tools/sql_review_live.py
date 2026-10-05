@@ -73,6 +73,7 @@ import re
 import statistics
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -84,6 +85,9 @@ from . import sql_review as sr
 from . import sql_review_index as sri
 
 RUNS_DIR = Path(".streamsnow") / "sql-review"
+#: Files the verbs write. Agents write findings and verdicts into the same
+#: folder; only these may mint citable ids, so facts keep coming from tools.
+_RESULT_FILE_RE = re.compile(r"^(probe|run-\d{2}|bench-\d{2}-\d+|compare(-\d{2})?)\.json$")
 META = "meta.json"
 REVIEW_LOG_DIR = "review_log"
 _RUN_ID_RE = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{7,40}$")
@@ -200,10 +204,23 @@ def run_batch(
     try:
         results = ex.run(flat, result_cache=result_cache)
     except sx.SnowError as exc:
+        # No Snowflake error code means no SQL ran at all: no CLI, an unknown
+        # connection, a failed login. Retrying item by item would only repeat
+        # the login (a browser window per item under SSO) and then report every
+        # section as a failed check. Nothing ran, so stop.
+        if not _SQL_ERROR_RE.search(str(exc)):
+            raise
+        out: dict[str, list[sx.ResultSet] | sx.SnowError] = {}
+        session = [stmts for key, stmts in items if key == "__session"]
+        if session:
+            # The session prefix (role, warehouse) runs before every item: if it
+            # alone fails, every item would, so this too is "nothing ran".
+            out["__session"] = ex.run(session[0], result_cache=result_cache)
         if len(items) == 1:
             return {items[0][0]: exc}
-        out: dict[str, list[sx.ResultSet] | sx.SnowError] = {}
         for key, stmts in items:
+            if key == "__session":
+                continue
             try:
                 out[key] = ex.run(stmts, result_cache=result_cache)
             except sx.SnowError as one:
@@ -215,6 +232,12 @@ def run_batch(
         out[key] = results[i : i + len(stmts)]
         i += len(stmts)
     return out
+
+
+#: A Snowflake statement error carries its code and SQLSTATE: `002003 (42S02): ...`.
+_SQL_ERROR_RE = re.compile(r"\b\d{6} \([0-9A-Z]{5}\)")
+#: Snowflake query ids look like a UUID.
+_QID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
 def _refused(exc: sx.SnowError) -> bool:
@@ -269,7 +292,16 @@ def write_json(path: Path, data: dict) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             json.dump(data, fh, indent=2, sort_keys=False)
             fh.write("\n")
-        os.replace(tmp, path)
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                # Windows: a parallel reader holding the file open blocks the
+                # replace for a moment.
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
@@ -291,7 +323,14 @@ def resolve_run(repo: Path, app: Path, run: str | None, st: Settings | None) -> 
     root = runs_root(repo, app.name)
     if run == "latest":
         runs = (
-            sorted(p for p in root.iterdir() if _RUN_ID_RE.match(p.name)) if root.is_dir() else []
+            sorted(
+                p
+                for p in root.iterdir()
+                if _RUN_ID_RE.match(p.name)
+                and any(_RESULT_FILE_RE.match(f.name) for f in p.glob("*.json"))
+            )
+            if root.is_dir()
+            else []
         )
         if not runs:
             raise ToolError(f"no runs yet for {app.name}; start one with `sql-review probe`")
@@ -516,11 +555,54 @@ _HISTORY_SQL = (
     "ROWS_PRODUCED FROM TABLE(SNOWFLAKE.INFORMATION_SCHEMA.QUERY_HISTORY_BY_USER("
     "END_TIME_RANGE_START => DATEADD('hour', -1, CURRENT_TIMESTAMP()), RESULT_LIMIT => 10000))"
 )
-# LAST_QUERY_ID(-2): the measured statement, before the LAST_QUERY_ID() read.
-_OPSTATS_SQL = (
-    "SELECT SUM(OPERATOR_STATISTICS:pruning:partitions_scanned::NUMBER) AS PARTITIONS_SCANNED, "
-    "SUM(OPERATOR_STATISTICS:pruning:partitions_total::NUMBER) AS PARTITIONS_TOTAL "
-    "FROM TABLE(GET_QUERY_OPERATOR_STATS(LAST_QUERY_ID(-2))) WHERE OPERATOR_TYPE = 'TableScan'"
+
+
+def _opstats_sql(qid: str) -> str:
+    return (
+        "SELECT SUM(OPERATOR_STATISTICS:pruning:partitions_scanned::NUMBER) AS "
+        "PARTITIONS_SCANNED, SUM(OPERATOR_STATISTICS:pruning:partitions_total::NUMBER) AS "
+        f"PARTITIONS_TOTAL FROM TABLE(GET_QUERY_OPERATOR_STATS({_lit(qid)})) "
+        "WHERE OPERATOR_TYPE = 'TableScan'"
+    )
+
+
+def query_stats(
+    ex: sx.SnowExec, qids: list[str | None], *, partitions: bool = False
+) -> tuple[dict[str, dict], list[str]]:
+    """Timing (and partitions) for measured queries, by id, in one more call.
+
+    A separate call, not the tail of the measure batch: when the role cannot
+    read query history, the measures have still run and must not be repeated.
+    Query ids are validated, so they are safe inside a literal.
+    """
+    ids = [q for q in dict.fromkeys(qids) if q and _QID_RE.match(q)]
+    if not ids:
+        return {}, []
+    hist = f"{_HISTORY_SQL} WHERE QUERY_ID IN ({', '.join(_lit(q) for q in ids)})"
+    stmts = [hist] + ([_opstats_sql(q) for q in ids] if partitions else [])
+    warnings: list[str] = []
+    try:
+        got = ex.run(stmts)
+    except sx.SnowError:
+        if not partitions:
+            return {}, [_HISTORY_WARNING]
+        try:
+            got = ex.run([hist]) + [[] for _ in ids]
+        except sx.SnowError:
+            return {}, [_HISTORY_WARNING]
+        warnings.append("operator stats were not readable; partition counts are missing")
+    stats = {str(r.get("QUERY_ID")): dict(r) for r in sx.upper_rows(got[0])}
+    if partitions:
+        for qid, ops in zip(ids, got[1:], strict=True):
+            stats.setdefault(qid, {}).update(sx.first_row(ops))
+    if any("TOTAL_ELAPSED_TIME" not in stats.get(q, {}) for q in ids):
+        warnings.append(_HISTORY_WARNING)
+    return stats, warnings
+
+
+_HISTORY_WARNING = (
+    "query history was not readable for some queries (the role may not see "
+    "SNOWFLAKE.INFORMATION_SCHEMA, or history lagged); their timings are missing"
 )
 
 
@@ -552,12 +634,6 @@ def parse_measure(row: dict, columns: list[Column]) -> dict:
         "totals": totals,
         "float_columns": [c.name for c in columns if c.is_float],
     }
-
-
-def _history(results: list[sx.ResultSet] | sx.SnowError | None) -> dict[str, dict]:
-    if not results or isinstance(results, sx.SnowError):
-        return {}
-    return {str(r.get("QUERY_ID")): r for r in sx.upper_rows(results[0])}
 
 
 # --------------------------------------------------------------------------- #
@@ -632,17 +708,25 @@ def _normalise_sql(text: str) -> str:
     return "".join(out)
 
 
+_TOKEN_RE = re.compile(r"'(?:[^'\\]|\\.|'')*'|\"(?:[^\"]|\"\")*\"|[A-Za-z0-9_$.]+|\S")
+
+
 def _ddl_body(text: str) -> list[str]:
     """Normalised lines of a view's query body (after the first top-level AS).
 
-    Formatting and keyword case never read as drift. Only the first CREATE
-    statement counts: a DDL file may also hold GRANT statements.
+    Only the first CREATE statement counts: a DDL file may also hold USE or
+    GRANT statements around it.
     """
     norm = _normalise_sql(text.replace("\r\n", "\n"))
     masked = sr._mask_strings_and_comments(norm)
-    end = masked.find(";")
-    if end != -1:
-        norm, masked = norm[:end], masked[:end]
+    start = 0
+    for chunk in masked.split(";"):
+        if chunk.strip().upper().startswith("CREATE"):
+            lead = len(chunk) - len(chunk.lstrip())
+            norm = norm[start + lead : start + len(chunk)]
+            masked = chunk[lead:]
+            break
+        start += len(chunk) + 1
     m = re.search(r"\bAS\b", masked)
     body = norm[m.end() :] if m else norm
     lines = [" ".join(ln.split()) for ln in body.split("\n")]
@@ -650,8 +734,9 @@ def _ddl_body(text: str) -> list[str]:
 
 
 def ddl_drift(committed: str, live: str) -> dict:
+    """Drift = a different token sequence: spacing and line breaks never count."""
     a, b = _ddl_body(committed), _ddl_body(live)
-    if " ".join(a) == " ".join(b):
+    if _TOKEN_RE.findall(" ".join(a)) == _TOKEN_RE.findall(" ".join(b)):
         return {"status": "pass", "drift": False, "diff": ""}
     diff = list(difflib.unified_diff(a, b, "committed", "live", lineterm="", n=1))
     clipped = diff[:40]
@@ -843,8 +928,12 @@ def _drift_status(kind: str, got: list[sx.ResultSet] | sx.SnowError | None, ddl:
 # --------------------------------------------------------------------------- #
 def measure_sections(
     ex: sx.SnowExec, sections: list[Section], *, with_session: bool
-) -> tuple[dict[str, dict], list[sx.ResultSet] | sx.SnowError | None]:
-    """Two logins: compile + columns for every section, then every measure."""
+) -> tuple[dict[str, dict], list[sx.ResultSet] | sx.SnowError | None, list[str]]:
+    """Three logins: compile + columns, every measure, then their timings.
+
+    Measures run with the result cache off: the wrapper text is the same each
+    time, so a cached rerun would read as instant and hide a slow section.
+    """
     items: list[tuple[str, list[str]]] = [("__session", [_SESSION_SQL])] if with_session else []
     for s in sections:
         if s.root not in _UNWRAPPABLE_ROOTS:
@@ -862,39 +951,47 @@ def measure_sections(
         if got is None:
             out[s.ref] = {"status": "skipped", "detail": f"{s.root} section is not measurable"}
         elif isinstance(got, sx.SnowError):
-            if _refused(got):
-                raise ToolError(str(got))
             out[s.ref] = {"status": "fail", "detail": str(got)}
         else:
             columns[s.ref] = parse_columns(got[1])
             measures.append((s.ref, [measure_sql(s.sql, columns[s.ref]), _LAST_QID_SQL]))
     if not measures:
-        return out, session
+        return out, session, []
     try:
-        got_all = run_batch(ex, [*measures, ("__history", [_HISTORY_SQL])])
+        got_all = run_batch(ex, measures, result_cache=False)
     except sx.SnowError as exc:
         raise ToolError(str(exc)) from exc
-    history = _history(got_all.pop("__history", None))
+    qids: dict[str, str | None] = {}
     for ref, _ in measures:
         got = got_all.get(ref)
         section = next(s for s in sections if s.ref == ref)
+        overflow = False
         if isinstance(got, sx.SnowError):
             # A SUM can overflow NUMBER(38); retry once without totals.
             try:
-                got = ex.run([measure_sql(section.sql, columns[ref], sums=False), _LAST_QID_SQL])
+                got = ex.run(
+                    [measure_sql(section.sql, columns[ref], sums=False), _LAST_QID_SQL],
+                    result_cache=False,
+                )
+                overflow = True
             except sx.SnowError as exc:
                 out[ref] = {"status": "fail", "detail": str(exc)}
                 continue
         row = sx.first_row(got[0])
-        qid = str(sx.first_row(got[1]).get("QUERY_ID") or "") or None
-        stats = history.get(qid or "", {})
+        qids[ref] = str(sx.first_row(got[1]).get("QUERY_ID") or "") or None
         entry = {"status": "pass", **parse_measure(row, columns[ref])}
+        if overflow:
+            entry["totals"] = None
+            entry["totals_detail"] = "a column total overflowed, so no totals were computed"
         entry["columns"] = [{"name": c.name, "type": c.type} for c in columns[ref]]
-        entry["query_id"] = qid
-        entry["elapsed_ms"] = _int(stats.get("TOTAL_ELAPSED_TIME"))
-        entry["bytes_scanned"] = _int(stats.get("BYTES_SCANNED"))
+        entry["query_id"] = qids[ref]
         out[ref] = entry
-    return out, session
+    stats, warnings = query_stats(ex, list(qids.values()))
+    for ref, qid in qids.items():
+        hist = stats.get(qid or "", {})
+        out[ref]["elapsed_ms"] = _int(hist.get("TOTAL_ELAPSED_TIME"))
+        out[ref]["bytes_scanned"] = _int(hist.get("BYTES_SCANNED"))
+    return out, session, warnings
 
 
 def cmd_run(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
@@ -904,13 +1001,9 @@ def cmd_run(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
     sections = page_sections(repo, app, index, args.page)
     ex = make_exec(app.name, st, args.timeout, runner)
     run_dir = resolve_run(repo, app, args.run, st)
-    measured, session = measure_sections(ex, sections, with_session=True)
+    measured, session, stat_warnings = measure_sections(ex, sections, with_session=True)
     warnings = list(st.warnings) + _record_session(run_dir, session or sx.SnowError("missing"))
-    if any(m.get("status") == "pass" and m.get("elapsed_ms") is None for m in measured.values()):
-        warnings.append(
-            "query history was not readable for some sections (the role may not see "
-            "SNOWFLAKE.INFORMATION_SCHEMA); elapsed time is missing for them"
-        )
+    warnings += stat_warnings
     by_page: dict[str, list[dict]] = {}
     for s in sections:
         entry = {"id": f"run:{s.ref}", **s.base(), **measured[s.ref]}
@@ -997,37 +1090,31 @@ def cmd_bench(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
             raise ToolError(f"{name} does not compile: {got}")
         columns[name] = parse_columns(got[1])
 
-    # Interleaved before/after with the result cache off; per run: measure,
-    # its query id, its actual partitions (GET_QUERY_OPERATOR_STATS).
+    # Interleaved before/after with the result cache off; per run, the measure
+    # and its query id. Timings and actual partitions follow in one more call.
     stmts: list[str] = []
     order: list[str] = []
     for _ in range(args.runs):
         for name, sql in variants:
-            stmts += [measure_sql(sql, columns[name], sums=False), _LAST_QID_SQL, _OPSTATS_SQL]
+            stmts += [measure_sql(sql, columns[name], sums=False), _LAST_QID_SQL]
             order.append(name)
     try:
-        try:
-            got = ex.run([*stmts, _HISTORY_SQL], result_cache=False)
-            history = _history([got[-1]])
-            got = got[:-1]
-        except sx.SnowError:
-            # Retry without query history and operator stats (role may not see them).
-            lite = [s for s in stmts if s != _OPSTATS_SQL]
-            got_lite = ex.run(lite, result_cache=False)
-            history = {}
-            got = []
-            for i in range(0, len(got_lite), 2):
-                got += [got_lite[i], got_lite[i + 1], []]
-            warnings.append("query history / operator stats were not readable; timings missing")
+        got = ex.run(stmts, result_cache=False)
     except sx.SnowError as exc:
         raise ToolError(f"benchmark failed: {exc}") from exc
-
+    measured = [
+        (
+            name,
+            sx.first_row(got[2 * i]),
+            str(sx.first_row(got[2 * i + 1]).get("QUERY_ID") or "") or None,
+        )
+        for i, name in enumerate(order)
+    ]
+    stats, stat_warnings = query_stats(ex, [q for _, _, q in measured], partitions=True)
+    warnings += stat_warnings
     samples: dict[str, list[dict]] = {name: [] for name, _ in variants}
-    for i, name in enumerate(order):
-        row = sx.first_row(got[3 * i])
-        qid = str(sx.first_row(got[3 * i + 1]).get("QUERY_ID") or "") or None
-        ops = sx.first_row(got[3 * i + 2]) if got[3 * i + 2] else {}
-        hist = history.get(qid or "", {})
+    for name, row, qid in measured:
+        hist = stats.get(qid or "", {})
         samples[name].append(
             {
                 "rows": _int(row.get("__ROWS")),
@@ -1035,8 +1122,8 @@ def cmd_bench(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
                 "query_id": qid,
                 "elapsed_ms": _int(hist.get("TOTAL_ELAPSED_TIME")),
                 "bytes_scanned": _int(hist.get("BYTES_SCANNED")),
-                "partitions_scanned": _int(ops.get("PARTITIONS_SCANNED")),
-                "partitions_total": _int(ops.get("PARTITIONS_TOTAL")),
+                "partitions_scanned": _int(hist.get("PARTITIONS_SCANNED")),
+                "partitions_total": _int(hist.get("PARTITIONS_TOTAL")),
             }
         )
     results = []
@@ -1101,10 +1188,10 @@ def equivalence(
 # log
 # --------------------------------------------------------------------------- #
 def evidence_ids(run_dir: Path) -> set[str]:
-    """Every ``id`` in the run's JSON: an open set, so later verbs' IDs work too."""
+    """Every ``id`` in the run's result files (open to later verbs' files)."""
     ids: set[str] = set()
     for path in sorted(run_dir.glob("*.json")):
-        if path.name == META:
+        if not _RESULT_FILE_RE.match(path.name):
             continue
         for r in read_json(path).get("results", []):
             if isinstance(r, dict) and isinstance(r.get("id"), str):
@@ -1159,9 +1246,12 @@ def validate_findings(
             if unknown:
                 problems.append(f"{where}: evidence {unknown} is not a result in this run")
         page, metric = f.get("page"), f.get("metric")
-        if page is not None and (not isinstance(page, str) or not re.fullmatch(r"\d{2}", page)):
+        page_ok = page is None or (isinstance(page, str) and re.fullmatch(r"\d{2}", page))
+        if not page_ok:
             problems.append(f'{where}: page must be a two-digit page number like "01" or null')
-        if metric is not None and (page is None or (page, metric) not in keys):
+        if metric is not None and (
+            not isinstance(metric, str) or page is None or not page_ok or (page, metric) not in keys
+        ):
             problems.append(f"{where}: metric {metric!r} is not a metric on page {page}")
         obj = f.get("object")
         if obj is not None and (not isinstance(obj, str) or not sri._FQN_RE.match(obj)):
@@ -1190,11 +1280,13 @@ def _cell(text: object) -> str:
 def headline(entry: dict) -> str:
     """The committed log's headline cell: never a small-group breakdown."""
     rows = entry.get("rows")
-    totals = entry.get("totals") or {}
     if rows is None:
         return "—"
     if rows == 0:
         return "no rows"
+    if entry.get("totals") is None and entry.get("totals_detail"):
+        return "totals not computed (a column total overflowed)"
+    totals = entry.get("totals") or {}
     if not totals:
         return "no numeric columns"
     columns = entry.get("columns") or []

@@ -51,8 +51,7 @@ def test_argv_names_the_connection_and_reads_stdin() -> None:
         "json",
         "--enable-templating",
         "NONE",
-        "-c",
-        "acme",
+        "--connection=acme",
     ]
 
 
