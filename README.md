@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <strong>An open-source toolkit for building, governing, and shipping
-  Streamlit-in-Snowflake apps with Claude Code.</strong>
+  <strong>The world's best open-source plugin for creating Snowflake
+  Streamlit data apps with Claude Code.</strong>
 </p>
 
 <p align="center">
