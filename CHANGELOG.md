@@ -8,6 +8,8 @@ entry.
 
 ## [0.8.0] - 2026-10-05
 
+Version 0.8.0.
+
 ### Breaking
 
 - **SQL review is page-based** (`sql_review/` redesign, phase 1 of 3; design in
