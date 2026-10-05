@@ -27,7 +27,7 @@ starting MIGRATION.md.
 | `auto-review-app` | `/review-app --auto` | Same convergence loop |
 | `sql-review` | `/review-app --sql` | Runnable SQL per page, one section per metric, from `sql_review/index.yaml` |
 | `deep-dive-data` | **`/audit-lineage`** | Renamed; same bounded read-only tracing. Warehouse-specific rules (e.g. an environment-specific schema helper, an intermediate-layer deploy note) stay local |
-| `feedback-app` | **`/feedback-app`** | Upstreamed in v0.3 — classification buckets, per-item commits, follow-up review |
+| `feedback-app` | `/build-app <slug> --feedback` | Upstreamed in v0.3 as `/feedback-app`; folded into `/build-app` after 0.8.0. Same classification buckets and per-item commits; fixes beyond one file go through the build and verify phases |
 | `preview-app` | **`/preview-app`** | Unchanged surface |
 | `validate-app` | **`/validate-app`** | The plugin's gate is `streamsnow validate-app`; a local `--pr` checklist variant is an *extends*, keep it if you use it |
 | `ship-app` | **`/ship-app`** | Same gate-then-PR flow incl. the squash-merge branch-reuse guard |
