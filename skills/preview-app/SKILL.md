@@ -77,7 +77,7 @@ first script run finishes; data errors surface in the browser and in `logs`, not
 For a hands-off pass, enumerate the app's pages with `streamsnow nav <slug>` (one JSON object per
 page — title, path, group; `--json-array` for one payload) and drive a Playwright browser across
 each per [_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md) — advisory only,
-silent skip without the MCP. The nav list is the loop input; never guess page URLs from filenames.
+silent skip without the CLI. The nav list is the loop input; never guess page URLs from filenames.
 
 ## Done when
 

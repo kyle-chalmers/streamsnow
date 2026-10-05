@@ -25,7 +25,7 @@ Snowflake pages for every fact below are collected in
 | **Snowflake CLI (`snow`)** | Local preview against live Snowflake + deploy (Paths B and C) | `snow --version` |
 | **pre-commit** | Runs the governance checks before each commit in a scaffolded repo | `pre-commit --version` |
 | **Claude Code** *(Path B)* | Drives the StreamSnow plugin skills (`/start-app`, `/validate-app`, …) | — |
-| **Node.js 20+** *(Path B, recommended)* | Runs the browser tool the plugin bundles, which clicks through your app and screenshots each page | `node --version` |
+| **Node.js 20+** *(Path B, recommended)* | Runs the Playwright browser tool that clicks through your app and screenshots each page | `node --version` |
 
 **On Windows**, run StreamSnow inside [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
 (Windows Subsystem for Linux, Microsoft's built-in Linux layer): run `wsl --install` in an

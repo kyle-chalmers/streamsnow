@@ -348,6 +348,10 @@ to overwrite an edited skill without `--force`.
 - **Reviewers.** `/review-app` fans out reviewers as Claude Code subagents; the
   skill tells an agent without subagents to run the same briefs one after
   another.
+- **Browser walkthroughs.** They run the Playwright CLI through `npx`, so they
+  work under Codex too, but only when its sandbox allows network access and
+  writes to `~/.npm` and `~/.cache/ms-playwright`; otherwise they are skipped
+  and every other check still runs.
 - **Claude Code only: the plugin hooks** in [Hooks, in full](#hooks-in-full)
   have no Codex equivalent, so StreamSnow cannot pause a destructive `snow`
   command, nudge for a review, or print its session-start line there. The
@@ -402,15 +406,15 @@ declare explicit timeouts so a hung hook can never stall a session. To turn them
 the plugin (`claude plugin disable streamsnow`). Hook additions do not reach installed copies
 automatically — see [Upgrading](#upgrading).
 
-### The bundled browser tool
+### The browser tool
 
-The plugin also ships one MCP server, in `.mcp.json`: Microsoft's
-[Playwright MCP](https://github.com/microsoft/playwright-mcp), pinned to an exact version.
-The skills use it to click through each page of your running app and screenshot it, so you see
-a broken page before it ships. Unlike the hooks it does use the network: `npx` downloads the
-pinned package from npm the first time, and a browser opens only when a skill walks your app.
-It needs Node.js 20+; without Node the walkthroughs are skipped and everything else works.
-`streamsnow doctor` and `/start-app --setup` check it for you.
+The skills click through each page of your running app and screenshot it with Microsoft's
+[Playwright CLI](https://www.npmjs.com/package/@playwright/cli), pinned to an exact version and
+run through `npx` only when a skill walks your app, so you see a broken page before it ships.
+There is no MCP server to start. Unlike the hooks it does use the network: `npx` downloads the
+pinned package from npm the first time, and the CLI downloads its own browser once. It needs
+Node.js 20+; without Node the walkthroughs are skipped and everything else works.
+`streamsnow doctor` checks Node, and `/onboard` downloads the CLI and its browser ahead of time.
 
 ## How it's organized
 

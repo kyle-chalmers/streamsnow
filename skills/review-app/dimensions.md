@@ -26,11 +26,11 @@ layering), consult [_shared/production-gotchas.md](../_shared/production-gotchas
 
 `st.set_page_config` first and called once; `st.navigation` + `st.Page` for multipage; branding
 applied in the entrypoint; multi-filter pages batched in `st.form` (one rerun, not one per widget);
-consistent chart library; number/`column_config` formatting. If a Playwright MCP is loaded, drive a
+consistent chart library; number/`column_config` formatting. If the Playwright CLI is available (Node 20+), drive a
 live walkthrough per [_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md) to
 confirm visuals populate under default filters — a whole band of empty visuals under defaults is
 **critical**; a single intentional empty-state beside an `st.info`/`st.warning` is fine. Degrade
-silently to source-only when the MCP is absent.
+silently to source-only when the CLI is unavailable.
 
 ## Runtime / config
 

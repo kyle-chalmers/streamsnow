@@ -42,13 +42,16 @@ public or cutting the first PyPI release:
    A plugin-only install reads `plugin.json`, a pip install reads the wheel
    metadata, and `streamsnow --version` reads `__init__.py`, so a partial bump
    makes them disagree about what is installed.
-   Then check the Playwright MCP pin in `.mcp.json` (`@playwright/mcp@X.Y.Z`):
-   compare it with `npm view @playwright/mcp version`. When bumping it, check the
-   Node floor of the `playwright-core` it pins (`npm view playwright-core@<that
-   version> engines`) against `_NODE_MIN_MAJOR` in `streamsnow/tools/doctor.py`, and run
-   one UI walkthrough (`/preview-app` on the sample app) on the new version
-   before tagging. It is an exact pin on purpose: `@latest` would let an
-   upstream release change the walk under a plugin version you already shipped.
+   Then check the Playwright CLI pin in `skills/_shared/playwright-walkthrough.md`
+   (`@playwright/cli@X.Y.Z`, the only place it is written): compare it with
+   `npm view @playwright/cli version`. When bumping it, read
+   `npm view @playwright/cli@<new> dependencies` for the `playwright-core` it pins, check
+   that core's Node floor (`npm view playwright-core@<that version> engines`) against
+   `_NODE_MIN_MAJOR` in `streamsnow/tools/doctor.py`, and run one UI walkthrough
+   (`/preview-app` on the sample app) on the new version before tagging. Each CLI release
+   tracks a Playwright alpha, so expect breakage on bumps, and each bump downloads a new
+   browser (about 150 MB). It is an exact pin on purpose: `@latest` would let an upstream
+   release change the walk under a plugin version you already shipped.
 2. Ensure `main` is green (lint-and-test, privacy-gate, wheel-smoke).
 3. Tag and push. Use the fully-qualified refspec:
    ```bash

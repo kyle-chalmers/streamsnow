@@ -80,7 +80,7 @@ governed repo needs its hooks, CI and `.gitignore` on disk, commits need a name 
 `pre-commit install` runs per clone, so without the hook a teammate's commits skip every check.
 `git-identity` reports only whether each value is set; ask the user for their name and email,
 and prefer repo-local scope on a machine with several accounts. `node` is an optional warning: the
-plugin's bundled browser tool runs through `npx`, and without it every UI walkthrough is skipped.
+Playwright CLI that walks your app runs through `npx`, and without it every UI walkthrough is skipped.
 `ci-secrets` belongs to §2e. `gh` is optional here and required later by `/ship-app`. `container-python` warns in a
 container-runtime repo with no Python 3.11 (`uv python install 3.11`). Two checks flip level by context: `config` is `optional`
 when no `streamsnow.config.yaml` exists yet and `required` when one exists but fails validation
@@ -102,7 +102,7 @@ report the prerequisites, connection readiness included, as unverified.
 | Snowflake CLI `snow` (optional) | lets the apps on this computer sign in to Snowflake, through one saved connection | `uv tool install snowflake-cli` (a Homebrew `snow` can break on a newer system Python) | `uv tool install snowflake-cli` |
 | pre-commit (blocker once configured) | runs StreamSnow's safety checks automatically before each commit | `uv tool install pre-commit` | same |
 | pre-commit hook (blocker once configured) | connects those checks to this copy of the repo; each clone needs it once | `pre-commit install` | same |
-| Node.js 20+ (optional, recommended) | runs the browser tool that clicks through the app and screenshots each page | `brew install node` | nvm (`nvm install --lts`); distro packages are often too old |
+| Node.js 20+ (optional, recommended) | runs the Playwright browser tool that clicks through the app and screenshots each page | `brew install node` | nvm (`nvm install --lts`); distro packages are often too old |
 | GitHub CLI `gh` (optional; `/ship-app` needs it) | opens pull requests and checks the deploy settings on GitHub | `brew install gh`, then `gh auth login` (user signs in) | distro package, then `gh auth login` |
 
 After the repo is configured, run `pre-commit install` yourself (doctor's `pre-commit-hook` row
@@ -112,21 +112,25 @@ there, `pre-commit install` keeps it as `pre-commit.legacy` and still runs it.
 
 ### 1b · Browser check (advisory, never blocks)
 
-StreamSnow ships a Playwright browser tool with the plugin, used to walk through each page of a
-running app. Confirm it works now rather than finding out later when a review silently skips it:
+StreamSnow walks each page of a running app in a browser with the Playwright CLI, through `npx`,
+at the pinned version in [_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md)
+(`P` below means `npx -y @playwright/cli@<that version>`). Prepare it now rather than finding out
+later when a review silently skips it. One line to the user: "Downloading the browser tool now,
+so app walkthroughs work later."
 
-- The first start downloads the tool, so it can still be connecting: search your tools for
-  `browser_navigate` (a tool search waits for servers that are still connecting) before deciding
-  it is missing.
-- If `browser_*` tools are available, navigate to `about:blank`, then close the browser. Report
-  "browser tool works" in one line. If it fails with "is not installed" or "Executable doesn't
-  exist", explain that the browser itself needs a one-time download, run `npx @playwright/mcp@<version> install-browser <name>`
-  with the browser name from the error and the version from the plugin's `.mcp.json` (the error
-  prints the command without a version, which would fetch a different release), and retry once.
-- If they are not visible and doctor's `node` row is not ok, install Node first (see the table).
-  Then ask the user to type `/reload-plugins` so the plugin's browser tool starts, and retry.
-- Still failing after that: say the UI walkthrough will be skipped until it is fixed, point to
-  `docs/troubleshooting.md`, and continue. Nothing else depends on it.
+- Doctor's `node` row not ok: Node.js 20+ is in the batched install (see the table), first.
+- Download the CLI and its browser: `P --version`, then `P install-browser chrome-for-testing`
+  (no sudo needed). Ignore the CLI's update and install banners; never install `@latest` or
+  globally.
+- Smoke test from a temporary directory, so no CLI files land in the repo:
+  `cd "$(mktemp -d)" && P -s=streamsnow-check open about:blank --browser=chromium --idle-timeout=60000`,
+  then `P -s=streamsnow-check close`. Report "browser tool works" in one line.
+- On Linux or WSL, a launch that fails on missing system libraries needs one command the user runs
+  (it asks for their password): `sudo npx -y @playwright/cli@<that version> install-browser --with-deps chrome-for-testing`.
+- Each new `npx` command can ask the user for permission. To cut prompts, they can allow
+  `Bash(npx -y @playwright/cli@*)` in their Claude Code settings; mention it once.
+- Still failing: say the UI walkthrough will be skipped until it is fixed, point to
+  `docs/troubleshooting.md` #20, and continue. Nothing else depends on it.
 
 ### 1c · The project's Python environment
 
