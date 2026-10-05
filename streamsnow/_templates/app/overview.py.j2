@@ -49,7 +49,7 @@ fig = px.bar(
     labels={"x": "category", "y": "count"},
     color_discrete_sequence=BRAND_CHART_COLORS,
 )
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 st.divider()
 st.caption("Sources: {{ gov_database }}.{{ schema_allow[0] }} (example)")
