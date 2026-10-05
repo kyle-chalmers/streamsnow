@@ -10,10 +10,16 @@ entry.
 
 ### Breaking
 
+- **`/start-app` is renamed `/build-app`**, with no deprecation release (a
+  maintainer exception to [docs/versioning.md](docs/versioning.md)). Same
+  front door, same `--spec` mode. Rename a repo overlay
+  `.streamsnow/overlays/start-app.md` to `build-app.md`, and Codex users re-run
+  `streamsnow agent-skills install`, which removes the old `start-app` copy
+  unless it was edited.
 - **`/start-app --setup` and `/start-app adopt` are removed**, with no
   deprecation release (a maintainer exception to
   [docs/versioning.md](docs/versioning.md)). Use `/onboard`, which does both;
-  `/start-app` hands off to it by itself when the machine or repo isn't ready.
+  `/build-app` hands off to it by itself when the machine or repo isn't ready.
 - **The plugin no longer bundles the Playwright MCP** (`.mcp.json`). UI
   walkthroughs use the Playwright CLI instead; see Changed below.
 
@@ -49,7 +55,7 @@ entry.
   set up your `snow` connection for you, or guide you through it.
 - **Session start** points to `/onboard` when the plugin is enabled but the
   repo isn't set up, and when this clone has no pre-commit hook.
-- `streamsnow new` prints the runtime-matched install command, and `/start-app`
+- `streamsnow new` prints the runtime-matched install command, and `/build-app`
   runs it into the repo `.venv` (which `/onboard` creates) right after
   scaffolding, so the first preview works.
 
@@ -65,7 +71,7 @@ entry.
 ### Removed
 
 - **`/start-app --setup` and `/start-app adopt`.** Use `/onboard`.
-  `/start-app` now hands off to `/onboard` by itself when the machine or repo
+  `/build-app` now hands off to `/onboard` by itself when the machine or repo
   isn't ready. docs/migrating-a-consumer-repo.md maps the old names.
 - **`.mcp.json`** (the bundled Playwright MCP). Skills no longer use an MCP;
   `/reload-plugins` drops the old server, and old `browser_*` tool approvals can

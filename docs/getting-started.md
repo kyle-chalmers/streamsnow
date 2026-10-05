@@ -24,7 +24,7 @@ Snowflake pages for every fact below are collected in
 | **git** | Version control | `git --version` |
 | **Snowflake CLI (`snow`)** | Local preview against live Snowflake + deploy (Paths B and C) | `snow --version` |
 | **pre-commit** | Runs the governance checks before each commit in a scaffolded repo | `pre-commit --version` |
-| **Claude Code** *(Path B)* | Drives the StreamSnow plugin skills (`/start-app`, `/validate-app`, …) | — |
+| **Claude Code** *(Path B)* | Drives the StreamSnow plugin skills (`/build-app`, `/validate-app`, …) | — |
 | **Node.js 20+** *(Path B, recommended)* | Runs the Playwright browser tool that clicks through your app and screenshots each page | `node --version` |
 
 **On Windows**, run StreamSnow inside [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
@@ -132,14 +132,14 @@ Then, in a Claude Code session in that directory (an already-open one is fine;
 3. **Build.** After you confirm, `streamsnow init --no-starter-app` writes
    `streamsnow.config.yaml` and the governed repo files (`AGENTS.md`, `CLAUDE.md`,
    pre-commit hooks, CI and deploy workflows, `.gitignore`, `README.md`,
-   `deploy/tombstones.yml`). No example app: `/start-app` scaffolds your real one.
+   `deploy/tombstones.yml`). No example app: `/build-app` scaffolds your real one.
    Then it installs the pre-commit hook for your clone.
 4. **Finish.** It runs `streamsnow ci-key create` (save a copy of the private key
    somewhere safe, such as a password manager), prepares the Snowflake admin
    script in `.internal/admin-setup.sql`, and once your admin has run it, sets the
    deploy workflow's GitHub secrets with `streamsnow ci-key push`.
 
-It ends at "ready to build and preview" (next: `/start-app`) or "ready to deploy".
+It ends at "ready to build and preview" (next: `/build-app`) or "ready to deploy".
 Re-run `/onboard` any time to check.
 
 ### If you are the Snowflake admin
@@ -349,7 +349,7 @@ claude plugin install --scope project streamsnow@streamsnow
 If Claude Code is already open in the repo, run `/reload-plugins` there to load
 the plugin without restarting.
 
-This adds the skills that wrap the CLI — `/start-app` (the front door),
+This adds the skills that wrap the CLI — `/build-app` (the front door),
 `/preview-app`, `/validate-app`, `/review-app`, `/ship-app`, and more — plus the
 hooks described in the README.
 

@@ -29,7 +29,7 @@ with the user in one round rather than re-asking what the repo already shows.
 - Skip any scaffold step whose target already exists; merge new `.gitignore` rules in, never replace.
 - `AGENTS.md` exists → render the StreamSnow template to `AGENTS.streamsnow.md` instead and note the
   sections worth merging (the governance table, the query/caching conventions). The human merges.
-- **Backfill specs, don't demand them:** for each existing app, offer `/start-app --spec <slug>`
+- **Backfill specs, don't demand them:** for each existing app, offer `/build-app --spec <slug>`
   (automatic backfill mode) so the review and validate phases have a contract to audit against.
   One app first, not a bulk rewrite.
 - Don't force `streamsnow new` conformance (local `branding.py`/`sql_loader.py`, `queries/*.sql`
@@ -42,13 +42,13 @@ One row per finding, with a recommendation:
 
 | Item | Classification | Recommendation |
 |---|---|---|
-| custom `build-dashboard.md` command | shadows `/start-app` | **replace** — plugin covers it; delete after one trial app |
+| custom `build-dashboard.md` command | shadows `/build-app` | **replace** — plugin covers it; delete after one trial app |
 | company branding-parity skill | extends `/review-app` | **keep local** — domain-specific; note it in AGENTS.md |
 | hand-maintained rules file | overlaps rendered AGENTS.md | **merge** — adopt the governance table + conventions |
 | app with inlined SQL | needs conform pass | **later** — `/migrate-app` conform step, one app at a time |
 
 Include: what was auto-configured, what needs a human decision, and the suggested trial — run ONE
-real change through `/start-app → /validate-app → /review-app → /ship-app` before deleting anything
+real change through `/build-app → /validate-app → /review-app → /ship-app` before deleting anything
 custom.
 
 ## 5 · Verify & report

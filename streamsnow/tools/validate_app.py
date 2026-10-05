@@ -456,7 +456,7 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     checks.append({"name": "caching", "ok": cache["ok"], "findings": cache["findings"]})
     leaks = check_path_leaks.scan_paths(files)
     checks.append({"name": "path-leaks", "ok": leaks["ok"], "findings": leaks["findings"]})
-    # §11 build-state contract — what /start-app resumes from. The check is a
+    # §11 build-state contract — what /build-app resumes from. The check is a
     # no-op for apps without a REQUIREMENTS.md (spec presence is a build-phase
     # concern, not a ship gate).
     reqs = check_requirements.scan_paths([app_dir])

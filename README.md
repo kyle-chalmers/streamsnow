@@ -160,7 +160,7 @@ each question you cannot answer on my behalf.
 5. Run `streamsnow agent-skills install --agent codex` (repo scope, the default; never
    `--scope user`). It copies the skills into this repo's .agents/skills, which Codex
    reads; any other agent can open .agents/skills/onboard/SKILL.md directly. Then
-   follow onboard, and then start-app to build my first app.
+   follow onboard, and then build-app to build my first app.
 
 Rules: never ask me for a Snowflake password or key in chat; if I choose, you may set
 up my snow connection with flags, and I approve the sign-in in my browser. Never run
@@ -175,7 +175,7 @@ for what differs outside Claude Code.
 ## How the skills fit together
 
 <p align="center">
-  <a href="docs/images/skills-flow.png"><img alt="StreamSnow skills flow: /onboard sets up your machine, repo and Snowflake once (re-run it any time to check); then your idea goes into /start-app, which runs spec and pages, /preview-app, the /validate-app pass/fail gate, and /review-app, stopping for your OK along the way; then you type /ship-app to open the PR. On merge, CI deploys the live app to Snowflake. /migrate-app and /feedback-app both re-enter at /preview-app, so every path passes the /validate-app gate, and /audit-lineage optionally checks numbers against the live warehouse." src="docs/images/skills-flow.png" width="100%"></a>
+  <a href="docs/images/skills-flow.png"><img alt="StreamSnow skills flow: /onboard sets up your machine, repo and Snowflake once (re-run it any time to check); then your idea goes into /build-app, which runs spec and pages, /preview-app, the /validate-app pass/fail gate, and /review-app, stopping for your OK along the way; then you type /ship-app to open the PR. On merge, CI deploys the live app to Snowflake. /migrate-app and /feedback-app both re-enter at /preview-app, so every path passes the /validate-app gate, and /audit-lineage optionally checks numbers against the live warehouse." src="docs/images/skills-flow.png" width="100%"></a>
 </p>
 
 The source is [docs/images/skills-flow.excalidraw](docs/images/skills-flow.excalidraw);
@@ -190,7 +190,7 @@ StreamSnow is a **hybrid** of two things that work together:
    tools, CI, pre-commit hooks, and branding your repo needs.
 2. **A Claude Code plugin** (marketplace) — ships the skills and
    hooks that turn Claude Code into a domain expert for this stack:
-   `/start-app` (the front door), `/preview-app`, `/validate-app`,
+   `/build-app` (the front door), `/preview-app`, `/validate-app`,
    `/review-app`, `/ship-app`, and more.
 
 Think **a Claude Code skill pack fused with an installable system + setup**.
@@ -258,7 +258,7 @@ and says what it is doing at every step:
 4. **Finish.** The CI key, the admin script (copied for you to run in
    Snowsight, or written up for your admin), and the deploy secrets.
 
-It ends "ready to build and preview" (next: `/start-app`) or "ready to deploy".
+It ends "ready to build and preview" (next: `/build-app`) or "ready to deploy".
 Your part: approve installs, answer one round of questions, approve sign-ins in
 your browser, and run the admin script in Snowsight if you are the admin. In a
 repo that already has Streamlit apps it maps onto them and writes a
@@ -318,7 +318,7 @@ lines, with depth in per-skill reference files:
 | Skill | What it does |
 |---|---|
 | `/onboard` | Machine, repo and Snowflake setup in four stages; detects what is done and does only what is missing. Also adopts repos that already have apps (maps onto them, writes `MIGRATION.md`) |
-| `/start-app` | The front door for apps: spec (incl. backfill from existing source) → scaffold → build pages → ship, with checkpoints. Hands off to `/onboard` if the machine or repo isn't set up |
+| `/build-app` | The front door for apps: spec (incl. backfill from existing source) → scaffold → build pages → ship, with checkpoints. Hands off to `/onboard` if the machine or repo isn't set up |
 | `/preview-app` | Run an app locally against live Snowflake |
 | `/validate-app` | The pass/fail check that must be clean before shipping |
 | `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` authors the audit-trail manifests |
@@ -339,8 +339,8 @@ streamsnow agent-skills install --agent codex               # <repo>/.agents/ski
 streamsnow agent-skills list --agent codex                  # what is installed, and from which version
 ```
 
-Then ask Codex for a skill by name (`$start-app`) or in plain words ("use the
-StreamSnow start-app skill to build..."). In a test with `codex exec`, Codex
+Then ask Codex for a skill by name (`$build-app`) or in plain words ("use the
+StreamSnow build-app skill to build..."). In a test with `codex exec`, Codex
 found the skills in `.agents/skills`, read the `SKILL.md` files and the recipes
 they link, and finished an offline app build that passed `validate-app`. The
 install is a copy: re-run it after `uv tool upgrade streamsnow`, and put

@@ -1,13 +1,13 @@
 ---
-name: start-app
+name: build-app
 description: The front door for building a Streamlit-in-Snowflake app from idea to opened PR, or resuming one mid-build. Owns the spec, scaffold, page-building, and ship phases, with human checkpoints between them. Start here for any new app, to document an existing one, or to add a page. Use when the user says "build an app", "new dashboard", "add a page", "spec this out", or "pick up where we left off".
 argument-hint: "[<idea>] | --spec"
 allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion]
 ---
 
-# /start-app
+# /build-app
 
-> **Repo overlay:** if `.streamsnow/overlays/start-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
+> **Repo overlay:** if `.streamsnow/overlays/build-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
 One command owns the app lifecycle: **spec → scaffold → build → preview → verify → ship → done**.
 It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume an interrupted build, tells the user the exact
