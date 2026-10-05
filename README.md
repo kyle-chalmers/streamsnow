@@ -28,20 +28,23 @@
 > agent-skills) and the Claude Code plugin (9 skills + shared recipes) are
 > implemented and CI-green for
 > both runtimes and both deploy sources. Published on PyPI (`uvx streamsnow` /
-> `pip install streamsnow`); APIs may still evolve toward 1.0.
+> `pip install streamsnow`); APIs may still evolve toward 1.0 — see
+> [Versioning and stability](docs/versioning.md) for what is already promised.
 
 ## Mission
 
-**StreamSnow aims to let a data team build and ship Streamlit-in-Snowflake apps
-quickly and safely, by turning production lessons into scaffolding and checks
+**StreamSnow aims to let a data team build and ship, quickly and safely,
+Streamlit-in-Snowflake apps that load fast, can be trusted, and help people make
+decisions, by turning production lessons into scaffolding, checks, and guidance
 that people and AI sessions can follow without having to remember them.**
 
 ## Vision
 
 **A data professional, with or without an AI assistant, can take a dashboard
 from idea to a governed, verified deployment in Snowflake without learning the
-platform's traps the hard way, and a reviewer with Snowsight can re-run the SQL
-behind the numbers it shows.**
+platform's traps the hard way; a reviewer with Snowsight can re-run the SQL
+behind the numbers it shows; and the people it's built for can open it,
+understand it, and act on it without a walkthrough.**
 
 **This is for you if:**
 
@@ -73,11 +76,12 @@ needs only a login that can read your data.
 1. **One implementation, many consumers:** CLI, plugin, pre-commit, and CI call the same code.
 2. **Detection is automated and total; destruction requires explicit committed consent.**
 3. **The backstop asks; it never decides:** the gates are `validate-app` and CI, not the review nudge.
-4. **Org knowledge lives in `streamsnow.config.yaml` and `.streamsnow/overlays/`**, never in skills.
+4. **Org knowledge lives in `streamsnow.config.yaml` and `.streamsnow/`** (overlays and the house design guide), never in skills.
 5. **Every rule names the incident that created it and the mechanism that enforces it.**
 6. **Degrade, don't die:** a missing enabler is named, not refused.
 7. **Faithful to a real fleet:** a check that fails a well-run production app is a defect in the check until proven otherwise (`tests/fixtures/fleet/` is the regression net).
 8. **Leaving should be cheap:** everything StreamSnow writes is a plain file the repo keeps ([Ownership and exit](docs/distribution.md#ownership-and-exit)).
+9. **Design is a default, not a gate:** StreamSnow ships opinionated defaults with their reasons, the org's house style overrides them, and only correctness and governance block a ship.
 
 ## What Claude can and can't see
 
@@ -476,6 +480,19 @@ code — one implementation, many consumers.
   plugin) and why there's no separate copy-paste kit.
 - **[Migrating a consumer repo](docs/migrating-a-consumer-repo.md)** — bring a
   repo with home-grown skills onto the plugin (skill map + incremental path).
+- **[Versioning and stability](docs/versioning.md)** — what counts as a breaking
+  change, the deprecation policy, and the path to 1.0.
+
+## Feedback and community
+
+- **Questions and ideas:** [Discussions](https://github.com/kyle-chalmers/streamsnow/discussions).
+- **Bugs and scoped feature requests:** [open an issue](https://github.com/kyle-chalmers/streamsnow/issues/new/choose)
+  with one of the forms. Issues are triaged automatically, and the ones the maintainer
+  approves are often implemented by an AI agent and reviewed before merge
+  ([how issues move](CONTRIBUTING.md#how-issues-move)).
+- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md), including the AI-assisted
+  contribution policy. Everyone agrees to the [Code of Conduct](CODE_OF_CONDUCT.md).
+- **Security:** report privately, per [SECURITY.md](SECURITY.md).
 
 ## License
 

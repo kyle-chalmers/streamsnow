@@ -94,3 +94,31 @@ uv run python scripts/check_docs_links.py --online
 
 Every URL must answer 200 without redirecting. A 308 means the page moved:
 update `docs/snowflake-docs.md` (and any inline link) to the new canonical path.
+
+## Path to 1.0.0
+
+1.0.0 turns the [stability promise](docs/versioning.md) into a firm commitment, so it ships
+only when every gate below is true. Track the work in the `1.0.0` milestone.
+
+**Before the 1.0 release candidate:**
+
+- Every planned breaking change has landed, each with its deprecation stub or redirect
+  (for example, retired skill entry points redirect to their replacements, as the 0.7.0
+  alias commands did). Nothing on the stable surface is still expected to move.
+- Native Windows is finished or explicitly documented as out of scope: the session hook
+  (`hooks/session_start.sh`) runs without bash or WSL, and no Windows test is skipped
+  without a written reason.
+- `tests/fixtures/cli_surface.json` matches the surface you intend to support for 1.x.
+
+**Release gates for 1.0.0 (all on the release commit):**
+
+1. Every CI job is green, including the Windows rows of `lint-and-test`.
+2. The privacy scan passes locally **with** your `.streamsnow/export-denylist.txt` present.
+3. `uv run python scripts/check_docs_links.py --online` passes.
+4. One end-to-end UI walkthrough (`/preview-app` on the sample app) on the pinned
+   Playwright CLI version.
+5. One live onboarding run in a scratch repo, by the maintainer, covering both admin paths
+   and both connection paths.
+6. `CHANGELOG.md` says semantic versioning applies from 1.0.0, and the release notes link
+   [docs/versioning.md](docs/versioning.md).
+
