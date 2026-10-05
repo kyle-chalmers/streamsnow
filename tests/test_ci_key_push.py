@@ -171,6 +171,10 @@ def test_short_values_are_redacted_too():
     assert "DEV" not in msg and "ab12345" not in msg
 
 
+def test_a_one_letter_value_does_not_rewrite_earlier_markers():
+    assert ci_key._redact("bad token SECRET", ["SECRET", "e"]) == "bad tok<redacted>n <redacted>"
+
+
 def _cli(*args: str):
     from typer.testing import CliRunner
 

@@ -519,7 +519,7 @@ def load_config(path: Path | None = None) -> Config:
         )
     try:
         data = yaml.safe_load(Path(cfg_path).read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as exc:  # pragma: no cover - passthrough
+    except yaml.YAMLError as exc:
         # Problem and position only: PyYAML's full message quotes a snippet of
         # the file, and --config can point at a file that holds a secret.
         mark = getattr(exc, "problem_mark", None)

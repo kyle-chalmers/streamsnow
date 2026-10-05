@@ -24,6 +24,7 @@ import base64
 import dataclasses
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -212,9 +213,11 @@ def _redact(text: str, values: list[str]) -> str:
     error message is the safe failure.
     """
     lines = {ln.strip() for value in values for ln in value.splitlines()} - {""}
-    for line in sorted(lines, key=len, reverse=True):
-        text = text.replace(line, "<redacted>")
-    return text
+    # NUL-delimited placeholders first, so a short value can't rewrite an
+    # earlier marker; gh's output never contains NUL.
+    for i, line in enumerate(sorted(lines, key=len, reverse=True)):
+        text = text.replace(line, f"\x00{i}\x00")
+    return re.sub(r"\x00\d+\x00", "<redacted>", text)
 
 
 def push(
