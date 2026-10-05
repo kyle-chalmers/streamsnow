@@ -365,7 +365,7 @@ lines, with depth in per-skill reference files:
 | `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` builds the app's `sql_review/` page files |
 | `/audit-lineage` | Live-warehouse column + lineage verification (read-only, bounded) |
 | `/ship-app` | Validate-gated stage → commit → push → PR → watch CI |
-| `/migrate-app` | Port an external Streamlit app in (lift, then conform) |
+| `/migrate-app` | Port an external Streamlit app in: lift it, then conform it through `/build-app`'s phases |
 
 ## Use with other agents
 

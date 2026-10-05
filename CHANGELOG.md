@@ -71,6 +71,20 @@ entry.
   with an external palette validator (the check isn't part of this repo's tests); slots 3 and 5
   sit below 3:1 contrast on white, so label those series directly. Only apps scaffolded without
   a `brand.chart_sequence` change.
+- **`/migrate-app` conforms through `/build-app`.** Step 2 now backfills the spec, builds the
+  shared layer and conforms the pages with build-app's parallel build (page-builders in
+  `conform` mode, worklist from `scan-conformance` and `scan-inline-sql`), then verifies. Done
+  is the gates: `validate-app` passes, `sql-review check` is clean and the conform scans are
+  empty. A new test lifts and conforms a fixture app and fails if the scanners and the gates
+  ever disagree.
+
+### Removed
+
+- **`/feedback-app` is now `/build-app <slug> --feedback "<feedback>"`.** Same classification
+  (BUG / POLISH / UX / NEW-FEATURE / CROSS-CUTTING), locked with you before any edit; small
+  fixes keep the one-commit-per-item fast path, while UX, new features and cross-cutting items
+  go through the design, build and verify phases for the affected pages. The old skill is
+  removed; `streamsnow agent-skills` and the plugin no longer install it.
 
 ### Fixed
 
