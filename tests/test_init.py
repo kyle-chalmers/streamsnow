@@ -931,7 +931,10 @@ def test_build_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
         "      - key: net_paid_by_day\n"
         "        query: queries/daily_sales.sql\n"
         '        binds: {"1": params.start_date, "2": params.end_date}\n'
-        f"        reads: [{table}]\n",
+        f"        reads: [{table}]\n"
+        # The scaffold's About page stays in the nav, so it stays in the index.
+        "  - path: pages/about.py\n"
+        "    metrics: []\n",
         encoding="utf-8",
     )
     assert sql_review.main(["generate", "sales-trends", "--dir", str(tmp_path)]) == 0

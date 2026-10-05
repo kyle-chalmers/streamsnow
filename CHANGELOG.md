@@ -19,21 +19,6 @@ entry.
   review covers the SQL listed in `sql_review/index.yaml`; SQL written inline in page code is
   no longer traced live (the static `/review-app` pass still reads it).
 
-### Changed
-
-- **A redesigned README.** It now has a logo with light and dark variants, a nav row, a demo
-  GIF, a quick-start callout near the top, a "Without / with StreamSnow" table that pairs real
-  production incidents with the check that prevents each, a new "How the repos fit together"
-  diagram, an updated skills diagram, and a star-history chart. Long reference sections fold
-  into `<details>`. "This is for you if" gains three lines, and a one-line Prerequisites
-  statement replaces "Who can use this" and the "Where it fits next to a BI tool" paragraph.
-  Images use absolute URLs, so they also render on PyPI.
-- **The principles moved to [docs/principles.md](docs/principles.md)**, with the same nine
-  rules and numbers, plus where each one shows up. The README links to them.
-- **`streamsnow init` prints the project-scope plugin install** (`claude plugin marketplace add
-  --scope project …` and `claude plugin install --scope project …`) in its `Next:` block,
-  matching the README and Getting started. It printed the user-scope `/plugin` commands before.
-
 ### Added
 
 - **Live SQL review commands**: `streamsnow sql-review probe` (objects exist, direct grants,
@@ -48,6 +33,25 @@ entry.
 - **Reviewer agents** for `/sql-review` in the plugin's `agents/` (page, object, optimizer,
   verifier); the same briefs ship in `skills/sql-review/reviewers/` for other agents.
 - `sql_review/AGENTS.md` (refreshed by `generate`) gains the review-log rules.
+- **In-app documentation in every new app.** `streamsnow new` adds an **About** page (last in the
+  navigation): purpose, audience, owner, each page and its question, the full metric glossary,
+  and every query with the schemas it reads, read at runtime from the `queries/*.sql` header
+  blocks (new `query_headers()` in `sql_loader.py`). It is listed in `sql_review/index.yaml`
+  with `metrics: []`.
+- **Shared page modules** scaffolded under `pages/`, imported package-qualified:
+  `_glossary.py` (one definitions table), `_layout.py` (`definitions_expander`, `empty_state`,
+  `sources_footer`, and `show_sql`, which shows the exact query and bound values behind a visual),
+  `_time_controls.py` (a period picker bounded by the data) and `_data.py` (loaders several pages
+  share).
+- **`branding.py` 1.1.0:** `fmt_number`, `fmt_currency`, `fmt_pct`, `BRAND_STATUS_COLORS`, and
+  `branded_metric(help=..., delta_color=...)` (tooltip definition; delta colored by meaning). Additive:
+  existing calls keep working; a zero delta ("0%") is grey, not green. Older apps on 1.0.0 next
+  to a new 1.1.0 app get a `check branding-parity` **note**, not a failure: a lag behind the
+  installed template within one major version is an upgrade, not a hand edit. Copy the new
+  `branding.py` into them when convenient.
+- **House design guide.** An optional, committed `.streamsnow/design.md` holds a repo's house
+  style for pages; `/build-app` and `/review-app` read it before the shipped defaults.
+- `/build-app` specs record each page's **Question** (§4) and a **Style** line (§2).
 - **[docs/cli-reference.md](docs/cli-reference.md):** every command, flag and check, with exit
   codes, JSON keys, and the steps `validate-app` runs. Several flags were documented nowhere
   before (`check dependency-vulns --allowlist`, `check session-fallback --all`,
@@ -57,6 +61,39 @@ entry.
   recording, social preview image and diagram PNGs, plus a runbook for recording the full
   Claude Code to Snowflake demo.
 - **`docs/superpowers/README.md`** indexes the internal design specs and plans.
+
+- **`/build-app` orchestrates subagents.** New phases between spec and scaffold: **discover**
+  (a data-scout profiles grain, date range, size and filter values into §3) and **design** (an
+  app-designer plans every page's forms, copy, glossary and shared data, shown as a text
+  wireframe at the new CHECKPOINT 1b). The scaffold builds the shared layer once; one
+  page-builder per page then builds in parallel, owning only its page and its queries, while the
+  orchestrator merges navigation, `sql_review/index.yaml` and the glossary and runs
+  `sql-review generate` once. A verify phase runs perf, visual and cold-reader reviewers with at
+  most two fix rounds before the click-through. Briefs live in `skills/build-app/briefs/`; hosts
+  without subagents follow them one at a time. `check requirements` accepts the `discover` and
+  `design` phases.
+
+### Changed
+
+- **A redesigned README.** It now has a logo with light and dark variants, a nav row, a demo
+  GIF, a quick-start callout near the top, a "Without / with StreamSnow" table that pairs real
+  production incidents with the check that prevents each, a new "How the repos fit together"
+  diagram, an updated skills diagram, and a star-history chart. Long reference sections fold
+  into `<details>`. "This is for you if" gains three lines, and a one-line Prerequisites
+  statement replaces "Who can use this" and the "Where it fits next to a BI tool" paragraph.
+  Images use absolute URLs, so they also render on PyPI.
+- **The principles moved to [docs/principles.md](docs/principles.md)**, with the same nine
+  rules and numbers, plus where each one shows up. The README links to them.
+- **`streamsnow init` prints the project-scope plugin install** (`claude plugin marketplace add
+  --scope project …` and `claude plugin install --scope project …`) in its `Next:` block,
+  matching the README and Getting started. It printed the user-scope `/plugin` commands before.
+- **Default chart palette** no longer uses green, amber or red, which the visualization guide
+  reserves for status. New default: `#2A78D6, #EB6834, #1BAF7A, #4A3AA7, #E87BA4`. It is **five
+  colors, not six**: a chart with a sixth series repeats a color, so fold the tail into "Other" or
+  use small multiples. Adjacent pairs were checked for colorblind separation on the light theme
+  with an external palette validator (the check isn't part of this repo's tests); slots 3 and 5
+  sit below 3:1 contrast on white, so label those series directly. Only apps scaffolded without
+  a `brand.chart_sequence` change.
 
 ### Fixed
 
