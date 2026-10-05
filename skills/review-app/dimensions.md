@@ -26,7 +26,12 @@ layering), consult [_shared/production-gotchas.md](../_shared/production-gotchas
 
 `st.set_page_config` first and called once; `st.navigation` + `st.Page` for multipage; branding
 applied in the entrypoint; multi-filter pages batched in `st.form` (one rerun, not one per widget);
-consistent chart library; number/`column_config` formatting. If a Playwright MCP is loaded, drive a
+consistent chart library; number/`column_config` formatting. Judge chart form, layout, color and
+copy against [visualization-guide.md](../_shared/visualization-guide.md) and
+[explainability.md](../_shared/explainability.md), and load paths against
+[streamlit-performance.md](../_shared/streamlit-performance.md): these are defaults, so a departure is
+nice-to-have unless it misleads the reader (a dual axis, an unlabeled delta) or the repo's overlay
+states a house rule. If a Playwright MCP is loaded, drive a
 live walkthrough per [_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md) to
 confirm visuals populate under default filters — a whole band of empty visuals under defaults is
 **critical**; a single intentional empty-state beside an `st.info`/`st.warning` is fine. Degrade

@@ -69,3 +69,14 @@ House rules the table encodes: formulas use `÷`; every ratio is `SUM(numerator)
 at the rendered grain, never the average of a per-row percentage; the `Sources:` footer names the
 object each metric reads. `tests/fixtures/fleet/apps/acme-collections-overview/pages/_glossary.py`
 in the StreamSnow repo is a complete, validate-clean example.
+
+## Related defaults
+
+Three companion guides cover what the contract above leaves open. Like this file, they are
+defaults with reasons that `/review-app` raises, not gates:
+- [streamlit-performance.md](streamlit-performance.md): fetch less, cache by what changes the
+  answer, share loaders across pages, rerun less.
+- [visualization-guide.md](visualization-guide.md): which form answers which question, layout,
+  KPI cards, color.
+- [explainability.md](explainability.md): the page's question, definitions where the numbers are,
+  empty and stale states, the cold-reader check.
