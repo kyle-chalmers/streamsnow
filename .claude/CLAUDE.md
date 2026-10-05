@@ -65,7 +65,7 @@ in `tests/fixtures/cli_surface.json`.
 Do not modify these. If a task needs them, stop and say so:
 
 - `.github/workflows/`, `.github/CODEOWNERS`, `.github/labels.yml`
-- `.claude-plugin/` manifests, `.mcp.json` pins, `hooks/deploy_safety.py`, `hooks/secret_guard.py`
+- `.claude-plugin/` manifests, `hooks/deploy_safety.py`, `hooks/secret_guard.py`
 - Version numbers (`pyproject.toml`, `plugin.json`, `streamsnow/__init__.py`, `uv.lock`),
   `RELEASING.md`, `publish.yml`, tags and releases
 - `LICENSE`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `docs/versioning.md`, `.claude/` (this file)

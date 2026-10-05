@@ -21,7 +21,7 @@ These are what your repo, your CI and your habits depend on, so they are covered
 | CLI commands, sub-commands, flags and positional arguments | `streamsnow init --dir`, `streamsnow check schema-refs --format json` | `tests/test_cli_surface.py` snapshot |
 | Governance check results | exit codes `0` pass / `1` finding / `2` tool error; the keys of `--format=json` output | per-check tests |
 | Config schema | keys of `streamsnow.config.yaml`, `schema_version` | `streamsnow/config.py` validation |
-| Plugin skills | skill names (`/build-app`, `/ship-app`, ...) and their arguments | `tests/test_plugin_surface.py` |
+| Plugin skills | skill names (`/build-app`, `/ship-app`, ...) and their arguments | `tests/test_plugin_surface.py` pins the skill names and checks that each skill declares an `argument-hint`; the arguments themselves are not tested |
 | Hook behavior | what the deploy guard blocks, what the key guard denies, when the review gate nudges | hook tests |
 | Generated repo files | CI and deploy workflows, pre-commit config, `AGENTS.md`, `CLAUDE.md` written by `streamsnow init` and refreshed by `streamsnow update` | template tests |
 
@@ -57,8 +57,9 @@ From 1.0.0, when something on the stable surface is renamed or removed:
 ## Config schema changes
 
 `streamsnow.config.yaml` carries `schema_version`. An older StreamSnow already refuses a newer
-config instead of misreading it. A breaking config change bumps `schema_version`, and
-`streamsnow update` migrates the previous version's file automatically.
+config instead of misreading it. No migration code exists yet, because no config change has
+needed one. When one does, the breaking config change will bump `schema_version` and ship a
+migration in `streamsnow update` that rewrites the previous version's file.
 
 ## Support
 
