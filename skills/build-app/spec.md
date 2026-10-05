@@ -21,7 +21,9 @@ document?
 1. **Read the governance config first.** `streamsnow.config.yaml` gives the schema allowlist
    (`governance.schema_allow` / `schema_deny`, `governance.database`), default runtime, and deploy
    source. Everything you write must fit it. If the repo isn't configured yet, keep going but mark
-   §3 unverified and point at `/onboard`.
+   §3 unverified and point at `/onboard`. Read the house design guide `.streamsnow/design.md`
+   too when it exists ([_shared/overlays.md](../_shared/overlays.md#house-design-guide)): its
+   choices go in §2 `Style:`.
 2. **Settle the slug** — `<domain>-<function>`, kebab-case, durable (it becomes the directory name).
 3. **Ingest visual references before interviewing.** Screenshots or sketches pre-populate the visual
    half (pages, charts, KPI cards, filters, layout); confirm the read with the user in one screen.
@@ -52,6 +54,7 @@ Read-only analysis; write the same schema. What feeds what:
 | `@st.cache_data(ttl=…)` | §8 caching | flag non-default TTLs as explicit rows |
 | `snowflake.yml` + manifest | §9 runtime | anchored `runtime_name:` key — never a comment grep |
 | app `AGENTS.md` / `README` | §1–§2 | description, audience |
+| page `st.caption` under the title; `pages/about.py` `ABOUT` | §2 `Style:`, §4 `Question:` | mark `(inferred)` unless the text states it |
 
 Rules: infer KPI formulas by tracing the value in scope (`df["X"].sum()` → `SUM(X)`,
 `len(df)` → `COUNT(*)`); mark anything not confidently extracted **`(inferred)`** and list those in
@@ -70,8 +73,10 @@ If `REQUIREMENTS.md` already exists (any mode), ask before overwriting and offer
 
 ## 1. Identity        — domain / function / slug + a 1–2 sentence description
 ## 2. Audience & Use  — who reads it, how often, what decision it drives
+                        **Style:** house-style or audience choices that differ from the defaults ("dense, analysts")
 ## 3. Source Schemas  — allowed-schema objects (or the data domain if unknown)
 ## 4. Pages & Sections — one bullet per page (`pages/<file>.py`) with its sections/visuals
+                        and **Question:** the decision that page supports (its caption, in the reader's words)
 ## 5. Charts          — | Name | Type | X | Y | Group-by | Expected rows |
 ## 6. KPIs            — | Name | Formula | Format | Comparison delta |
 ## 7. Filters         — | Name | Scope | Type | Default |

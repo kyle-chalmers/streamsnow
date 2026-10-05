@@ -11,7 +11,9 @@ real pages, queries, and branding without breaking the governance contract.
    streamsnow new <domain> <function>
    ```
    This writes `apps/<slug>/` — entrypoint, dependency manifest, `snowflake.yml`, app `AGENTS.md`,
-   local `branding.py`, `sql_loader.py` and `review.py` (the `review_value` marker), and
+   local `branding.py`, `sql_loader.py` and `review.py` (the `review_value` marker), the shared
+   page modules (`pages/_glossary.py`, `_layout.py`, `_time_controls.py`, `_data.py`), the About
+   page (`pages/about.py`, last in the navigation), and
    `sql_review/` (its `index.yaml`, `AGENTS.md`, README and generated page file). **Do not
    hand-create these files**: the scaffold keeps
    them consistent with the governance templates, and `streamsnow update` re-renders the governed

@@ -6,6 +6,35 @@ All notable changes to StreamSnow are recorded here. This project follows
 period. Before 1.0, a breaking change can land in any minor release and is called out in its
 entry.
 
+## [Unreleased]
+
+### Added
+
+- **In-app documentation in every new app.** `streamsnow new` adds an **About** page (last in the
+  navigation): purpose, audience, owner, each page and its question, the full metric glossary,
+  and every query with the schemas it reads, read at runtime from the `queries/*.sql` header
+  blocks (new `query_headers()` in `sql_loader.py`). It is listed in `sql_review/index.yaml`
+  with `metrics: []`.
+- **Shared page modules** scaffolded under `pages/`, imported package-qualified:
+  `_glossary.py` (one definitions table), `_layout.py` (`definitions_expander`, `empty_state`,
+  `sources_footer`, and `show_sql`, which shows the exact query and bound values behind a visual),
+  `_time_controls.py` (a period picker bounded by the data) and `_data.py` (loaders several pages
+  share).
+- **`branding.py` 1.1.0:** `fmt_number`, `fmt_currency`, `fmt_pct`, `BRAND_STATUS_COLORS`, and
+  `branded_metric(help=..., delta_color=...)` (tooltip definition; delta colored by meaning). Additive:
+  existing calls keep working. Copy the new `branding.py` into existing apps when a repo mixes
+  versions, or `check branding-parity` reports the older copies.
+- **House design guide.** An optional, committed `.streamsnow/design.md` holds a repo's house
+  style for pages; `/build-app` and `/review-app` read it before the shipped defaults.
+- `/build-app` specs record each page's **Question** (§4) and a **Style** line (§2).
+
+### Changed
+
+- **Default chart palette** no longer uses green, amber or red, which the visualization guide
+  reserves for status. New default: `#2A78D6, #EB6834, #1BAF7A, #4A3AA7, #E87BA4` (adjacent pairs
+  colorblind-separable on the light theme). Only apps scaffolded without a `brand.chart_sequence`
+  change.
+
 ## [0.8.0] - 2026-10-05
 
 ### Breaking

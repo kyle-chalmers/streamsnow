@@ -1,0 +1,14 @@
+"""Shared data loaders for {{ app_title }}: data that more than one page uses.
+
+One cached loader per shared dataset, backed by one ``queries/<name>.sql``, so two pages never
+run the same query twice or drift into two definitions of one number
+(skills/_shared/streamlit-performance.md, "Share across pages"). Typical entries: the data's
+date bounds, a base aggregate several pages slice, the value lists behind filters.
+
+Import package-qualified: ``from pages._data import load_date_bounds``. Pattern:
+
+    @st.cache_data(ttl=1800)
+    def load_date_bounds() -> tuple[date, date]:
+        sql = load_sql("date_bounds")
+        ...
+"""

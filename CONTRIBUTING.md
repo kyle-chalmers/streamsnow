@@ -101,7 +101,7 @@ Want to implement something yourself? Comment on a `status:triaged` issue (or on
 
 ## What gets accepted
 
-- Changes that serve the mission and respect the eight principles at the top of the
+- Changes that serve the mission and respect the nine principles at the top of the
   [README](README.md). The "This is for you if / not for you" list there is the scope line.
 - **Small and focused first.** Bug fixes and docs fixes are welcome directly as PRs. A new
   feature or a new check needs an issue that the maintainer marked `status:triaged` or

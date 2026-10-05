@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
 
-_BRANDING_VERSION = "1.0.0"
+_BRANDING_VERSION = "1.1.0"
 
 BRAND_COLORS = {
     "primary": "{{ brand.primary }}",
@@ -18,6 +18,9 @@ BRAND_COLORS = {
     "text": "{{ brand.text_color }}",
 }
 BRAND_CHART_COLORS = [{{ brand.chart_sequence | map('tojson') | join(", ") }}]
+# Status hues mean good / warning / bad and stay out of ordinary series
+# (skills/_shared/visualization-guide.md). Pair them with a label or icon.
+BRAND_STATUS_COLORS = {"good": "#008300", "warning": "#C98500", "bad": "#E34948"}
 
 # Register the Plotly template once. Guard against re-registration AND the
 # default-set side effect: the container runtime shares one Python process
@@ -40,26 +43,67 @@ def apply_branding() -> None:
     pio.templates.default = "streamsnow_brand"
 
 
+def fmt_number(x: float, decimals: int = 1) -> str:
+    """Compact number for cards and labels: 950, 12.3k, 4.5M, 1.2B. Counts stay integers."""
+    sign, n = ("-" if x < 0 else ""), abs(x)
+    for limit, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "k")):
+        if n >= limit:
+            return f"{sign}{n / limit:.{decimals}f}{suffix}"
+    return f"{sign}{n:,.0f}" if float(n).is_integer() else f"{sign}{n:,.{decimals}f}"
+
+
+def fmt_currency(x: float, symbol: str = "$", decimals: int = 1) -> str:
+    """Compact currency in the house symbol: $48.6k, -$1.2M."""
+    text = fmt_number(x, decimals)
+    return f"-{symbol}{text[1:]}" if text.startswith("-") else f"{symbol}{text}"
+
+
+def fmt_pct(ratio: float, decimals: int = 1) -> str:
+    """A ratio as a percentage: 0.345 -> 34.5%."""
+    return f"{ratio * 100:.{decimals}f}%"
+
+
+_DELTA_COLORS = {"up": BRAND_STATUS_COLORS["good"], "down": BRAND_STATUS_COLORS["bad"]}
+
+
 def branded_metric(
-    label: str, value: str, delta: str | None = None, border_color: str | None = None
+    label: str,
+    value: str,
+    delta: str | None = None,
+    border_color: str | None = None,
+    help: str | None = None,
+    delta_color: str = "normal",
 ) -> None:
     """A metric card with a brand-colored left border.
 
-    label/value/delta/border_color are HTML-escaped before interpolation — the
-    card uses unsafe_allow_html=True, so escaping stops a database-derived value
-    (including a per-tenant brand color) from breaking out of the attribute and
-    injecting markup into the viewer's page.
+    ``help`` is the metric's definition (from ``pages/_glossary.py``), shown as a
+    hover tooltip like ``st.metric(help=...)``. ``delta_color`` colors the delta by
+    meaning, as ``st.metric`` does: "normal" (up is good), "inverse" (up is bad,
+    e.g. cost) or "off". The direction is read from the delta's leading sign.
+
+    label/value/delta/help/border_color are HTML-escaped before interpolation —
+    the card uses unsafe_allow_html=True, so escaping stops a database-derived
+    value (including a per-tenant brand color) from breaking out of the
+    attribute and injecting markup into the viewer's page.
     """
     color = html.escape(border_color or BRAND_COLORS["primary"])
     label, value = html.escape(label), html.escape(value)
-    delta_html = (
-        f'<div style="font-size:0.8rem;color:#6b7280;">{html.escape(delta)}</div>'
-        if delta
+    help_html = (
+        f' <span title="{html.escape(help)}" aria-label="{html.escape(help)}"'
+        ' style="cursor:help;">&#9432;</span>'
+        if help
         else ""
     )
+    delta_html = ""
+    if delta:
+        direction = "down" if delta.lstrip().startswith(("-", "\u2212")) else "up"
+        if delta_color == "inverse":
+            direction = "up" if direction == "down" else "down"
+        delta_ink = "#6b7280" if delta_color == "off" else _DELTA_COLORS[direction]
+        delta_html = f'<div style="font-size:0.8rem;color:{delta_ink};">{html.escape(delta)}</div>'
     st.markdown(
         f'<div style="border-left:4px solid {color};padding:0.25rem 0.75rem;margin:0.25rem 0;">'
-        f'<div style="font-size:0.8rem;color:#6b7280;">{label}</div>'
+        f'<div style="font-size:0.8rem;color:#6b7280;">{label}{help_html}</div>'
         f'<div style="font-size:1.6rem;font-weight:600;">{value}</div>'
         f"{delta_html}</div>",
         unsafe_allow_html=True,

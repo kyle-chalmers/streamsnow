@@ -1,0 +1,59 @@
+"""About {{ app_title }}: what it is for, its pages, metric definitions and data sources.
+
+Everything below is read from the app itself: definitions from ``pages/_glossary.py`` and data
+sources from the header block of each ``queries/*.sql`` file. Fill ``ABOUT`` from
+REQUIREMENTS.md (§1 Identity, §2 Audience & Use, §4 Pages); an empty field is not shown.
+"""
+
+import streamlit as st
+from pages._glossary import all_metrics
+from sql_loader import query_headers
+
+ABOUT = {
+    "purpose": "",  # One or two sentences: the decisions this app supports.
+    "audience": "",  # Who reads it, and how often.
+    "owner": "",  # Who to contact, and how to report a problem.
+    "pages": [],  # (page title, the question it answers), in navigation order.
+    "caveats": [],  # Known limitations a reader should know before acting on a number.
+}
+
+st.title("About this app")
+if ABOUT["purpose"]:
+    st.caption(ABOUT["purpose"])
+if ABOUT["audience"]:
+    st.markdown(f"**For:** {ABOUT['audience']}")
+
+if ABOUT["pages"]:
+    st.subheader("Pages")
+    st.caption("Each page and the question it answers.")
+    st.dataframe(
+        [{"Page": title, "Answers": question} for title, question in ABOUT["pages"]],
+        hide_index=True,
+        width="stretch",
+    )
+
+metrics = all_metrics()
+if metrics:
+    st.subheader("Metric definitions")
+    st.caption("Every number in the app, defined once.")
+    st.dataframe(
+        [
+            {"Metric": m.label, "Definition": m.definition, "Formula": m.formula}
+            for m in metrics
+        ],
+        hide_index=True,
+        width="stretch",
+    )
+
+st.subheader("Data sources")
+st.caption("Each query, the page it feeds and the schemas it reads.")
+st.dataframe(query_headers(), hide_index=True, width="stretch")
+
+if ABOUT["caveats"]:
+    st.subheader("Caveats")
+    for caveat in ABOUT["caveats"]:
+        st.markdown(f"- {caveat}")
+
+if ABOUT["owner"]:
+    st.divider()
+    st.caption(f"Questions or a problem with a number: {ABOUT['owner']}")

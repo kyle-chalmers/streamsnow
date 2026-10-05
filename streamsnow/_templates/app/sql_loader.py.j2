@@ -3,8 +3,11 @@
 - ``load_sql(name)`` returns the raw file contents.
 - ``render_sql(name, **tokens)`` substitutes ``{UPPERCASE_TOKEN}`` placeholders
   via str.replace (NOT str.format — SQL patterns like ``{2}`` would collide).
+- ``query_headers()`` reads every query's header block (``Query / Feeds / Schemas``)
+  so the About page lists data sources from the files themselves, never by hand.
 """
 
+import re
 from pathlib import Path
 
 _QUERIES = Path(__file__).parent / "queries"
@@ -19,3 +22,27 @@ def render_sql(name: str, **tokens: str) -> str:
     for key, value in tokens.items():
         sql = sql.replace("{" + key + "}", value)
     return sql
+
+
+_HEADER_LINE = re.compile(r"^--\s*(Query|Feeds|Schemas):\s*(.*)$")
+
+
+def query_headers() -> list[dict[str, str]]:
+    """One row per ``queries/*.sql``: its name, the page it feeds and the schemas it reads."""
+    rows = []
+    for path in sorted(_QUERIES.glob("*.sql")):
+        fields: dict[str, str] = {}
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("--"):
+                break
+            match = _HEADER_LINE.match(line)
+            if match:
+                fields[match.group(1)] = match.group(2).strip()
+        rows.append(
+            {
+                "Query": fields.get("Query", path.stem),
+                "Feeds": fields.get("Feeds", ""),
+                "Reads": fields.get("Schemas", ""),
+            }
+        )
+    return rows

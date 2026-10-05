@@ -39,7 +39,13 @@ run the spec phase first ([spec.md](spec.md)) and resume.
    loader per query calling the app's `sql_loader`. Match a sibling page's patterns. TTL = repo
    default unless §8 says otherwise (then cite it in a comment). Imports of app-root modules
    (`branding`, `sql_loader`) stay bare; anything you factor out into `pages/` is imported
-   package-qualified (`from pages._header import ...`) — see Gotchas.
+   package-qualified (`from pages._header import ...`) — see Gotchas. Use the scaffold's shared
+   modules rather than writing your own: each metric gets a `pages/_glossary.py` entry and its
+   `help=`; the page ends with `definitions_expander(<its keys>)` and `sources_footer(...)` from
+   `pages/_layout.py`; the period picker is `date_range` from `pages/_time_controls.py`; data
+   another page also reads goes in `pages/_data.py`. Add `show_sql(...)` under a visual when §2
+   says the readers check numbers themselves (analysts), passing the same SQL and binds the loader
+   runs.
 5. **Register the page**: add an `st.Page(...)` entry to the existing `st.navigation` structure in
    `streamlit_app.py`. Show the diff before applying and use multi-line `Edit` context so the match
    is unambiguous. One nav group → add to it; several → ask which.
@@ -93,7 +99,12 @@ same commit as that page (step 8), whatever the page is called:
 3. **The `example_metric` entry in `sql_review/index.yaml`**, and the `YOUR_TABLE` in its
    `review_window`. Replace them with the real page's entry and window (step 8.2), then run
    `streamsnow sql-review generate <slug>`: it removes the stale `sql_review/01_overview.sql`
-   when no page needs it, and `check` reports a leftover page file as an orphan.
+   when no page needs it, and `check` reports a leftover page file as an orphan. Keep the
+   `pages/about.py` entry (`metrics: []`): the About page stays in the navigation.
+
+The About page is not part of the trio. When the build phase ends, fill its `ABOUT` constants
+from REQUIREMENTS.md (§1 purpose, §2 audience, the owner, §4 each page and its question, known
+caveats); its definitions and data sources fill themselves from the glossary and query headers.
 
 Then `streamsnow validate-app <slug>` must PASS: its `placeholders` check FAILS while any query,
 page or `index.yaml` still carries `YOUR_TABLE` or the starter page's sample block. Do not grep the
