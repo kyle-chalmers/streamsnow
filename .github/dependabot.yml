@@ -1,5 +1,5 @@
 # Weekly, grouped dependency updates. Nothing auto-merges: the maintainer merges after CI
-# and claude-review pass. Major bumps get their own PR so a breaking upstream release is
+# and the Claude Code Review workflow pass. Major bumps get their own PR so a breaking upstream release is
 # never hidden inside a group.
 version: 2
 updates:

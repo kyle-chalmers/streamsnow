@@ -99,7 +99,7 @@ automation does the rest:
    (`status:agent-working`), writes the change and its tests following [.claude/CLAUDE.md](.claude/CLAUDE.md),
    runs every check, and opens a PR that closes the issue. If the issue is ambiguous or
    needs a breaking change, it stops and asks on the issue instead.
-4. **Review and merge (maintainer).** CI and `claude-review` run on the PR. The maintainer
+4. **Review and merge (maintainer).** CI and the Claude Code Review workflow run on the PR. The maintainer
    asks for changes with `@claude ...` comments, or merges.
 
 Want to implement something yourself? Comment on a `status:triaged` issue (or one labeled
