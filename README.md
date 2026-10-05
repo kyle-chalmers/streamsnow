@@ -11,7 +11,7 @@
 
 <p align="center">
   <strong>The world's best open-source plugin for creating Snowflake
-  Streamlit data apps with Claude Code.</strong>
+  Streamlit data apps with AI.</strong>
 </p>
 
 <p align="center">
