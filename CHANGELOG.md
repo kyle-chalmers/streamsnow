@@ -1,7 +1,9 @@
 # Changelog
 
 All notable changes to StreamSnow are recorded here. This project follows
-[semantic versioning](https://semver.org/) once it reaches its first release.
+[semantic versioning](https://semver.org/): from 1.0.0 the stable surface in
+[docs/versioning.md](docs/versioning.md) breaks only in a major release, and before 1.0
+breaking changes still get one minor release of deprecation warnings first.
 
 ## [Unreleased]
 
@@ -49,6 +51,25 @@ Version 0.8.0.
   generated pre-commit hook passes the staged ones, CI lints everything.
 - `generate` applies sqlfluff's layout and capitalisation fixes (never rules
   that change what SQL means) to every section it writes.
+- **Versioning and stability policy** ([docs/versioning.md](docs/versioning.md)): what the
+  stable surface is, why a stricter check counts as a breaking change (warn-only for one
+  minor release first), the deprecation window, and the path to 1.0.0. A new
+  `tests/test_cli_surface.py` pins every command, flag and argument in
+  `tests/fixtures/cli_surface.json`, so a rename or removal fails CI as BREAKING. The
+  release gates for 1.0.0 are in `RELEASING.md`.
+- **Community intake and agent-run maintenance** for this repository: issue forms (blank
+  issues off), a PR template with AI-use disclosure, labels as code, CODEOWNERS, Dependabot,
+  a Code of Conduct, `SUPPORT.md`, `.claude/CLAUDE.md` for agents, and workflows that triage every
+  issue (the model only classifies; scripts apply labels and canned comments), implement
+  maintainer-approved `ready-for-agent` issues as PRs, review same-repo PRs, answer
+  maintainer `@claude` comments, post a daily maintainer digest, and close issues left in
+  `status:needs-info` for 14 days. CONTRIBUTING describes the flow and the AI-assisted
+  contribution policy.
+
+## [0.7.7] - 2026-10-05
+
+### Added
+
 - **`streamsnow ci-key push`** sets the five deploy secrets on GitHub from the
   files `ci-key create` wrote. Each value goes to `gh secret set` on stdin,
   never on the command line, and only names are printed. `SNOWFLAKE_ACCOUNT`

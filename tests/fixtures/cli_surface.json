@@ -1,0 +1,385 @@
+{
+  "commands": {
+    "": {
+      "options": [
+        "--version",
+        "-V"
+      ],
+      "arguments": []
+    },
+    "check": {
+      "options": [],
+      "arguments": []
+    },
+    "check artifacts": {
+      "options": [
+        "--fix",
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check bind-predicates": {
+      "options": [
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check branding-parity": {
+      "options": [
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check caching": {
+      "options": [
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check dependency-vulns": {
+      "options": [
+        "--allowlist",
+        "--best-effort",
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check page-imports": {
+      "options": [
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check path-leaks": {
+      "options": [
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check requirements": {
+      "options": [
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check schema-refs": {
+      "options": [
+        "--config",
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check security": {
+      "options": [
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check session-fallback": {
+      "options": [
+        "--all",
+        "--base-ref",
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check sql-tokens": {
+      "options": [
+        "--format"
+      ],
+      "arguments": [
+        "paths"
+      ]
+    },
+    "check tombstones": {
+      "options": [
+        "--apps-dir",
+        "--base-ref",
+        "--config",
+        "--drop-sql",
+        "--format",
+        "--registry"
+      ],
+      "arguments": []
+    },
+    "ci-key": {
+      "options": [],
+      "arguments": []
+    },
+    "ci-key create": {
+      "options": [
+        "--account",
+        "--config",
+        "--dir"
+      ],
+      "arguments": []
+    },
+    "ci-key push": {
+      "options": [
+        "--dir",
+        "--repo"
+      ],
+      "arguments": []
+    },
+    "config-get": {
+      "options": [
+        "--config"
+      ],
+      "arguments": [
+        "key"
+      ]
+    },
+    "configure": {
+      "options": [
+        "--account",
+        "--config",
+        "--connection",
+        "--database",
+        "--deny-schemas",
+        "--deploy-source",
+        "--dir",
+        "--runtime",
+        "--schemas"
+      ],
+      "arguments": []
+    },
+    "deploy-setup": {
+      "options": [
+        "--admin",
+        "--config",
+        "--git-origin",
+        "--github-auth",
+        "--public-key-file",
+        "--source",
+        "--teardown",
+        "--viewer-user"
+      ],
+      "arguments": []
+    },
+    "deploy-sql": {
+      "options": [
+        "--config",
+        "--refresh",
+        "--sha"
+      ],
+      "arguments": [
+        "slug"
+      ]
+    },
+    "doctor": {
+      "options": [
+        "--format",
+        "--json"
+      ],
+      "arguments": []
+    },
+    "init": {
+      "options": [
+        "--account",
+        "--app",
+        "--config",
+        "--connection",
+        "--database",
+        "--deny-schemas",
+        "--deploy-source",
+        "--dir",
+        "--force",
+        "--no-starter-app",
+        "--reconfigure",
+        "--runtime",
+        "--schemas"
+      ],
+      "arguments": []
+    },
+    "nav": {
+      "options": [
+        "--dir",
+        "--json-array"
+      ],
+      "arguments": [
+        "slug"
+      ]
+    },
+    "new": {
+      "options": [
+        "--force"
+      ],
+      "arguments": [
+        "domain",
+        "function"
+      ]
+    },
+    "stage-path": {
+      "options": [
+        "--config"
+      ],
+      "arguments": []
+    },
+    "update": {
+      "options": [
+        "--apply",
+        "--dir"
+      ],
+      "arguments": []
+    },
+    "validate-app": {
+      "options": [
+        "--config",
+        "--dir",
+        "--format"
+      ],
+      "arguments": [
+        "slug"
+      ]
+    },
+    "verify-deploy": {
+      "options": [
+        "--attempts",
+        "--config",
+        "--delay",
+        "--format",
+        "--sha",
+        "--temporary-connection"
+      ],
+      "arguments": [
+        "slug"
+      ]
+    }
+  },
+  "passthrough": {
+    "agent-skills": {
+      "verbs": [
+        "install",
+        "list"
+      ],
+      "arguments": [
+        "--agent",
+        "--dir",
+        "--dry-run",
+        "--force",
+        "--scope"
+      ]
+    },
+    "migrate": {
+      "verbs": [
+        "graft-plan",
+        "preflight",
+        "scan-conformance",
+        "scan-hardfails",
+        "scan-imports",
+        "scan-inline-sql",
+        "translate-deps"
+      ],
+      "arguments": [
+        "--config",
+        "--dir",
+        "--offline",
+        "--out",
+        "--target-slug",
+        "app_path",
+        "source"
+      ]
+    },
+    "preview": {
+      "verbs": [
+        "logs",
+        "start",
+        "status",
+        "stop"
+      ],
+      "arguments": [
+        "--dir",
+        "--json",
+        "--lines",
+        "--poll-interval",
+        "--port",
+        "--timeout",
+        "slug"
+      ]
+    },
+    "review-gate": {
+      "verbs": [
+        "baseline",
+        "classify",
+        "stamp",
+        "stop-hook"
+      ],
+      "arguments": [
+        "--apps-dir",
+        "--base-ref",
+        "--format",
+        "--payload",
+        "--slug",
+        "artifact",
+        "slug"
+      ]
+    },
+    "review-loop": {
+      "verbs": [
+        "dedup-findings",
+        "exit-condition",
+        "merge-findings",
+        "parse-findings",
+        "write-resolutions"
+      ],
+      "arguments": [
+        "--applied",
+        "--block",
+        "--bucket-c",
+        "--deferred-b",
+        "--flag",
+        "--inputs",
+        "--iter",
+        "--max-iter",
+        "--max-walk-reentries",
+        "--new",
+        "--out-of-scope",
+        "--walk-findings-new",
+        "--walk-not-clean",
+        "--walk-reentries",
+        "--walk-status",
+        "--window-days",
+        "--with-repeats",
+        "report",
+        "session_dir"
+      ]
+    },
+    "sql-review": {
+      "verbs": [
+        "check",
+        "discover",
+        "generate",
+        "index"
+      ],
+      "arguments": [
+        "--dir",
+        "--feature",
+        "--format",
+        "--write",
+        "slug"
+      ]
+    }
+  }
+}
