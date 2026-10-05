@@ -13,8 +13,9 @@ This validates exactly what the skills rely on to resume — nothing more:
 
 1. a ``## 11. Build Progress`` section exists;
 2. it carries a ``**Current phase:**`` line whose value is a recognized
-   lifecycle phase (``spec``/``scaffold``/``build``/``preview``/``verify``/
-   ``ship``/``done``, or ``in-production (backfilled)`` from spec backfill) —
+   lifecycle phase (``spec``/``discover``/``design``/``scaffold``/``build``/
+   ``preview``/``verify``/``ship``/``done``, or ``in-production (backfilled)``
+   from spec backfill) —
    an unknown phase can't be routed to any resume target. The value is
    *exact*: narrative ("build (pages 3/5)") goes on an optional
    ``**Phase notes:**`` line, which this check tolerates and never parses. A

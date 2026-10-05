@@ -89,6 +89,11 @@ def test_query_headers_reads_sources_from_the_query_files(tmp_path):
         encoding="utf-8",
     )
     (a / "queries/no_header.sql").write_text("SELECT 1\n", encoding="utf-8")
+    # Blank lines before or between header comments don't end the header.
+    (a / "queries/spaced.sql").write_text(
+        "\n-- Query: spaced\n\n-- Feeds: Revenue\n-- Schemas: ANALYTICS_DB.ANALYTICS\n\nSELECT 1\n",
+        encoding="utf-8",
+    )
     spec = importlib.util.spec_from_file_location("acme_sql_loader", a / "sql_loader.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -100,6 +105,11 @@ def test_query_headers_reads_sources_from_the_query_files(tmp_path):
         "Reads": "ANALYTICS_DB.ANALYTICS",
     }
     assert rows["no_header"] == {"Query": "no_header", "Feeds": "", "Reads": ""}
+    assert rows["spaced"] == {
+        "Query": "spaced",
+        "Feeds": "Revenue",
+        "Reads": "ANALYTICS_DB.ANALYTICS",
+    }
     assert "example_metric" in rows  # the scaffold's own query is listed too
 
 
@@ -117,6 +127,10 @@ def test_branding_formatters(tmp_path):
     assert fmt_number(999_999) == "1.0M"
     assert fmt_number(999.96) == "1.0k"
     assert fmt_number(999.4) == "999.4"
+    # The sign follows the rounded text: a value that rounds to zero has none.
+    assert fmt_number(-0.04) == "0.0"
+    assert fmt_currency(-0.04) == "$0.0"
+    assert fmt_number(-0.06) == "-0.1"
     assert fmt_currency(48_600) == "$48.6k"
     assert fmt_currency(-1_200_000, symbol="€") == "-€1.2M"
     assert fmt_pct(0.345) == "34.5%"
