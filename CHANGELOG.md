@@ -100,6 +100,10 @@ entry.
   is the gates: `validate-app` passes, `sql-review check` is clean and the conform scans are
   empty. A new test lifts and conforms a fixture app and fails if the scanners and the gates
   ever disagree.
+- **The starter page's chart uses `width="stretch"`** in place of the deprecated
+  `use_container_width=True`, so a new app no longer logs a deprecation warning on every
+  render (both the 1.52.2 warehouse pin and the 1.59.2 container pin warned). Only newly
+  scaffolded apps change; existing apps keep working as they are.
 
 ### Removed
 
