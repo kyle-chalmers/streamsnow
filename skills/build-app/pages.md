@@ -111,7 +111,9 @@ returns their inputs instead of editing shared files.
       where `check` reads drift or uncovered pages, and a reviewer can't re-run the numbers behind
       the new visuals.
 9. **End of the build phase** (all §4 pages built): `streamsnow sql-review check <slug>` reports no
-   `coverage` warning, so every page in the nav is in `index.yaml`.
+   `coverage` warning, so every page in the nav is in `index.yaml`. A warning for a helper query that
+   shows no value on screen (a date-bounds or filter-options loader in `pages/_data.py`) is expected:
+   leave it, and never invent a metric to clear it.
 
 ## Replace the starter trio
 
