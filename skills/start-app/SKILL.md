@@ -1,6 +1,6 @@
 ---
 name: start-app
-description: The front door: build a Streamlit-in-Snowflake app from idea to opened PR, or resume one mid-build. Owns the spec, scaffold, page-building, and ship phases, with human checkpoints between them. Start here for any new app, to document an existing one, or to add a page. Use when the user says "build an app", "new dashboard", "add a page", "spec this out", or "pick up where we left off".
+description: The front door for building a Streamlit-in-Snowflake app from idea to opened PR, or resuming one mid-build. Owns the spec, scaffold, page-building, and ship phases, with human checkpoints between them. Start here for any new app, to document an existing one, or to add a page. Use when the user says "build an app", "new dashboard", "add a page", "spec this out", or "pick up where we left off".
 argument-hint: "[<idea>] | --spec"
 allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion]
 ---
