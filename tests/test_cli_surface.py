@@ -1,7 +1,8 @@
 """The CLI's public surface is pinned in a snapshot: nothing is renamed or removed by accident.
 
-docs/versioning.md promises that command names, flag names and positional arguments
-only break in a major release (after a deprecation window). That promise is only as
+docs/versioning.md promises that from 1.0.0 command names, flag names and positional
+arguments only break in a major release (after a deprecation window). Before 1.0 a break
+can ship in a minor release, but only on purpose. Either way the promise is only as
 good as the thing that enforces it: a refactor, or an agent working an issue, can
 rename `--base-ref` to `--base` in one keystroke and every consumer repo's generated
 CI breaks on the next `uv tool upgrade`. This test turns that into a red CI run.
@@ -13,9 +14,9 @@ tool it forwards to. Hidden commands are included on purpose: the generated
 workflows call some of them (`config-get`, `stage-path`).
 
 When it fails:
-- REMOVED entries are a breaking change. Restore the name (keep it working as a
-  deprecated alias with a warning) unless this is a major release; see
-  docs/versioning.md.
+- REMOVED entries are a breaking change. Restore the name, unless the maintainer
+  approved the break: then regenerate the snapshot (below). From 1.0.0 a removal also
+  needs the deprecation period in docs/versioning.md.
 - ADDED entries only need the snapshot regenerated, deliberately:
       uv run python tests/test_cli_surface.py --update
 """
@@ -119,8 +120,9 @@ def test_cli_surface_matches_snapshot():
     msg = []
     if removed:
         msg.append(
-            "BREAKING: these were removed or renamed. Restore them (deprecate first; see "
-            "docs/versioning.md) unless this is a major release:\n  " + "\n  ".join(removed)
+            "BREAKING: these were removed or renamed. Restore them unless the maintainer "
+            "approved the break (from 1.0.0 it also needs the deprecation period in "
+            "docs/versioning.md):\n  " + "\n  ".join(removed)
         )
     if added:
         msg.append(

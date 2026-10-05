@@ -3,9 +3,10 @@
 StreamSnow uses [semantic versioning](https://semver.org/). This page says what that promise
 covers, how things are retired, and what has to be true before 1.0.0.
 
-**Today (0.x):** the surface below is already treated as stable in spirit. Breaking changes
-can still land in a minor release (0.7 → 0.8), but only after one release of deprecation
-warnings, and always with a CHANGELOG entry that says what to do.
+**Before 1.0.0 (today, 0.x):** the surface below is already treated as stable in spirit, but
+the deprecation policy does not apply yet. A breaking change can land in any minor release
+(0.7 → 0.8) without a deprecation period, always with a CHANGELOG entry that says what changed
+and what to do.
 
 **From 1.0.0:** anything on the stable surface changes incompatibly only in a major release
 (1.x → 2.0), after the deprecation window below.
@@ -41,14 +42,16 @@ fleet") is not breaking and ships immediately.
 
 ## Deprecation policy
 
-When something on the stable surface is renamed or removed:
+**Applies to 1.0.0 and later.** Before 1.0.0, a rename or removal can ship in any minor
+release; a warning or redirect stub is welcome but not required.
+
+From 1.0.0, when something on the stable surface is renamed or removed:
 
 1. **Deprecate in a minor release.** The old name keeps working, prints a warning on stderr
    that names the replacement, and gets a `### Deprecated` CHANGELOG entry. A retired skill
    becomes a redirect stub that points at its replacement.
 2. **Keep it working** for at least one further minor release **and** at least 90 days.
-3. **Remove it in the next major release** (before 1.0: in a later minor release, never in
-   the same release that deprecates it). The removal gets a `### Removed` entry.
+3. **Remove it in the next major release.** The removal gets a `### Removed` entry.
 
 ## Config schema changes
 
@@ -71,6 +74,5 @@ config instead of misreading it. A breaking config change bumps `schema_version`
 
 ## Path to 1.0.0
 
-1.0.0 ships once the planned breaking changes have landed with their deprecation stubs, the
-stable surface above is frozen in its tests, and the release gates in
-[RELEASING.md](../RELEASING.md#path-to-100) pass.
+1.0.0 ships once the planned breaking changes have landed, the stable surface above is frozen
+in its tests, and the release gates in [RELEASING.md](../RELEASING.md#path-to-100) pass.

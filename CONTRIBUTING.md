@@ -4,7 +4,7 @@ Thanks for your interest! StreamSnow is in early, active development.
 
 ## Mission first
 
-Every change is judged against the mission, vision and eight principles at the
+Every change is judged against the mission, vision and nine principles at the
 top of the [README](README.md). Two of them are worth restating here because
 they decide most reviews: **faithful to a real fleet** (a check that fails a
 well-run production app is a defect in the check until proven otherwise —
@@ -106,8 +106,10 @@ Want to implement something yourself? Comment on a `status:triaged` issue (or on
 - **Small and focused first.** Bug fixes and docs fixes are welcome directly as PRs. A new
   feature or a new check needs an issue that the maintainer marked `status:triaged` or
   `ready-for-agent` first, so nobody spends a weekend on something that will not merge.
-- Nothing on the stable surface (commands, flags, config keys, check results, skill names,
-  generated files) breaks without the deprecation path in [docs/versioning.md](docs/versioning.md).
+- A change that breaks the stable surface (commands, flags, config keys, check results,
+  skill names, generated files) needs the maintainer's sign-off and a CHANGELOG entry that
+  says what to do. From 1.0.0 it also follows the deprecation policy in
+  [docs/versioning.md](docs/versioning.md).
 
 ## AI-assisted contributions
 

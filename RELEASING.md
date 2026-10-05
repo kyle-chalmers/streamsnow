@@ -42,13 +42,16 @@ public or cutting the first PyPI release:
    A plugin-only install reads `plugin.json`, a pip install reads the wheel
    metadata, and `streamsnow --version` reads `__init__.py`, so a partial bump
    makes them disagree about what is installed.
-   Then check the Playwright MCP pin in `.mcp.json` (`@playwright/mcp@X.Y.Z`):
-   compare it with `npm view @playwright/mcp version`. When bumping it, check the
-   Node floor of the `playwright-core` it pins (`npm view playwright-core@<that
-   version> engines`) against `_NODE_MIN_MAJOR` in `streamsnow/tools/doctor.py`, and run
-   one UI walkthrough (`/preview-app` on the sample app) on the new version
-   before tagging. It is an exact pin on purpose: `@latest` would let an
-   upstream release change the walk under a plugin version you already shipped.
+   Then check the Playwright CLI pin in `skills/_shared/playwright-walkthrough.md`
+   (`@playwright/cli@X.Y.Z`, the only place it is written): compare it with
+   `npm view @playwright/cli version`. When bumping it, read
+   `npm view @playwright/cli@<new> dependencies` for the `playwright-core` it pins, check
+   that core's Node floor (`npm view playwright-core@<that version> engines`) against
+   `_NODE_MIN_MAJOR` in `streamsnow/tools/doctor.py`, and run one UI walkthrough
+   (`/preview-app` on the sample app) on the new version before tagging. Each CLI release
+   tracks a Playwright alpha, so expect breakage on bumps, and each bump downloads a new
+   browser (about 150 MB). It is an exact pin on purpose: `@latest` would let an upstream
+   release change the walk under a plugin version you already shipped.
 2. Ensure `main` is green (lint-and-test, privacy-gate, wheel-smoke).
 3. Tag and push. Use the fully-qualified refspec:
    ```bash
@@ -99,9 +102,9 @@ only when every gate below is true. Track the work in the `1.0.0` milestone.
 
 **Before the 1.0 release candidate:**
 
-- Every planned breaking change has landed, each with its deprecation stub or redirect
-  (for example, retired skill entry points redirect to their replacements, as the 0.7.0
-  alias commands did). Nothing on the stable surface is still expected to move.
+- Every planned breaking change has landed. Nothing on the stable surface is still
+  expected to move, because from 1.0.0 the deprecation policy applies to every rename or
+  removal.
 - Native Windows is finished or explicitly documented as out of scope: the session hook
   (`hooks/session_start.sh`) runs without bash or WSL, and no Windows test is skipped
   without a written reason.
@@ -113,7 +116,7 @@ only when every gate below is true. Track the work in the `1.0.0` milestone.
 2. The privacy scan passes locally **with** your `.streamsnow/export-denylist.txt` present.
 3. `uv run python scripts/check_docs_links.py --online` passes.
 4. One end-to-end UI walkthrough (`/preview-app` on the sample app) on the pinned
-   Playwright MCP version.
+   Playwright CLI version.
 5. One live onboarding run in a scratch repo, by the maintainer, covering both admin paths
    and both connection paths.
 6. `CHANGELOG.md` says semantic versioning applies from 1.0.0, and the release notes link
