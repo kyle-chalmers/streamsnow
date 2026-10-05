@@ -121,6 +121,17 @@ phase names are added to the lifecycle values it recognizes.
    - each chart type, with the reason for it
    - the KPI hierarchy and comparisons
    - the copy for captions, `help=` text and the "How to read this page" expander
+   - **a cross-page shared-data plan.** List every page's data needs side by side and find the
+     overlaps: the same object at the same or a coarser grain, the date bounds, the dimension
+     lists behind filters. Each overlap becomes one shared query and one cached loader in
+     `pages/_data.py`, at the coarsest grain the pages need, which the pages then slice.
+     - **Why:** `st.cache_data` keys on the function and its arguments. Two pages with their own
+       copies of a loader run two warehouse queries and can drift into two definitions of one
+       number. One shared loader runs once, and on the container runtime its cache is shared
+       across viewers too.
+     - **Why it's a plan, not an agent:** it has to happen before pages are built in parallel,
+       because a page-builder sees only its own page and can't find overlaps. No new agent is
+       needed; this is the `app-designer`'s job, checked again after the build (phase 7).
 
    **Checkpoint 1b:** a one-screen text wireframe per page. The user adjusts it before any code is
    written.
@@ -129,6 +140,8 @@ phase names are added to the lifecycle values it recognizes.
    2. The shared modules every page imports: `branding.py`, `pages/_glossary.py`,
       `pages/_time_controls.py` and `pages/_layout.py`. `_layout.py` holds the KPI row, chart
       card, empty state and "How to read this page" expander.
+   3. The shared-data layer from the design plan: `pages/_data.py` with its cached loaders, and
+      the shared `queries/*.sql` behind them.
 
    Doing this once, before any page, is what lets pages be built in parallel without diverging.
 6. **Build pages.** One `page-builder` agent per §4 page, run in parallel.
@@ -136,12 +149,23 @@ phase names are added to the lifecycle values it recognizes.
      `sql_review` file.
    - Each runs `streamsnow check schema-refs`, `caching`, `bind-predicates` and `page-imports` on
      its own files before returning.
-   - Two pages that need the same query: the orchestrator assigns it to one of them in the design
-     plan.
+   - Page-builders import shared loaders from `pages/_data.py` and never edit it. A builder that
+     finds new overlap (data another page also needs) returns it as a request rather than writing
+     a private copy. The orchestrator adds it to `_data.py` and re-dispatches the pages that use
+     it.
 7. **Verify.** Three advisory agents run in parallel against a running preview. Their findings go
    to the page-builder that owns the file, for a bounded number of rounds:
    - **`perf-reviewer`:** reads the code and the timings from `sql-review bench` and the
-     preview's time-to-render reading.
+     preview's time-to-render reading. It also makes a **cross-page pass** over the whole app,
+     not one page at a time, looking for:
+     - duplicate or near-duplicate SQL across `queries/*.sql`
+     - the same object scanned at the same grain by several queries
+     - loaders that should live in `_data.py`
+
+     It sends findings to the orchestrator, which owns the shared layer. The deterministic part
+     of this (identical normalized SQL, the same objects in the query headers) is a candidate
+     `streamsnow check` under principle 1. The judgment part (is a coarser shared query worth it?)
+     stays with the agent.
    - **`viz-critic`:** takes screenshots of each page with the Playwright CLI (the walkthrough
      tool after `/onboard`) and reviews them against the three design layers. It cites the
      default or house-style line behind each finding.
@@ -159,7 +183,8 @@ phase names are added to the lifecycle values it recognizes.
 ## 5. Knowledge files (StreamSnow defaults)
 
 These go in `skills/_shared/`, each default with its reason, and are linked from
-`page-conventions.md` (whose four-block contract stays as is):
+`page-conventions.md` (whose four-block contract stays as is). The first drafts are in
+[kyle-chalmers/streamsnow#45](https://github.com/kyle-chalmers/streamsnow/pull/45):
 
 - **`streamlit-performance.md`**
   - `st.cache_data` keyed on filter arguments, and `st.cache_resource` for clients.
@@ -168,6 +193,7 @@ These go in `skills/_shared/`, each default with its reason, and are linked from
     tabs.
   - Container-runtime rules: one process is shared across viewers, so there are no import-time
     side effects.
+  - Sharing across pages: one cached loader and one query file per shared dataset.
 - **`visualization-guide.md`**
   - Which chart answers which question:
     - trend → line
@@ -356,5 +382,9 @@ skill list once the SQL review redesign retires `/audit-lineage`.
   follow the same style.
 - **Warehouse runtime support.** Whether its Streamlit pin (1.52.2) supports metric sparklines.
   The guides degrade if it doesn't.
+- **Overlap with the SQL review optimizer.** The SQL review redesign plans an `optimizer` agent
+  for query-level tuning. The cross-page pass here works across an app's pages. Decide whether
+  they share one brief or stay separate with a clear boundary: query rewrite versus where a query
+  lives.
 - **Time-to-render reading.** Whether it is part of the SQL review redesign's preview capture or
   its own `streamsnow preview` verb. Under principle 1 it is a CLI command either way.
