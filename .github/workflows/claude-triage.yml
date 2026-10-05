@@ -113,7 +113,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Apply labels and canned comments
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           RESULT: ${{ needs.classify.outputs.result }}
         with:
