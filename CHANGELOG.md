@@ -27,6 +27,8 @@ entry.
 
 ### Changed
 
+- `/build-app` accepts a `coverage` warning for a helper query that shows nothing on screen
+  (a date-bounds or filter-options loader in `pages/_data.py`) instead of inventing a metric.
 - **The review log's Screen match column is filled** from `compare`: `match`, `mismatch`,
   `not captured`, `unsupported`, or `stale` when a page was re-run after the comparison (it was
   always `n/a`). `log` also lists screen mismatches no kept finding cites; it never logs them
