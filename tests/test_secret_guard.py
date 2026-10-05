@@ -86,6 +86,25 @@ def _denied(out: str) -> bool:
             "Bash",
             {"command": "streamsnow ci-key push > ~/.streamsnow-ci/secrets/SNOWFLAKE_ACCOUNT"},
         ),
+        (
+            "PowerShell",
+            {
+                "command": 'streamsnow ci-key create > "C:\\Users\\John Smith\\.streamsnow-ci\\'
+                'streamsnow_ci_rsa_key.p8"'
+            },
+        ),
+        (
+            "Bash",
+            {
+                "command": "streamsnow deploy-setup 1> '/home/a b/.streamsnow-ci/secrets/SNOWFLAKE_USER'"
+            },
+        ),
+        (
+            "Bash",
+            {
+                "command": "streamsnow deploy-setup >/home/a\\ b/.streamsnow-ci/secrets/SNOWFLAKE_ROLE"
+            },
+        ),
     ],
 )
 def test_denied(tool, tool_input):

@@ -137,12 +137,38 @@ def test_empty_secret_file_is_refused(tmp_path):
     assert gh.secret_calls() == []
 
 
-def test_repo_flag_is_passed_through(tmp_path):
+def test_repo_is_positional_for_view_and_a_flag_for_secret_set(tmp_path):
+    # `gh repo view` has no --repo flag; passing one makes it exit 1.
     gh = FakeGh()
-    ci_key.push(_secrets_dir(tmp_path), repo="acme/other", run=gh, which=_which)
-    for cmd, _ in gh.calls:
-        if cmd[1:3] in (["secret", "set"], ["repo", "view"]):
-            assert cmd[-2:] == ["--repo", "acme/other"]
+    result = ci_key.push(_secrets_dir(tmp_path), repo="acme/other", run=gh, which=_which)
+    views = [cmd for cmd, _ in gh.calls if cmd[1:3] == ["repo", "view"]]
+    assert views and all(cmd[3] == "acme/other" and "--repo" not in cmd for cmd in views)
+    # secret set gets the name gh resolved (the fake answers acme/apps).
+    for cmd, _ in gh.secret_calls():
+        assert cmd[-2:] == ["--repo", result.repo]
+
+
+def test_secret_set_targets_the_resolved_repo_without_a_flag(tmp_path):
+    gh = FakeGh()
+    result = ci_key.push(_secrets_dir(tmp_path), run=gh, which=_which)
+    views = [cmd for cmd, _ in gh.calls if cmd[1:3] == ["repo", "view"]]
+    assert views and "--repo" not in views[0]
+    for cmd, _ in gh.secret_calls():
+        assert cmd[-2:] == ["--repo", result.repo]
+
+
+def test_trailing_spaces_are_stripped_from_plain_values(tmp_path):
+    gh = FakeGh()
+    ci_key.push(_secrets_dir(tmp_path, SNOWFLAKE_ROLE="DEPLOY_ROLE  \n"), run=gh, which=_which)
+    sent = {c[3]: i for c, i in gh.secret_calls()}
+    assert sent["SNOWFLAKE_ROLE"] == b"DEPLOY_ROLE"
+
+
+def test_short_values_are_redacted_too():
+    msg = ci_key._redact(
+        "role DEV and account ab12345.us-east-1 rejected", ["DEV", "ab12345.us-east-1"]
+    )
+    assert "DEV" not in msg and "ab12345" not in msg
 
 
 def _cli(*args: str):

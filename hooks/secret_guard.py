@@ -9,7 +9,8 @@ except a plain `streamsnow ci-key ...` or `streamsnow deploy-setup ...` command
 (deploy-setup reads the PUBLIC key via --public-key-file).
 
 A backstop, not a sandbox: matching command text can be dodged on purpose
-(shell variables, globs), and it only runs inside Claude Code. Not repo-gated:
+(shell variables, globs, a recursive search started above the directory, a
+program written in streamsnow's place), and it only runs inside Claude Code. Not repo-gated:
 the key is equally sensitive in any repo. Stdlib only, no network. Any error
 after a match still denies (fail closed on a match); everything else passes.
 If the launcher cannot start this hook (no uv), the guard is off for that call;
@@ -33,7 +34,6 @@ SHELL_TOOLS = {"Bash", "PowerShell"}
 PATH_KEYS = {
     "Read": ("file_path",),
     "Edit": ("file_path",),
-    "MultiEdit": ("file_path",),
     "Write": ("file_path",),
     "NotebookEdit": ("notebook_path",),
     "Grep": ("path", "glob"),
@@ -58,9 +58,11 @@ _ALLOWED = re.compile(rf"^\s*(?:&\s*)?{_PROGRAM}\s+(?:ci-key|deploy-setup)(?:\s|
 # stripped before this check; any other `&` counts.
 _CHAINING = re.compile(r"[|;&<()\n\r`]|\$\(")
 # A `>` redirect whose target names the key directory would truncate key
-# material. A protected path BEFORE the `>` (the public key as an argument) is fine.
+# material. A protected path BEFORE the `>` (the public key as an argument) is
+# fine; one anywhere AFTER a `>` is not, so a quoted target with spaces
+# (`> "C:\Users\A B\.streamsnow-ci\..."`) can't slip past.
 _REDIRECT_INTO_PROTECTED = re.compile(
-    r">>?\s*\S*(?:\.streamsnow-ci|streamsnow_ci_rsa_key)", re.IGNORECASE
+    r">.*?(?:\.streamsnow-ci|streamsnow_ci_rsa_key)", re.IGNORECASE | re.DOTALL
 )
 
 

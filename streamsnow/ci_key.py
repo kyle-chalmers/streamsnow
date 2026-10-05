@@ -205,12 +205,15 @@ class PushResult:
 
 
 def _redact(text: str, values: list[str]) -> str:
-    """Strip every line of every secret value out of ``text`` (gh's error output)."""
-    for value in values:
-        for line in value.splitlines():
-            line = line.strip()
-            if len(line) >= 4 and line in text:
-                text = text.replace(line, "<redacted>")
+    """Strip every line of every secret value out of ``text`` (gh's error output).
+
+    Longest first, so a short value (a role such as ``DEV``) can't split a longer
+    one before it is replaced. Short values are redacted too: an over-redacted
+    error message is the safe failure.
+    """
+    lines = {ln.strip() for value in values for ln in value.splitlines()} - {""}
+    for line in sorted(lines, key=len, reverse=True):
+        text = text.replace(line, "<redacted>")
     return text
 
 
@@ -239,9 +242,18 @@ def push(
         raise CiKeyError(
             "gh is not signed in. Run `gh auth login`, then re-run `streamsnow ci-key push`."
         )
-    repo_flag = ["--repo", repo] if repo else []
+    # `gh repo view` takes the repository as a positional argument, not --repo.
     view = run(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner", *repo_flag],
+        [
+            "gh",
+            "repo",
+            "view",
+            *([repo] if repo else []),
+            "--json",
+            "nameWithOwner",
+            "-q",
+            ".nameWithOwner",
+        ],
         capture_output=True,
         check=False,
     )
@@ -258,9 +270,14 @@ def push(
         path = secrets / name
         if not path.exists():
             raise CiKeyError(f"{path} is missing. Run `streamsnow ci-key create` first.")
-        data = path.read_bytes()
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise CiKeyError(f"{path} cannot be read ({exc.strerror}).") from None
         if name != PRIVATE_KEY_SECRET:
-            data = data.rstrip(b"\r\n")  # a hand-edited file may end in a newline
+            # A hand-edited file may end in a newline or stray spaces; create()
+            # compares these files stripped, so push sends them stripped too.
+            data = data.strip()
         if not data.strip():
             raise CiKeyError(
                 f"secrets/{name} is empty. Delete it and re-run `streamsnow ci-key create`."
@@ -271,7 +288,8 @@ def push(
     done: list[str] = []
     for i, name in enumerate(SECRET_NAMES):
         proc = run(
-            ["gh", "secret", "set", name, *repo_flag],
+            # Always the resolved repo, so the one printed is the one written.
+            ["gh", "secret", "set", name, "--repo", target],
             input=payloads[name],
             capture_output=True,
             check=False,
