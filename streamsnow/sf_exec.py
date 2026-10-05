@@ -183,6 +183,9 @@ _KEEP_QUOTED_RE = re.compile(
 )
 
 
+_LITERAL_RE = re.compile(r"'(?:[^'\\]|\\.|'')*'")
+
+
 def _mask_values(text: str) -> str:
     """Replace quoted values with '…' unless they name an object.
 
@@ -192,7 +195,9 @@ def _mask_values(text: str) -> str:
     """
     out: list[str] = []
     last = 0
-    for m in re.finditer(r"'[^']*'", text):
+    # A whole literal, doubled-quote and backslash escapes included, so a value
+    # like 'O''Brien' is masked as one span, never split around its escape.
+    for m in _LITERAL_RE.finditer(text):
         out.append(text[last : m.start()])
         out.append(m.group(0) if _KEEP_QUOTED_RE.search(text[: m.start()]) else "'…'")
         last = m.end()

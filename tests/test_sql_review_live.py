@@ -818,3 +818,12 @@ def test_error_text_never_carries_a_cell_value() -> None:
     )
     assert "Jane" not in detail and "'…'" in detail
     assert "'ANALYTICS_DB.REPORTING.ORDERS'" in detail and "'REVENUE'" in detail
+
+
+@pytest.mark.parametrize("value", ["O''Brien", "a''b''c", "back\\'slash"])
+def test_error_masking_keeps_escaped_quotes_inside_one_value(value: str) -> None:
+    from streamsnow import sf_exec as sx
+
+    detail = sx._error_detail(f"100038 (22018): Numeric value '{value}' is not recognized", "")
+    assert "Brien" not in detail and "b''c" not in detail and "slash" not in detail
+    assert "'…' is not recognized" in detail
