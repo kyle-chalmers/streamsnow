@@ -17,7 +17,7 @@ def test_build_app_has_no_setup_or_adopt_mode():
     start = _read("build-app", "SKILL.md")
     assert "--setup" not in start
     assert "adopt" not in start.split("## Phase 0")[0]
-    assert 'argument-hint: "[<idea>] | --spec"' in start
+    assert 'argument-hint: "[<idea>] | --spec | <slug> --feedback \\"<feedback>\\""' in start
 
 
 def test_build_app_hands_off_to_onboard_including_when_the_cli_is_missing():

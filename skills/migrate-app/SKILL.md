@@ -10,10 +10,14 @@ disable-model-invocation: true
 
 > **Repo overlay:** if `.streamsnow/overlays/migrate-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
-Bring an external Streamlit app into the repo, then conform it to StreamSnow conventions until the
-validation check passes. **Two commits** — the lift (files relocated, only ship blockers scrubbed),
-then the conform diff — because mixing the move and the rewrite makes review impossible and kills
-your ability to bisect a misbehaving conform against the known-good lift.
+Bring an external Streamlit app into the repo, then conform it until the gates pass. **Two
+commits** — the lift (files relocated, only ship blockers scrubbed), then the conform diff — because
+mixing the move and the rewrite makes review impossible and kills your ability to bisect a
+misbehaving conform against the known-good lift.
+
+**This skill gets the app in**; [/build-app](../build-app/SKILL.md)'s phases make it good, so a
+migrated app meets the same bar as a new one; the gates (`streamsnow validate-app`,
+`streamsnow sql-review check`) decide "done".
 
 Detection is `streamsnow migrate <verb>` — JSON out, deterministic, AST-only (never executes
 source). You read the JSON and make the judgment calls. Read [engine.md](engine.md) before Step 1 —
@@ -44,44 +48,40 @@ it documents every verb: when to run it, what its JSON says, the judgment call t
    auto-added). Container → declare PyPI deps in `pyproject.toml`, using the same JSON as inventory.
 6. Commit the lift as one changeset.
 
-## Step 2 — conform (make it a StreamSnow app)
+## Step 2 — conform (make it a StreamSnow app, the /build-app way)
 
-7. Source the canonical local helpers (`branding.py`, `sql_loader.py`) from a scratch
-   `streamsnow new` or a sibling app. Always `from branding import ...` — never `from shared...`;
-   the deployed runtime can't reach a repo-level `shared/`, so a shared import runs locally and
-   fails at deploy.
-8. `streamsnow migrate scan-conformance apps/<slug>` is the worklist: wrap each `uncached_queries`
-   fetch in `@st.cache_data(ttl=...)` (filters as function arguments, not closures), pin explicit
-   columns per `select_stars` entry, swap `altair_imports` to the repo chart standard, rebuild
-   navigation if `legacy_pages_only`, and surface the `required_grants` split in the PR. Re-run
-   until the three fix-lists empty and `legacy_pages_only` is false ([engine.md](engine.md)).
-9. `streamsnow migrate scan-inline-sql apps/<slug>` lists the SQL to externalize into
-   `queries/<name>.sql` with the required header block (`Query / Feeds / Schemas / Params /
-   Tokens`) behind `load_sql`/`render_sql`. **Walk the Feeds/Schemas mapping with the user one
-   candidate at a time**; plumbing queries stay inline with `# noqa: inline-sql`. Replace optional
-   `(:N IS NULL OR col = :N)` predicates with `{TOKEN}` fragments while you're in there — deployed,
-   the driver NULL-binds every parameter when any one is `None`
-   (`streamsnow check bind-predicates` catches it).
-10. Write `snowflake.yml` for the chosen runtime; add an app `AGENTS.md` noting non-default TTLs
-    and the runtime decision; scrub personal absolute paths the copy brought along.
-11. **Bootstrap the review SQL** (details in [engine.md](engine.md)): mark each visual with
-    `review_value("<key>", value)`, write `sql_review/index.yaml` (pages, metrics in on-screen
-    order, real sample tokens), then `streamsnow sql-review generate <slug>` and
-    `streamsnow sql-review check <slug>`; the review SQL ships inside the conform commit.
-12. Preview via /preview-app so the user confirms each page still renders. A warehouse app failing
-    locally on `get_active_session` is the runtime's signature, not a bug.
-13. Gate: `streamsnow validate-app <slug>` until PASS, then commit the conform pass as its own
-    changeset. A deploy error you can't place →
-    [_shared/deploy-error-translator.md](../_shared/deploy-error-translator.md).
+7. **Spec it:** follow build-app [spec.md](../build-app/spec.md) in backfill mode for
+   `apps/<slug>/REQUIREMENTS.md` (pages, their questions, sources, TTLs, the runtime from step 5).
+8. **Foundation:** `streamsnow new` the same slug and runtime in a scratch repo; copy in every file
+   the lift lacks (`snowflake.yml`, `branding.py`, `sql_loader.py`, `review.py`, `pages/_*.py`,
+   `pages/about.py`, `sql_review/`), never over a source file; drop its starter page and query
+   ([pages.md](../build-app/pages.md#replace-the-starter-trio)). Then [scaffold.md § Foundation](../build-app/scaffold.md#foundation-after-the-scaffold-before-any-page).
+   Keep imports app-local (`from branding import ...`): deployed, a repo-level `shared/` is gone.
+9. **Conform the pages:** [pages.md § Parallel build](../build-app/pages.md#parallel-build) with
+   each page-builder in `mode: conform` (keep the visuals and behavior, apply the conventions).
+   Its worklist is the JSON of `streamsnow migrate scan-conformance apps/<slug>` and
+   `streamsnow migrate scan-inline-sql apps/<slug>`, split by file. Migrate-only items
+   ([engine.md](engine.md)): pin columns for each `SELECT *`, swap `altair_imports` to the repo
+   chart standard, rebuild navigation with `st.navigation` if `legacy_pages_only`, and put the
+   `required_grants` needing a DBA in the PR. **Walk each query's Feeds/Schemas with the user**;
+   plumbing SQL stays inline with `# noqa: inline-sql`.
+10. Check `snowflake.yml` matches the runtime; note non-default TTLs and the runtime decision in
+    the app `AGENTS.md`; scrub personal absolute paths the copy brought along.
+11. **Verify:** build-app [verify.md](../build-app/verify.md), then the user clicks through every
+    page in /preview-app. A warehouse app failing locally on `get_active_session` is the
+    runtime's signature, not a bug.
+12. **Gate:** `streamsnow validate-app <slug>` PASS, `streamsnow sql-review check <slug>` clean,
+    and both conform scans' fix-lists empty. Then commit the conform as its own changeset. A
+    deploy error you can't place → [_shared/deploy-error-translator.md](../_shared/deploy-error-translator.md).
 
 ## Hand-offs
 
 PASS → /ship-app opens the PR (first-time accounts may need one-time `streamsnow deploy-setup`
-DDL); deeper quality → /review-app + /sql-review; an app already in the repo → Step 2 only.
+DDL); deeper quality → /review-app + /sql-review; an app already in the repo → Step 2 only;
+later changes → `/build-app <slug>` or `/build-app <slug> --feedback "..."`.
 
 ## Done when
 
-`apps/<slug>/` holds the conformed app — local helpers, headered `queries/*.sql`, a
-runtime-matching `snowflake.yml`, every fetch cached, generated `sql_review/` page files, zero
-findings from the two conform scans — `streamsnow validate-app <slug>` passes, and the lift and
+`streamsnow validate-app <slug>` passes, `streamsnow sql-review check <slug>` is clean, the two
+conform scans report nothing to fix, `REQUIREMENTS.md` describes the app, and the lift and
 conform are two separate commits.

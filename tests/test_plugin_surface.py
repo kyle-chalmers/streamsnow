@@ -1,4 +1,4 @@
-"""The plugin-surface contract: 9 skills, ≤80-line front pages, no alias stubs.
+"""The plugin-surface contract: 8 skills, ≤80-line front pages, no alias stubs.
 
 The CHANGELOG and README advertise this surface; these tests keep it honest so
 drift (an 81-line SKILL.md, a resurrected alias or old name) fails CI
@@ -21,7 +21,6 @@ EXPECTED_SKILLS = {
     "onboard",
     "review-app",
     "sql-review",
-    "feedback-app",
     "preview-app",
     "validate-app",
     "ship-app",
@@ -29,8 +28,9 @@ EXPECTED_SKILLS = {
 }
 
 # Retired names -> the surface that replaced them. The v0.2 alias stubs were
-# removed in 0.7.3, /start-app became /build-app in 0.8.0, and /sql-review
-# replaced /audit-lineage after 0.8.0; the names stay here so nothing
+# removed in 0.7.3, /start-app became /build-app in 0.8.0, and after 0.8.0
+# /feedback-app became /build-app --feedback and /sql-review replaced
+# /audit-lineage; the names stay here so nothing
 # re-introduces them.
 RETIRED_NAMES = {
     "new-app": "/build-app",
@@ -40,6 +40,7 @@ RETIRED_NAMES = {
     "auto-review-app": "/review-app --auto",
     "deep-dive-data": "/sql-review",
     "start-app": "/build-app",
+    "feedback-app": "/build-app --feedback",
     "audit-lineage": "/sql-review",
 }
 
@@ -154,7 +155,7 @@ _CLI_PIN = re.compile(r"@playwright/cli@([0-9A-Za-z.\-]+)")
 
 
 def test_walkthrough_pins_the_playwright_cli():
-    """Five skills walk the running app in a browser with the Playwright CLI.
+    """Four skills walk the running app in a browser with the Playwright CLI.
     An exact pin (never @latest, never a prerelease) keeps a new upstream release
     from changing the walk under a released plugin. The recipe is the only place
     the version is written; RELEASING.md owns the bump."""

@@ -2,7 +2,7 @@
 
 Purpose: drive a browser smoke walk, with the Playwright CLI, of every page in a running StreamSnow app, capturing a screenshot and console errors per page, with the `Data as of:` caption (or app-loaded state) as the success sentinel. This is a recipe other skills read and follow — not an invocable skill.
 
-Consumed by: /validate-app and /preview-app (their optional UI-smoke sections), /review-app (incl. `--auto`), /feedback-app.
+Consumed by: /validate-app and /preview-app (their optional UI-smoke sections), /review-app (incl. `--auto`), /build-app (verify phase and `--feedback`).
 
 Pinned version: `@playwright/cli@0.1.22`. This is the only place the version is written; every
 other mention says "the pinned version in _shared/playwright-walkthrough.md". Below, `P` means

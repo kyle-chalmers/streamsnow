@@ -1,7 +1,7 @@
 ---
 name: build-app
-description: The front door for building a Streamlit-in-Snowflake app from idea to opened PR, or resuming one mid-build. Orchestrates spec, data discovery, page design, scaffold, a parallel page build and review by subagents, and ship, with human checkpoints between them. Start here for any new app, to document an existing one, or to add a page. Use when the user says "build an app", "new dashboard", "add a page", "spec this out", or "pick up where we left off".
-argument-hint: "[<idea>] | --spec"
+description: The front door for building a Streamlit-in-Snowflake app from idea to opened PR, or resuming one mid-build. Orchestrates spec, data discovery, page design, scaffold, a parallel page build and review by subagents, and ship, with human checkpoints between them. Start here for any new app, to document an existing one, to add a page, or to act on feedback about a live app. Use when the user says "build an app", "new dashboard", "add a page", "spec this out", "pick up where we left off", "here's feedback on <app>", "the numbers look wrong" or "polish this dashboard".
+argument-hint: "[<idea>] | --spec | <slug> --feedback \"<feedback>\""
 allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Task, Agent]
 ---
 
@@ -12,25 +12,25 @@ allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Task, Agen
 Lifecycle: **spec → discover → design → scaffold → build → preview → verify → ship → done**.
 It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume and never skips a checkpoint.
 
-> **Orchestrator.** You run every deterministic step (the `streamsnow` CLI, merges, generation,
-> validation) and own the shared files. Bounded work goes to subagents with fixed briefs in
-> [briefs/](briefs/), each naming its inputs, the only files it may write, and the result it
-> returns. The CLI and gates decide pass/fail, never a subagent. Without subagents, follow each
-> brief yourself, one at a time ([_shared/other-agents.md](../_shared/other-agents.md)).
+> **Orchestrator.** You run every deterministic step (CLI, merges, generation, validation) and own
+> the shared files; subagents get fixed briefs ([briefs/](briefs/)) naming their inputs, the only
+> files they may write, and the result they return. The CLI and gates decide pass/fail, never a
+> subagent. No subagents? Follow each brief yourself ([_shared/other-agents.md](../_shared/other-agents.md)).
 
 ## Modes
 
 - **Default** — a new app, or a slug to resume from §11 `Current phase`; never restart a build.
 - **`--spec [<slug>]`** — write or refresh the spec only, then stop. Covers new specs, tickets and
   **backfill** from an existing app's source (automatic when `apps/<slug>/` has code). [spec.md](spec.md).
+- **`<slug> --feedback "<feedback>"`** — classify feedback on a live app, then fix it via [feedback.md](feedback.md).
 
 ## Phase 0 · Preflight
 
 1. Report which `streamsnow` runs and its version, then run `streamsnow doctor --format json`.
 2. `streamsnow` not on PATH, a `required` check failing, or no `streamsnow.config.yaml`: say "This
    machine or repo isn't set up yet, so I'm running onboarding first", follow
-   [/onboard](../onboard/SKILL.md) in full, then continue. `optional` failures get one line.
-   In `--spec` mode, offer `/onboard` but carry on without config if the user prefers.
+   [/onboard](../onboard/SKILL.md) in full, then continue (`--spec` may carry on without config).
+   `optional` failures get one line.
 
 ## Phase 1 — Spec, then CHECKPOINT 1
 
@@ -73,13 +73,13 @@ It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume and never skips a checkpoi
 A `Current phase` line (the lifecycle above) plus an append-only `Sessions` log whose last line
 names the next command. Update it on every phase change; never rewrite past lines. On resume,
 jump to `Current phase`. `done` or `in-production (backfilled)` means the app is live: new §4
-pages re-enter at design; anything else goes to `/feedback-app` or `/review-app`.
+pages re-enter at design; feedback uses `--feedback`, review depth `/review-app`.
 Apps started before 0.8 name the old `start-app` skill in that log; say `/build-app` instead.
 
 ## Out of scope
 
-Porting an external app → `/migrate-app`; feedback on a live app → `/feedback-app`; review depth →
-`/review-app`; live numbers → `/sql-review`; machine, repo and Snowflake setup → `/onboard`.
+Porting an external app → `/migrate-app`; review depth → `/review-app`; live numbers →
+`/sql-review`; machine, repo and Snowflake setup → `/onboard`.
 
 ## Done when
 

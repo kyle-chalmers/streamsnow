@@ -68,7 +68,7 @@ inventory, not its output file. Exit 2 = `--out` unwritable.
   adding it. `--offline` skips the channel-repodata fetch (conservative allowlist; use when the
   network is unavailable, and expect more conservative drops).
 
-## Step 2 verbs — what the conform pass still owes
+## Step 2 verbs — the conform worklist
 
 ### `streamsnow migrate scan-conformance apps/<slug> [--config ...]`
 
@@ -99,23 +99,11 @@ The SQL-externalization worklist. Exit 0 always.
   Feeds/Schemas mapping with the user one at a time, it can't be guessed from code — or is plumbing
   (heartbeats, INFORMATION_SCHEMA discovery) and earns a `# noqa: inline-sql` on its line.
 
-## The sql-review bootstrap (end of Step 2)
+## The review SQL (end of Step 2)
 
-Once queries live in `queries/*.sql`, the app owes its review SQL: one runnable file per page, a
-section per metric, that a reviewer opens in DataGrip or Snowsight to re-run the numbers behind
-each visual. The conformed app has no `sql_review/` yet; start it from a fresh scaffold's files
-(`streamsnow new` in a scratch repo shows them) or write them by hand:
-
-1. Copy `review.py` to the app root and add it to `snowflake.yml` artifacts; wrap each visual's
-   value in `review_value("<metric_key>", value)`.
-2. Write `sql_review/index.yaml`: each page path from `streamlit_app.py`, its metrics in on-screen
-   order with `query`, real sample `tokens` (e.g. `REGION_FILTER: "AND region = 'West'"`, a value
-   the app actually renders), `binds` (`params.start_date`), `reads`; a `review_window` anchored
-   to the data's latest date; `fragments:` for inlined CTE files.
-3. Comment each query's CTEs (one line directly above each name); keep the queries lint-clean
-   with the repo's `.sqlfluff` (`streamsnow update` adds it to an older repo).
-4. `streamsnow sql-review generate <slug>` writes the page files, README and folder `AGENTS.md`;
-   `streamsnow sql-review check <slug>` must be clean.
-
-Commit `index.yaml` and the generated files inside the conform commit: the conformed app and its
-review SQL land together, and `streamsnow sql-review check` stays green from the first PR.
+A conformed app owes its review SQL like any other: `review_value` marks, `sql_review/index.yaml`,
+then `streamsnow sql-review generate` and `check`. It's not migrate-specific, so it lives in one
+place: build-app [pages.md step 8](../build-app/pages.md#steps). In a parallel conform, the
+page-builders return the index entries and the orchestrator generates once
+([pages.md § Parallel build](../build-app/pages.md#parallel-build)). Commit it inside the conform
+commit, so `streamsnow sql-review check` is green from the first PR.
