@@ -273,14 +273,17 @@ this redesign supports it.
 Two other workstreams touch the same files. This design depends on both and must land after them.
 
 **Start-app skill refactor** (onboarding):
-- **Part A** adds `ci-key push` and the key guard, and edits `skills/start-app/setup.md`.
+- **Part A** is [kyle-chalmers/streamsnow#40](https://github.com/kyle-chalmers/streamsnow/pull/40).
+  It adds `ci-key push`, the key guard hook and a README "What Claude can and can't see" section,
+  and edits `skills/start-app/setup.md`.
 - **Part B** (planned for 0.8.0) moves setup into a new `/onboard` skill.
 - **Ask:** carry the `start-app` → `build-app` rename in Part B, so 0.8.0 is one breaking release
   with one tombstone round, and `--setup` leaves the skill at the same moment.
 
-**SQL review redesign**
-([kyle-chalmers/streamsnow#41](https://github.com/kyle-chalmers/streamsnow/pull/41),
-`docs/superpowers/specs/2026-10-04-sql-review-redesign.md`):
+**SQL review redesign** (spec in
+[kyle-chalmers/streamsnow#41](https://github.com/kyle-chalmers/streamsnow/pull/41),
+`docs/superpowers/specs/2026-10-04-sql-review-redesign.md`; the three phase plans in
+[kyle-chalmers/streamsnow#42](https://github.com/kyle-chalmers/streamsnow/pull/42)):
 - One `sql_review/NN_page_name.sql` per page plus `index.yaml`, a `/sql-review` skill that retires
   `/audit-lineage`, live `probe` / `run` / `bench` commands, plugin `agents/`, and preview capture
   with a Playwright walk.
