@@ -21,9 +21,11 @@ those over with a one-line reason:
 - `/reload-plugins`: a slash command only the user can type;
 - the Snowflake admin script (`streamsnow deploy-setup --admin`): it needs admin rights;
 - anything that asks for their computer password (`sudo` on Linux/WSL): your shell cannot answer
-  that prompt, so give them the command; prefer installs that need no password (uv, nvm);
-- creating the CI key pair and setting the private-key secret (§2d): never generate, read, print,
-  or pipe a private key yourself.
+  that prompt, so give them the command; prefer installs that need no password (uv, nvm).
+
+The CI key is handled only by `streamsnow ci-key create` and `streamsnow ci-key push` (§2d). The
+plugin's key guard blocks every other tool call that names `~/.streamsnow-ci`, so a blocked call
+there is expected: never try another way to read a key or secret file.
 
 ## 0 · Windows: use WSL
 
@@ -329,9 +331,12 @@ to the repository the probe found.
   the CLI-only path; in this skill the real app comes from `/start-app`, so pass the flag.
 - The first deploy needs one-time Snowflake objects (database, schema, warehouse, roles, a CI
   service user, grants). `streamsnow deploy-setup --admin` prints the reviewable DDL; surface it
-  for the user's Snowflake admin, never run it yourself. The user runs `streamsnow ci-key create`
-  in their own terminal for the CI key pair, then adds `--public-key-file <its .pub>` so the file
-  runs unedited; it is safe to re-run, and `deploy-setup --teardown` prints the start-fresh reverse.
+  for the user's Snowflake admin, never run it yourself. You run `streamsnow ci-key create` for the
+  CI key pair (it prints only file names and a fingerprint) and tell the user, in one line, to
+  save a copy of the `.p8` somewhere safe such as a password manager themselves (you never open
+  it; a lost key means rotating), then `deploy-setup --admin
+  --public-key-file <its .pub>` so the file runs unedited; it is safe to re-run, and
+  `deploy-setup --teardown` prints the start-fresh reverse.
 
 ## 2d · Shared repo settings (once per repo; a teammate usually finds them done)
 
@@ -350,19 +355,11 @@ It needs the CI service user from the admin script (§2): if the admin has not r
 "waiting on your Snowflake admin" and come back on the next run.
 Order matters: `SNOWFLAKE_ACCOUNT` switches the deploy job on, so it goes last, or every merge
 fails at sign-in while the key is still missing.
-- The key pair is created by the user or their admin, never by you: `streamsnow ci-key create` in
-  their own terminal (or the commands in [docs/deploy-setup.md](../../docs/deploy-setup.md) §2).
-  The public half goes into the admin script (`--public-key-file`), the private half only into GitHub.
-- Set these yourself after confirming each value with the user, with
-  `gh secret set NAME --body "<value>"`: `SNOWFLAKE_ROLE` (`roles.ci_role`),
-  `SNOWFLAKE_WAREHOUSE` (a warehouse the CI role can use, usually `objects.default_warehouse`),
-  and `SNOWFLAKE_USER` (the `CREATE USER` name in the admin script; the admin may have renamed it).
-- The private key is theirs to set. Give the command and the reason in one line: "This one is a
-  password-like key, so you run it and I never see it":
-  `gh secret set SNOWFLAKE_PRIVATE_KEY_RAW < ~/.streamsnow-ci/streamsnow_ci_rsa_key.p8` (plus
-  `SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` only if the key is encrypted).
-- Re-run doctor. Only when `ci-secrets` lists nothing but `SNOWFLAKE_ACCOUNT`, set it
-  (`snowflake.account`) and tell the user the next merge to `main` will deploy.
+Once the admin has run the script, run `streamsnow ci-key push`. It sets `SNOWFLAKE_USER`,
+`SNOWFLAKE_PRIVATE_KEY_RAW`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE` and then `SNOWFLAKE_ACCOUNT`,
+each straight from its file to `gh` on stdin, and prints only names. Setting `SNOWFLAKE_ACCOUNT`
+switches the deploy job on, so tell the user the next merge to `main` will deploy. If it stops
+partway, it names what failed and leaves `SNOWFLAKE_ACCOUNT` unset: fix the cause and run it again.
 
 ## 3 · Connection (one store, owned by the user)
 

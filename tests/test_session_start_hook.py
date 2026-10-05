@@ -70,5 +70,6 @@ def test_configured_repo_banner_names_version_guards_and_skills(tmp_path):
     assert out.count("\n") == 1
     assert PLUGIN_VERSION in out
     assert "guard is ACTIVE" in out and "/start-app" in out and "/ship-app" in out
+    assert "Key guard is ACTIVE" in out
     assert "CLI not on PATH" not in out  # fake streamsnow on PATH → no nag
     assert len(out) < 700  # a banner, not an essay

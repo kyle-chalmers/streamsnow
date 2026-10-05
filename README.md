@@ -79,6 +79,41 @@ needs only a login that can read your data.
 7. **Faithful to a real fleet:** a check that fails a well-run production app is a defect in the check until proven otherwise (`tests/fixtures/fleet/` is the regression net).
 8. **Leaving should be cheap:** everything StreamSnow writes is a plain file the repo keeps ([Ownership and exit](docs/distribution.md#ownership-and-exit)).
 
+## What Claude can and can't see
+
+StreamSnow asks Claude to set up Snowflake access, CI and deploy secrets on your
+behalf. Here is exactly what that means for your credentials.
+
+- **Claude never sees a password, private key or token.** Sign-ins happen in
+  your browser, and StreamSnow never asks for, stores or handles a Snowflake password.
+- **The CI key goes from a file on your machine to GitHub without passing
+  through Claude.** `streamsnow ci-key create` makes the key pair in
+  `~/.streamsnow-ci` and prints only file names and a fingerprint. `streamsnow
+  ci-key push` hands each secret to the GitHub CLI on standard input, never on
+  the command line, and prints only names.
+- **Save a copy of the private key somewhere safe.** Put
+  `~/.streamsnow-ci/streamsnow_ci_rsa_key.p8` in a password manager or similar
+  store yourself; Claude never opens it. If it is ever lost, make a new pair
+  and re-run the admin script ([rotating the key](SECURITY.md#how-streamsnow-handles-secrets)).
+- **Snowflake gets only the public half of the key.** It goes into the admin
+  script, which you or your Snowflake admin run. Claude never runs it and
+  creates no Snowflake objects itself.
+- **Claude's tools are blocked from the key directory.** The plugin's key
+  guard (`hooks/secret_guard.py`) denies any read, search, edit or shell
+  command that points at it, apart from plain `streamsnow ci-key` and
+  `streamsnow deploy-setup` commands.
+- **Setup queries are read-only.** The setup flow reads your account with
+  `SHOW` and `SELECT` queries only, and never prints connection files or
+  `SNOWFLAKE_*` values.
+
+<p align="center">
+  <a href="docs/images/secrets-flow.png"><img alt="The CI key flow: on your machine, streamsnow ci-key create makes a key pair. The public half goes into the admin script, which you or your Snowflake admin run, so Snowflake stores it on the CI user. The private half goes through streamsnow ci-key push to a GitHub secret. On merge, the deploy job signs in with the private key and Snowflake checks it against the public key. Claude sees file names and a fingerprint, never the key. Make sure to save the private key in a secure location." src="docs/images/secrets-flow.png" width="100%"></a>
+</p>
+
+The limits, stated plainly: Claude runs as your user account, so the key guard
+is a backstop, not a sandbox, and it runs only inside Claude Code. The full
+detail is in [SECURITY.md](SECURITY.md#how-streamsnow-handles-secrets).
+
 ## Install with your coding agent
 
 Point any coding agent (Claude Code, Codex, Cursor, Gemini CLI, and others) at
@@ -352,16 +387,17 @@ run outside skill prose entirely. See
 Trust demands transparency: this plugin runs hooks, so here is every one of them. All are
 stdlib-only, make **no network calls**, never write outside the repo (plus one best-effort
 dedupe state file in `$TMPDIR`, so the review nudge fires once per state, not every turn),
-and fail open — a hook
-error never blocks your session; the guards only ever *add* a confirmation or a note.
+and fail open, so a hook error never blocks your session. The one exception is the key guard,
+which denies rather than asks, and denies even if it hits an error on a call that names the key directory.
 
 | Event | Script | What it does |
 |---|---|---|
 | PreToolUse (Bash) | `hooks/deploy_safety.py` | Pauses before destructive Streamlit/SQL commands (`snow streamlit deploy/drop`, `CREATE OR REPLACE / DROP / ALTER STREAMLIT`, stage `REMOVE`, destructive SQL incl. `-f` files / stdin) — `/ship-app` is the sanctioned deploy path |
+| PreToolUse (shell, file and search tools) | `hooks/secret_guard.py` | Denies any tool call that names the CI key directory (`~/.streamsnow-ci`) or key file, apart from `streamsnow ci-key ...` and `streamsnow deploy-setup ...`. Covers the shell (Bash, PowerShell), file and search tools. Not repo-gated, because the key is sensitive in any repo. See [What Claude can and can't see](#what-claude-can-and-cant-see) |
 | SessionStart | `hooks/session_start.sh` | One line inside a StreamSnow repo (plugin version, skills, which guards are active), a one-line `/start-app --setup` nudge in a repo that has Streamlit apps but no config, silence everywhere else |
 | Stop | `hooks/review_gate_stop.py` | Warn-only nudge (a `systemMessage`, never a turn continuation) when a substantive app change ends with no review covering it — points at `/review-app <slug> --auto`. Off-switches: `REVIEW_GATE_OFF=1`, `apps/<slug>/.review/SKIP`, or `review_gate: {enabled: false}` in config |
 
-All hooks are repo-gated on `streamsnow.config.yaml` — zero cost in unrelated repos — and
+All hooks except the key guard are repo-gated on `streamsnow.config.yaml` (zero cost in unrelated repos) and
 declare explicit timeouts so a hung hook can never stall a session. To turn them off, disable
 the plugin (`claude plugin disable streamsnow`). Hook additions do not reach installed copies
 automatically — see [Upgrading](#upgrading).

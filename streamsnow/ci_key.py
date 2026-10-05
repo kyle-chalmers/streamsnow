@@ -24,6 +24,7 @@ import base64
 import dataclasses
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -193,3 +194,117 @@ def create(
         mismatched=mismatched,
         warnings=warnings,
     )
+
+
+@dataclasses.dataclass
+class PushResult:
+    repo: str
+    done: list[str]
+    failed: str | None = None
+    message: str = ""
+    not_attempted: list[str] = dataclasses.field(default_factory=list)
+
+
+def _redact(text: str, values: list[str]) -> str:
+    """Strip every line of every secret value out of ``text`` (gh's error output).
+
+    Longest first, so a short value (a role such as ``DEV``) can't split a longer
+    one before it is replaced. Short values are redacted too: an over-redacted
+    error message is the safe failure.
+    """
+    lines = {ln.strip() for value in values for ln in value.splitlines()} - {""}
+    # NUL-delimited placeholders first, so a short value can't rewrite an
+    # earlier marker; gh's output never contains NUL.
+    for i, line in enumerate(sorted(lines, key=len, reverse=True)):
+        text = text.replace(line, f"\x00{i}\x00")
+    return re.sub(r"\x00\d+\x00", "<redacted>", text)
+
+
+def push(
+    directory: Path,
+    *,
+    repo: str | None = None,
+    run=None,
+    which=None,
+) -> PushResult:
+    """Set the five deploy secrets on GitHub, each value going file -> gh's stdin.
+
+    Checks everything before setting anything: gh present and signed in, the
+    target repo resolvable, every secret file present and non-empty. Secrets go
+    in SECRET_NAMES order, so SNOWFLAKE_ACCOUNT (which switches the deploy job
+    on) is last, and a failure stops before it. No value is ever placed on argv
+    or returned in a message.
+    """
+    run = run or subprocess.run
+    which = which or shutil.which
+    if which("gh") is None:
+        raise CiKeyError(
+            "gh (the GitHub CLI) is not on PATH. Install it, then run `gh auth login`."
+        )
+    if run(["gh", "auth", "status"], capture_output=True, check=False).returncode != 0:
+        raise CiKeyError(
+            "gh is not signed in. Run `gh auth login`, then re-run `streamsnow ci-key push`."
+        )
+    # `gh repo view` takes the repository as a positional argument, not --repo.
+    view = run(
+        [
+            "gh",
+            "repo",
+            "view",
+            *([repo] if repo else []),
+            "--json",
+            "nameWithOwner",
+            "-q",
+            ".nameWithOwner",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    target = view.stdout.decode("utf-8", errors="replace").strip()
+    if view.returncode != 0 or not target:
+        raise CiKeyError(
+            "No GitHub repository found for this directory. Add a GitHub remote, or pass "
+            "--repo owner/name."
+        )
+
+    secrets = Path(directory).expanduser().absolute() / "secrets"
+    payloads: dict[str, bytes] = {}
+    for name in SECRET_NAMES:
+        path = secrets / name
+        if not path.exists():
+            raise CiKeyError(f"{path} is missing. Run `streamsnow ci-key create` first.")
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise CiKeyError(f"{path} cannot be read ({exc.strerror}).") from None
+        if name != PRIVATE_KEY_SECRET:
+            # A hand-edited file may end in a newline or stray spaces; create()
+            # compares these files stripped, so push sends them stripped too.
+            data = data.strip()
+        if not data.strip():
+            raise CiKeyError(
+                f"secrets/{name} is empty. Delete it and re-run `streamsnow ci-key create`."
+            )
+        payloads[name] = data
+    plain = [v.decode("utf-8", errors="replace") for v in payloads.values()]
+
+    done: list[str] = []
+    for i, name in enumerate(SECRET_NAMES):
+        proc = run(
+            # Always the resolved repo, so the one printed is the one written.
+            ["gh", "secret", "set", name, "--repo", target],
+            input=payloads[name],
+            capture_output=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            raw = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
+            return PushResult(
+                repo=target,
+                done=done,
+                failed=name,
+                message=_redact(raw, plain) or f"gh exited {proc.returncode}",
+                not_attempted=list(SECRET_NAMES[i + 1 :]),
+            )
+        done.append(name)
+    return PushResult(repo=target, done=done)
