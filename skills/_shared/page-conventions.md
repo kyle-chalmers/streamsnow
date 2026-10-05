@@ -80,3 +80,16 @@ House rules the table encodes: formulas use `÷`; every ratio is `SUM(numerator)
 at the rendered grain, never the average of a per-row percentage; the `Sources:` footer names the
 object each metric reads. `tests/fixtures/fleet/apps/acme-collections-overview/pages/_glossary.py`
 in the StreamSnow repo is a complete, validate-clean example.
+
+## Related defaults
+
+Design for the use case and the people who read the page. The three guides below are starting
+points with their reasons, not rules. The repo's house style (`brand:` config, its overlay,
+`AGENTS.md`) wins, and so does a judgment that fits this audience better. `/review-app` raises
+departures; nothing blocks on them.
+- [streamlit-performance.md](streamlit-performance.md): fetch less, cache by what changes the
+  answer, share across pages, rerun less.
+- [visualization-guide.md](visualization-guide.md): form from the question, labels, layout, KPI
+  cards, color.
+- [explainability.md](explainability.md): a text budget, the page's question, definitions at the
+  number, empty and stale states, the cold-reader check.

@@ -63,7 +63,7 @@ extra question.
 | Egress / code-exec / write-SQL / dynamic SQL | `streamsnow check security apps/<slug>` |
 | Missing `@st.cache_data(ttl=…)` | `streamsnow check caching apps/<slug>` |
 | `:N IS NULL OR` trap | `streamsnow check bind-predicates apps/<slug>` |
-| UI / chart / docs | lint only; verify visually if a Playwright MCP is loaded |
+| UI / chart / docs | lint only; verify visually if the Playwright CLI is available (Node 20+) |
 | Any edit to `queries/*.sql` or the data layer | `streamsnow sql-review check <slug>` |
 
 If a "fix" can't be confirmed green by a matching check, it's Bucket B — not an auto-fix.

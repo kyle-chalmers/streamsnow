@@ -3,14 +3,14 @@
 This guide is for a repo that grew its own `.claude/skills/` for building Streamlit-in-Snowflake
 apps and now wants the maintained plugin instead. It maps each custom skill to its plugin
 equivalent, names what should stay local, and lays out an incremental path — the same one
-`/start-app adopt` automates ([skills/start-app/adopt.md](../skills/start-app/adopt.md) writes a
+`/onboard` automates ([skills/onboard/adopt.md](../skills/onboard/adopt.md) writes a
 per-repo `MIGRATION.md` from a live inventory).
 
 The worked example throughout is a production repo with 16 custom skills that predate the plugin —
 the shape of the private repo you're migrating from. If that's you, the table below is your
 starting MIGRATION.md.
 
-## The skill map (16 custom → 8 plugin)
+## The skill map (16 custom → 9 plugin)
 
 | Custom skill | Plugin equivalent | Notes |
 |---|---|---|
@@ -19,7 +19,8 @@ starting MIGRATION.md.
 | `backfill-requirements` | `/start-app --spec <slug>` (automatic backfill) | Upstreamed in v0.3 — the plugin detects existing source and backfills, `(inferred)` markers included |
 | `new-app` | `/start-app` (scaffold phase) | `streamsnow new` replaces the local Copier flow |
 | `add-page` | `/start-app` (build phase) | Resumes into the build phase for an existing app |
-| `onboard` | `/start-app --setup` | Same doctor-driven, confirm-each-fix walkthrough |
+| `onboard` | **`/onboard`** | Restored as its own skill in 0.8.0 (it was `/start-app --setup` from 0.3 to 0.7). Same doctor-driven walkthrough, now staged, with the Snowflake admin step |
+| `/start-app --setup`, `/start-app adopt` | `/onboard` | Removed from `/start-app` in 0.8.0 |
 | `review-app` | **`/review-app`** | Same five dimensions |
 | `apply-review` | `/review-app --fix` | Same A/B/C bucketing, atomic commits |
 | `auto-review-app` | `/review-app --auto` | Same convergence loop |
@@ -102,7 +103,7 @@ a trial run), **extends** (domain-specific variant → keep, note it in AGENTS.m
 1. **Install the plugin** alongside the local skills (nothing breaks — same-named local skills
    shadow the plugin's until you delete them).
 2. **`streamsnow configure`** (≤5 questions) if the repo doesn't have `streamsnow.config.yaml` yet —
-   or run `/start-app adopt` and let it inventory + configure + write `MIGRATION.md` for you.
+   or run `/onboard` and let it inventory + configure + write `MIGRATION.md` for you.
 3. **Trial run:** take ONE real change through `/start-app → /preview-app → /validate-app →
    /review-app → /ship-app` with the plugin versions.
 4. **Delete the shadows** the trial proved covered; keep the extends with a one-line AGENTS.md note

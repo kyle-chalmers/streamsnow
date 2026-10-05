@@ -28,11 +28,17 @@ real pages, queries, and branding without breaking the governance contract.
    the three as "starter, replaced in the build phase" in the CP1 tree, never as created pages.
 2. If the staged spec lives outside the app dir, `git mv` it to `apps/<slug>/REQUIREMENTS.md` so §11
    travels with the app. Confirm `apps/<slug>/streamlit_app.py` exists before reporting the phase done.
-3. **Runtime** was decided in the spec (§9) — the scaffold materializes it into `snowflake.yml` and
+3. **Install the app's packages** into the repo's `.venv`, so the first preview works. `streamsnow
+   new` prints the command, matched to the runtime ("Install the app's packages for local
+   preview: ..."): an editable install for container apps, the `environment.yml` packages for
+   warehouse apps. `/onboard` creates `.venv` (setup §1c), so run only the part after `&&`;
+   when `.venv` is missing, create it first with `uv venv --python 3.11`. One line to the user:
+   what it installs and why.
+4. **Runtime** was decided in the spec (§9) — the scaffold materializes it into `snowflake.yml` and
    the matching manifest. If it's still open, resolve it now via
    [_shared/runtime-decision.md](../_shared/runtime-decision.md); switching after deploy is a
    re-deploy plus a rewrite.
-4. If `streamsnow new` says the app already exists, a prior run left a half-scaffolded app — read its
+5. If `streamsnow new` says the app already exists, a prior run left a half-scaffolded app — read its
    §11 and resume rather than re-scaffolding. Pass `--force` only when the user explicitly wants to
    overwrite.
 

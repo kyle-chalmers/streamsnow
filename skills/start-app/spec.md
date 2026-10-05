@@ -21,7 +21,7 @@ document?
 1. **Read the governance config first.** `streamsnow.config.yaml` gives the schema allowlist
    (`governance.schema_allow` / `schema_deny`, `governance.database`), default runtime, and deploy
    source. Everything you write must fit it. If the repo isn't configured yet, keep going but mark
-   §3 unverified and point at `/start-app --setup`.
+   §3 unverified and point at `/onboard`.
 2. **Settle the slug** — `<domain>-<function>`, kebab-case, durable (it becomes the directory name).
 3. **Ingest visual references before interviewing.** Screenshots or sketches pre-populate the visual
    half (pages, charts, KPI cards, filters, layout); confirm the read with the user in one screen.

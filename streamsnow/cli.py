@@ -254,7 +254,7 @@ def _prompt_config(
     ``given`` holds answers passed as flags (``_QUESTIONS`` plus
     ``deny_schemas`` and ``connection``); each one replaces its prompt, so the
     same answers build the same dict whether typed or passed. All five given
-    means no prompt fires (the non-interactive path ``/start-app --setup`` uses).
+    means no prompt fires (the non-interactive path ``/onboard`` uses).
     """
     given = {k: v for k, v in (given or {}).items() if v is not None}
     left = sum(1 for q in _QUESTIONS if q not in given)
@@ -683,7 +683,7 @@ def init(
         False,
         "--no-starter-app",
         help="Write the governed repo files (AGENTS.md, hooks, CI, .gitignore, README, "
-        "tombstones) without the example app. The setup path for /start-app.",
+        "tombstones) without the example app. The setup path for /onboard.",
     ),
     runtime: str = typer.Option(None, "--runtime", help=_ANSWER_HELP["runtime"]),
     account: str = typer.Option(None, "--account", help=_ANSWER_HELP["account"]),
@@ -698,7 +698,7 @@ def init(
     Reuses an existing streamsnow.config.yaml unless --reconfigure/--config is
     given, so re-running init to add the scaffold is safe. Repo-level files that
     already exist are left alone. --no-starter-app skips the example app, which
-    is what `/start-app --setup` runs before `streamsnow new` builds the real one.
+    is what `/onboard` runs before `streamsnow new` builds the real one.
     The answer flags (see `configure`) replace the wizard's questions; on an
     existing config they need --reconfigure, so they are never silently ignored.
     """
@@ -772,7 +772,7 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
         "",
         "Next:",
         "  1. Claude Code users: /plugin marketplace add kyle-chalmers/streamsnow",
-        "                        /plugin install streamsnow@streamsnow   then /start-app",
+        "                        /plugin install streamsnow@streamsnow   then /onboard",
         "     (CLI only? skip this step. Codex: streamsnow agent-skills install --agent codex)",
         f"  2. {_connection_hint(cfg, _snow_connections())}",
         "     (one-time; st.connection('snowflake') reads this default connection locally.",
@@ -840,6 +840,16 @@ def new(
         "sql_review/index.yaml and pages/overview.py (sample numbers). Replace them with your "
         "real pages and queries (/start-app does this in its build phase); validate-app FAILS "
         "while any file still reads YOUR_TABLE."
+    )
+    # The runtime-matched install, so the first local preview works. markup off:
+    # pip extras in brackets (pkg[extra]) are not Rich markup.
+    console.print(
+        "Install the app's packages for local preview: "
+        f"{local_install_command(Path.cwd() / 'apps' / slug)}  "
+        "(if this repo already has a .venv, run only the part after &&)",
+        markup=False,
+        highlight=False,
+        soft_wrap=True,  # never break the command mid-line; it gets pasted
     )
     console.print(
         f"Next: streamsnow validate-app {slug}, then add {slug} to README.md's Apps table "

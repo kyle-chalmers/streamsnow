@@ -21,7 +21,7 @@ it documents every verb: when to run it, what its JSON says, the judgment call t
 
 ## Step 1 — lift-and-shift (get it in the tree)
 
-1. `streamsnow doctor` first; failures → `/start-app --setup` before continuing.
+1. `streamsnow doctor` first; failures → `/onboard` before continuing.
 2. Settle `<slug>` (`<domain>-<function>`, kebab-case), then
    `streamsnow migrate preflight <source> --target-slug <slug>`. Exit 1 → stop and resolve with
    the user (`abort_reason` names it: target exists, not a Streamlit app, multiple entrypoints, or

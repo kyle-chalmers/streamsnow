@@ -2,8 +2,9 @@
 
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/): from 1.0.0 the stable surface in
-[docs/versioning.md](docs/versioning.md) breaks only in a major release, and before 1.0
-breaking changes still get one minor release of deprecation warnings first.
+[docs/versioning.md](docs/versioning.md) breaks only in a major release, after a deprecation
+period. Before 1.0, a breaking change can land in any minor release and is called out in its
+entry.
 
 ## [Unreleased]
 
@@ -24,15 +25,20 @@ Version 0.8.0.
   and `index` verbs are gone. `check` reports an app still on the old format
   as an `index` finding; `docs/auditing-a-visual.md` has the upgrade steps, and
   `generate` deletes the old `*.review.sql` files.
-  This skips the deprecation release in [docs/versioning.md](docs/versioning.md)
-  as a maintainer-approved exception: the 0.7 format had no known users
-  (decision 11 of the redesign spec).
+  Before 1.0.0 a breaking change needs no deprecation release
+  ([docs/versioning.md](docs/versioning.md)); the 0.7 format had no known users.
 - **`sql-review check` lints app queries with sqlfluff** (Snowflake dialect,
   the repo's new `.sqlfluff`, created by `init` and by `update` when missing)
   and requires a one-line comment directly above every CTE, with comment lines
   of 100 characters or fewer. Both fail the gate. `sqlfluff` is now a runtime
   dependency. Apps without an `index.yaml` are only reported as uncovered.
 - Generated CI and deploy workflows pin `streamsnow>=0.8,<0.9`.
+- **`/start-app --setup` and `/start-app adopt` are removed**, with no
+  deprecation release (a maintainer exception to
+  [docs/versioning.md](docs/versioning.md)). Use `/onboard`, which does both;
+  `/start-app` hands off to it by itself when the machine or repo isn't ready.
+- **The plugin no longer bundles the Playwright MCP** (`.mcp.json`). UI
+  walkthroughs use the Playwright CLI instead; see Changed below.
 
 ### Added
 
@@ -56,7 +62,7 @@ Version 0.8.0.
   that change what SQL means) to every section it writes.
 - **Versioning and stability policy** ([docs/versioning.md](docs/versioning.md)): what the
   stable surface is, why a stricter check counts as a breaking change (warn-only for one
-  minor release first), the deprecation window, and the path to 1.0.0. A new
+  minor release first), the deprecation window that applies from 1.0.0, and the path to 1.0.0. A new
   `tests/test_cli_surface.py` pins every command, flag and argument in
   `tests/fixtures/cli_surface.json`, so a rename or removal fails CI as BREAKING. The
   release gates for 1.0.0 are in `RELEASING.md`.
@@ -68,6 +74,44 @@ Version 0.8.0.
   maintainer `@claude` comments, post a daily maintainer digest, and close issues left in
   `status:needs-info` for 14 days. CONTRIBUTING describes the flow and the AI-assisted
   contribution policy.
+- **`/onboard`**, a skill of its own again. It gets a machine, a repo and a
+  Snowflake account ready in four stages: check and prepare (one install
+  approval), one round of clickable questions, build after you confirm, then
+  the steps that wait on others. It explains every step as it goes, ends at
+  "ready to build and preview" or "ready to deploy", and is safe to re-run.
+- **The Snowflake admin step.** `/onboard` checks read-only whether the admin
+  objects exist ("not confirmed", never "missing"), runs `ci-key create` and
+  `deploy-setup --admin --public-key-file` into `.internal/admin-setup.sql`
+  (gitignored), then copies it for Snowsight or writes a note for your admin.
+  It never runs the admin SQL. Once confirmed it runs `ci-key push`.
+- **Wider Snowflake access detection:** MCP servers that are configured but not
+  connected, `SNOWFLAKE_*` variable names, legacy SnowSQL config, and
+  `SNOWFLAKE_DEFAULT_CONNECTION_NAME`, all by name only. `/onboard` can also
+  set up your `snow` connection for you, or guide you through it.
+- **Session start** points to `/onboard` when the plugin is enabled but the
+  repo isn't set up, and when this clone has no pre-commit hook.
+- `streamsnow new` prints the runtime-matched install command, and `/start-app`
+  runs it into the repo `.venv` (which `/onboard` creates) right after
+  scaffolding, so the first preview works.
+
+### Changed
+
+- **UI walkthroughs use the Playwright CLI** (`@playwright/cli`, pinned in
+  `skills/_shared/playwright-walkthrough.md`) instead of the bundled Playwright
+  MCP: nothing to start at session launch (the MCP's first download could
+  outlast the startup timeout), fewer tokens, and Codex can run it too when its
+  sandbox allows network. `/onboard` downloads the CLI and its browser ahead of
+  time. The repo `.gitignore` template ignores `.playwright-cli/`.
+
+### Removed
+
+- **`/start-app --setup` and `/start-app adopt`.** Use `/onboard`.
+  `/start-app` now hands off to `/onboard` by itself when the machine or repo
+  isn't ready. docs/migrating-a-consumer-repo.md maps the old names.
+- **`.mcp.json`** (the bundled Playwright MCP). Skills no longer use an MCP;
+  `/reload-plugins` drops the old server, and old `browser_*` tool approvals can
+  be deleted. Codex users get the new recipe on their next
+  `streamsnow agent-skills install`.
 
 ## [0.7.7] - 2026-10-05
 
