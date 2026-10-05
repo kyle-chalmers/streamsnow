@@ -26,8 +26,9 @@ def _secrets_dir(tmp_path: Path, **overrides: str) -> Path:
     d = tmp_path / "ci"
     (d / "secrets").mkdir(parents=True)
     # A regular file, not create()'s symlink: push must read either, and
-    # symlinks need privileges on Windows CI.
-    (d / "secrets" / ci_key.PRIVATE_KEY_SECRET).write_text(KEY, encoding="utf-8")
+    # symlinks need privileges on Windows CI. Bytes, so Windows text mode
+    # doesn't turn the PEM's \n into \r\n before the byte-for-byte check.
+    (d / "secrets" / ci_key.PRIVATE_KEY_SECRET).write_bytes(KEY.encode("utf-8"))
     for name, value in {**VALUES, **overrides}.items():
         (d / "secrets" / name).write_text(value, encoding="utf-8")
     return d
