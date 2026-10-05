@@ -5,6 +5,25 @@ All notable changes to StreamSnow are recorded here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- **`streamsnow ci-key push`** sets the five deploy secrets on GitHub from the
+  files `ci-key create` wrote. Each value goes to `gh secret set` on stdin,
+  never on the command line, and only names are printed. `SNOWFLAKE_ACCOUNT`
+  goes last, and a failure stops before it, so deploys never switch on with a
+  partial set. It checks `gh`, its sign-in, the target repo and every file
+  before setting anything.
+- **Key guard hook** (`hooks/secret_guard.py`, launched through cross-shell
+  `uv run` launcher). A `PreToolUse` guard that denies Claude's shell, file and
+  search tools any access to `~/.streamsnow-ci`, apart from `streamsnow ci-key
+  ...` and `streamsnow deploy-setup ...`. Covers PowerShell and Windows paths.
+  Not repo-gated, and it denies rather than asks.
+- **README: "What Claude can and can't see"**, before the install section, with
+  a secrets-flow diagram, and a matching "How StreamSnow handles secrets"
+  section in SECURITY.md. A test keeps the README's claims tied to the code.
+
+
+
 ### Changed
 
 - **The plugin's Python hooks launch through `uv`, not `python3`.** The deploy
@@ -26,6 +45,15 @@ All notable changes to StreamSnow are recorded here. This project follows
   status and stop now work there (psutil, installed on Windows only), and stop
   takes the whole process tree, since `streamlit.exe` is a launcher whose
   child process holds the port.
+
+- `ci-key create`'s closing steps point at `ci-key push` instead of a
+  `gh secret set` loop. docs/deploy-setup.md keeps the manual loop for anyone
+  who prefers it.
+- **`/start-app --setup` sets the deploy secrets with `ci-key push`.** Claude
+  runs `streamsnow ci-key create` and, once your admin has run the admin script,
+  `streamsnow ci-key push`, instead of setting values with `gh secret set
+  --body` and handing you the private key command.
+
 
 ### Fixed
 
