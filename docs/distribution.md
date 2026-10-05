@@ -70,7 +70,7 @@ is actually true today, so a team can decide with open eyes.
   [contributing guide](../CONTRIBUTING.md) says how.
 - **Release pinning.** Generated CI and deploy workflows install
   `streamsnow>=0.9,<0.10`, so a repo never takes a major silently. Stricter
-  shops pin exact (`streamsnow==0.9.0`) and bump on purpose.
+  shops pin exact (`streamsnow==0.9.1`) and bump on purpose.
 - **Rollback.** `uv tool install streamsnow==<previous>` and
   `streamsnow update --apply` re-render the governance files from that
   version's templates. Nothing StreamSnow writes is opaque.
