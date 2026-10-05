@@ -368,13 +368,28 @@
     },
     "sql-review": {
       "verbs": [
+        "bench",
         "check",
-        "generate"
+        "generate",
+        "log",
+        "probe",
+        "run"
       ],
       "arguments": [
+        "--connection",
         "--dir",
+        "--findings",
         "--format",
         "--lint-files",
+        "--metric",
+        "--page",
+        "--role",
+        "--run",
+        "--runs",
+        "--slow-s",
+        "--sql-file",
+        "--timeout",
+        "--warehouse",
         "slug"
       ]
     }
