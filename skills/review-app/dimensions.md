@@ -32,11 +32,11 @@ copy against [visualization-guide.md](../_shared/visualization-guide.md) and
 [streamlit-performance.md](../_shared/streamlit-performance.md). They are defaults, so ask whether
 a choice fits this audience and question, not whether it matches the guide. A departure is
 nice-to-have, should-fix when it misleads because it isn't disclosed (visualization-guide's
-"Departures to tell the reader about"), or when it breaks a house rule from the overlay. If a Playwright MCP is loaded, drive a
+"Departures to tell the reader about"), or when it breaks a house rule from the overlay. If the Playwright CLI is available (Node 20+), drive a
 live walkthrough per [_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md) to
 confirm visuals populate under default filters — a whole band of empty visuals under defaults is
 **critical**; a single intentional empty-state beside an `st.info`/`st.warning` is fine. Degrade
-silently to source-only when the MCP is absent.
+silently to source-only when the CLI is unavailable.
 
 ## Runtime / config
 

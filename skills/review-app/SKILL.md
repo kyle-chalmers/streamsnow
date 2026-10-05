@@ -66,7 +66,7 @@ can't catch.
 - The canonical static-gate escape: a `default=[]` multiselect rendering a whole band of empty
   visuals passes every check — only a live walkthrough catches it
   ([_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md), degrade silently
-  without the MCP). One intentional empty-state beside an `st.info` is fine.
+  without the CLI). One intentional empty-state beside an `st.info` is fine.
 
 ## Done when
 
