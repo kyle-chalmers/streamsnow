@@ -65,7 +65,7 @@ folder, comment rules, lint, and coverage. Every finding carries a ``kind``:
 ``readonly``    a page section is not read-only SQL
 ``bind``        a page section still holds a ``:bind`` or an undefined ``$variable``
 ``coverage``    a nav page or query file that index.yaml does not account for
-``advisory``    reported, never gates (comment density; a window anchored to today)
+``advisory``    reported, never gates (comment density over 25%)
 
 ``coverage`` follows ``sql_review.coverage`` in streamsnow.config.yaml (``warn``
 by default, ``fail`` to gate); ``advisory`` never fails; everything else always

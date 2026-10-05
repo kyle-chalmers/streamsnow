@@ -1,86 +1,86 @@
 ---
 name: validate-app
-description: The pass/fail check that must be clean before an app ships — runs `streamsnow validate-app <slug>` (required files, manifest, schema refs, security, bind predicates, caching, sql-tokens, session fallback, page imports, path leaks, the §11 build-state contract, plus the sql-review check of the app's sql_review/ page files, whose coverage severity follows sql_review.coverage in config) and explains how to fix anything that fails. Use when the user says "validate", "is this ready", "check my app", or before /ship-app.
+description: The pass/fail check that must be clean before an app ships. Runs `streamsnow validate-app <slug>` (required-files, manifest, artifacts, naming, schema-refs, app-security, bind-predicates, sql-tokens, session-fallback, page-imports, caching, path-leaks, the §11 requirements contract, the offline sql-review check of the app's sql_review/ files, whose coverage severity follows sql_review.coverage in config, and placeholders) and explains how to fix anything that fails. Use when the user says "validate", "is this ready", "check my app", or before /ship-app.
 argument-hint: "<slug>"
-allowed-tools: [Bash, Read]
+allowed-tools: [Bash, Read, Edit]
 ---
 
 # /validate-app
 
-> **Repo overlay:** if `.streamsnow/overlays/validate-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
+> **Repo overlay:** if `.streamsnow/overlays/validate-app.md` exists in this repo, read it first: committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
-Run the pass/fail check on one app and report exactly what fails and how to fix it.
-`streamsnow validate-app <slug>` is the single source of truth — it bundles the same checks the
-governance hooks and CI enforce. Fast local pre-flight; CI re-runs the authoritative version.
+Run the pass/fail gate on one app and report exactly what fails and how to fix it. `streamsnow
+validate-app <slug>` is the single source of truth: offline (no Snowflake, no network), deterministic,
+and what CI runs per app. CI also runs `dependency-vulns` and `tombstones`; pre-commit runs a subset.
 
 ## What it covers
 
-- **files / layout** — required files exist for the app's runtime; the slug is well-formed.
-- **schema-refs** — no references to denied schemas; at least one into an allowed schema.
-- **security** — no network egress, code execution, write SQL, or string-built SQL. Apps are
-  read-only by contract.
-- **bind-predicates** — none of the `:N IS NULL OR` deployed-driver trap.
-- **caching** — data-fetching functions carry `@st.cache_data(ttl=...)`.
-- **artifacts** — `snowflake.yml`'s `artifacts:` list matches the files on disk.
-- **sql-tokens** — no `{TOKEN}` placeholders inside SQL comments.
-- **session-fallback** — `get_active_session()` sits in a broad `try/except`.
-- **page-imports** — subdirectory helpers imported package-qualified, since only the app root is on
-  `sys.path` deployed. **A local boot and a full UI walkthrough cannot catch this** — that is the
-  whole reason it's static.
+Names as the gate prints them. How to fix each: [fixing-checks.md](fixing-checks.md).
+
+- **required-files, manifest, artifacts, naming:** the runtime's files exist, `snowflake.yml` is
+  valid for that runtime, its `artifacts:` list matches disk, and the slug is lowercase-hyphenated.
+- **schema-refs:** no reference into a `governance.schema_deny` schema (exact `read_exceptions` aside).
+- **app-security:** no network egress, code execution, write SQL or string-built SQL. Apps are
+  read-only by contract; maintained DDL in `sql_review/app_specific_reporting_objects/` is exempt.
+- **bind-predicates:** none of the `:N IS NULL OR` deployed-driver trap.
+- **sql-tokens:** no `{TOKEN}` placeholders inside SQL comments.
+- **session-fallback:** `get_active_session()` sits in a broad `try/except`.
+- **page-imports:** subdirectory helpers (`pages/_layout.py`, `pages/_data.py`) imported
+  package-qualified, since only the app root is on `sys.path` deployed. **A local boot and a full UI
+  walkthrough cannot catch this**, which is the whole reason it's static.
+- **caching:** data-fetching functions carry `@st.cache_data(ttl=...)`.
+- **path-leaks:** no personal home-directory paths in `.py` or `.md` files.
+- **requirements:** the §11 Build Progress block in `REQUIREMENTS.md` that `/build-app` resumes from.
+- **sql-review (coverage policy: warn|fail):** the offline `streamsnow sql-review check` of
+  `sql_review/`. Coverage gates only under `sql_review.coverage: fail`; `advisory` never gates.
+- **placeholders:** no scaffold `YOUR_TABLE` or starter sample block. A fresh scaffold fails it on purpose.
 
 ## Steps
 
 1. **Resolve the slug** (list `apps/*/` and ask if omitted).
-2. **Run it:** `streamsnow validate-app <slug>` — read its output, don't re-derive the checks
-   (`--format json` to parse programmatically).
-3. **PASS →** report per check and stop.
-4. **On FAIL,** re-run the matching focused check to get the exact file and line:
-   `streamsnow check schema-refs|security|caching|bind-predicates|artifacts|sql-tokens|session-fallback|page-imports apps/<slug>`
-   (files/layout, manifest, and naming failures have no sub-check — cite the path the validator named).
+2. **Run it:** `streamsnow validate-app <slug>`; read its output, don't re-derive the checks
+   (`--format json` to parse; match the sql-review entry by its `sql-review` name prefix).
+3. **PASS →** report per check. A `!` mark with `~` lines is a PASS carrying sql-review warnings
+   (uncovered pages or queries, advisories): report them, never call the app clean. `/build-app`
+   needs zero coverage warnings when its build phase ends.
+4. **On FAIL,** the gate already prints `file:line`, up to 10 per check. Past that, re-run the
+   focused check: `streamsnow check schema-refs|security|caching|bind-predicates|artifacts|sql-tokens|page-imports|path-leaks|requirements apps/<slug>`,
+   `streamsnow check session-fallback --all apps/<slug>`, or `streamsnow sql-review check <slug>`.
+   required-files, manifest, naming and placeholders have no sub-check: cite what the gate named.
 5. **Fix per [fixing-checks.md](fixing-checks.md):** apply only mechanical, unambiguous fixes;
    surface judgment calls to the user rather than guessing.
 6. **Re-run until PASS** (or the only remaining failures are documented human deferrals), then
    report a terse per-check summary.
 
-## Runtime changes "required files"
-
-Determine the runtime the way the checker does — from the app's own `snowflake.yml` (anchored
-`runtime_name:` key; config's top-level `runtime` is only the fallback). Container expects
-`pyproject.toml`; warehouse expects `environment.yml`; the file check fails on the wrong one (or
-both). A common false alarm is judging a container app against warehouse expectations — see
-[_shared/runtime-decision.md](../_shared/runtime-decision.md).
-
 ## Gotchas
 
-- **Per-app and deterministic:** it catches contract violations, not slow SQL, awkward UI, or spec
-  drift — that's `/review-app`.
+- **Per-app, deterministic, offline:** it catches contract violations, not slow SQL, wrong numbers
+  or awkward UI. Quality is `/review-app`; numbers against live Snowflake are `/sql-review`.
 - **Never "fix" by weakening governance.** Editing the deny list, deleting a check, or
   string-escaping past the dynamic-SQL rule is a regression. Route through allowed schemas,
   parameterize, or remove the capability.
-- **Local PASS is necessary, not final** — CI is authoritative and re-runs after push.
-- **A focused check can pass while the aggregate fails** — the aggregate also enforces files/layout
-  and slug naming. Trust the aggregate for the verdict.
+- **Local PASS is necessary, not final:** CI is authoritative and re-runs after push.
+- **Trust the aggregate for the verdict.** A focused check can pass while the gate fails: four checks
+  exist only in the gate, `session-fallback` defaults to new calls only, and `sql-review check`
+  reads the coverage policy from the repo's config rather than `--config`.
 
 ## Troubleshooting
 
-- **"app not found"** — the slug must be a directory under `apps/`; run from the repo root or pass
-  `--dir`. An ungoverned repo is an `/onboard` problem, not a validate problem.
-- **Config not at the root** — pass `--config <path>`.
-- **Schema looks allowed but fails** — compare against the exact `governance.schema_allow` /
-  `schema_deny` / `governance.database` values; a fully-qualified name resolving into a denied
-  schema still trips it.
-- **Checks disagree with reality after a config change** — re-render governed files with
-  `streamsnow update --apply`, then re-run.
+- **`no app at apps/<slug>` (exit 2):** the slug must be a directory under `apps/`; run from the
+  repo root or pass `--dir` (and `--config <path>` when the config is elsewhere). An ungoverned
+  repo is an `/onboard` problem, not a validate problem.
+- **Schema looks allowed but fails:** only `governance.schema_deny` and exact `read_exceptions`
+  count; a fully-qualified name resolving into a denied schema still trips it.
+- **Checks disagree with reality after a config change:** the gate reads config live, so re-run it.
 
 ## Optional UI smoke
 
-The static check can't see a page that fails to render. Complement (never substitute) with a
-browser walkthrough per [_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md).
-The reverse also holds: a clean walkthrough is not evidence against `page-imports`, which flags
-exactly the class of bug a walkthrough is blind to. Never wave a check off because the app ran.
+The gate can't see a page that fails to render: add (never substitute) a walkthrough per
+[_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md). A clean walkthrough is no evidence against `page-imports`.
 
 ## Done when
 
-`streamsnow validate-app <slug>` exits PASS on every check, or each remaining FAIL is handed back
-with a specific, named reason. Hand-offs: quality depth → /review-app; see it render → /preview-app;
-PASS → /ship-app.
+The gate exits PASS on every check, or each remaining FAIL is handed back with a specific, named
+reason. Hand-offs: a sql-review fix that needs real sample values or new `index.yaml` entries →
+`/sql-review <slug> --offline` (inside `/build-app`, its build step owns `index.yaml`); quality depth →
+/review-app; see it render → /preview-app; PASS → /ship-app, or back to `/build-app` when it called.

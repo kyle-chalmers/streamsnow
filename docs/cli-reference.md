@@ -70,15 +70,17 @@ All `preview` verbs take `--dir` and `--json`.
 ## validate-app
 
 `streamsnow validate-app <slug>` is the deterministic ship gate: PASS or FAIL for one
-app. Flags: `--dir`, `--config`, `--format md|json`. JSON is
-`{"app", "runtime", "ok", "checks": [{"name", "ok", "findings"}]}`. It runs, in order:
+app, offline (no Snowflake, no network). Flags: `--dir`, `--config`, `--format md|json`.
+JSON is `{"app", "runtime", "ok", "checks": [{"name", "ok", "findings"}]}`; the sql-review
+entry also carries `warnings` (coverage under `warn`, and advisories), and the
+`required-files`, `manifest` and `naming` findings are plain strings. It runs, in order:
 
 | Step | What fails it |
 |---|---|
 | `required-files` | A file every app needs is missing |
-| `manifest` | `snowflake.yml` is invalid or disagrees with the config |
+| `manifest` | `snowflake.yml` is invalid or disagrees with the config; `pyproject.toml` (container) or `environment.yml` (warehouse) lacks required content, or `environment.yml` pins `python` |
 | `artifacts` | `snowflake.yml` `artifacts:` disagrees with the files on disk |
-| `naming` | The slug is not `<domain>-<function>` kebab-case |
+| `naming` | The slug does not match `^[a-z][a-z0-9-]*$` |
 | `schema-refs` | A query or SQL string names a denied schema |
 | `app-security` | Egress, code execution, write SQL or dynamic SQL in app code (the `check security` rules) |
 | `bind-predicates` | The `:N IS NULL OR` bind trap |
@@ -88,7 +90,7 @@ app. Flags: `--dir`, `--config`, `--format md|json`. JSON is
 | `caching` | A data-fetching function without `@st.cache_data(ttl=...)` |
 | `path-leaks` | A personal absolute path in committed code or docs |
 | `requirements` | `REQUIREMENTS.md` §11 build state is malformed (see the `check requirements` row below) |
-| `sql-review (coverage policy: warn\|fail)` | SQL review drift, hand edits, marker mismatches or lint; uncovered pages fail only under `fail` |
+| `sql-review (coverage policy: warn\|fail)` | The `sql-review check` finding kinds `index`, `provenance`, `marker`, `objects`, `lint`, `comments`, `readonly` and `bind`; uncovered pages or queries (`coverage`) fail only under `fail` |
 | `placeholders` | The starter's `YOUR_TABLE` or sample numbers are still there |
 
 A freshly scaffolded app **fails** `placeholders` on purpose until you repoint the
@@ -104,7 +106,7 @@ extra keys listed below.
 | Check | Blocks | Extra flags | Extra JSON keys |
 |---|---|---|---|
 | `schema-refs` | References to denied schemas (`governance.schema_deny`, minus exact `read_exceptions`) | `--config` | |
-| `security` | Egress, code execution, write SQL, dynamic SQL in app code | | |
+| `security` | Egress, code execution, write SQL, dynamic SQL in app code. A DDL file directly in an app's `sql_review/app_specific_reporting_objects/` may use `CREATE`, `ALTER` and `GRANT` | | |
 | `caching` | Data-fetching functions without `@st.cache_data(ttl=...)` | | |
 | `bind-predicates` | The `:N IS NULL OR` Go-driver bind trap | | |
 | `sql-tokens` | `{TOKEN}` placeholders inside SQL comments (`render_sql` would substitute them) | | |
@@ -126,7 +128,7 @@ everything; `validate-app` always scans the whole app.
 | Command | What it does |
 |---|---|
 | `streamsnow sql-review generate <slug>` | Writes one runnable file per page, `sql_review/NN_<page>.sql`, from `sql_review/index.yaml`. `--dir`. |
-| `streamsnow sql-review check [<slug>]` | Fails on drift, hand edits, `review_value` marker mismatches and lint; uncovered pages or queries fail or warn per `sql_review.coverage`. No slug checks every app. `--dir`, `--format md\|json`, `--lint-files <file>...` (lint only these; pre-commit passes the staged files). |
+| `streamsnow sql-review check [<slug>]` | Fails on an invalid index, drift or hand edits, `review_value` marker mismatches, DDL folder disagreements, lint, missing CTE comments, and sections that would write or don't run; uncovered pages or queries fail or warn per `sql_review.coverage`. No slug checks every app. `--dir`, `--format md\|json`, `--lint-files <file>...` (lint only these; pre-commit passes the staged files). |
 
 The live review (the `/sql-review` skill drives these; each needs a `snow` connection):
 

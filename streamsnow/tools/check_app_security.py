@@ -36,14 +36,17 @@ Detection
   and quoted string literals, the file is split on ``;`` and each statement's
   leading keyword is checked against :data:`WRITE_KEYWORDS`. String literals are
   masked first, so ``WHERE status = 'DELETED'`` never trips the guard, and a
-  write verb is only flagged when it is statement-initial.
+  write verb is only flagged when it is statement-initial. Maintained DDL directly
+  in an app's ``sql_review/app_specific_reporting_objects/`` may use ``CREATE``,
+  ``ALTER`` and ``GRANT`` (see :func:`_is_maintained_ddl`).
 
 Waivers
 =======
 
-- ``# noqa: <kind>`` on (or spanning) the offending line suppresses a finding of
-  that kind (e.g. ``# noqa: dynamic-sql`` on a provably server-controlled
-  metadata command).
+- ``# noqa: dynamic-sql`` on (or spanning) the offending line suppresses that
+  one kind (a provably server-controlled metadata command). It is the only
+  ``noqa`` this check honors: egress, code-exec and write-sql are never waivable,
+  since a self-service waiver there would be a security bypass.
 - The narrow Snowflake Cortex Analyst REST exception: a bare ``import requests``
   carrying a trailing ``# snowflake-cortex-rest`` comment is **not** flagged as
   egress (the container-runtime Cortex Analyst client). General ``requests``
@@ -59,6 +62,8 @@ import ast
 import json
 import re
 from pathlib import Path
+
+from .sql_review import OBJECTS_DIR
 
 # --------------------------------------------------------------------------- #
 # Denylists (universal Python/SQL security primitives — not org schema policy) #
@@ -559,7 +564,7 @@ def _scan_python(path: Path) -> list[dict]:
     return findings
 
 
-def _scan_sql(path: Path) -> list[dict]:
+def _scan_sql(path: Path, allowed: frozenset[str] = frozenset()) -> list[dict]:
     try:
         text = path.read_text(errors="ignore", encoding="utf-8")
     except OSError:
@@ -572,6 +577,7 @@ def _scan_sql(path: Path) -> list[dict]:
             "detail": f"statement begins with {kw}",
         }
         for lineno, kw in _scan_sql_text(text)
+        if kw not in allowed
     ]
 
 
@@ -652,6 +658,38 @@ def _iter_files(root: Path) -> list[Path]:
     return sorted(out)
 
 
+# What a maintained DDL file may begin a statement with: defining the object and
+# granting it to the app's role. Anything else (DELETE, DROP, TRUNCATE, ...) is
+# still a write finding inside that folder.
+_DDL_VERBS: frozenset[str] = frozenset({"CREATE", "ALTER", "GRANT"})
+
+
+def _is_maintained_ddl(path: Path) -> bool:
+    """True for a file directly in an app's ``sql_review/app_specific_reporting_objects/``.
+
+    Those files exist to hold ``CREATE`` statements: the maintained definition of
+    a view or table the app reads. A human applies them; no StreamSnow command
+    executes them (``sql-review probe`` only reads them to compare against the
+    live ``GET_DDL``), and ``sql-review check`` validates each one (the ``objects``
+    kind). Scanning them as app code made every app that declared an object fail
+    ``validate-app`` and the pre-commit hook on its own DDL.
+
+    The scope is exactly what ``sql-review`` validates: a direct child of that
+    folder in an app root, which is ``apps/<slug>/`` holding a ``snowflake.yml``.
+    A look-alike folder deeper in the app (even beside a planted manifest), or a
+    subfolder of it, is scanned like any other SQL, and inside the folder only
+    :data:`_DDL_VERBS` are allowed.
+    """
+    folder = path.parent
+    app_root = folder.parent.parent
+    return (
+        folder.name == OBJECTS_DIR
+        and folder.parent.name == "sql_review"
+        and app_root.parent.name == "apps"
+        and (app_root / "snowflake.yml").is_file()
+    )
+
+
 def scan_paths(paths: list[Path], root: Path | None = None) -> dict:
     findings: list[dict] = []
     for p in paths:
@@ -664,7 +702,7 @@ def scan_paths(paths: list[Path], root: Path | None = None) -> dict:
         if p.suffix == ".py":
             findings.extend(_scan_python(p))
         elif p.suffix == ".sql":
-            findings.extend(_scan_sql(p))
+            findings.extend(_scan_sql(p, _DDL_VERBS if _is_maintained_ddl(p) else frozenset()))
     return {"ok": not findings, "findings": findings}
 
 
