@@ -1,5 +1,8 @@
 """Live SQL review: ``probe``, ``run``, ``bench`` and ``log`` against Snowflake.
 
+(``compare``, which holds the screen to ``run`` without a connection, lives
+in ``sql_review_compare``.)
+
 Why this exists
 ---------------
 ``sql-review check`` proves the committed review SQL matches what the app runs.
@@ -33,12 +36,15 @@ Each review is one run: ``.streamsnow/sql-review/<slug>/<run_id>/`` with
 whether the app's files had uncommitted changes, and the connection, role and
 warehouse the session actually used. Verbs write ``probe.json``,
 ``run-NN.json`` (one per page, so parallel page reviewers never write the same
-file) and ``bench-NN-N.json``. The folder holds only aggregates, and a
+file) and ``bench-NN-N.json``; ``compare`` adds ``compare.json``, from the
+review preview captures in ``capture/`` and the browser walk's
+``screen.json`` (agent-written, so it never holds a citable id). The folder
+holds only aggregates, and a
 ``.gitignore`` of ``*`` keeps it out of commits even in repos whose root
 ``.gitignore`` predates it. The committed record is the review log.
 
-Headline contract (phase 3 compares the screen against it)
------------------------------------------------------------
+Headline contract (``compare`` holds the screen to it)
+-----------------------------------------------------
 For each section ``run`` reports ``rows`` (the row count) and ``totals``:
 ``{COLUMN: decimal string | null}`` for every numeric column (``NUMBER`` and
 its aliases, ``FLOAT``/``DOUBLE``/``REAL``, ``DECFLOAT``), keyed by the column
@@ -67,6 +73,7 @@ import argparse
 import contextlib
 import datetime as _dt
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -1310,6 +1317,7 @@ def render_log(run_dir: Path, app: Path, index: sri.Index, findings: list[dict],
         for r in read_json(path).get("results", []):
             run_results[r.get("id", "")] = r
     probe = read_json(run_dir / "probe.json") if (run_dir / "probe.json").is_file() else {}
+    screen = _screen_cells(run_dir)
     sha = str(meta.get("commit") or "")[:7]
     dirty = " (the app had uncommitted changes when it ran)" if meta.get("dirty") else ""
     secondary = _secondary(session.get("secondary_roles"))
@@ -1330,6 +1338,15 @@ def render_log(run_dir: Path, app: Path, index: sri.Index, findings: list[dict],
         "Totals are shown only for a single all-numeric row or for results of "
         f"{MIN_ROWS_FOR_TOTALS} rows or more. No row-level data is recorded.",
         "",
+        *(
+            [
+                "Screen match holds what each visual received in review preview mode to the "
+                "run: within 0.5% or the displayed rounding, integers exactly.",
+                "",
+            ]
+            if screen
+            else []
+        ),
         "## Pages",
         "",
     ]
@@ -1350,8 +1367,10 @@ def render_log(run_dir: Path, app: Path, index: sri.Index, findings: list[dict],
             status = r.get("status", "not run")
             rows = r.get("rows") if r.get("rows") is not None else "—"
             ids = ", ".join(by_metric.get((nn, metric.key), [])) or "—"
+            match = screen.get(f"compare:{nn}#{metric.number}", "n/a")
             lines.append(
-                f"| {metric.number} `{metric.key}` | {status} | {rows} | {headline(r)} | n/a | {ids} |"
+                f"| {metric.number} `{metric.key}` | {status} | {rows} | {headline(r)} "
+                f"| {match} | {ids} |"
             )
         lines.append("")
     objs = [r for r in probe.get("results", []) if r.get("object")]
@@ -1396,6 +1415,47 @@ def render_log(run_dir: Path, app: Path, index: sri.Index, findings: list[dict],
         "",
     ]
     return "\n".join(lines)
+
+
+_SCREEN_WORDS = {
+    "match": "match",
+    "mismatch": "mismatch",
+    "not_captured": "not captured",
+    "unsupported": "unsupported",
+}
+
+
+def run_digest(path: Path) -> str | None:
+    """Fingerprint of a ``run-NN.json``: tells a compare made from it from a stale one."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:16] if path.is_file() else None
+
+
+def _compare_results(run_dir: Path) -> dict | None:
+    from .sql_review_compare import COMPARE_FILE  # noqa: PLC0415
+
+    path = run_dir / COMPARE_FILE
+    return read_json(path) if path.is_file() else None
+
+
+def _screen_cells(run_dir: Path) -> dict[str, str]:
+    """``compare:NN#n`` -> its Screen match cell: a status word, never a value.
+
+    A page whose ``run-NN.json`` changed after the compare (a reviewer re-ran
+    it) is ``stale``: its comparison no longer describes these results. The
+    browser walk never shows here; it is a cross-check, not evidence.
+    """
+    data = _compare_results(run_dir)
+    if data is None:
+        return {}
+    digests = data.get("run_digests") or {}
+    cells: dict[str, str] = {}
+    for r in data.get("results", []):
+        page = str(r.get("page"))
+        if digests.get(page) != run_digest(run_dir / f"run-{page}.json"):
+            cells[str(r.get("id"))] = "stale"
+        else:
+            cells[str(r.get("id"))] = _SCREEN_WORDS.get(str(r.get("status")), "n/a")
+    return cells
 
 
 def _leaks(text: str) -> list[str]:
@@ -1487,9 +1547,29 @@ def cmd_log(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
             )
         )
         return 1
+    # Screen mismatches are candidate findings for the page reviewers, never
+    # logged on their own: name the ones no kept finding cites.
+    cited = {e for f in findings for e in f["evidence"]}
+    cells = _screen_cells(run_dir)
+    uncited = [
+        r["id"]
+        for r in (_compare_results(run_dir) or {}).get("results", [])
+        if r.get("status") == "mismatch"
+        and r.get("id") not in cited
+        and cells.get(str(r.get("id"))) != "stale"
+    ]
     if getattr(args, "dry_run", False):
         print(
-            json.dumps({"ok": True, "run_id": run_dir.name, "dry_run": True, "log": text}, indent=2)
+            json.dumps(
+                {
+                    "ok": True,
+                    "run_id": run_dir.name,
+                    "dry_run": True,
+                    "screen_mismatches_uncited": uncited,
+                    "log": text,
+                },
+                indent=2,
+            )
         )
         return 0
     sha = str(read_json(run_dir / META).get("commit") or "0" * 7)[:7]
@@ -1503,7 +1583,18 @@ def cmd_log(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
         if updated != current:
             sr._write(readme, updated)
     rel = sr._rel(app, "sql_review", REVIEW_LOG_DIR, path.name)
-    print(json.dumps({"ok": True, "run_id": run_dir.name, "log": rel, "counts": counts}, indent=2))
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "run_id": run_dir.name,
+                "log": rel,
+                "counts": counts,
+                "screen_mismatches_uncited": uncited,
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -1511,7 +1602,19 @@ def cmd_log(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
 # CLI dispatch (the parsers live in sql_review._build_parser, where the
 # CLI-surface snapshot reads them)
 # --------------------------------------------------------------------------- #
-LIVE_COMMANDS = {"probe": cmd_probe, "run": cmd_run, "bench": cmd_bench, "log": cmd_log}
+def _cmd_compare(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
+    from . import sql_review_compare as cmp  # noqa: PLC0415  (it imports this module)
+
+    return cmp.cmd_compare(args, runner)
+
+
+LIVE_COMMANDS = {
+    "probe": cmd_probe,
+    "run": cmd_run,
+    "bench": cmd_bench,
+    "compare": _cmd_compare,
+    "log": cmd_log,
+}
 
 
 def dispatch(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:

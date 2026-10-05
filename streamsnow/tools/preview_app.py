@@ -4,8 +4,9 @@
 scripts that need to launch an app, walk its pages, and tear it down. This tool
 owns the whole lifecycle so callers never hand-roll ``nohup``/PID bookkeeping:
 
-    start <slug> [--port N] [--dir REPO] [--timeout SECS]
-        Verify the entrypoint exists and the port is free, launch
+    start <slug> [--port N] [--review-capture DIR] [--dir REPO] [--timeout SECS]
+        Verify the entrypoint exists and the port is free (``--port 0`` picks
+        any free one), launch
         ``streamlit run`` detached with output captured to a log file, then
         poll ``http://127.0.0.1:<port>/_stcore/health`` until it answers 200
         or the timeout expires. On timeout (or early process death) the
@@ -15,6 +16,14 @@ owns the whole lifecycle so callers never hand-roll ``nohup``/PID bookkeeping:
         hint instead of a raw traceback. A key-pair connection whose key the
         Python connector cannot load is classified too, but it only fails on
         the first page load, so it surfaces through ``logs``.
+
+        ``--review-capture DIR`` is review preview mode for ``/sql-review``:
+        the app's ``review_value`` calls record what each visual received
+        (aggregates, never rows) as JSON in DIR, which ``streamsnow sql-review
+        compare`` holds against the reviewed SQL. The flag reaches only this
+        child process; a normal preview strips it, so a stray shell export
+        never turns capture on. A preview already running with a different
+        capture setting is reported (``capture_mismatch``), never reused.
 
     status <slug> [--dir REPO]
         Running / not-running plus a live health probe. Stale state (the
@@ -80,6 +89,8 @@ from typing import Any
 
 _WINDOWS = sys.platform == "win32"
 _DEFAULT_PORT = 8501
+#: Read once by the scaffolded apps/<slug>/review.py; set only here.
+REVIEW_CAPTURE_ENV = "STREAMSNOW_REVIEW_CAPTURE"
 _DEFAULT_TIMEOUT = 60.0
 _STOP_GRACE_SECONDS = 5.0
 
@@ -493,13 +504,16 @@ def _kill(pid: int, grace: float = _STOP_GRACE_SECONDS) -> bool:
     return not _pid_alive(pid)
 
 
-def _launch_detached(cmd: list[str], log_fh: Any, cwd: Path) -> subprocess.Popen:
+def _launch_detached(
+    cmd: list[str], log_fh: Any, cwd: Path, env: dict[str, str] | None = None
+) -> subprocess.Popen:
     """Start the preview so it outlives this CLI and can be stopped as a unit."""
     common: dict[str, Any] = {
         "stdout": log_fh,
         "stderr": subprocess.STDOUT,
         "stdin": subprocess.DEVNULL,
         "cwd": cwd,
+        "env": env,
     }
     if not _WINDOWS:
         # detach: survives this CLI's exit; killable as a group
@@ -513,6 +527,51 @@ def _launch_detached(cmd: list[str], log_fh: Any, cwd: Path) -> subprocess.Popen
         )
     except PermissionError:  # the job forbids breakaway
         return subprocess.Popen(cmd, creationflags=flags, **common)  # noqa: S603
+
+
+def _free_port() -> int:
+    """A port nothing listens on right now (``--port 0``)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _capture_dir(repo: Path, raw: str | None) -> Path | None:
+    """``--review-capture``: absolute, relative to the repo, created, git-ignored.
+
+    Inside the run directory the sql-review ``.gitignore`` already applies; a
+    folder anywhere else gets its own, since captures are review evidence.
+    """
+    if raw is None:
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = repo / path
+    path = path.resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    runs = (repo / ".streamsnow" / "sql-review").resolve()
+    if not path.is_relative_to(runs) and not (path / ".gitignore").exists():
+        (path / ".gitignore").write_text(
+            "# streamsnow review capture: aggregates only, never committed.\n*\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    return path
+
+
+def _same_capture(a: str | None, b: str | None) -> bool:
+    if a is None or b is None:
+        return a is b
+    return os.path.normcase(str(Path(a).resolve())) == os.path.normcase(str(Path(b).resolve()))
+
+
+def _child_env(capture: Path | None) -> dict[str, str]:
+    """The child's environment, always explicit and all ``str`` (Windows refuses
+    a Path): capture on only when asked for, never inherited from the shell."""
+    env = {k: v for k, v in os.environ.items() if k != REVIEW_CAPTURE_ENV}
+    if capture is not None:
+        env[REVIEW_CAPTURE_ENV] = str(capture)
+    return env
 
 
 def _emit(payload: dict[str, Any], as_json: bool) -> None:
@@ -532,11 +591,36 @@ def cmd_start(args: argparse.Namespace) -> int:
     if not entrypoint.is_file():
         _emit({"status": "error", "message": f"error: {entrypoint} not found"}, args.json)
         return 2
+    if not 0 <= args.port <= 65535:
+        _emit(
+            {"status": "error", "message": f"error: --port {args.port} is not 0-65535"}, args.json
+        )
+        return 2
+    capture = _capture_dir(repo, args.review_capture)
+    wanted = str(capture) if capture else None
 
-    # A live previous preview is fine — report it instead of double-launching.
+    # A live previous preview is fine — report it instead of double-launching,
+    # unless it captures differently than asked (review mode must not silently
+    # reuse a preview that records nothing, or one that records elsewhere).
     state = _read_state(repo, slug)
     if state and _state_owns_pid(state):
         port = int(state.get("port", 0))
+        running = state.get("review_capture")
+        if not _same_capture(running, wanted):
+            _emit(
+                {
+                    "status": "capture_mismatch",
+                    "pid": state["pid"],
+                    "port": port,
+                    "review_capture": running,
+                    "requested_capture": wanted,
+                    "message": f"error: {slug} is already running (pid {state['pid']}, port "
+                    f"{port}) with review capture {running or 'off'}, not "
+                    f"{wanted or 'off'}; run `streamsnow preview stop {slug}` first",
+                },
+                args.json,
+            )
+            return 1
         healthy = probe_health(port)
         _emit(
             {
@@ -545,6 +629,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 "port": port,
                 "url": f"http://127.0.0.1:{port}",
                 "healthy": healthy,
+                "review_capture": running,
                 "message": f"{slug} already running (pid {state['pid']}, port {port}, "
                 f"{'healthy' if healthy else 'not yet healthy'})",
             },
@@ -552,13 +637,14 @@ def cmd_start(args: argparse.Namespace) -> int:
         )
         return 0
 
-    if _port_in_use(args.port):
+    port = _free_port() if args.port == 0 else args.port
+    if _port_in_use(port):
         _emit(
             {
                 "status": "port_in_use",
-                "port": args.port,
-                "message": f"error: port {args.port} is already in use — stop the process "
-                f"holding it or pass --port with a free one",
+                "port": port,
+                "message": f"error: port {port} is already in use — stop the process "
+                f"holding it or pass --port with a free one (0 picks one)",
             },
             args.json,
         )
@@ -567,11 +653,39 @@ def cmd_start(args: argparse.Namespace) -> int:
     state_dir = _state_dir(repo)
     state_dir.mkdir(parents=True, exist_ok=True)
     log_path = _log_path(repo, slug)
+    # --port 0 can lose the free port to another process before Streamlit binds
+    # it; one retry on a fresh port covers that race.
+    attempts = 2 if args.port == 0 else 1
+    for attempt in range(attempts):
+        retry_port = attempt < attempts - 1
+        outcome = _launch_and_wait(args, repo, entrypoint, port, log_path, capture, retry_port)
+        if outcome is None:
+            return 0
+        if outcome == "tool_error":
+            return 2
+        if outcome != "port_in_use" or not retry_port:
+            return 1
+        port = _free_port()
+    return 1
 
-    cmd = build_command(entrypoint, args.port)
+
+def _launch_and_wait(
+    args: argparse.Namespace,
+    repo: Path,
+    entrypoint: Path,
+    port: int,
+    log_path: Path,
+    capture: Path | None,
+    retry_port: bool,
+) -> str | None:
+    """Launch on ``port`` and wait for health. None when serving; otherwise the
+    failure's classification (reported, except a ``port_in_use`` the caller
+    will retry) or ``tool_error``."""
+    slug = args.slug
+    cmd = build_command(entrypoint, port)
     try:
         with log_path.open("wb") as log_fh:
-            proc = _launch_detached(cmd, log_fh, repo)
+            proc = _launch_detached(cmd, log_fh, repo, _child_env(capture))
     except FileNotFoundError:
         _emit(
             {
@@ -583,19 +697,20 @@ def cmd_start(args: argparse.Namespace) -> int:
             },
             args.json,
         )
-        return 2
+        return "tool_error"
 
     _state_path(repo, slug).write_text(
         json.dumps(
             {
                 "slug": slug,
                 "pid": proc.pid,
-                "port": args.port,
+                "port": port,
                 "log": str(log_path),
                 "entrypoint": str(entrypoint),
                 # Recorded so stop/status can verify the PID still belongs to
                 # this launch before signaling it (PID reuse — _state_owns_pid).
                 "cmd": cmd,
+                "review_capture": str(capture) if capture else None,
                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             },
             indent=2,
@@ -609,20 +724,22 @@ def cmd_start(args: argparse.Namespace) -> int:
         if proc.poll() is not None:
             died = True  # no point polling a corpse's port
             break
-        if probe_health(args.port):
+        if probe_health(port):
             _emit(
                 {
                     "status": "ready",
                     "pid": proc.pid,
-                    "port": args.port,
-                    "url": f"http://127.0.0.1:{args.port}",
+                    "port": port,
+                    "url": f"http://127.0.0.1:{port}",
                     "log": str(log_path),
-                    "message": f"{slug} serving at http://127.0.0.1:{args.port} "
-                    f"(pid {proc.pid}, log {log_path})",
+                    "review_capture": str(capture) if capture else None,
+                    "message": f"{slug} serving at http://127.0.0.1:{port} "
+                    f"(pid {proc.pid}, log {log_path})"
+                    + (f", capturing review values to {capture}" if capture else ""),
                 },
                 args.json,
             )
-            return 0
+            return None
         time.sleep(args.poll_interval)
 
     # Timed out or the process died: kill, clean state, classify the log tail.
@@ -631,6 +748,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     _state_path(repo, slug).unlink(missing_ok=True)
     tail = "\n".join(tail_lines(log_path, 100))
     classified = classify_log(tail)
+    if retry_port and classified["status"] == "port_in_use":
+        return "port_in_use"
     reason = "process exited during startup" if died else f"not healthy after {args.timeout:g}s"
     lines = [f"error: {slug} failed to start ({reason})"]
     if classified["status"] != "unknown":
@@ -649,7 +768,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         },
         args.json,
     )
-    return 1
+    return classified["status"]
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -683,6 +802,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             "url": f"http://127.0.0.1:{port}",
             "healthy": healthy,
             "log": state.get("log", ""),
+            "review_capture": state.get("review_capture"),
             "message": f"{slug}: running (pid {pid}, port {port}, "
             f"{'healthy' if healthy else 'health probe failed'})",
         },
@@ -763,7 +883,19 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("start", help="launch streamlit detached and wait for health")
     common(p)
-    p.add_argument("--port", type=int, default=_DEFAULT_PORT)
+    p.add_argument(
+        "--port",
+        type=int,
+        default=_DEFAULT_PORT,
+        help=f"Port to serve on (default {_DEFAULT_PORT}; 0 picks any free port).",
+    )
+    p.add_argument(
+        "--review-capture",
+        default=None,
+        metavar="DIR",
+        help="Review preview mode for /sql-review: review_value records what each visual "
+        "received (aggregates only) in DIR, relative to --dir.",
+    )
     p.add_argument(
         "--timeout",
         type=float,

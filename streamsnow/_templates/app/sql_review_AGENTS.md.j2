@@ -56,7 +56,8 @@ Data notes (grain, definitions, quirks, freshness) live in `../AGENTS.md`, not h
   index, provenance, markers, objects, sqlfluff lint of `../queries/*.sql`, comment rules.
 - Lint settings are the repo's `.sqlfluff`.
 - `/sql-review {{ app_slug }}` runs the live review against Snowflake: `streamsnow sql-review
-  probe`, `run`, `bench` and `log`. Their evidence stays local under `.streamsnow/sql-review/`.
+  probe`, `run`, `bench`, `compare` (the screen against `run`, from review preview mode) and
+  `log`. Their evidence stays local under `.streamsnow/sql-review/`.
 
 ## Review log (review_log/)
 

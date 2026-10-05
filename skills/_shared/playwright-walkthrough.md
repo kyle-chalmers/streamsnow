@@ -2,7 +2,7 @@
 
 Purpose: drive a browser smoke walk, with the Playwright CLI, of every page in a running StreamSnow app, capturing a screenshot and console errors per page, with the `Data as of:` caption (or app-loaded state) as the success sentinel. This is a recipe other skills read and follow — not an invocable skill.
 
-Consumed by: /validate-app and /preview-app (their optional UI-smoke sections), /review-app (incl. `--auto`), /build-app (verify phase and `--feedback`).
+Consumed by: /validate-app and /preview-app (their optional UI-smoke sections), /review-app (incl. `--auto`), /build-app (verify phase and `--feedback`), /sql-review (the review variant below).
 
 Pinned version: `@playwright/cli@0.1.22`. This is the only place the version is written; every
 other mention says "the pinned version in _shared/playwright-walkthrough.md". Below, `P` means
@@ -66,6 +66,24 @@ Write `apps/<slug>/.review/walkthrough-<ts>/report.md` (gitignored) and return a
 - Per page: `ok` | `console-errors` | `render-error` | `empty` | `timeout`, plus screenshot path.
 - Aggregate: pages walked, pages with issues, total console errors.
 - Any finding here is **advisory/qualitative** — it informs /review-app judgment; it does NOT override `streamsnow validate-app`, which remains the deterministic PASS/FAIL ship gate. A walkthrough issue never flips validate to FAIL on its own.
+
+## Review variant (/sql-review)
+
+/sql-review's screen step ([sql-review/screen.md](../sql-review/screen.md)) walks a preview that
+was started with `--review-capture`. Steps 1 to 5 apply, with these differences:
+
+- `D` is `<run_dir>/walk/` (`<run_dir>` = `.streamsnow/sql-review/<slug>/<run_id>`), not
+  `apps/<slug>/.review/`, and you delete `D` after `close`: the CLI's own `.playwright-cli/`
+  snapshots there hold cell text, which must not outlive the walk.
+- Never touch a widget, and take no screenshots: the page must render at its default filters,
+  and a screenshot is a copy of the data.
+- The `Data as of:` caption renders before the data does. After it, also wait for the page's
+  script run to finish: `P S run-code "async page => { await page.locator('[data-test-script-state=notRunning]').waitFor({ timeout: 60000 }); }"`.
+  Then run screen.md's snippet once, from the file screen.md says to save it in:
+  `P S eval "$(cat D/snippet.js)"`.
+  It returns counts and displayed numbers only. Write the readings to `<run_dir>/screen.json`
+  as screen.md says, and never repeat them in chat.
+- The report is `ok` or `timeout` per page; there is no `report.md`.
 
 ## Notes
 
