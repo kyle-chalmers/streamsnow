@@ -445,6 +445,18 @@ def test_probe_missing_direct_grant_is_a_warning_not_a_failure(
     assert grants["status"] == "warn" and grants["missing_direct"] == ["STREAMSNOW_DEPLOY_ROLE"]
 
 
+def test_probe_a_grant_to_public_reaches_every_role(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Every role inherits PUBLIC: shared sample data is readable through it alone."""
+    fake = FakeSnow()
+    fake.grants["REGION_ROLLUP"] = ["PUBLIC"]
+    assert _live(repo, fake, "probe") == 0
+    grants = {r["id"]: r for r in _out(capsys)["results"]}[f"probe:{ROLLUP}"]["grants"]
+    assert grants["status"] == "pass"
+    assert grants["via_public"] is True
+
+
 # --------------------------------------------------------------------------- #
 # bench
 # --------------------------------------------------------------------------- #
