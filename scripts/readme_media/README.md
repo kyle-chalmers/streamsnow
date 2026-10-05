@@ -11,6 +11,7 @@ the hand-authored logo), so rerun them when the CLI output or the dashboard chan
 | `social-preview.png` (1280x640) | `render_social.py` | `social_preview.html` |
 | `demo-terminal.svg` | `render_terminal.py` | the real offline CLI flow |
 | `demo.gif` | `render_gif.py` | the same CLI flow plus `examples/sample-dashboard` |
+| `skills-flow.png`, `repos-flow.png`, `secrets-flow.png` | `export_excalidraw.py` | the `.excalidraw` file next to each PNG |
 
 ## The logo
 
@@ -38,6 +39,10 @@ uv run --with playwright python scripts/readme_media/render_social.py
 # Demo GIF: needs ffmpeg on PATH as well.
 uv run --with playwright --with streamlit --with "pandas>=2,<3" --with "plotly>=5,<6" \
     python scripts/readme_media/render_gif.py
+
+# Diagram PNGs, after editing the .excalidraw JSON (at excalidraw.com or by hand).
+uv run --with playwright --with pillow python scripts/readme_media/export_excalidraw.py \
+    docs/images/skills-flow.excalidraw docs/images/repos-flow.excalidraw
 ```
 
 The browser scripts drive headless Chromium through Playwright. They use the browser named
@@ -65,6 +70,11 @@ What each script does:
   terminal, dashboard and end card into a looping 960x600 GIF at 10 fps with an ffmpeg
   palette (about 28 seconds, about 1.5 MB). Pass `--work DIR` to keep the frames,
   `--width` to scale, or `--skip-dashboard` for the terminal part only.
+- `export_excalidraw.py` renders each `.excalidraw` file to a PNG beside it with
+  Excalidraw's own exporter (`@excalidraw/utils`) in headless Chromium at 2x, in the
+  diagrams' Space Grotesk face. It downloads the library from jsDelivr; where that is
+  blocked, `npm install @excalidraw/utils@0.1.5` somewhere and pass `--lib-dir` to its
+  folder. A PNG over `--max-kb` (default 500) is re-saved as a palette image.
 
 ## Record the full Claude Code to Snowflake demo
 
