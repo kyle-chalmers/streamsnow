@@ -3,6 +3,49 @@
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/) once it reaches its first release.
 
+## [Unreleased]
+
+### Added
+
+- **`/onboard`**, a skill of its own again. It gets a machine, a repo and a
+  Snowflake account ready in four stages: check and prepare (one install
+  approval), one round of clickable questions, build after you confirm, then
+  the steps that wait on others. It explains every step as it goes, ends at
+  "ready to build and preview" or "ready to deploy", and is safe to re-run.
+- **The Snowflake admin step.** `/onboard` checks read-only whether the admin
+  objects exist ("not confirmed", never "missing"), runs `ci-key create` and
+  `deploy-setup --admin --public-key-file` into `.internal/admin-setup.sql`
+  (gitignored), then copies it for Snowsight or writes a note for your admin.
+  It never runs the admin SQL. Once confirmed it runs `ci-key push`.
+- **Wider Snowflake access detection:** MCP servers that are configured but not
+  connected, `SNOWFLAKE_*` variable names, legacy SnowSQL config, and
+  `SNOWFLAKE_DEFAULT_CONNECTION_NAME`, all by name only. `/onboard` can also
+  set up your `snow` connection for you, or guide you through it.
+- **Session start** points to `/onboard` when the plugin is enabled but the
+  repo isn't set up, and when this clone has no pre-commit hook.
+- `streamsnow new` prints the runtime-matched install command, and `/start-app`
+  runs it into the repo `.venv` (which `/onboard` creates) right after
+  scaffolding, so the first preview works.
+
+### Changed
+
+- **UI walkthroughs use the Playwright CLI** (`@playwright/cli`, pinned in
+  `skills/_shared/playwright-walkthrough.md`) instead of the bundled Playwright
+  MCP: nothing to start at session launch (the MCP's first download could
+  outlast the startup timeout), fewer tokens, and Codex can run it too when its
+  sandbox allows network. `/onboard` downloads the CLI and its browser ahead of
+  time. The repo `.gitignore` template ignores `.playwright-cli/`.
+
+### Removed
+
+- **`/start-app --setup` and `/start-app adopt`.** Use `/onboard`.
+  `/start-app` now hands off to `/onboard` by itself when the machine or repo
+  isn't ready. docs/migrating-a-consumer-repo.md maps the old names.
+- **`.mcp.json`** (the bundled Playwright MCP). Skills no longer use an MCP;
+  `/reload-plugins` drops the old server, and old `browser_*` tool approvals can
+  be deleted. Codex users get the new recipe on their next
+  `streamsnow agent-skills install`.
+
 ## [0.7.7] - 2026-10-05
 
 ### Added
