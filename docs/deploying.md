@@ -66,7 +66,9 @@ The pipeline above only ever runs `CREATE OR REPLACE` — it has **no implicit
 delete path**. Renaming `apps/<a>/` to `apps/<b>/` mints a *new* object with a
 *new* URL; removing a directory just stops re-deploying the old object. Either
 way, the previously deployed STREAMLIT lives on, frozen at the last merge that
-deployed it, and `verify-deploy` flags it on every later run.
+deployed it. Nothing after the merge notices: `verify-deploy` only checks the
+app directories that still exist, so the PR-time tombstone check below is the
+only thing that catches it.
 
 The delete path is explicit and consent-based:
 
@@ -185,7 +187,7 @@ streamsnow update            # dry-run: shows what would change
 streamsnow update --apply    # write the changes
 ```
 
-`update` re-renders `AGENTS.md`, hooks, CI, and `deploy.yml` from your current
+`update` re-renders `AGENTS.md`, `CLAUDE.md`, hooks, CI, and `deploy.yml` from your current
 config; it leaves `README` and `.gitignore` alone. Run it after upgrading
 `streamsnow` across a minor version too — 0.7 moved the generated CI pin to
 `streamsnow>=0.7,<0.8` and added the `sql_review.coverage` policy, and only a

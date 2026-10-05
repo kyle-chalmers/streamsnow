@@ -1,35 +1,53 @@
-<!-- markdownlint-disable MD041 -->
-<h1 align="center">StreamSnow ❄️</h1>
+<!-- markdownlint-disable MD033 MD041 -->
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/logo-light.svg">
+    <img alt="StreamSnow" src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/logo-light.svg" width="420">
+  </picture>
+</p>
+
+<p align="center">
+  <strong>Build, govern, and ship Streamlit-in-Snowflake apps with AI.</strong><br>
+  The open-source Claude Code plugin and CLI that turns an idea into a governed,
+  reviewed dashboard running in Snowflake, without learning the platform's traps
+  the hard way.
+</p>
+
+<p align="center">
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#documentation">Docs</a> ·
+  <a href="#the-skills">Skills</a> ·
+  <a href="docs/cli-reference.md">CLI reference</a> ·
+  <a href="docs/principles.md">Principles</a> ·
+  <a href="https://github.com/kyle-chalmers/streamsnow/discussions">Discussions</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
 <p align="center">
   <a href="https://github.com/kyle-chalmers/streamsnow/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kyle-chalmers/streamsnow/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://pypi.org/project/streamsnow/"><img alt="PyPI" src="https://img.shields.io/pypi/v/streamsnow.svg"></a>
   <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-blue">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <a href="https://github.com/kyle-chalmers/streamsnow/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-d97757">
 </p>
 
 <p align="center">
-  <strong>The world's best open-source plugin for creating Snowflake
-  Streamlit data apps with AI.</strong>
+  <img alt="StreamSnow demo: streamsnow init scaffolds a governed repo, validate-app fails on the starter placeholders until they are replaced, and the example dashboard runs locally." src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/demo.gif" width="900">
+  <br>
+  <sub>Offline demo: scaffold a governed repo, hit the validate-app gate, and preview a dashboard. With Claude Code, <code>/build-app</code> drives these steps and <code>/ship-app</code> opens the PR; CI deploys to Snowflake.</sub>
 </p>
 
-<p align="center">
-  <em>Scaffold a governed monorepo, build dashboards inside enforced
-  data-governance guardrails, and deploy them to Snowflake — without
-  learning the rules by hand.</em>
-</p>
+> **Quick start.** In the folder for your Snowflake apps, run
+> `claude plugin marketplace add --scope project kyle-chalmers/streamsnow` and
+> `claude plugin install --scope project streamsnow@streamsnow`, then type
+> `/reload-plugins` and `/onboard` in Claude Code. No Claude Code? `uvx streamsnow init`.
+> Using another agent? [Install with your coding agent](#install-with-your-coding-agent).
 
----
-
-> **Status: beta, functional.** The CLI (configure / init / new / doctor /
-> validate-app / preview / check / sql-review / review-gate / review-loop /
-> migrate / nav / deploy-sql / deploy-setup / ci-key / verify-deploy / update /
-> agent-skills) and the Claude Code plugin (9 skills + shared recipes) are
-> implemented and CI-green for
-> both runtimes and both deploy sources. Published on PyPI (`uvx streamsnow` /
-> `pip install streamsnow`); APIs may still evolve toward 1.0 — see
-> [Versioning and stability](docs/versioning.md) for what is already promised.
+> **Status: beta, functional.** The CLI and the Claude Code plugin are CI-green for
+> both runtimes and both deploy sources, and published on PyPI. APIs may still evolve
+> toward 1.0; [Versioning and stability](docs/versioning.md) says what is already
+> promised.
 
 ## Mission
 
@@ -48,6 +66,10 @@ understand it, and act on it without a walkthrough.**
 
 **This is for you if:**
 
+- ✅ you want to build the most useful and beautiful dashboards of your life
+- ✅ you want to eliminate the time you spend dragging and dropping in
+  traditional BI tools
+- ✅ you want analytics to stop being a bottleneck at your company
 - ✅ you run, or will run, more than one Streamlit app in Snowflake with more
   than one author
 - ✅ you want Claude Code sessions and humans held to the same governance rules
@@ -56,32 +78,14 @@ understand it, and act on it without a walkthrough.**
 - ❌ you host Streamlit outside Snowflake, or you need a scheduler or a data
   catalog (StreamSnow does neither)
 - ❌ your dashboards are for people without Snowflake logins, out of the box
-  (possible with customization; see below)
+  (possible with customization)
 
-**Where it fits next to a BI tool.** For internal analytics, meaning dashboards
-your own Snowflake users open in Snowsight, StreamSnow can replace a BI tool:
-the apps are reviewed Python, they run where the data lives, and Snowflake roles
-manage access. Customer-facing dashboards, embedding, and pixel-perfect
-scheduled reports are possible but need customization beyond what ships today.
+**Prerequisites:** a Snowflake account, an AI coding agent, and either knowing
+or being a Snowflake administrator (the one-time setup is in
+[Deploy setup](docs/deploy-setup.md)).
 
-**Who can use this.** Anyone with a Snowflake account (any edition runs
-Streamlit in Snowflake; StreamSnow does not need Enterprise-only masking or row
-access policies) and either a role with `CREATE STREAMLIT` on one schema or an
-admin willing to run the one-time bootstrap that `streamsnow deploy-setup --admin`
-prints ([Deploy setup](docs/deploy-setup.md)). Building and previewing locally
-needs only a login that can read your data.
-
-**Principles** every change is judged against:
-
-1. **One implementation, many consumers:** CLI, plugin, pre-commit, and CI call the same code.
-2. **Detection is automated and total; destruction requires explicit committed consent.**
-3. **The backstop asks; it never decides:** the gates are `validate-app` and CI, not the review nudge.
-4. **Org knowledge lives in `streamsnow.config.yaml` and `.streamsnow/`** (overlays and the house design guide), never in skills.
-5. **Every rule names the incident that created it and the mechanism that enforces it.**
-6. **Degrade, don't die:** a missing enabler is named, not refused.
-7. **Faithful to a real fleet:** a check that fails a well-run production app is a defect in the check until proven otherwise (`tests/fixtures/fleet/` is the regression net).
-8. **Leaving should be cheap:** everything StreamSnow writes is a plain file the repo keeps ([Ownership and exit](docs/distribution.md#ownership-and-exit)).
-9. **Design is a default, not a gate:** StreamSnow ships opinionated defaults with their reasons, the org's house style overrides them, and only correctness and governance block a ship.
+**Principles:** every change is judged against [nine principles](docs/principles.md),
+from *one implementation, many consumers* to *design is a default, not a gate*.
 
 ## What Claude can and can't see
 
@@ -111,7 +115,7 @@ behalf. Here is exactly what that means for your credentials.
   `SNOWFLAKE_*` values.
 
 <p align="center">
-  <a href="docs/images/secrets-flow.png"><img alt="The CI key flow: on your machine, streamsnow ci-key create makes a key pair. The public half goes into the admin script, which you or your Snowflake admin run, so Snowflake stores it on the CI user. The private half goes through streamsnow ci-key push to a GitHub secret. On merge, the deploy job signs in with the private key and Snowflake checks it against the public key. Claude sees file names and a fingerprint, never the key. Make sure to save the private key in a secure location." src="docs/images/secrets-flow.png" width="100%"></a>
+  <a href="docs/images/secrets-flow.png"><img alt="The CI key flow: on your machine, streamsnow ci-key create makes a key pair. The public half goes into the admin script, which you or your Snowflake admin run, so Snowflake stores it on the CI user. The private half goes through streamsnow ci-key push to a GitHub secret. On merge, the deploy job signs in with the private key and Snowflake checks it against the public key. Claude sees file names and a fingerprint, never the key. Make sure to save the private key in a secure location." src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/secrets-flow.png" width="100%"></a>
 </p>
 
 The limits, stated plainly: Claude runs as your user account, so the key guard
@@ -124,6 +128,9 @@ Point any coding agent (Claude Code, Codex, Cursor, Gemini CLI, and others) at
 this repo and say: *"Read the install prompt in
 github.com/kyle-chalmers/streamsnow and follow it."* Or paste the prompt in
 yourself:
+
+<details>
+<summary><b>Show the install prompt</b></summary>
 
 ```text
 Install StreamSnow (https://github.com/kyle-chalmers/streamsnow) for me at the
@@ -168,6 +175,8 @@ the admin SQL that `streamsnow deploy-setup --admin` prints; prepare it for me o
 Snowflake admin.
 ```
 
+</details>
+
 Only Claude Code and Codex are tested. Prefer to type the steps yourself? See
 [Quickstart](#quickstart), and [Use with other agents](#use-with-other-agents)
 for what differs outside Claude Code.
@@ -175,19 +184,27 @@ for what differs outside Claude Code.
 ## How the skills fit together
 
 <p align="center">
-  <a href="docs/images/skills-flow.png"><img alt="StreamSnow skills flow: /onboard sets up your machine, repo and Snowflake once (re-run it any time to check); then your idea goes into /build-app, which runs spec and pages, /preview-app, the /validate-app pass/fail gate, and /review-app, stopping for your OK along the way; then you type /ship-app to open the PR. On merge, CI deploys the live app to Snowflake. /migrate-app and /feedback-app both re-enter at /preview-app, so every path passes the /validate-app gate, and /sql-review optionally checks numbers against the live warehouse." src="docs/images/skills-flow.png" width="100%"></a>
+  <a href="docs/images/skills-flow.png"><img alt="StreamSnow skills flow: run /onboard once to set up your machine, repo and Snowflake (re-run it any time to check), then take your idea to /build-app, the front door. It runs spec, scaffold, build pages, /preview-app, the /validate-app pass/fail gate (governance checks, SQL review, placeholders) and /review-app, stopping at three checkpoints: after the scaffold (continue, edit the spec, or stop), a click-through of every page in the local preview, and ready to ship, where you type /ship-app. /ship-app classifies the review gate, commits, pushes, opens the PR and watches CI; on merge, CI deploys the live app to Snowflake. /build-app --spec writes or refreshes just the spec, or backfills one from an existing app. /feedback-app (one commit per fix) and /migrate-app (lift, then conform) re-enter at /preview-app, and /sql-review optionally checks numbers against the live warehouse. Always-on plugin hooks: a SessionStart banner, a deploy-safety guard, a CI-key guard and a review nudge. Codex and other agents get the skills from the agent-skills command. Every path to production passes the /validate-app gate, and only CI deploys." src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/skills-flow.png" width="100%"></a>
 </p>
 
-The source is [docs/images/skills-flow.excalidraw](docs/images/skills-flow.excalidraw);
-open it at [excalidraw.com](https://excalidraw.com) to edit, then re-export the PNG.
+## How the repos fit together
+
+<p align="center">
+  <a href="docs/images/repos-flow.png"><img alt="How the repos fit together: the StreamSnow repo (kyle-chalmers/streamsnow) publishes its Python package, the CLI and governance checks, to PyPI on a release tag, and serves its skills and hooks straight from the repo through the Claude Code plugin marketplace. On your machine, uv tool install gives you the CLI and claude plugin install gives Claude Code the plugin; your editor, pre-commit and Claude Code run the same checks. The init command generates your analytics monorepo (for example acme-analytics): streamsnow.config.yaml with your org's values, plus AGENTS.md and CLAUDE.md, pre-commit hooks and the CI and deploy workflows, which the update command re-renders from that config; apps/&lt;slug&gt;/ and .streamsnow/overlays/ house rules are yours. Opening a PR runs the same checks in CI; on merge, the deploy job deploys to Snowflake from the deploy source set in config (stage-copy by default, or git-repository), building each Streamlit app, which people open in Snowsight with access through Snowflake roles. Same checks everywhere, and only CI deploys." src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/repos-flow.png" width="100%"></a>
+</p>
+
+Both diagrams are Excalidraw files in [docs/images/](docs/images/); edit the
+`.excalidraw` source at [excalidraw.com](https://excalidraw.com) and re-export the
+PNG with [scripts/readme_media](scripts/readme_media/README.md).
 
 ## What it is
 
 StreamSnow is a **hybrid** of two things that work together:
 
 1. **A `streamsnow` CLI** (PyPI) — scaffolds a governed Streamlit-in-Snowflake
-   monorepo, runs an interactive setup wizard, and vendors the validation
-   tools, CI, pre-commit hooks, and branding your repo needs.
+   monorepo, runs an interactive setup wizard, renders the CI, pre-commit
+   hooks and branding your repo needs, and runs the governance checks (from the
+   installed package, so your repo carries no copied tool code).
 2. **A Claude Code plugin** (marketplace) — ships the skills and
    hooks that turn Claude Code into a domain expert for this stack:
    `/build-app` (the front door), `/preview-app`, `/validate-app`,
@@ -206,6 +223,21 @@ a deploy pipeline, branding, and review discipline. StreamSnow encodes those as
 **executable guardrails** — pre-commit + CI gates, scaffolding templates, and
 Claude Code skills — so every developer (and every Claude session) follows the
 same rules and ships safely.
+
+## Without StreamSnow / with StreamSnow
+
+Every guardrail exists because something went wrong in a real production fleet
+([Production lessons](docs/production-lessons.md) has the full story of each).
+
+| ❌ Without | ✅ With StreamSnow |
+|---|---|
+| A query names a raw or staging schema and ships to production | `streamsnow check schema-refs` blocks it in pre-commit, `validate-app` and CI |
+| A `None` in `params=` makes the deployed driver bind every filter to NULL: the page renders, with zero rows | `check bind-predicates` blocks the `(:1 IS NULL OR col = :1)` shape, and the scaffold's `render_sql` builds optional filters without nullable binds |
+| A page helper imports fine under `streamlit run` and dies with `ModuleNotFoundError` once deployed | `check page-imports` fails it before merge |
+| Renaming an app leaves the old one live in Snowflake, frozen and forgotten | `check tombstones` blocks the PR until the old name is tombstoned; the deploy job drops it |
+| The "reviewed SQL" stops matching what the app actually runs | `sql-review check` hashes every input, so drift and hand edits fail CI |
+| A Claude Code session runs `snow streamlit deploy` or a `DROP` from a laptop | The deploy-safety hook stops and asks first; the sanctioned path is `/ship-app`, and only CI deploys |
+| "Deploy succeeded", but the app is blank or serving old code | `streamsnow verify-deploy` checks the live version, the commit it serves and the container logs |
 
 ## Two things you choose
 
@@ -253,8 +285,8 @@ and says what it is doing at every step:
 2. **One round of questions.** Clickable choices for what it could not work
    out: the five setup answers, your git name if it is missing, and who runs
    the Snowflake admin script.
-3. **Build.** The config and the governed repo files (`AGENTS.md`, pre-commit
-   hooks, CI, `.gitignore`, README), only after you confirm.
+3. **Build.** The config and the governed repo files (`AGENTS.md`, `CLAUDE.md`,
+   pre-commit hooks, CI, `.gitignore`, README), only after you confirm.
 4. **Finish.** The CI key, the admin script (copied for you to run in
    Snowsight, or written up for your admin), and the deploy secrets.
 
@@ -275,10 +307,19 @@ streamsnow init                      # 5-question wizard, then a governed scaffo
 snow connection add --connection-name <name> --account <locator> \
   --user <you> --authenticator externalbrowser --default   # init prints the exact command
 uv tool install pre-commit && pre-commit install
-streamsnow validate-app example-dashboard                 # PASS proves the scaffold is whole
+streamsnow validate-app example-dashboard   # FAILS on the starter placeholders until you replace them
 uv venv --python 3.11 && uv pip install -e apps/example-dashboard   # container runtime
 streamsnow preview example-dashboard
 ```
+
+<p align="center">
+  <img alt="Terminal: streamsnow init scaffolds the repo, then validate-app reports PASS for every check except placeholders, which fails until the starter query is replaced." src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/demo-terminal.svg" width="100%">
+</p>
+
+`validate-app` fails on purpose until you repoint the starter query
+(`queries/example_metric.sql`) and the review window in `sql_review/index.yaml`
+at your own table and replace the sample numbers in `pages/overview.py`; every
+other check passing is what proves the scaffold is whole.
 
 On the warehouse runtime an app has `environment.yml` instead of `pyproject.toml`,
 so install its packages directly (`init` and `streamsnow preview` print the exact
@@ -303,11 +344,11 @@ claude plugin install --scope project streamsnow@streamsnow    # then /reload-pl
 ```bash
 uv tool upgrade streamsnow               # the CLI
 streamsnow update                        # dry-run: governance files the new templates would change
-streamsnow update --apply                # re-render AGENTS.md, hooks, CI, deploy.yml
+streamsnow update --apply                # re-render AGENTS.md, CLAUDE.md, hooks, CI, deploy.yml
 ```
 
 Generated CI and deploy workflows pin `streamsnow>=0.8,<0.9`; bump the pin with
-`update --apply` when you move majors.
+`update --apply` when you move to a new minor release (before 1.0, minors can break).
 `claude plugin details streamsnow@streamsnow` lists the 9 skills below.
 
 ## The skills
@@ -333,6 +374,9 @@ The skills are plain `SKILL.md` folders in the open
 [Agent Skills](https://agentskills.io/specification) format, so a coding agent
 other than Claude Code can follow them. OpenAI Codex CLI 0.157.1 is the only
 one tested. The CLI installs them where Codex looks:
+
+<details>
+<summary><b>Install for Codex, and what differs outside Claude Code</b></summary>
 
 ```bash
 streamsnow agent-skills install --agent codex               # <repo>/.agents/skills; commit it
@@ -375,6 +419,9 @@ to overwrite an edited skill without `--force`.
   `streamsnow review-gate classify` itself. Those guards now rest on the agent
   following the skill; nothing enforces them.
 
+
+</details>
+
 ## SQL review (redesigned in 0.8)
 
 Every page of an app gets **SQL a person can run**: `apps/<slug>/sql_review/NN_<page>.sql`,
@@ -399,7 +446,7 @@ judge the SQL and must cite those results; a verifier drops what the evidence do
 `streamsnow sql-review log` writes `sql_review/review_log/YYYY-MM-DD_<sha>.md` with a sign-off
 block for a person. `bench` proves an optimization returns the same result before proposing it.
 
-## Make it yours — repo overlays (new in 0.6.1)
+## Make it yours: repo overlays
 
 The skills are generic procedures; your org's knowledge layers on top without
 forking them. Commit `.streamsnow/overlays/<skill>.md` files and every skill
@@ -419,12 +466,13 @@ which denies rather than asks, and denies even if it hits an error on a call tha
 
 | Event | Script | What it does |
 |---|---|---|
-| PreToolUse (Bash) | `hooks/deploy_safety.py` | Pauses before destructive Streamlit/SQL commands (`snow streamlit deploy/drop`, `CREATE OR REPLACE / DROP / ALTER STREAMLIT`, stage `REMOVE`, destructive SQL incl. `-f` files / stdin) — `/ship-app` is the sanctioned deploy path |
+| PreToolUse (Bash, PowerShell) | `hooks/deploy_safety.py` | Pauses before destructive Streamlit/SQL commands (`snow streamlit deploy/drop`, `CREATE OR REPLACE / DROP / ALTER STREAMLIT`, stage `REMOVE`, destructive SQL incl. `-f` files / stdin) — `/ship-app` is the sanctioned deploy path |
 | PreToolUse (shell, file and search tools) | `hooks/secret_guard.py` | Denies any tool call that names the CI key directory (`~/.streamsnow-ci`) or key file, apart from `streamsnow ci-key ...` and `streamsnow deploy-setup ...`. Covers the shell (Bash, PowerShell), file and search tools. Not repo-gated, because the key is sensitive in any repo. See [What Claude can and can't see](#what-claude-can-and-cant-see) |
 | SessionStart | `hooks/session_start.sh` | One line inside a StreamSnow repo (plugin version, skills, which guards are active, and a nudge when this clone has no pre-commit hook); a one-line `/onboard` nudge in a repo that has Streamlit apps or the plugin enabled but no config; silence everywhere else |
 | Stop | `hooks/review_gate_stop.py` | Warn-only nudge (a `systemMessage`, never a turn continuation) when a substantive app change ends with no review covering it — points at `/review-app <slug> --auto`. Off-switches: `REVIEW_GATE_OFF=1`, `apps/<slug>/.review/SKIP`, or `review_gate: {enabled: false}` in config |
 
-All hooks except the key guard are repo-gated on `streamsnow.config.yaml` (zero cost in unrelated repos) and
+All hooks except the key guard are repo-gated on `streamsnow.config.yaml` (zero cost in unrelated repos; the
+SessionStart `/onboard` nudge above is the one line that also appears in a repo without a config) and
 declare explicit timeouts so a hung hook can never stall a session. To turn them off, disable
 the plugin (`claude plugin disable streamsnow`). Hook additions do not reach installed copies
 automatically — see [Upgrading](#upgrading).
@@ -441,22 +489,30 @@ Node.js 20+; without Node the walkthroughs are skipped and everything else works
 
 ## How it's organized
 
+<details>
+<summary><b>Show the repository layout</b></summary>
+
 ```
 streamsnow/            the PyPI package — CLI, config, policy, scaffolder, tools
-  ├── cli.py           configure / init / new / doctor / check
+  ├── cli.py           every command (see docs/cli-reference.md)
   ├── config.py        typed + validated streamsnow.config.yaml model
   ├── policy.py        schema allow/deny single source of truth
   ├── scaffolder.py    renders a governed repo from config
+  ├── deploy.py        deploy-setup and deploy-sql
+  ├── verify.py        verify-deploy
+  ├── ci_key.py        ci-key create / push
+  ├── agent_skills.py  agent-skills (Codex and other agents)
   ├── _templates/      the Jinja scaffold templates (repo/ + app/)
   └── tools/           governance checks + engines (schema refs, security,
                        caching, dependency vulns, tombstones, path leaks,
-                       sql_review generator, review gate/loop, migrate, doctor)
+                       sql_review generator, review gate/loop, migrate, preview)
 .claude-plugin/        Claude Code plugin manifest + marketplace
-skills/  agents/  hooks/   Claude Code plugin surface (9 skills, incl. onboard/; hooks)
-docs/  examples/            guides + a runnable no-Snowflake example app
+skills/  hooks/        Claude Code plugin surface (9 skills, incl. onboard/; hooks)
+docs/  examples/       guides + a runnable no-Snowflake example app
+scripts/               maintainer tools (docs link check, README media)
 ```
 
-> Active scaffolding lives in `streamsnow/` (templates under `streamsnow/_templates/`).
+</details>
 
 The `streamsnow` Python package is the **single source of truth** for tool
 logic: the CLI, the Claude Code plugin, pre-commit, and CI all call the same
@@ -466,6 +522,10 @@ code — one implementation, many consumers.
 
 - **[Getting started](docs/getting-started.md)** — run the example with no
   Snowflake, then scaffold and preview your own governed app.
+- **[CLI reference](docs/cli-reference.md)** — every command, flag and check,
+  with exit codes and JSON output.
+- **[Principles](docs/principles.md)** — the nine rules every change is judged
+  against, and where each one shows up.
 - **[Data discovery](docs/data-discovery.md)** — find tables and wire queries
   inside the schema-access guardrails.
 - **[Deploying](docs/deploying.md)** — ship apps to Snowflake on merge, for both
@@ -501,9 +561,23 @@ code — one implementation, many consumers.
   contribution policy. Everyone agrees to the [Code of Conduct](CODE_OF_CONDUCT.md).
 - **Security:** report privately, per [SECURITY.md](SECURITY.md).
 
+## Star history
+
+If StreamSnow saves you a production incident (or a week of dragging boxes around a
+BI tool), ⭐ **star the repo** so you can find it again when you ship your next app,
+and so other data teams can find it too.
+
+<a href="https://www.star-history.com/#kyle-chalmers/streamsnow&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=kyle-chalmers/streamsnow&type=Date&theme=dark">
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=kyle-chalmers/streamsnow&type=Date">
+    <img alt="Star history of kyle-chalmers/streamsnow" src="https://api.star-history.com/svg?repos=kyle-chalmers/streamsnow&type=Date" width="600">
+  </picture>
+</a>
+
 ## License
 
-[MIT](LICENSE) © Kyle Chalmers
+[MIT](https://github.com/kyle-chalmers/streamsnow/blob/main/LICENSE) © Kyle Chalmers
 
 > StreamSnow is an independent open-source project and is not affiliated with or
 > endorsed by Snowflake Inc., Streamlit, or Anthropic.

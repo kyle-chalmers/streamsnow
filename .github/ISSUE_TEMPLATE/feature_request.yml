@@ -6,8 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Feature requests are judged against the mission, vision and principles at the top of the
-        [README](https://github.com/kyle-chalmers/streamsnow#mission). If the idea is still open-ended,
+        Feature requests are judged against the mission and vision at the top of the
+        [README](https://github.com/kyle-chalmers/streamsnow#mission) and the nine
+        [principles](https://github.com/kyle-chalmers/streamsnow/blob/main/docs/principles.md). If the idea is still open-ended,
         [start a discussion in Ideas](https://github.com/kyle-chalmers/streamsnow/discussions/categories/ideas)
         first. A request with a clear problem and a concrete proposal can go straight to
         implementation once the maintainer approves it.
@@ -48,7 +49,7 @@ body:
   - type: textarea
     id: principle
     attributes:
-      label: Which README principle does this serve?
+      label: Which principle does this serve?
       description: One line is enough, e.g. "faithful to a real fleet".
   - type: textarea
     id: alternatives

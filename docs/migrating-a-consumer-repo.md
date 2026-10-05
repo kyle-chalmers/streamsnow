@@ -110,7 +110,7 @@ a trial run), **extends** (domain-specific variant → keep, note it in AGENTS.m
 4. **Delete the shadows** the trial proved covered; keep the extends with a one-line AGENTS.md note
    each; leave unrelated skills alone.
 5. **Old names are gone.** The pre-0.3 aliases (`/new-app`, `/refine-requirements`,
-   `/add-page`, `/onboard`, `/auto-review-app`, `/sql-review`, `/apply-review`,
+   `/add-page`, `/auto-review-app`, `/sql-review`, `/apply-review`,
    `/deep-dive-data`) were removed in 0.7.3; use the plugin equivalents in the table above, and
    update any docs or scripts that still call the old names. `/onboard` (0.8) and `/sql-review`
    (after 0.8) came back as new skills; `/audit-lineage` is now part of `/sql-review`.
