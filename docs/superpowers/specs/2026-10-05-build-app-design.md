@@ -142,8 +142,9 @@ phase names are added to the lifecycle values it recognizes.
    to the page-builder that owns the file, for a bounded number of rounds:
    - **`perf-reviewer`:** reads the code and the timings from `sql-review bench` and the
      preview's time-to-render reading.
-   - **`viz-critic`:** takes Playwright screenshots of each page and reviews them against the
-     three design layers. It cites the default or house-style line behind each finding.
+   - **`viz-critic`:** takes screenshots of each page with the Playwright CLI (the walkthrough
+     tool after `/onboard`) and reviews them against the three design layers. It cites the
+     default or house-style line behind each finding.
    - **`cold-reader`:** sees only the screenshots and the page text, never the spec or the code.
      For each page it must state what decision the page supports and what each KPI means. A wrong
      or missing answer is a finding against the page's copy, not against the reader.
@@ -276,9 +277,12 @@ Two other workstreams touch the same files. This design depends on both and must
 - **Part A** is [kyle-chalmers/streamsnow#40](https://github.com/kyle-chalmers/streamsnow/pull/40).
   It adds `ci-key push`, the key guard hook and a README "What Claude can and can't see" section,
   and edits `skills/start-app/setup.md`.
-- **Part B** (planned for 0.8.0) moves setup into a new `/onboard` skill.
-- **Ask:** carry the `start-app` → `build-app` rename in Part B, so 0.8.0 is one breaking release
-  with one tombstone round, and `--setup` leaves the skill at the same moment.
+- **Part B** (planned for 0.8.0) moves `setup.md` and `adopt.md` into a new `/onboard` skill, so
+  `--setup` and `adopt` leave `skills/start-app/`. It also moves the UI walkthrough from the
+  bundled Playwright MCP to the Playwright CLI (`@playwright/cli`) and removes `.mcp.json`.
+- **Decided (Kyle, 2026-10-05):** the `start-app` → `build-app` rename is its own PR, opened right
+  after `/onboard` merges. 0.8.0 is cut only once both are in, so adopters still see one breaking
+  release and one tombstone round.
 
 **SQL review redesign** (spec in
 [kyle-chalmers/streamsnow#41](https://github.com/kyle-chalmers/streamsnow/pull/41),
@@ -302,7 +306,7 @@ Two other workstreams touch the same files. This design depends on both and must
 **Alphabetical order.** `audit-lineage` sorts before `build-app`, so `/build-app` is first in the
 skill list once the SQL review redesign retires `/audit-lineage`.
 
-### The rename (in Part B)
+### The rename (its own PR, right after `/onboard`, in 0.8.0)
 
 - `git mv skills/start-app skills/build-app`, and set `name: build-app` in the frontmatter.
 - Update about 60 references:
