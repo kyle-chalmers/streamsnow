@@ -136,6 +136,13 @@
       ],
       "arguments": []
     },
+    "ci-key push": {
+      "options": [
+        "--dir",
+        "--repo"
+      ],
+      "arguments": []
+    },
     "config-get": {
       "options": [
         "--config"
