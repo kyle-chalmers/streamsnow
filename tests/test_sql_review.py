@@ -466,7 +466,10 @@ def test_crlf_checkout_reads_clean(repo: Path) -> None:
         a / "sql_review" / "index.yaml",
         a / "sql_review" / "README.md",
     ]:
-        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        # Normalize first: on Windows write_text already wrote CRLF, and converting
+        # again would produce \r\r\n, which no real checkout has.
+        lf = path.read_bytes().replace(b"\r\n", b"\n")
+        path.write_bytes(lf.replace(b"\n", b"\r\n"))
     assert _check(repo) == 0
 
 
