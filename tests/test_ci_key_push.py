@@ -9,7 +9,11 @@ import pytest
 
 from streamsnow import ci_key
 
-KEY = "-----BEGIN " "PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcw\n-----END " "PRIVATE KEY-----\n"
+KEY = (
+    "-----BEGIN "
+    + "PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcw\n-----END "
+    + "PRIVATE KEY-----\n"
+)
 VALUES = {
     "SNOWFLAKE_USER": "STREAMSNOW_DEPLOY_USER",
     "SNOWFLAKE_WAREHOUSE": "STREAMSNOW_WH",
