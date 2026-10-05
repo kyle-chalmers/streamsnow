@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-05
+
 ### Added
 
 - **Screen comparison for `/sql-review`** (SQL review redesign, phase 3 of 3). The scaffolded
