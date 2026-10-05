@@ -36,6 +36,53 @@ defeating a governance check. The checks catch accidents and drift, and
 repository review remains the trust boundary for malicious commits (see the
 read-only guard notes in `streamsnow/tools/sql_review.py`).
 
+## How StreamSnow handles secrets
+
+**The five GitHub secrets** the deploy workflow reads, set by
+`streamsnow ci-key push` in this order:
+
+| Secret | Holds |
+|---|---|
+| `SNOWFLAKE_USER` | the CI service user, for example `STREAMSNOW_DEPLOY_USER` |
+| `SNOWFLAKE_PRIVATE_KEY_RAW` | that user's private key (unencrypted PKCS#8); the only sensitive one |
+| `SNOWFLAKE_WAREHOUSE` | the warehouse CI deploys with |
+| `SNOWFLAKE_ROLE` | the CI deploy role |
+| `SNOWFLAKE_ACCOUNT` | the account locator; set last, because it switches the deploy job on |
+
+`SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` is read only for an encrypted key, which
+`ci-key create` does not make.
+
+**Where the key lives.** `~/.streamsnow-ci/` (mode 700): the private key
+`streamsnow_ci_rsa_key.p8` (mode 600), the public key `.pub`, and `secrets/`
+with one file per secret (mode 600; the private-key entry is a link to the `.p8`). `ci-key create` refuses a directory inside
+a git repository, never overwrites an existing key, and never prints a value.
+`ci-key push` reads each file and passes it to `gh secret set` on stdin, then
+prints only names; if one fails it stops before `SNOWFLAKE_ACCOUNT`.
+
+**The key guard** (`hooks/secret_guard.py`, Claude Code `PreToolUse`) denies
+any Bash, PowerShell, Read, Grep, Glob, Edit, Write or NotebookEdit call that
+names `.streamsnow-ci` or `streamsnow_ci_rsa_key`, in any case and with either
+path separator. It allows only a plain `streamsnow ci-key ...` or
+`streamsnow deploy-setup ...` command with no chaining, substitution or
+subexpressions. A redirect into the key directory is also denied.
+Its gaps: it matches text, so a command built to hide the path (shell
+variables, globs) can get past it; it runs only in Claude Code; and if the hook
+cannot start at all, the call goes through. It backs up `ci-key push`, which
+is the main protection.
+
+**Never printed** by any skill: `snow connection list`, MCP configuration,
+connection files, `profiles.yml`, and `SNOWFLAKE_*` environment values. Setup
+reads named keys through a filter instead.
+
+**What Claude never runs:** the admin SQL from `streamsnow deploy-setup
+--admin` (you or your Snowflake admin runs it, in Snowsight or with
+`snow sql -f`), and any sign-in that needs your password.
+
+**Rotating the key.** Move `~/.streamsnow-ci/streamsnow_ci_rsa_key.p8` and
+`.pub` aside, run `streamsnow ci-key create`, regenerate the admin file with
+`streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub`,
+have the admin run its `ALTER USER` statement, then run `streamsnow ci-key push`.
+
 ## Everything else
 
 Bugs, questions and feature requests go to

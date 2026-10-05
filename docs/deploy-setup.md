@@ -129,14 +129,21 @@ streamsnow deploy-setup | snow sql --stdin   # or pipe to your admin session
 
 Create a key-pair for a dedicated CI **service user**, register the public key
 on that user, and add these **repo secrets**. `streamsnow ci-key create` does
-the first and last parts: it uses `openssl` to write the same unencrypted
+the first part and prepares the last: it uses `openssl` to write the same unencrypted
 PKCS#8 key pair Snowflake's
 [key-pair guide](https://docs.snowflake.com/en/user-guide/key-pair-auth) makes
 and one file per secret below to `~/.streamsnow-ci` (`--dir` to change it),
 reuses an existing key rather than replacing it, and prints only file names,
 the key's `SHA256:` fingerprint (compare it with `RSA_PUBLIC_KEY_FP` in
-`DESC USER`) and the `gh secret set` loop that copies each file straight into
-GitHub. The admin script registers the public key. Key-pair is the default because
+`DESC USER`). The admin script registers the public key.
+
+Then `streamsnow ci-key push` sets the five secrets from those files, each
+value going straight to `gh secret set` on stdin, `SNOWFLAKE_ACCOUNT` last. It
+prints only names. Prefer to do it by hand? From the repo, run
+`gh secret set NAME < ~/.streamsnow-ci/secrets/NAME` for each of the five
+names in that order.
+
+Key-pair is the default because
 Snowflake's [MFA rollout](https://docs.snowflake.com/en/user-guide/security-mfa-rollout)
 blocks password authentication for service users in its final phase (Aug–Oct
 2026, account-specific and subject to change); a
