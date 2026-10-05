@@ -40,7 +40,7 @@ with a no-code Playwright cross-check.
 
 ## Task 4: `compare` verb
 
-- `streamsnow sql-review compare <slug> --run <run_id> --capture <dir> [--screen screen.json]`.
+- `sql-review compare <slug> --run <run_id> --capture <dir> [--screen screen.json]`.
 - Per metric: `match | mismatch | not_captured | unsupported`, with tolerance: relative 0.5%
   or the displayed rounding (derive decimals from the screen string), whichever is looser;
   integers exact. IDs `compare:<page>#<n>` for agents to cite.
