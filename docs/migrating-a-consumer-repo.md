@@ -3,7 +3,7 @@
 This guide is for a repo that grew its own `.claude/skills/` for building Streamlit-in-Snowflake
 apps and now wants the maintained plugin instead. It maps each custom skill to its plugin
 equivalent, names what should stay local, and lays out an incremental path — the same one
-`/start-app adopt` automates ([skills/start-app/adopt.md](../skills/start-app/adopt.md) writes a
+`/onboard` automates ([skills/onboard/adopt.md](../skills/onboard/adopt.md) writes a
 per-repo `MIGRATION.md` from a live inventory).
 
 The worked example throughout is a production repo with 16 custom skills that predate the plugin —
@@ -102,7 +102,7 @@ a trial run), **extends** (domain-specific variant → keep, note it in AGENTS.m
 1. **Install the plugin** alongside the local skills (nothing breaks — same-named local skills
    shadow the plugin's until you delete them).
 2. **`streamsnow configure`** (≤5 questions) if the repo doesn't have `streamsnow.config.yaml` yet —
-   or run `/start-app adopt` and let it inventory + configure + write `MIGRATION.md` for you.
+   or run `/onboard` and let it inventory + configure + write `MIGRATION.md` for you.
 3. **Trial run:** take ONE real change through `/start-app → /preview-app → /validate-app →
    /review-app → /ship-app` with the plugin versions.
 4. **Delete the shadows** the trial proved covered; keep the extends with a one-line AGENTS.md note

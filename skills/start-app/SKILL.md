@@ -1,7 +1,7 @@
 ---
 name: start-app
-description: The front door — build a Streamlit-in-Snowflake app from idea to opened PR, or resume one mid-build. Owns the spec, scaffold, page-building, and ship phases, with human checkpoints between them. Start here for any new app, to document an existing one, to add a page, or to set up a machine or repo. Use when the user says "build an app", "new dashboard", "add a page", "spec this out", "set me up", or "pick up where we left off".
-argument-hint: "[<idea>] | --spec | --setup | adopt"
+description: The front door: build a Streamlit-in-Snowflake app from idea to opened PR, or resume one mid-build. Owns the spec, scaffold, page-building, and ship phases, with human checkpoints between them. Start here for any new app, to document an existing one, or to add a page. Use when the user says "build an app", "new dashboard", "add a page", "spec this out", or "pick up where we left off".
+argument-hint: "[<idea>] | --spec"
 allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion]
 ---
 
@@ -24,18 +24,16 @@ next command at each judgment point, and never skips a checkpoint.
 - **`--spec [<slug>]`** — write or refresh the requirements spec only, then stop for review. Covers
   brand-new specs, ticket ingestion, and **backfill** (reverse-engineering the spec from an existing
   app's source — automatic when `apps/<slug>/` already has code). Follow [spec.md](spec.md).
-- **`--setup`**: first-time machine + repo setup: prerequisites, then `streamsnow init --no-starter-app`
-  (config + governed repo files: hooks, CI, .gitignore; no example app). Follow [setup.md](setup.md).
-- **`adopt`** — the repo already has Streamlit apps or its own agent skills/commands that didn't come from
-  StreamSnow. Map onto what exists instead of scaffolding over it, and write a `MIGRATION.md`
-  checklist. Follow [adopt.md](adopt.md).
 
-## Phase 0 — Preflight (degrade, don't die)
+## Phase 0 · Preflight
 
-1. Report which `streamsnow` runs and its version, then run `streamsnow doctor` and fix-or-skip each failure interactively per [setup.md](setup.md) §0 to §1b (§1 says when doctor is skipped).
-2. If `streamsnow.config.yaml` is missing, this isn't a governed repo yet — offer `--setup` (or
-   `adopt` if the repo already has apps). You can still write a spec without config; note that
-   schema choices in §3 stay unverified until the repo is configured.
+1. Report which `streamsnow` runs and its version, then run `streamsnow doctor --format json`.
+2. If `streamsnow` is not on PATH, a `required` check fails, or `streamsnow.config.yaml` is
+   missing, say "This machine or repo isn't set up yet, so I'm running onboarding first", follow
+   [/onboard](../onboard/SKILL.md)'s instructions in full, then continue at Phase 1. `optional`
+   failures get one line and no handoff.
+   - `--spec` mode only: offer `/onboard` but carry on without config if the user prefers;
+     schema choices in §3 then stay unverified.
 
 ## Phase 1 — Spec
 
@@ -79,7 +77,7 @@ jump to the matching phase; `done` or `in-production (backfilled)` means the app
 
 ## Out of scope
 
-Porting an external app → `/migrate-app`; feedback on a live app → `/feedback-app`; review depth → `/review-app`; live lineage → `/audit-lineage`.
+Porting an external app → `/migrate-app`; feedback on a live app → `/feedback-app`; review depth → `/review-app`; live lineage → `/audit-lineage`; machine, repo and Snowflake setup → `/onboard`.
 
 ## Done when
 

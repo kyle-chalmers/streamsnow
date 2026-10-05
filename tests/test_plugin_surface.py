@@ -1,4 +1,4 @@
-"""The plugin-surface contract: 8 skills, ≤80-line front pages, no alias stubs.
+"""The plugin-surface contract: 9 skills, ≤80-line front pages, no alias stubs.
 
 The CHANGELOG and README advertise this surface; these tests keep it honest so
 drift (an 81-line SKILL.md, a resurrected alias or old name) fails CI
@@ -18,6 +18,7 @@ PLUGIN_MANIFEST = REPO_ROOT / ".claude-plugin" / "plugin.json"
 
 EXPECTED_SKILLS = {
     "start-app",
+    "onboard",
     "review-app",
     "audit-lineage",
     "feedback-app",
@@ -33,7 +34,6 @@ RETIRED_NAMES = {
     "new-app": "/start-app",
     "refine-requirements": "/start-app --spec",
     "add-page": "/start-app",
-    "onboard": "/start-app --setup",
     "apply-review": "/review-app --fix",
     "auto-review-app": "/review-app --auto",
     "sql-review": "/review-app --sql",
