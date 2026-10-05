@@ -158,7 +158,9 @@ def parse_output(stdout: str, expected: int) -> list[ResultSet]:
     """
     text = stdout.strip()
     if not text:
-        return [[] for _ in range(expected)]
+        # Never a real result: even one statement prints `[]`. Reading it as
+        # empty result sets would report every object missing, every section 0 rows.
+        raise SnowError("`snow sql` printed no output; nothing can be reported from this call")
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:

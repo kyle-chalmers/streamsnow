@@ -152,6 +152,8 @@ def test_parse_output_single_and_multi() -> None:
         sx.parse_output('[[{"A": 1}]]', 2)
     with pytest.raises(sx.SnowError, match="JSON"):
         sx.parse_output("[{", 1)
+    with pytest.raises(sx.SnowError, match="no output"):
+        sx.parse_output("  \n", 3)
 
 
 def test_a_failure_carries_the_snowflake_message_and_a_role_hint() -> None:
