@@ -9,12 +9,12 @@ caught it. Runtime-specific facts link to the official page in
 
 ### 1. `streamsnow: command not found`
 
-- **Symptom:** the plugin's `/start-app --setup` or a doc says to run
+- **Symptom:** the plugin's `/onboard` or a doc says to run
   `streamsnow …` and the shell cannot find it.
 - **Cause:** the CLI was never installed (`uvx streamsnow …` runs are one-shot),
   or `uv tool install` put it in a bin dir that is not on PATH yet.
-- **Fix:** `uv tool install streamsnow`, then re-open the shell. `/start-app
-  --setup` does this for you and refuses to continue until the command works.
+- **Fix:** `uv tool install streamsnow`, then re-open the shell. `/onboard`
+  does this for you and refuses to continue until the command works.
 
 ### 2. `pre-commit` fails on the first commit with "executable not found"
 
@@ -217,7 +217,7 @@ caught it. Runtime-specific facts link to the official page in
   `/reload-plugins` and `/mcp` to confirm `playwright` is connected. For a
   missing browser, run `npx @playwright/mcp@<version> install-browser <name>`
   with the browser name from the error and the version pinned in the plugin's
-  `.mcp.json` (the error's own command omits the version). `/start-app --setup` runs all of this for you.
+  `.mcp.json` (the error's own command omits the version). `/onboard` runs all of this for you.
 
 ### 21. A teammate's commits skip the governance checks
 
@@ -225,7 +225,7 @@ caught it. Runtime-specific facts link to the official page in
   people.
 - **Cause:** `pre-commit install` runs per clone, so a fresh clone has no hook.
 - **Fix:** `streamsnow doctor` reports it as the `pre-commit-hook` row; run
-  `pre-commit install` in the clone, or `/start-app --setup`.
+  `pre-commit install` in the clone, or `/onboard`.
 
 ## Adding new issues
 

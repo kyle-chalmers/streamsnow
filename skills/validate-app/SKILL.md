@@ -64,7 +64,7 @@ both). A common false alarm is judging a container app against warehouse expecta
 ## Troubleshooting
 
 - **"app not found"** — the slug must be a directory under `apps/`; run from the repo root or pass
-  `--dir`. An ungoverned repo is a `/start-app --setup` problem, not a validate problem.
+  `--dir`. An ungoverned repo is an `/onboard` problem, not a validate problem.
 - **Config not at the root** — pass `--config <path>`.
 - **Schema looks allowed but fails** — compare against the exact `governance.schema_allow` /
   `schema_deny` / `governance.database` values; a fully-qualified name resolving into a denied
