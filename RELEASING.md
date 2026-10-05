@@ -1,9 +1,9 @@
 # Releasing StreamSnow
 
-## Pre-publish privacy gate (do this before the repo goes public)
+## Privacy gate (before every release)
 
-StreamSnow was extracted from a private monorepo, so before flipping the repo
-public or cutting the first PyPI release:
+StreamSnow was extracted from a private monorepo. It has been public and on PyPI
+since 0.7, and every release still passes this gate before it is tagged:
 
 1. **Automated scan** (must be clean):
    ```bash
@@ -32,8 +32,7 @@ public or cutting the first PyPI release:
 
 ## Cut a release
 
-1. Bump the version in **lockstep across four files**, and note the changes in
-   `CHANGELOG.md`:
+1. Bump the version in **lockstep across four files**:
    - `pyproject.toml`
    - `.claude-plugin/plugin.json`
    - `streamsnow/__init__.py` (the `__version__` fallback)
@@ -52,20 +51,23 @@ public or cutting the first PyPI release:
    tracks a Playwright alpha, so expect breakage on bumps, and each bump downloads a new
    browser (about 150 MB). It is an exact pin on purpose: `@latest` would let an upstream
    release change the walk under a plugin version you already shipped.
-2. Ensure `main` is green (lint-and-test, privacy-gate, wheel-smoke).
-3. Tag and push. Use the fully-qualified refspec:
+2. Close the changelog: in `CHANGELOG.md`, move every entry under `## [Unreleased]` into a
+   new `## [X.Y.Z] - YYYY-MM-DD` heading directly below it, and leave an empty
+   `## [Unreleased]` above it for the next change.
+3. Ensure `main` is green (lint-and-test, privacy-gate, wheel-smoke).
+4. Tag and push. Use the fully-qualified refspec:
    ```bash
-   git tag v0.1.0
-   git push origin refs/tags/v0.1.0
+   git tag vX.Y.Z
+   git push origin refs/tags/vX.Y.Z
    ```
    The `publish` workflow builds the sdist + wheel and publishes to PyPI via OIDC.
 
-   `git push origin v0.1.0` is ambiguous and will fail if a release BRANCH of
+   `git push origin vX.Y.Z` is ambiguous and will fail if a release BRANCH of
    the same name exists, which is the convention here (`v0.6.1`, `v0.6.2` are
    branches as well as tags). Git refuses with "matches more than one" rather
    than guessing, so it is a stop, not a mis-push - but it stops you mid-release.
-   `refs/tags/` names the tag unambiguously; `refs/heads/v0.1.0` pushes the branch.
-4. Create a GitHub Release from the tag with the changelog notes.
+   `refs/tags/` names the tag unambiguously; `refs/heads/vX.Y.Z` pushes the branch.
+5. Create a GitHub Release from the tag with the `## [X.Y.Z]` changelog notes.
 
 ## Flip the repo public (separate, deliberate step)
 

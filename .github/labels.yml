@@ -63,7 +63,7 @@
   description: "Plugin hooks (hooks/)"
 - name: "area:plugin"
   color: "c5def5"
-  description: "Plugin/marketplace manifests, .mcp.json, agent-skills, packaging"
+  description: "Plugin/marketplace manifests, agent-skills, packaging"
 - name: "area:docs"
   color: "c5def5"
   description: "docs/ and README"
