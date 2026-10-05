@@ -47,7 +47,7 @@ jobs:
             }
             await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['status:agent-working'] });
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.HAS_TOKEN == 'true'
         with:
           fetch-depth: 0

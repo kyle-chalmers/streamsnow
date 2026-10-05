@@ -36,7 +36,7 @@ jobs:
         if: env.HAS_TOKEN != 'true'
         run: echo "::notice::CLAUDE_CODE_OAUTH_TOKEN is not set; review skipped."
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.HAS_TOKEN == 'true'
         with:
           fetch-depth: 1
