@@ -55,6 +55,11 @@ exists so someone can re-run each visual's SQL in DataGrip or Snowsight, not to
 ship. The app's `review.py` (the no-op `review_value` marker its pages import)
 does ship, and is in `artifacts:`.
 
+Before a release or a deploy that changes an app's SQL, run `/sql-review <slug>`:
+it checks the app's objects, grants and sections against live Snowflake and
+commits a review log under `sql_review/review_log/` for a person to sign off.
+It is recommended, never required: nothing in the deploy path waits on it.
+
 ## Retiring or renaming an app
 
 The pipeline above only ever runs `CREATE OR REPLACE` — it has **no implicit

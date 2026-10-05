@@ -55,8 +55,18 @@ Data notes (grain, definitions, quirks, freshness) live in `../AGENTS.md`, not h
 - `streamsnow sql-review check {{ app_slug }}`: offline gate (pre-commit, CI, `validate-app`):
   index, provenance, markers, objects, sqlfluff lint of `../queries/*.sql`, comment rules.
 - Lint settings are the repo's `.sqlfluff`.
-- `/sql-review` (a later StreamSnow release) will run a live review against Snowflake and
-  write a committed review log here. Until then, run sections by hand.
+- `/sql-review {{ app_slug }}` runs the live review against Snowflake: `streamsnow sql-review
+  probe`, `run`, `bench` and `log`. Their evidence stays local under `.streamsnow/sql-review/`.
+
+## Review log (review_log/)
+
+- `log` writes `review_log/YYYY-MM-DD_<shortsha>.md` and points the README's "Latest review" at it.
+- Commit the log and the README together, alone: `chore(sql-review): {{ app_slug }} review <date>`.
+  Fixes go in their own commits. Run `streamsnow sql-review check {{ app_slug }}` first; the
+  pre-commit hook runs it too.
+- The sign-off block is for a person. Claude never fills it in.
+- Never record row-level data or small-group breakdowns in a log or a finding: only pass or fail,
+  row counts and top-level totals.
 
 <!-- streamsnow: edit below this line; generate keeps it -->
 

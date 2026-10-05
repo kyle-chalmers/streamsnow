@@ -2,7 +2,7 @@
 
 The unattended path: the same review → bucket → fix → re-review cycle a person runs by hand, cycling
 until the app stops producing mechanical findings, then a render smoke. Costs several minutes — and
-some Snowflake credits when the lineage pass joins — so say so up front and offer `--no-lineage`
+some Snowflake credits when the live pass joins — so say so up front and offer `--no-lineage`
 to stay static-only.
 
 **Reach for the loop** after a big change that likely seeded several mechanical findings, once the
@@ -24,13 +24,16 @@ re-derives its dedup each cycle re-reports findings it already resolved:
 
 ## Steps
 
-1. Resolve the slug; warn about duration (and credits if live lineage will run).
+1. Resolve the slug; warn about duration (and credits if the live pass will run).
 2. **Check the working tree** — the loop commits one fix at a time, and a dirty tree muddies
    attribution. Offer stash/commit first.
 3. **Detect the connection context** (`snow connection list`, or the `snowflake.*` blocks in
-   config). Present → `/audit-lineage` joins each cycle (bounded read-only live-DB checks). Absent
-   or `--no-lineage` → static-only; say so once and continue — no connection is not a failure.
-4. **Cycle:** run the review pass (and the lineage pass, in parallel subagents when in scope and supported),
+   config). Present → the live facts join each cycle: `streamsnow sql-review probe <slug>`, then
+   `run <slug> --run <run_id>` (read-only, aggregates only); a failing result becomes a finding
+   that cites its id. Absent or `--no-lineage` → static-only; say so once and continue — no
+   connection is not a failure. The full `/sql-review` (reviewers, verifier, the committed log
+   a person signs) is not a loop step: offer it when the loop ends.
+4. **Cycle:** run the review pass (and the live pass, in parallel when in scope and supported),
    writing `apps/<slug>/.review/review-<ts>.md`. Merge multi-reviewer output with `merge-findings`;
    filter re-reports with `dedup-findings --with-repeats`. **A non-empty `repeats_of_applied` is
    no-convergence** — the same finding returned after its own applied fix, meaning the recipe is
@@ -73,5 +76,5 @@ re-derives its dedup each cycle re-reports findings it already resolved:
   the punch list with `--fix` interactively.
 - **Loop feels slow** — the browser walkthrough is the long pole; drop to a manual smoke and/or
   pass `--no-lineage`.
-- Cross-agent reviewers ride inside the review/lineage passes per their own config; the loop
+- Cross-agent reviewers ride inside the review and live passes per their own config; the loop
   inherits, never configures them.

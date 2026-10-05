@@ -83,8 +83,8 @@ only entries with `granted_by_default == false` need action.
   `required_grants` — the (database, schema) pairs the app queries, split into ones the CI role's
   allowlist already covers vs ones that need a DBA.
 - Judgment: wrap each uncached fetch (TTL = repo default unless the app argues otherwise); pin
-  explicit columns for each `SELECT *` (defer with a note rather than hallucinate — `/audit-lineage`
-  can fetch the real list); swap altair chart layers to the repo standard (its 5,000-row default
+  explicit columns for each `SELECT *` (defer with a note rather than hallucinate — `streamsnow sql-review
+  probe` reports the real list); swap altair chart layers to the repo standard (its 5,000-row default
   cap breaks real dashboards); `legacy_pages_only` → rebuild navigation with `st.navigation` (the
   two conventions cannot mix). Grants needing a DBA go in the PR description, not silent hope.
 

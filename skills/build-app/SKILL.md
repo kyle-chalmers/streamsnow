@@ -78,8 +78,8 @@ Apps started before 0.8 name the old `start-app` skill in that log; say `/build-
 
 ## Out of scope
 
-Porting an external app → `/migrate-app`; review depth → `/review-app`; live lineage →
-`/audit-lineage`; machine, repo and Snowflake setup → `/onboard`.
+Porting an external app → `/migrate-app`; review depth → `/review-app`; live numbers →
+`/sql-review`; machine, repo and Snowflake setup → `/onboard`.
 
 ## Done when
 

@@ -8,8 +8,31 @@ entry.
 
 ## [Unreleased]
 
+### Breaking
+
+- **`/audit-lineage` is replaced by `/sql-review`**, with no deprecation release (none is
+  needed before 1.0.0, per [docs/versioning.md](docs/versioning.md)). `/sql-review <slug>`
+  proves an app's numbers against live Snowflake and commits a review log a person signs
+  (SQL review redesign, phase 2 of 3). `/review-app --sql` now runs it. Rename a repo overlay
+  `.streamsnow/overlays/audit-lineage.md` to `sql-review.md`. Codex users re-run
+  `streamsnow agent-skills install`, which removes an unedited `audit-lineage` copy. The live
+  review covers the SQL listed in `sql_review/index.yaml`; SQL written inline in page code is
+  no longer traced live (the static `/review-app` pass still reads it).
+
 ### Added
 
+- **Live SQL review commands**: `streamsnow sql-review probe` (objects exist, direct grants,
+  DDL drift against `GET_DDL`, every section compiles), `run` (every section as aggregates:
+  row count, column totals, an order-insensitive hash, timing; never rows), `bench` (a section
+  with the result cache off, before and after a candidate rewrite, with a result-equivalence
+  check) and `log` (writes `sql_review/review_log/YYYY-MM-DD_<sha>.md` from verified findings,
+  refusing any finding whose evidence is not in the run). They run through `snow sql` with the
+  configured connection, the app's CI role with secondary roles off, a query tag and a
+  statement timeout, and refuse non-read-only SQL and denied schemas before sending.
+  Evidence stays local in `.streamsnow/sql-review/`, which new repos' `.gitignore` also lists.
+- **Reviewer agents** for `/sql-review` in the plugin's `agents/` (page, object, optimizer,
+  verifier); the same briefs ship in `skills/sql-review/reviewers/` for other agents.
+- `sql_review/AGENTS.md` (refreshed by `generate`) gains the review-log rules.
 - **In-app documentation in every new app.** `streamsnow new` adds an **About** page (last in the
   navigation): purpose, audience, owner, each page and its question, the full metric glossary,
   and every query with the schemas it reads, read at runtime from the `queries/*.sql` header

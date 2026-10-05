@@ -1,6 +1,6 @@
 # `--fix` — apply the latest report as atomic commits
 
-Turn the newest `.review/` report (written by a review pass or `/audit-lineage` — same schema) into
+Turn the newest `.review/` report (written by a review pass or the `--auto` loop — same schema) into
 per-finding commits, then re-run the gate. This applies findings; it does not re-judge them.
 
 ## Severity × bucket — the canonical taxonomy
@@ -17,8 +17,8 @@ asking. Every finding sorts into exactly one bucket.
   Missing `@st.cache_data(ttl=…)`; a denied-schema reference swapped to the allowed equivalent
   *named in the finding*; a write/dynamic-SQL pattern removed; the `:N IS NULL OR` bind-predicate
   trap rewritten; `SELECT *` → named columns **only when the column list is inlined in the finding**
-  (only `/audit-lineage` can inline real columns — a static review's `SELECT *` finding defers with
-  a TODO note instead); a chart-library *import* swap.
+  (only the live review can inline real columns: `streamsnow sql-review probe` reports them; a
+  static review's `SELECT *` finding defers with a TODO note instead); a chart-library *import* swap.
 - **B — judgment (walked interactively):** which TTL value, which view to read, a query
   restructure, translating chart specs between libraries, wrapping a page in `st.form`, container
   thread-safety guards. Show the diff, apply only on approval; "skip" and "mark resolved" are valid.

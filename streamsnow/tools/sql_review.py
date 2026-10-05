@@ -96,6 +96,8 @@ Verbs
 ``check [<slug>]``   the import-free gate above (every app when no slug).
                      ``--lint-files F …`` limits sqlfluff to those query files
                      (the pre-commit hook passes the staged ones; CI lints all).
+``probe | run | bench | log <slug>``
+                     the live review against Snowflake; see ``sql_review_live``.
 
 Exit codes: 0 = clean, 1 = findings/drift/gaps, 2 = tool error.
 """
@@ -887,13 +889,18 @@ def _with_params(body: str, lead: list[str], window: dict[str, str]) -> str:
     return "\n".join([*cte[:-1], cte[-1] + ",", *lead, rest])
 
 
-def render_section(app: Path, index: sri.Index, metric: sri.Metric) -> str:
-    """One metric's runnable SQL (no tag line), ending in exactly one ``;``."""
-    qpath = app / metric.query
-    try:
-        text = qpath.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        raise ToolError(f"cannot read {metric.query} (metric {metric.key!r}): {exc}") from exc
+def render_section(app: Path, index: sri.Index, metric: sri.Metric, text: str | None = None) -> str:
+    """One metric's runnable SQL (no tag line), ending in exactly one ``;``.
+
+    ``text`` stands in for the metric's query file: ``bench --sql-file``
+    renders a candidate rewrite exactly as the app's own query would be.
+    """
+    if text is None:
+        qpath = app / metric.query
+        try:
+            text = qpath.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ToolError(f"cannot read {metric.query} (metric {metric.key!r}): {exc}") from exc
     lead, body = _split_query(text)
     for tok, value in metric.tokens.items():
         body = body.replace("{" + tok + "}", value)
@@ -1735,7 +1742,8 @@ def cmd_generate(args: argparse.Namespace) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="sql_review",
-        description="Generate and verify each app's sql_review/ page files.",
+        description="Generate and verify each app's sql_review/ page files, and review "
+        "them live against Snowflake.",
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -1755,6 +1763,48 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Lint only these query files (pre-commit passes the staged ones). "
         "Every other check still runs in full.",
     )
+
+    # Live review (implemented in sql_review_live; the parsers stay here so the
+    # CLI-surface snapshot and the skill/CLI parity test read them).
+    def live(p: argparse.ArgumentParser, *, snowflake: bool = True) -> None:
+        p.add_argument("slug")
+        p.add_argument("--dir", default=".", help="Repo root (default: cwd).")
+        p.add_argument(
+            "--run",
+            default=None,
+            help="Run id or 'latest' (default: a new run; for log, the latest run).",
+        )
+        if snowflake:
+            p.add_argument("--connection", default=None, help="snow connection (default: config).")
+            p.add_argument("--role", default=None, help="Role (default: snowflake.roles.ci_role).")
+            p.add_argument(
+                "--warehouse", default=None, help="Warehouse (default: objects.default_warehouse)."
+            )
+            p.add_argument(
+                "--timeout", type=int, default=120, help="Statement timeout, seconds (default 120)."
+            )
+
+    p = sub.add_parser("probe", help="Live: objects exist, grants, DDL drift, sections compile.")
+    live(p)
+    p = sub.add_parser("run", help="Live: each section as aggregates (rows, totals, hash).")
+    live(p)
+    p.add_argument("--page", default=None, help="Only this page number (e.g. 01).")
+    p.add_argument(
+        "--slow-s", type=int, default=10, help="Flag sections slower than this (default 10 s)."
+    )
+    p = sub.add_parser("bench", help="Live: benchmark a section, optionally against a rewrite.")
+    live(p)
+    p.add_argument("--metric", required=True, help="Page#metric, e.g. 01#2.")
+    p.add_argument("--sql-file", default=None, help="Candidate replacement for the query file.")
+    p.add_argument("--runs", type=int, default=3, help="Timed runs per variant (1-5, default 3).")
+    p = sub.add_parser("log", help="Write the committed review log from verified findings.")
+    live(p, snowflake=False)
+    p.add_argument("--findings", required=True, help="JSON file of verified findings.")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate the findings against the run and print the log; write nothing.",
+    )
     return ap
 
 
@@ -1762,6 +1812,10 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     dispatch = {"generate": cmd_generate, "check": cmd_check}
     try:
+        if args.cmd not in dispatch:
+            from . import sql_review_live as live  # noqa: PLC0415
+
+            return live.dispatch(args)
         return dispatch[args.cmd](args)
     except ToolError as exc:
         print(f"error: {exc}", file=sys.stderr)

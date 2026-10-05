@@ -22,8 +22,8 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
    `streamsnow review-gate classify <slug> --format json`. Reviewed/trivial/skip-marker → proceed.
    `.apps[0].needs_review == true` → offer the choice: review first (`/review-app <slug> --auto`) or **ship
    as-is** — always available (ships can be time-critical; /validate-app + CI are the real publish
-   gates), but note "shipped unreviewed" in the PR body so the approver sees it. Never auto-run a
-   credit-spending review loop on the user's behalf here.
+   gates), but note "shipped unreviewed" in the PR body so the approver sees it. If the app's SQL
+   changed, recommend `/sql-review <slug>` before merge (never required). Never auto-run either.
 3. **Hard gate:** run /validate-app. Any FAIL → stop; report and do not stage, commit, or push.
    /validate-app is the fix-it path — don't auto-fix here.
 4. **Branch hygiene.** On `main` → `git switch -c ship/<slug>-<desc>` first. **Never reuse a

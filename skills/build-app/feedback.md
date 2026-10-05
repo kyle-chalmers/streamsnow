@@ -32,7 +32,7 @@ confirmation, because the user is checking your reading of *their* words.
 | **CROSS-CUTTING** | Applies to every page of the app | Pipeline, all pages in one pass | `feat` |
 
 - **Wrong output beats everything.** An item that is both a UX gripe and a wrong number is a BUG,
-  and wrong numbers may be the warehouse's doing: offer `/audit-lineage <slug>` before patching
+  and wrong numbers may be the warehouse's doing: offer `/sql-review <slug>` before patching
   Python.
 - **Scope smell test.** A fix that needs a table, chart or filter the spec doesn't mention is
   NEW-FEATURE, however it was phrased.

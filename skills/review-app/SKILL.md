@@ -1,6 +1,6 @@
 ---
 name: review-app
-description: Review an app the way a senior reviewer would — parallel reviewers across SQL, data, UI, runtime, and docs — then optionally apply the fixes. Use when the user says "review this app", "audit my dashboard", "fix the findings", "auto-fix until clean", or after validation passes. Flags — --fix applies findings as atomic commits, --auto loops review→fix until clean, --sql builds the runnable sql_review/ page files.
+description: Review an app the way a senior reviewer would — parallel reviewers across SQL, data, UI, runtime, and docs — then optionally apply the fixes. Use when the user says "review this app", "audit my dashboard", "fix the findings", "auto-fix until clean", or after validation passes. Flags — --fix applies findings as atomic commits, --auto loops review→fix until clean, --sql runs /sql-review (the page files, then the live SQL review and its signed log).
 argument-hint: "<slug> [--fix | --auto | --sql]"
 allowed-tools: [Bash, Read, Edit, Glob, Grep, Task]
 ---
@@ -22,10 +22,10 @@ can't catch.
 - **`--auto`** — loop review → fix → re-review until no new mechanical findings remain, then a
   render smoke. Follow [auto-loop.md](auto-loop.md). Warn it takes minutes (and Snowflake credits
   when the lineage pass joins); `--no-lineage` keeps it static-only.
-- **`--sql`** — build the app's `sql_review/` page files (mark visuals with `review_value` →
-  write `sql_review/index.yaml` → `streamsnow sql-review generate` → `check`). Follow
-  [sql-companions.md](sql-companions.md). Read-only; runs only when `--sql` is passed (the review
-  pass reports `sql-review check` gaps but does not build the files itself).
+- **`--sql`** — after the review pass, run `/sql-review <slug>` (step 10): it builds or repairs
+  the `sql_review/` page files, reviews them live and writes the log a person signs. Follow
+  [../sql-review/SKILL.md](../sql-review/SKILL.md). Only with `--sql`: the review pass reports
+  `sql-review check` gaps but never starts it.
 
 ## Review pass
 
@@ -55,12 +55,13 @@ can't catch.
    should-fix / nice-to-have counts and the top items — so nobody has to open the file to know
    where they stand.
 9. **Offer the next step:** mechanically fixable findings → `--fix`; findings that hinge on live
-   data (row counts, real columns, filter semantics) → `/audit-lineage <slug>` rather than guessing.
+   data (row counts, real columns, filter semantics) → `/sql-review <slug>` rather than guessing.
+10. **With `--sql`:** run `/sql-review <slug>` now, following its SKILL.md from preflight.
 
 ## Boundaries
 
 - **Static by design.** The review pass reads code; it doesn't run SQL. Live-DB truth is
-  `/audit-lineage`.
+  `/sql-review`.
 - **Never weaken governance to clear a finding**, and never re-judge the gate — a review finding
   can't flip validate-app.
 - The canonical static-gate escape: a `default=[]` multiselect rendering a whole band of empty
@@ -71,4 +72,4 @@ can't catch.
 ## Done when
 
 The merged report is written under `.review/`, the plain-English summary is printed, and the user
-has a clear next step (`--fix`, `/audit-lineage`, or ship via /validate-app → /ship-app).
+has a clear next step (`--fix`, `/sql-review`, or ship via /validate-app → /ship-app).

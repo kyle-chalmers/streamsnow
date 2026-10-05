@@ -128,7 +128,24 @@ everything; `validate-app` always scans the whole app.
 | `streamsnow sql-review generate <slug>` | Writes one runnable file per page, `sql_review/NN_<page>.sql`, from `sql_review/index.yaml`. `--dir`. |
 | `streamsnow sql-review check [<slug>]` | Fails on drift, hand edits, `review_value` marker mismatches and lint; uncovered pages or queries fail or warn per `sql_review.coverage`. No slug checks every app. `--dir`, `--format md\|json`, `--lint-files <file>...` (lint only these; pre-commit passes the staged files). |
 
-See [Auditing a visual](auditing-a-visual.md) for the file format.
+The live review (the `/sql-review` skill drives these; each needs a `snow` connection):
+
+| Command | What it does |
+|---|---|
+| `streamsnow sql-review probe <slug>` | Checks every object the index names exists, has a direct grant to the review role, and (for views in `app_specific_reporting_objects/`) matches the live definition; compiles every section and reports its columns. Starts a run and prints its `run_id`. |
+| `streamsnow sql-review run <slug>` | Runs every section wrapped in an aggregate: row count, a total per numeric column, an order-insensitive hash, timing. Never fetches rows. `--page NN`, `--slow-s N` (default 10). |
+| `streamsnow sql-review bench <slug> --metric NN#n` | Times one section with the result cache off (median of `--runs`, default 3): elapsed time, bytes and partitions scanned. `--sql-file F` benchmarks a candidate rewrite of the query against it and reports `equivalent`. |
+| `streamsnow sql-review log <slug> --findings F` | Writes `sql_review/review_log/YYYY-MM-DD_<sha>.md` from verified findings and links it from the README; refuses a finding whose evidence is not a result in the run. `--dry-run` validates and writes nothing. |
+
+`probe`, `run` and `bench` share `--run <id>|latest` (default: a new run), `--connection`
+(default `snowflake.connection_name`), `--role` (default `snowflake.roles.ci_role`),
+`--warehouse` (default `objects.default_warehouse`) and `--timeout` (statement timeout in
+seconds, default 120); `log` takes `--run` (default `latest`). All take `--dir`. They print JSON,
+write it to `.streamsnow/sql-review/<slug>/<run_id>/` (ignored by git), and refuse non-read-only
+SQL and governance-denied schemas before anything is sent. Exit codes: `0` every check passed,
+`1` a check failed (or `log` refused the findings), `2` nothing ran.
+
+See [Auditing a visual](auditing-a-visual.md) for the file format and the live review.
 
 ## Review
 
