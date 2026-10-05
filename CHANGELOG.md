@@ -7,6 +7,15 @@ breaking changes still get one minor release of deprecation warnings first.
 
 ## [Unreleased]
 
+### Breaking
+
+- **`/start-app --setup` and `/start-app adopt` are removed**, with no
+  deprecation release (a maintainer exception to
+  [docs/versioning.md](docs/versioning.md)). Use `/onboard`, which does both;
+  `/start-app` hands off to it by itself when the machine or repo isn't ready.
+- **The plugin no longer bundles the Playwright MCP** (`.mcp.json`). UI
+  walkthroughs use the Playwright CLI instead; see Changed below.
+
 ### Added
 
 - **Versioning and stability policy** ([docs/versioning.md](docs/versioning.md)): what the
