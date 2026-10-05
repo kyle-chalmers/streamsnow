@@ -1,8 +1,7 @@
 # SQL review redesign: design spec
 
-Status: design agreed with Kyle on 2026-10-04. Implementation plans for the three phases below are
-NOT written yet; the next session writes them (superpowers:writing-plans) from this spec, one plan
-per phase, saved under `docs/superpowers/plans/`.
+Status: design agreed with Kyle on 2026-10-04. Implementation plans, one per phase, are in
+`docs/superpowers/plans/2026-10-05-sql-review-phase-{1,2,3}-*.md`.
 
 ## Purpose
 
