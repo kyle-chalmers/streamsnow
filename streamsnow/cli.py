@@ -841,6 +841,15 @@ def new(
         "and queries (/start-app does this in its build phase); validate-app FAILS while any "
         "file still reads YOUR_TABLE."
     )
+    # The runtime-matched install, so the first local preview works. markup off:
+    # pip extras in brackets (pkg[extra]) are not Rich markup.
+    console.print(
+        "Install the app's packages for local preview: "
+        f"{local_install_command(Path.cwd() / 'apps' / slug)}  "
+        "(if this repo already has a .venv, run only the part after &&)",
+        markup=False,
+        highlight=False,
+    )
     console.print(
         f"Next: streamsnow validate-app {slug}, then add {slug} to README.md's Apps table "
         "(the index is hand-maintained and the row is the step teams forget)."

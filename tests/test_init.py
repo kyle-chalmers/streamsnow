@@ -775,6 +775,9 @@ def test_new_warns_when_repo_governance_files_are_missing(tmp_path, monkeypatch)
     out = " ".join(result.output.split())
     assert "streamsnow init --no-starter-app" in out
     assert ".gitignore" in out and ".pre-commit-config.yaml" in out
+    # /start-app runs this right after scaffolding (skills/start-app/scaffold.md).
+    assert "Install the app's packages for local preview:" in out
+    assert "apps/sales-order-trends" in out.split("for local preview:")[1]
 
     # Once the repo files exist, `new` is quiet about them.
     assert runner.invoke(app, ["init", "--dir", str(tmp_path), "--no-starter-app"]).exit_code == 0

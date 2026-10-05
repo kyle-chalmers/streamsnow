@@ -84,3 +84,9 @@ def test_no_stale_cross_references():
     assert "/start-app --setup" not in SETUP
     assert "belongs to §2d" not in SETUP  # ci-secrets moved to §2e
     assert "Setup mode" not in SETUP and "this skill's default mode" not in SETUP
+
+
+def test_scaffold_installs_the_app_packages():
+    scaffold = " ".join(_read("start-app", "scaffold.md").split())
+    assert "Install the app's packages for local preview" in scaffold
+    assert "/start-app --setup" not in _read("start-app", "spec.md")
