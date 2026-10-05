@@ -192,10 +192,11 @@ apps/<slug>/
   streamlit_app.py         # st.navigation entrypoint, apply_branding()
   pages/overview.py        # starter placeholder: sample numbers, a Plotly chart, a cached loader
   queries/example_metric.sql   # starter placeholder: reads YOUR_TABLE
-  sql_review/              # human-runnable SQL audit trail (streamsnow sql-review)
-    manifests/example_metric.json   # the editing surface
-    example_metric.review.sql       # generated: paste-runnable in Snowsight
-  branding.py  sql_loader.py
+  sql_review/              # runnable SQL per page (streamsnow sql-review)
+    index.yaml             # the editing surface: pages, metrics, review window
+    01_overview.sql        # generated: one runnable section per metric
+    README.md  AGENTS.md  CLAUDE.md
+  branding.py  sql_loader.py  review.py (the review_value marker)
   .streamlit/config.toml   .streamlit/secrets.toml.example
   snowflake.yml            pyproject.toml (container) | environment.yml (warehouse)
   AGENTS.md
@@ -281,27 +282,31 @@ naming, and the governance checks (`schema-refs`, `security`,
 `page-imports`, `artifacts`, `path-leaks`, `requirements`, the same names you
 pass to `streamsnow check`). Any **FAIL** must be fixed before shipping. The
 `placeholders` check **fails** while any app file still reads the starter's
-`YOUR_TABLE`: the example query, the review window in its `sql_review`
-manifest, and `pages/overview.py`, whose numbers are samples. Replace or
+`YOUR_TABLE`: the example query, the review window in
+`sql_review/index.yaml`, and `pages/overview.py`, whose numbers are samples. Replace or
 repoint all three (or delete the example app) before you merge, because CI
 deploys every app under `apps/`; every other check passing is what proves the
 scaffold itself is whole. Run an
 individual check while iterating with, e.g., `streamsnow check caching
 apps/<slug>`.
 
-Every query under `apps/<slug>/queries/` also gets a **paste-runnable audit
-copy** under `apps/<slug>/sql_review/`, so a reviewer can re-run each visual's
-SQL in Snowsight. `streamsnow sql-review discover | generate | check` keeps it
-generated and fresh. Drift and hand edits always fail `check`; whether an
-*uncovered* query fails or only warns is `sql_review.coverage` in your config
-(`warn` by default).
+Every page of an app also gets a **runnable SQL file** under
+`apps/<slug>/sql_review/` (`01_overview.sql`, …), one section per metric, so a
+reviewer can re-run each visual's SQL in DataGrip or Snowsight
+([Auditing a visual](auditing-a-visual.md)). `sql_review/index.yaml` lists the
+metrics; `streamsnow sql-review generate` writes the files and
+`streamsnow sql-review check` keeps them fresh, checks each page's
+`review_value` markers, and lints the app's queries with the repo's
+`.sqlfluff`. Drift, hand edits and lint always fail `check`; whether an
+*uncovered* page or query fails or only warns is `sql_review.coverage` in your
+config (`warn` by default).
 
 Reproducing CI locally, job by job:
 
 | CI job | Local command |
 |---|---|
 | Governance gate | `for d in apps/*/; do streamsnow validate-app "$(basename "$d")"; done` |
-| SQL-review audit trail | `streamsnow sql-review check` |
+| SQL review | `streamsnow sql-review check` |
 | Tombstones | `streamsnow check tombstones --base-ref origin/main` |
 | Dependency vulnerabilities | `streamsnow check dependency-vulns` |
 
@@ -368,7 +373,7 @@ secrets / `secrets.toml`). The load-bearing sections:
 | `snowflake.roles` | `ci_role` (deploys and owns the apps, reads the data) and `viewer_role` (opens deployed apps; data reads are opt-in) |
 | `governance` | `database`, `schema_allow`, `schema_deny`, `read_exceptions` — the data guardrails. `schema_deny` is what the `schema-refs` check enforces (a denylist); `schema_allow` is the convention the scaffolded queries and docs point at, not an enforced gate |
 | `deploy.source` | `stage-copy` (default) or `git-repository`; `deploy.artifact_exclude` names non-code files your pipeline ships by another step |
-| `sql_review.coverage` | `warn` (default) or `fail` — whether an uncovered query fails `validate-app`, pre-commit and CI |
+| `sql_review.coverage` | `warn` (default) or `fail` — whether a page or query missing from `sql_review/index.yaml` fails `validate-app`, pre-commit and CI |
 
 See [`streamsnow.config.example.yaml`](../streamsnow.config.example.yaml) for an
 annotated template.

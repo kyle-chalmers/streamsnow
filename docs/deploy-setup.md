@@ -181,7 +181,7 @@ across re-runs, refusing if a tombstone still names a declared app), and
 verifies each app's health (`streamsnow verify-deploy`). See
 [Deploying → Retiring or renaming an app](deploying.md#retiring-or-renaming-an-app).
 
-Note that an app's `sql_review/` audit-trail directory is repo-side
+Note that an app's `sql_review/` directory (its runnable review SQL) is repo-side
 documentation for reviewers — the deployed app never reads it, and it is not
 declared in the app's `snowflake.yml` `artifacts:`.
 

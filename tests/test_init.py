@@ -559,7 +559,7 @@ def _repoint_starter(app_dir: Path) -> None:
     hard-coded sample metric and chart are still on screen."""
     for rel in (
         "queries/example_metric.sql",
-        "sql_review/manifests/example_metric.json",
+        "sql_review/index.yaml",
         "pages/overview.py",
     ):
         f = app_dir / rel
@@ -582,7 +582,7 @@ def _finish_starter(app_dir: Path) -> None:
     page = app_dir / "pages/overview.py"
     text, n = _STARTER_SAMPLE_BLOCK.subn(
         'df = load_example("2024-01-01", "2024-12-31")\n'
-        'branded_metric("Rows", f"{int(df[\'N\'].sum()):,}")\n'
+        'branded_metric("Rows", review_value("example_metric", f"{int(df[\'N\'].sum()):,}"))\n'
         'fig = px.bar(df, x="DT", y="N", color_discrete_sequence=BRAND_CHART_COLORS)\n'
         "st.plotly_chart(fig, use_container_width=True)\n",
         page.read_text(encoding="utf-8"),
@@ -593,9 +593,9 @@ def _finish_starter(app_dir: Path) -> None:
 
 def test_fresh_scaffold_fails_only_on_its_placeholders(tmp_path):
     """A repo straight out of `streamsnow init` (including the auto-generated
-    sql_review companion) is structurally whole: every check but `placeholders`
-    passes (the accuracy audit once caught check-artifacts demanding the .review.sql
-    be declared deployable). `placeholders` FAILS until the starter trio is replaced,
+    sql_review page file) is structurally whole: every check but `placeholders`
+    passes (the accuracy audit once caught check-artifacts demanding the generated
+    review SQL be declared deployable). `placeholders` FAILS until the starter trio is replaced,
     so the example app can never ship; once it is, the gate passes."""
     import json as _json
 
@@ -805,8 +805,8 @@ def test_setup_skill_writes_repo_files_on_a_repo_without_apps():
 def test_validate_app_fails_on_the_scaffold_placeholders(tmp_path):
     """B8, tightened: the starter query reads YOUR_TABLE. As a warning it validated
     clean and CI deployed an app that cannot run. It is a FAIL now, and it names every
-    file of the starter trio: repointing the query alone still leaves the manifest's
-    review window and the page's sample numbers. The page's sample metric and chart are
+    file of the starter trio: repointing the query alone still leaves the review window
+    in sql_review/index.yaml and the page's sample numbers. The page's sample metric and chart are
     their own finding, so replacing YOUR_TABLE everywhere does not clear the gate either."""
     import json as _json
 
@@ -828,7 +828,7 @@ def test_validate_app_fails_on_the_scaffold_placeholders(tmp_path):
         ("pages/overview.py", "token"),
         ("pages/overview.py", "sample"),
         ("queries/example_metric.sql", "token"),
-        ("sql_review/manifests/example_metric.json", "token"),
+        ("sql_review/index.yaml", "token"),
     ]
     md = runner.invoke(app, validate)
     assert md.exit_code == 1
@@ -841,7 +841,7 @@ def test_validate_app_fails_on_the_scaffold_placeholders(tmp_path):
         encoding="utf-8",
     )
     assert ("queries/example_metric.sql", "token") not in placeholder_findings()
-    assert runner.invoke(app, validate).exit_code == 1  # manifest + page still placeholders
+    assert runner.invoke(app, validate).exit_code == 1  # index.yaml + page still placeholders
 
     # Every YOUR_TABLE gone, the sample metric and chart still on the page: FAIL.
     _repoint_starter(tmp_path / "apps/a-b")
@@ -866,9 +866,9 @@ def test_validate_app_fails_on_the_scaffold_placeholders(tmp_path):
 
 def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypatch):
     """The /start-app end state (pages.md § Replace the starter trio): `new`, then the
-    first real page, its query and an anchored manifest replace all three starter
-    files. The app must validate clean, which proves the documented replacement
-    leaves nothing dangling (nav entry, artifacts, sql_review)."""
+    first real page (with its review_value marker), its query and its index.yaml entry
+    replace all three starter files. The app must validate clean, which proves the
+    documented replacement leaves nothing dangling (nav entry, artifacts, sql_review)."""
     import json as _json
 
     from streamsnow.tools import sql_review
@@ -880,29 +880,28 @@ def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
     assert result.exit_code == 0, result.output
     assert "placeholders" in result.output and "YOUR_TABLE" in result.output
     a = tmp_path / "apps/sales-trends"
+    assert (a / "sql_review/01_overview.sql").is_file()
     assert runner.invoke(app, ["validate-app", "sales-trends"]).exit_code == 1
 
-    for rel in (
-        "pages/overview.py",
-        "queries/example_metric.sql",
-        "sql_review/manifests/example_metric.json",
-        "sql_review/example_metric.review.sql",
-    ):
+    for rel in ("pages/overview.py", "queries/example_metric.sql"):
         (a / rel).unlink()
     (a / "queries/daily_sales.sql").write_text(
         "-- Query: daily_sales\n-- Feeds: Sales trend\n-- Schemas: ANALYTICS_DB.ANALYTICS\n"
         "-- Params: :1 start_date, :2 end_date\n"
-        "SELECT sold_date, SUM(net_paid) AS net_paid\nFROM ANALYTICS_DB.ANALYTICS.STORE_SALES\n"
+        "SELECT\n    sold_date,\n    SUM(net_paid) AS net_paid\n"
+        "FROM ANALYTICS_DB.ANALYTICS.STORE_SALES\n"
         "WHERE sold_date BETWEEN :1 AND :2\nGROUP BY sold_date\n",
         encoding="utf-8",
     )
     (a / "pages/sales_trend.py").write_text(
-        '"""Sales trend."""\n\nimport streamlit as st\nfrom sql_loader import load_sql\n\n\n'
+        '"""Sales trend."""\n\nimport streamlit as st\nfrom review import review_value\n'
+        "from sql_loader import load_sql\n\n\n"
         "@st.cache_data(ttl=1800)\n"
         "def load_daily(start: str, end: str):\n"
         '    sql = load_sql("daily_sales")\n'
         '    return st.connection("snowflake").query(sql, params=[start, end], ttl=0)\n\n\n'
-        'st.title("Sales trend")\n',
+        'st.title("Sales trend")\n'
+        'st.line_chart(review_value("net_paid_by_day", load_daily("2024-01-01", "2024-12-31")))\n',
         encoding="utf-8",
     )
     entry = a / "streamlit_app.py"
@@ -914,19 +913,24 @@ def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
         encoding="utf-8",
     )
     table = "ANALYTICS_DB.ANALYTICS.STORE_SALES"
-    manifest = {
-        "schema_version": 1,
-        "feature": "sales",
-        "app": "sales-trends",
-        "set_block": {
-            "start_date": f"(SELECT DATEADD('year', -1, MAX(sold_date)) FROM {table})::DATE",
-            "end_date": f"(SELECT MAX(sold_date) FROM {table})::DATE",
-        },
-        "pages": [{"name": "Sales trend", "queries": ["daily_sales"]}],
-        "query_specs": {"daily_sales": {"params_doc": ":1 start_date, :2 end_date"}},
-    }
-    (a / "sql_review/manifests/sales.json").write_text(_json.dumps(manifest), encoding="utf-8")
+    (a / "sql_review/index.yaml").write_text(
+        "schema_version: 2\n"
+        "app: sales-trends\n"
+        "review_window:\n"
+        f"  start_date: \"(SELECT DATEADD('year', -1, MAX(sold_date)) FROM {table})::DATE\"\n"
+        f'  end_date: "(SELECT MAX(sold_date) FROM {table})::DATE"\n'
+        "pages:\n"
+        "  - path: pages/sales_trend.py\n"
+        "    metrics:\n"
+        "      - key: net_paid_by_day\n"
+        "        query: queries/daily_sales.sql\n"
+        '        binds: {"1": params.start_date, "2": params.end_date}\n'
+        f"        reads: [{table}]\n",
+        encoding="utf-8",
+    )
     assert sql_review.main(["generate", "sales-trends", "--dir", str(tmp_path)]) == 0
+    assert not (a / "sql_review/01_overview.sql").exists()  # generate removed the stale page
+    assert (a / "sql_review/01_sales_trend.sql").is_file()
     result = runner.invoke(app, ["validate-app", "sales-trends", "--format", "json"])
     assert result.exit_code == 0, result.output
     assert not [w for c in _json.loads(result.output)["checks"] for w in c.get("warnings", [])]

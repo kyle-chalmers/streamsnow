@@ -125,13 +125,34 @@ caught it. Runtime-specific facts link to the official page in
   ambiguous.
 - **Fix:** `**Current phase:** build` plus a `**Phase notes:** pages 3/5` line.
 
-### 10. `sql-review check` fails on queries with no companion
+### 10. `sql-review check` fails on pages or queries with no review SQL
 
-- **Symptom:** every `queries/*.sql` without a manifest is a FAIL.
-- **Cause:** `sql_review.coverage: fail` in config, or the repo is on 0.6, where
-  coverage always failed the standalone check.
-- **Fix:** set `sql_review: {coverage: warn}` while backfilling; drift, hand
-  edits, unbound binds and write statements still fail regardless.
+- **Symptom:** a page missing from `sql_review/index.yaml`, or a `queries/*.sql`
+  no metric uses, is a FAIL (`coverage`).
+- **Cause:** `sql_review.coverage: fail` in config.
+- **Fix:** add the pages and metrics to `index.yaml` (see
+  [Auditing a visual](auditing-a-visual.md)), or set
+  `sql_review: {coverage: warn}` while backfilling; drift, hand edits, marker
+  mismatches, lint and write statements still fail regardless.
+
+### 10a. `sql-review check` reports the removed format after upgrading to 0.8
+
+- **Symptom:** an `index` finding: "this app still uses the removed sql_review
+  format (manifests/, …)".
+- **Cause:** 0.8.0 replaced `sql_review/manifests/*.json` and `*.review.sql`
+  with `sql_review/index.yaml` and one generated file per page, with no
+  automatic migration.
+- **Fix:** follow "Upgrading from 0.7" in
+  [Auditing a visual](auditing-a-visual.md#for-the-developer-on-the-other-side-of-this).
+
+### 10b. `sql-review check` reports `lint` findings in queries
+
+- **Symptom:** `FAIL [lint] apps/<slug>/queries/x.sql:12 LT01: …`.
+- **Cause:** 0.8.0 lints each app's `queries/*.sql` with sqlfluff (Snowflake
+  dialect), using the repo's `.sqlfluff`.
+- **Fix:** `sqlfluff fix apps/<slug>/queries --templater placeholder` fixes most
+  layout findings; tune the rules in `.sqlfluff` (`streamsnow update` adds it to
+  a repo scaffolded before 0.8.0). Then `streamsnow sql-review generate <slug>`.
 
 ### 11. `environment.yml` rejected for pinning `python`
 

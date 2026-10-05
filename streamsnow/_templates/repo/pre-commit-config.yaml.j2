@@ -99,13 +99,13 @@ repos:
         pass_filenames: true
       - id: streamsnow-sql-review
         description: >-
-          Rendered review SQL nobody can re-run rots; the manifest is the editing surface, and provenance hashes turn drift into a named finding. Coverage severity follows sql_review.coverage in config.
+          Review SQL nobody can re-run rots; sql_review/index.yaml is the editing surface, and provenance hashes turn drift into a named finding. sqlfluff lints only the staged queries here (CI lints all). Coverage severity follows sql_review.coverage in config.
           Rationale and incident: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/production-lessons.md
-        name: streamsnow sql-review check (audit trail fresh + complete)
-        entry: streamsnow sql-review check
+        name: streamsnow sql-review check (review SQL fresh, linted, complete)
+        entry: streamsnow sql-review check --lint-files
         language: system
-        files: ^apps/.*(queries/.*\.sql|sql_review/.*|\.py)$
-        pass_filenames: false
+        files: ^(apps/.*(queries/.*\.sql|sql_review/.*|\.py)|\.sqlfluff)$
+        pass_filenames: true
       - id: streamsnow-dependency-vulns
         description: >-
           OSV scan of every exact pin; a live connector CVE sat in a manifest for weeks before a scan existed. Best-effort offline here, fail-closed in CI.

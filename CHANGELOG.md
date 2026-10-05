@@ -5,8 +5,50 @@ All notable changes to StreamSnow are recorded here. This project follows
 
 ## [Unreleased]
 
+Version 0.8.0.
+
+### Breaking
+
+- **SQL review is page-based** (`sql_review/` redesign, phase 1 of 3; design in
+  `docs/superpowers/specs/2026-10-04-sql-review-redesign.md`). Each app gets
+  one generated SQL file per page, `sql_review/NN_<page>.sql` (`NN` = the page's
+  position in the app's navigation), with one runnable section per metric in
+  on-screen order. Each section starts with a `--N_key` tag (the first is
+  always line 9), carries its own `params` CTE for the review window, and runs
+  on its own with the cursor in it (DataGrip, Snowsight). A single
+  `sql_review/index.yaml` per app is the editing surface. **The 0.6/0.7 format
+  is removed with no automatic migration**: `sql_review/manifests/*.json`,
+  `*.review.sql`, combos, metrics mode, token strategies, and the `discover`
+  and `index` verbs are gone. `check` reports an app still on the old format
+  as an `index` finding; `docs/auditing-a-visual.md` has the upgrade steps, and
+  `generate` deletes the old `*.review.sql` files.
+- **`sql-review check` lints app queries with sqlfluff** (Snowflake dialect,
+  the repo's new `.sqlfluff`, created by `init` and by `update` when missing)
+  and requires a one-line comment directly above every CTE, with comment lines
+  of 100 characters or fewer. Both fail the gate. `sqlfluff` is now a runtime
+  dependency. Apps without an `index.yaml` are only reported as uncovered.
+- Generated CI and deploy workflows pin `streamsnow>=0.8,<0.9`.
+
 ### Added
 
+- **`review_value("<key>", value)` markers.** A new scaffolded `review.py`
+  (listed in `snowflake.yml` artifacts) ties each visual in page code to its
+  metric in `index.yaml`; `check` reads the calls by AST, never by import, and
+  fails on a metric with no visual or a visual with no metric. Outside review
+  preview mode the call returns its input and does nothing else (about 40 ns;
+  a benchmark test holds it under 1 µs, with no file written and no import).
+- **`sql_review/app_specific_reporting_objects/`**: maintained DDL, one file per
+  object built to make the app work, headed by Object, Purpose, Used by
+  (generated) and Grants. `check` fails on a DDL file nothing reads, an object
+  with no DDL file, or a header that disagrees with `index.yaml`. A human
+  applies DDL; these files are exempt from the read-only guard and never run.
+- **`sql_review/AGENTS.md`, `CLAUDE.md` and `README.md`** are created with each
+  app; `generate` refreshes the README tables and the tool-owned part of
+  `AGENTS.md`. The app `AGENTS.md` gains a Data notes section.
+- **`sql-review check --lint-files F …`** lints only the named query files; the
+  generated pre-commit hook passes the staged ones, CI lints everything.
+- `generate` applies sqlfluff's layout and capitalisation fixes (never rules
+  that change what SQL means) to every section it writes.
 - **`streamsnow ci-key push`** sets the five deploy secrets on GitHub from the
   files `ci-key create` wrote. Each value goes to `gh secret set` on stdin,
   never on the command line, and only names are printed. `SNOWFLAKE_ACCOUNT`

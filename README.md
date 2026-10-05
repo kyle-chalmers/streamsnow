@@ -291,8 +291,8 @@ streamsnow update                        # dry-run: governance files the new tem
 streamsnow update --apply                # re-render AGENTS.md, hooks, CI, deploy.yml
 ```
 
-Generated CI pins `streamsnow>=0.7,<0.8` (the deploy workflow
-`>=0.7.2,<0.8`); bump the pin with `update --apply` when you move majors.
+Generated CI and deploy workflows pin `streamsnow>=0.8,<0.9`; bump the pin with
+`update --apply` when you move majors.
 `claude plugin details streamsnow@streamsnow` lists the 8 skills below.
 
 ## The skills
@@ -305,7 +305,7 @@ lines, with depth in per-skill reference files:
 | `/start-app` | The front door: spec (incl. backfill from existing source) → scaffold → build pages → ship, with checkpoints. Also `--setup` (machine + repo) and `adopt` (existing repos — maps, doesn't scaffold, writes `MIGRATION.md`) |
 | `/preview-app` | Run an app locally against live Snowflake |
 | `/validate-app` | The pass/fail check that must be clean before shipping |
-| `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` authors the audit-trail manifests |
+| `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` builds the app's `sql_review/` page files |
 | `/audit-lineage` | Live-warehouse column + lineage verification (read-only, bounded) |
 | `/feedback-app` | Turn user feedback into classified, atomic-commit fixes |
 | `/ship-app` | Validate-gated stage → commit → push → PR → watch CI |
@@ -355,22 +355,22 @@ to overwrite an edited skill without `--force`.
   `streamsnow review-gate classify` itself. Those guards now rest on the agent
   following the skill; nothing enforces them.
 
-## The audit trail (new in 0.6)
+## SQL review (redesigned in 0.8)
 
-Every query under `apps/<slug>/queries/` gets a **human-runnable proof**: a
-fully-rendered, paste-runnable `.review.sql` under `apps/<slug>/sql_review/`,
-generated from a per-feature manifest and verified by an import-free freshness
-+ coverage gate (`streamsnow sql-review check`). Coverage is keyed to the
-`queries/` convention — the same place the validate gate pushes UI-feeding SQL
-— so SQL inlined in Python sits outside its reach. Drift, hand edits, unbound
-binds and write statements always fail the gate; whether an *uncovered* query
-fails or warns is your repo's call — `sql_review: {coverage: warn | fail}` in
-`streamsnow.config.yaml` (default `warn`, so an adopting fleet backfills on its
-own schedule; new in 0.7, replacing the 0.6 "warn now, FAIL later" promise). A
-person with nothing but Snowsight can trace a covered visual back to the data
-and confirm it — see **[Auditing a visual](docs/auditing-a-visual.md)**. For
-dashboards whose visuals aggregate differently than any single query,
-`"mode": "metrics"` manifests (0.6.1) render one authored block per visual.
+Every page of an app gets **SQL a person can run**: `apps/<slug>/sql_review/NN_<page>.sql`,
+one section per metric in on-screen order, each runnable on its own (cursor + Cmd/Ctrl+Enter in
+DataGrip, or pasted into Snowsight) with its review window in its own `params` CTE. The files are
+generated from `sql_review/index.yaml`, which lists each page's metrics and the app query behind
+each, and verified by an import-free gate (`streamsnow sql-review check`): provenance digests,
+the `review_value("<key>", value)` markers that tie each visual in page code to its section,
+sqlfluff lint and comment rules for the app's queries, and a folder of maintained DDL
+(`app_specific_reporting_objects/`) for views built just for the app. Drift, hand edits, marker
+mismatches and lint always fail the gate; whether an *uncovered* page or query fails or warns is
+your repo's call — `sql_review: {coverage: warn | fail}` in `streamsnow.config.yaml` (default
+`warn`, so an adopting fleet backfills on its own schedule). A person with nothing but a SQL editor
+can trace a covered visual back to the data and confirm it — see
+**[Auditing a visual](docs/auditing-a-visual.md)**. 0.8.0 replaced the 0.6/0.7 manifest format with
+no automatic migration (the same page has the upgrade steps).
 
 ## Make it yours — repo overlays (new in 0.6.1)
 

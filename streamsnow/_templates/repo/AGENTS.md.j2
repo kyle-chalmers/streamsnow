@@ -33,12 +33,14 @@ Every data-fetching function MUST use `@st.cache_data(ttl=<seconds>)`. Default T
 
 Any SQL that feeds a UI element lives in `apps/<slug>/queries/<name>.sql` (loaded via `sql_loader.py`), with a header block: `-- Query:`, `-- Feeds:`, `-- Schemas:`, `-- Params:`. Inline SQL is only for plumbing/discovery.
 
-Every query also carries a human-runnable **audit trail**: `apps/<slug>/sql_review/` holds a
-manifest per feature and a fully-rendered, paste-runnable `.review.sql` per filter combo, so a
-person can re-run each visual's SQL in Snowsight and confirm the numbers. Generated and verified
-by `streamsnow sql-review` (discover | generate | check | index); the manifest is the editing
-surface — `check` flags hand-edited rendered files, uncovered queries, and stale renders, and
-runs in pre-commit + CI.
+Every page also carries **runnable review SQL**: `apps/<slug>/sql_review/NN_<page>.sql` holds one
+self-contained section per metric, in on-screen order, so a person can re-run each visual's SQL in
+DataGrip or Snowsight and confirm the numbers. `sql_review/index.yaml` is the editing surface
+(pages, metrics, the query behind each, sample tokens, the review window); each visual's value in
+page code is wrapped in `review_value("<key>", value)` to tie it to its metric. Generated and
+verified by `streamsnow sql-review` (generate | check): `check` flags hand-edited or stale files,
+marker mismatches, uncovered pages and queries, sqlfluff lint (the repo's `.sqlfluff`) and CTEs
+without a comment, and runs in pre-commit + CI. Each app's `sql_review/AGENTS.md` has the rules.
 
 ## Deploy source: {{ deploy_source }}
 

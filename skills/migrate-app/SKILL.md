@@ -64,10 +64,10 @@ it documents every verb: when to run it, what its JSON says, the judgment call t
    (`streamsnow check bind-predicates` catches it).
 10. Write `snowflake.yml` for the chosen runtime; add an app `AGENTS.md` noting non-default TTLs
     and the runtime decision; scrub personal absolute paths the copy brought along.
-11. **Bootstrap the audit trail** (details in [engine.md](engine.md)):
-    `streamsnow sql-review discover <slug> --write`, author the skeleton manifests (real sample
-    fragments, not the TODO placeholders), then `streamsnow sql-review generate <slug>` and
-    `streamsnow sql-review index <slug>` — the review SQL ships inside the conform commit.
+11. **Bootstrap the review SQL** (details in [engine.md](engine.md)): mark each visual with
+    `review_value("<key>", value)`, write `sql_review/index.yaml` (pages, metrics in on-screen
+    order, real sample tokens), then `streamsnow sql-review generate <slug>` and
+    `streamsnow sql-review check <slug>`; the review SQL ships inside the conform commit.
 12. Preview via /preview-app so the user confirms each page still renders. A warehouse app failing
     locally on `get_active_session` is the runtime's signature, not a bug.
 13. Gate: `streamsnow validate-app <slug>` until PASS, then commit the conform pass as its own
@@ -82,6 +82,6 @@ DDL); deeper quality → /review-app + /audit-lineage; an app already in the rep
 ## Done when
 
 `apps/<slug>/` holds the conformed app — local helpers, headered `queries/*.sql`, a
-runtime-matching `snowflake.yml`, every fetch cached, a generated `sql_review/` audit trail, zero
+runtime-matching `snowflake.yml`, every fetch cached, generated `sql_review/` page files, zero
 findings from the two conform scans — `streamsnow validate-app <slug>` passes, and the lift and
 conform are two separate commits.

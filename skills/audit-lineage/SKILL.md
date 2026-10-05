@@ -63,11 +63,10 @@ notes.
 
 ## Audit-trail hand-back
 
-8. **While the lineage results are warm**, run `streamsnow sql-review check <slug>`; on gaps offer
-   `discover --write` + author the literals + `generate` (inside `/review-app --auto`: write the
-   skeletons only and punch-list the authoring — never generate from `-- TODO` literals, which
-   render as mid-clause comments). Then `streamsnow sql-review index <slug>` and fill the README's Upstream
-   cells from step 5, setting Verified (date) only on live-confirmed rows — see [tracing.md](tracing.md).
+8. **While the lineage results are warm**, record the objects step 5 traced in each metric's
+   `reads:` in `sql_review/index.yaml` and any data quirk in the app `AGENTS.md` Data notes, then
+   `streamsnow sql-review generate` and `check <slug>`. Coverage gaps: offer to add the pages and
+   metrics with real sample tokens, never placeholders ([tracing.md](tracing.md)).
 
 ## Judgment guardrails
 

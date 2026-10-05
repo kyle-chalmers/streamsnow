@@ -29,8 +29,19 @@ ends to the date picker's `value=`, and bound its `min_value` / `max_value` by t
 `date.today()` as a default makes every page over data that ends in the past (a historical
 extract, a sample dataset, a feed that stopped loading) open empty, which reads as a broken
 query. Show the anchor in the `Data as of:` footer, so a stale feed is visible rather than
-silent. The page's `sql_review` manifest anchors its `set_block` to the same `MAX(<date_col>)`,
-so the audit trail reviews the range the page shows by default.
+silent. The app's `sql_review/index.yaml` anchors its `review_window` to the same
+`MAX(<date_col>)`, so the review SQL covers the range the page shows by default.
+
+## Mark every visual for SQL review
+
+Wrap the value each data visual shows in `review_value("<metric_key>", value)` from the app's
+`review.py` (`from review import review_value`):
+`st.metric("Revenue", review_value("total_revenue", total))`,
+`st.dataframe(review_value("orders_by_region", df))`. It returns its input and does nothing else
+at runtime (no query, no file, no import), in Streamlit in Snowflake too. The key is the metric's
+key in `sql_review/index.yaml` (snake_case, five words or fewer); one call per metric, with a
+string literal key, because `streamsnow sql-review check` reads the calls without running the page
+and fails on a visual the index does not list or a metric no visual marks.
 
 ## Single-source metric definitions (the glossary module)
 

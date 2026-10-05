@@ -1,119 +1,97 @@
-# `--sql` — build the audit-ready `sql_review/` companions
+# `--sql`: build the app's `sql_review/` page files
 
-Give every UI-feeding query in `apps/<slug>/queries/` a paste-and-runnable companion plus a lineage
-README, driven by `streamsnow sql-review`. **Read-only** — never mutates Snowflake, never deploys.
-The tool owns everything deterministic: rendering, the read-only guard, provenance digests,
-coverage, the README table skeleton. Your judgment work is the **manifests** and the lineage
-narrative. Data-correctness judgment lives in `/audit-lineage`, code judgment in the review pass,
-the ship gate in `streamsnow validate-app`. Review and lineage passes run this automatically when
-`streamsnow sql-review check <slug>` reports gaps; invoke `--sql` directly for the scaffolding alone.
+Give every page of `apps/<slug>/` a runnable SQL file, one section per metric, driven by
+`apps/<slug>/sql_review/index.yaml` and `streamsnow sql-review`. **Read-only**: never mutates
+Snowflake, never deploys. The tool owns everything deterministic: rendering, the read-only guard,
+sqlfluff layout, provenance digests, the README tables, the marker and coverage checks. Your
+judgment work is the **index** (which metric each visual is, its sample tokens and binds) and the
+query comments. Data-correctness judgment lives in `/audit-lineage`, code judgment in the review
+pass, the ship gate in `streamsnow validate-app`. This runs only when the user passes `--sql`;
+the review pass does not start it on its own.
 
-**The manifest is the editing surface — the rendered file never is.** Each
-`sql_review/<feature>[.<combo>].review.sql` carries a provenance digest, and `sql-review check`
-flags a hand-edited body (or a manifest/template/module that changed since generation) as DRIFT
-until regenerated. To change what a companion renders, edit
-`apps/<slug>/sql_review/manifests/<feature>.json` and re-run `generate`.
+**`index.yaml` and `queries/*.sql` are the editing surface; a page file never is.** Each
+`sql_review/NN_<page>.sql` carries a provenance digest, and `sql-review check` flags a hand-edited
+body (or an index, query, nav entry or `.sqlfluff` that changed since generation) until
+regenerated. The folder's own rules are in `apps/<slug>/sql_review/AGENTS.md`.
 
 ## Steps
 
 1. Resolve the slug; confirm `apps/<slug>/queries/` exists. No `queries/*.sql` (a legacy app that
    inlines its SQL) → nothing to generate; suggest externalizing queries first and stop.
-2. **Compute the gap:** `streamsnow sql-review discover <slug> --write` — prints coverage
-   (claimed vs. uncovered) and persists one static skeleton manifest per uncovered query under
-   `sql_review/manifests/`. Exit 1 means gaps existed; existing manifests are never overwritten.
-   Leave already-covered queries' manifests untouched unless the user asks for a refresh.
-3. **Author the manifests — this is the judgment work.** A skeleton renders, but renders badly.
-   Per manifest, before generating:
-   - Replace every `-- TODO` dispatcher literal with a **real sample fragment whose literals
-     satisfy the predicates** (pick values the data actually contains, inside the review window) —
-     otherwise a correct query and an empty one look the same on paste. A leftover TODO literal is
-     worse than a placeholder: it renders as a comment mid-clause and silently comments out the
-     rest of that line.
-   - Make `combos` mirror the dashboard's **default filter state** first (`all-default`), then add
-     one combo per meaningfully different filter shape — not one per possible value.
-   - Set each query spec's `metric_name` to the **on-screen visual title**, so a pasted section's
-     result labels itself to match the dashboard.
-   - Group related queries into one `feature` manifest whose `pages` mirror the app's navigation —
-     `discover` proposes one manifest per query; consolidating them is your call. Two manifests may
-     never share a feature name (`generate` refuses the filename collision).
-   - When the app exposes its own token producers (e.g. a `region_filter_sql()` helper in a data
-     module), switch `token_strategy` to `"manifest"` and point `call`/`const_attr` dispatchers at
-     them via `modules` — the render is then exactly what the app emits, not your transcription of
-     it. Only `generate` imports app code, and only on a developer machine; `check` stays
-     import-free by design.
-   - **Anchor the review window to the data, always.** Set `set_block` explicitly; never rely on
-     the implicit default, which is the year ending `CURRENT_DATE` and returns zero rows for data
-     whose latest date is in the past (a historical extract, a sample dataset like TPC-DS, a
-     paused feed). End the window at the source's own latest date:
-     `"start_date": "(SELECT DATEADD('year', -1, MAX(<date_col>)) FROM <db>.<schema>.<table>)::DATE"`,
-     `"end_date": "(SELECT MAX(<date_col>) FROM <db>.<schema>.<table>)::DATE"`, reading the same
-     object and date column the page's default range uses (see the default-date-range rule in
-     [page-conventions](../_shared/page-conventions.md)). `sql-review check` reports a manifest
-     with no `set_block` as a `window` warning. Declare `CURRENT_DATE` explicitly only when today
-     really is the anchor (a live feed that loads daily), and say so in `set_block_note`.
-   - Defaults cover `:1 start_date, :2 end_date` via the `SET` block; override `param_bindings` /
-     `set_block` when the query binds something else. **Every bind a query uses must be declared**
-     — an undeclared `:3` is a hard error, and `param_bindings` must point at a variable that
-     `set_block` actually declares (a `$var` with no `SET` line is also a hard error). Unused
-     `set_block` entries are pruned from the output, so declare what the queries use.
-   - `set_block_note`: why these defaults are what they are — which source the bounds derive from,
-     and any mechanics that bite when editing them. It renders above the `SET` lines, where the
-     auditor reads it. Put the rationale here, not in a manifest comment.
-   - `fragments`: `[{"file": "_shared_ctes.sql", "reason": "..."}]`. A `queries/*.sql` that is a
-     shared CTE inlined via a token is **not independently runnable**, so it can never be claimed
-     by a page — and without declaring it, coverage demands a companion it can never have, which
-     makes the gate unsatisfiable for any app that factors CTEs into their own files. `reason` is
-     required and renders into the index. Never rename a query to dodge coverage; declare it.
-4. **Render:** `streamsnow sql-review generate <slug>` (scope one manifest with `--feature
-   <name>`). The tool substitutes tokens and binds, verifies the output is read-only, stamps
-   provenance, and deletes stale files for removed combos. Read-only is enforced in two
-   independent layers: a statement-root allowlist (`SELECT` / `WITH…SELECT` / `SHOW` / `DESCRIBE`
-   / `EXPLAIN` / session-variable `SET`), plus a tripwire that refuses a write verb in command
-   position even if the parser is fooled. Four hard errors — an unresolved `{TOKEN}`, a surviving
-   `:N` bind, a `$var` with no `SET` line, or a write-shaped statement. Fix the manifest, never
-   the output.
-5. **Check for a connection** (`streamsnow doctor` / `snow connection list`). It's a branch, not a
-   gate: with one, lineage rows get live-verified; without one, everything is written from static
-   analysis and marked **unverified** — still useful, still honest. Never fabricate column lists.
-6. **Live-verify lineage when connected:** per upstream object, a zero-row resolve probe
-   (`SELECT COUNT(*) FROM <fqn> WHERE 1=0`) and type/columns from `INFORMATION_SCHEMA`. `LIMIT`
-   any row-returning probe; no DDL, no writes, nothing outside `governance.schema_allow`.
-7. **Index:** `streamsnow sql-review index <slug>` rebuilds the README coverage table between its
-   `<!-- sql-review-index:start/end -->` markers (creating README.md if absent). The tool owns the
-   table skeleton and carries the two human columns per row, keyed by query name; everything
-   outside the markers is preserved byte-for-byte. After it runs, fill in what only you know:
-   - **Upstream object(s)** — replace the `_(fill via /review-app --sql)_` placeholder with the
-     fully-qualified object(s) the query reads.
-   - **Verified** — a date (e.g. `2026-08-31`) only for rows whose objects step 6 live-confirmed
-     this pass; leave `no` otherwise.
-   - The **narrative around the markers** — lineage notes, known caveats, how to read the files.
-8. **Report the coverage delta** — total queries, covered, still uncovered (`check` names them),
-   declared CTE fragments, and live-verified vs. static rows. Two `check` findings need action
-   rather than a number: a declared fragment whose file no longer exists (a stale exemption), and
-   a query claimed by a page in one manifest while another declares it a fragment (contradictory;
-   the exemption is ignored until resolved). Report those as findings, not as coverage.
+2. **Compute the gap:** `streamsnow sql-review check <slug>`. `coverage` warnings name each nav
+   page missing from `index.yaml` and each query no metric uses; `marker` findings name visuals
+   whose `review_value` key and the index disagree. An app with no `index.yaml` yet gets one
+   `coverage` warning: start the index from the template below.
+3. **Mark the visuals.** For each data visual on a page, wrap the value it shows in
+   `review_value("<metric_key>", value)` (`from review import review_value`; the scaffold ships
+   `review.py`, a no-op at runtime). Keys are snake_case, five words or fewer, and name the value
+   (`revenue_by_region`), so they stay stable when the layout moves.
+4. **Write the index: the judgment work.** Per page (its `st.Page` path), one entry per marked
+   visual under `metrics:`, **in on-screen order** (the order sets the section numbers):
+   - `query`: the `queries/<name>.sql` that feeds the visual. Two visuals on one query each get an
+     entry.
+   - `tokens`: a **real sample value** for every `{TOKEN}` the query has, whose literals satisfy
+     the predicates (values the data actually contains, inside the review window), and that
+     mirror the page's **default filter state**. Otherwise a correct query and an empty one look
+     the same when run.
+   - `binds`: a value for every `:1` / `:name`. `params.start_date` reads the section's own
+     `params` CTE; anything else is inserted as a SQL literal (`"'West'"`). An unused or missing
+     bind is an `index` finding.
+   - `reads`: every object the query reads, `DATABASE.SCHEMA.OBJECT`.
+   - `notes`: a definition a reviewer needs ("booked date, not ship date"), when there is one.
+   - **Anchor `review_window` to the data, always**: end it at the source's own latest date,
+     `end_date: "(SELECT MAX(<date_col>) FROM <db>.<schema>.<table>)::DATE"` and
+     `start_date: "(SELECT DATEADD('year', -1, MAX(<date_col>)) FROM <db>.<schema>.<table>)::DATE"`,
+     reading the object and date column the page's default range uses (see the default-date-range
+     rule in [page-conventions](../_shared/page-conventions.md)). A window ending at
+     `CURRENT_DATE` returns zero rows for data whose latest date is in the past (a historical
+     extract, a sample dataset like TPC-DS, a paused feed); use it only when today really is the
+     anchor.
+   - `fragments`: `[{file: queries/_shared_ctes.sql, reason: "..."}]` for a query file that is a
+     CTE inlined via a token: it is not runnable alone, so no metric can use it. The reason is
+     required. Never rename a query to dodge coverage; declare it.
+   - `objects`: a view or table built for this app (not a shared source) goes here with its
+     `grants`, and its maintained DDL goes in `sql_review/app_specific_reporting_objects/` as
+     `<DATABASE>.<SCHEMA>.<OBJECT>.sql` with the `-- Object:` / `-- Purpose:` / `-- Used by:` /
+     `-- Grants:` header. A human applies DDL; deploy it yourself only when the user says to.
+5. **Comment the queries.** Every CTE gets a one-line comment directly above its name (for the
+   first CTE, `WITH` on its own line first); every non-obvious filter, join or CASE a one-line
+   "why". Never restate the SQL. `check` enforces the CTE comments and the 100-character limit,
+   and lints each query with the repo's `.sqlfluff` (`sqlfluff fix` fixes most layout findings).
+6. **Render:** `streamsnow sql-review generate <slug>`. It substitutes tokens and binds, adds each
+   section's `params` CTE, applies sqlfluff's layout and capitalisation fixes, verifies the output
+   is read-only, stamps provenance, refreshes the README tables and `Used by` lines, and removes
+   page files no page needs any more. Read-only is enforced in two independent layers: a
+   statement-root allowlist (`SELECT` / `WITH…SELECT` / `SHOW` / `DESCRIBE` / `EXPLAIN`), plus a
+   tripwire that refuses a write verb in command position even if the parser is fooled. An invalid
+   index, an unresolved `{TOKEN}`, a surviving bind, more than one statement in a query, or a
+   write-shaped statement stops it with nothing written. Fix the index or query, never the output.
+7. `streamsnow sql-review check <slug>` must be clean.
+8. **Live-verify when connected** (`streamsnow doctor` / `snow connection list`): it's a branch,
+   not a gate. Per object in `reads:`, a zero-row resolve probe
+   (`SELECT COUNT(*) FROM <fqn> WHERE 1=0`), and run each section once (`LIMIT` any row-returning
+   probe; no DDL, no writes, nothing outside `governance.schema_allow`). Without a connection,
+   say the sections were generated from static analysis only. Never fabricate column lists.
+9. **Report the coverage delta**: pages and metrics covered, pages and queries still uncovered
+   (`check` names them), declared fragments, and which sections ran live.
 
 ## Judgment calls
 
-- **One rendered section per query, whatever its join width** — a three-table join is one section;
-  its README row lists all three upstream objects.
-- **No `{TOKEN}`s in a query** → no dispatchers needed; the rendered body is the template with
-  binds substituted. That's fine.
-- **Zero rows in the predicate window** is a finding for the README (the UI may render empty), not
-  an error to fix here — route the judgment to `/audit-lineage`.
+- **One section per visual, whatever its join width**: a three-table join is one section; its
+  `reads:` lists all three objects.
+- **No `{TOKEN}`s and no binds in a query** → no `tokens:` or `binds:` needed. That's fine.
+- **Zero rows in the review window** is a finding to report (the UI may render empty), not an
+  error to fix here: route the judgment to `/audit-lineage`.
 
 ## Edge cases
 
-- **Auth expires mid-run:** finish the remaining rows static-only, mark them unverified, and say
-  how to upgrade them (`snow connection test`, re-run steps 6–7).
+- **Auth expires mid-run:** finish the rest static-only, say which sections did not run, and how
+  to finish (`snow connection test`, re-run step 8).
 - **"Does not exist or not authorized" on a probe:** either genuinely missing or the role can't see
-  it — run `streamsnow check schema-refs apps/<slug>` to confirm the reference is allowed, check
-  grants, and leave the row unverified rather than guessing columns.
-- **Rendered section errors or returns nothing on paste:** a sample literal doesn't match real
-  data — fix the dispatcher in the manifest and regenerate; never patch the `.review.sql`.
-- **`generate` fails importing app modules** (`token_strategy: "manifest"`): run from an
-  environment with the app's dependencies installed, or fall back to `"static"` with literal
-  fragments transcribed from the app's helpers.
-- `sql_review/` is review scaffolding, not app code — it isn't deployed and isn't loaded by the
+  it: run `streamsnow check schema-refs apps/<slug>` to confirm the reference is allowed, check
+  grants, and report it rather than guessing columns.
+- **A section errors or returns nothing when run:** a sample token doesn't match real data: fix it
+  in `index.yaml` and regenerate; never patch the page file.
+- `sql_review/` is review scaffolding, not app code: it isn't deployed and isn't loaded by the
   app's `sql_loader`; editing it never changes what ships. The generator refuses to emit any write
-  statement into a review file, and `check` re-verifies committed files stay read-only.
+  statement into a page file, and `check` re-verifies committed files stay read-only.
