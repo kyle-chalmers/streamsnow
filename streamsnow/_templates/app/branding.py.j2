@@ -75,14 +75,17 @@ def fmt_pct(ratio: float, decimals: int = 1) -> str:
 
 _DELTA_COLORS = {"up": BRAND_STATUS_COLORS["good"], "down": BRAND_STATUS_COLORS["bad"]}
 _NEUTRAL_INK = "#6b7280"
+# A falling delta starts with: hyphen, minus sign, down arrow, down triangle, or "(".
+_DOWN_MARKS = ("-", "\u2212", "\u2193", "\u25bc", "(")
 
 
 def _delta_ink(delta: str, delta_color: str = "normal") -> str:
     """The delta's color by meaning: up is good ("normal"), up is bad ("inverse"), or
-    grey ("off"). A delta with no non-zero digit ("0%", "+0.0 pts") is no change: grey."""
+    grey ("off"). A delta with no non-zero digit ("0%", "+0.0 pts") is no change: grey.
+    Down is a leading minus, a down arrow, or accounting parentheses ("(5%)")."""
     if delta_color == "off" or not any(c in "123456789" for c in delta):
         return _NEUTRAL_INK
-    down = delta.lstrip().startswith(("-", "\u2212"))
+    down = delta.lstrip().startswith(_DOWN_MARKS)
     if delta_color == "inverse":
         down = not down
     return _DELTA_COLORS["down" if down else "up"]
@@ -101,7 +104,7 @@ def branded_metric(
     ``help`` is the metric's definition (from ``pages/_glossary.py``), shown as a
     hover tooltip like ``st.metric(help=...)``. ``delta_color`` colors the delta by
     meaning, as ``st.metric`` does: "normal" (up is good), "inverse" (up is bad,
-    e.g. cost) or "off". The direction is read from the delta's leading sign.
+    e.g. cost) or "off". The direction is read from the delta's leading sign or arrow.
 
     label/value/delta/help/border_color are HTML-escaped before interpolation —
     the card uses unsafe_allow_html=True, so escaping stops a database-derived

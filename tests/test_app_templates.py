@@ -159,7 +159,7 @@ def test_default_palette_keeps_status_hues_out():
 
 
 def test_metric_delta_is_colored_by_meaning(tmp_path):
-    names = {"BRAND_STATUS_COLORS", "_DELTA_COLORS", "_NEUTRAL_INK", "_delta_ink"}
+    names = {"BRAND_STATUS_COLORS", "_DELTA_COLORS", "_NEUTRAL_INK", "_DOWN_MARKS", "_delta_ink"}
     ns = _pure_functions(_app(tmp_path) / "branding.py", names)
     ink, good, bad = (
         ns["_delta_ink"],
@@ -170,5 +170,7 @@ def test_metric_delta_is_colored_by_meaning(tmp_path):
     assert ink("+5.3%") == good and ink("-5.3%") == bad and ink("\u22121.2k") == bad
     assert ink("+5.3%", "inverse") == bad and ink("-5.3%", "inverse") == good  # e.g. cost
     assert ink("+5.3%", "off") == grey
+    for down in ("\u2193 5%", "\u25bc 5%", "(5%)"):  # arrows and accounting negatives
+        assert ink(down) == bad and ink(down, "inverse") == good
     for unchanged in ("0%", "+0.0 pts", "0"):  # no change is neither good nor bad
         assert ink(unchanged) == grey and ink(unchanged, "inverse") == grey

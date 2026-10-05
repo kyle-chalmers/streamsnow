@@ -27,8 +27,9 @@ What it reports:
   was simply scaffolded after an upgrade, the template's minor bumps are
   additive, and failing the older apps would turn a passing repo red on its
   first ``streamsnow new`` after upgrading. A different major version, or a
-  newest copy that differs from the template (someone changed branding by
-  hand), stays a finding.
+  newest stamp that isn't the installed template's (someone bumped it by
+  hand), stays a finding. Like every case here, this compares stamps only: a
+  hand edit that keeps the stamp is invisible to this check.
 
 Versions compare via ``packaging.version`` where they parse; unparseable
 stamps fall back to string comparison and simply must all match.
