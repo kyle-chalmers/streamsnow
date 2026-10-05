@@ -215,6 +215,11 @@ A scaffolded app looks like:
 apps/<slug>/
   streamlit_app.py         # st.navigation entrypoint, apply_branding()
   pages/overview.py        # starter placeholder: sample numbers, a Plotly chart, a cached loader
+  pages/about.py           # "About this app": purpose, pages, metric definitions, data sources
+  pages/_glossary.py       # one definition per metric, reused by tooltips, expanders and About
+  pages/_layout.py         # shared page pieces: definitions, empty state, sources, "show the SQL"
+  pages/_time_controls.py  # the period picker every page shares, bounded by the data
+  pages/_data.py           # cached loaders for data more than one page uses
   queries/example_metric.sql   # starter placeholder: reads YOUR_TABLE
   sql_review/              # runnable SQL per page (streamsnow sql-review)
     index.yaml             # the editing surface: pages, metrics, review window
@@ -225,6 +230,15 @@ apps/<slug>/
   snowflake.yml            pyproject.toml (container) | environment.yml (warehouse)
   AGENTS.md
 ```
+
+Every app ships an **About this app** page, last in its navigation. It is
+built from the app itself, not hand-written: metric definitions from
+`pages/_glossary.py` and data sources from the header block of each
+`queries/*.sql` file, plus a short `ABOUT` block (purpose, audience, owner,
+pages, caveats) that `/build-app` fills from `REQUIREMENTS.md`. The `pages/_*.py`
+modules are shared by every page; import them package-qualified
+(`from pages._glossary import metric_help`), because a bare import works under
+`streamlit run` and fails once deployed.
 
 At the repo level, `init` also writes `deploy/tombstones.yml` (the registry
 the deploy pipeline uses to drop retired apps — empty until your first
