@@ -51,6 +51,8 @@ _KIND = "requirements"
 _PHASES = frozenset(
     {
         "spec",
+        "discover",
+        "design",
         "scaffold",
         "build",
         "preview",

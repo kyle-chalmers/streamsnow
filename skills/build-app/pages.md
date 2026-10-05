@@ -1,4 +1,30 @@
-# Build phase — add one page to an app
+# Build phase — the parallel build, and how one page is built
+
+## Parallel build
+
+The orchestrator builds every §4 page at once and owns every file pages share; each
+**page-builder** ([briefs/page-builder.md](briefs/page-builder.md)) owns one page.
+
+1. **Owners.** The orchestrator: `streamlit_app.py`, `sql_review/` (`index.yaml` and everything
+   `generate` writes), `pages/_*.py`, `pages/about.py`, shared queries and REQUIREMENTS.md. Each
+   page-builder: `pages/<page>.py` and the queries the design lists for that page alone.
+   `index.yaml` and the navigation are shared on purpose: every generated review file hashes the
+   whole index, and its `NN` comes from the navigation order.
+2. **Dispatch** one page-builder per page in one message (`mode: build`), each with its design
+   entry, its `page_queries` and the shared loaders available.
+3. **Merge** the returns: reject any write outside a builder's own files; add `nav_entry` to
+   `st.navigation` in §4 order (About stays last); add `index_entry` under `pages:`; add
+   `glossary_entries` to `pages/_glossary.py`; resolve `data_requests` by adding the loader to
+   `pages/_data.py` and re-dispatching the pages that asked.
+4. **Generate once:** `streamsnow sql-review generate <slug>`, then `streamsnow sql-review check
+   <slug>` and the four `check` commands from step 6 below. Fix shared files yourself; send page
+   findings back to that page's builder in `fix` mode.
+5. **Commit the round** (pages, their queries, `index.yaml`, the generated review files, the
+   shared files you changed) and log it in §11 (`Next: verify`).
+
+Without subagents, build the pages one at a time with the steps below; you then own every file.
+
+## One page
 
 Scaffold one page so its charts, KPIs, filters, and queries match the spec. Additive and
 idempotent: never overwrite an existing page or query; leave the app lint-clean and previewable
@@ -9,7 +35,10 @@ The spec is the contract: read §4 for the page's sections and the Charts/KPIs/F
 sections for its visuals. Don't invent visuals that aren't specced — if the page isn't in §4 yet,
 run the spec phase first ([spec.md](spec.md)) and resume.
 
-## Steps
+### Steps
+
+In a parallel build, steps 5, 7, 8.2 and 8.4–9 are the orchestrator's (above): the page-builder
+returns their inputs instead of editing shared files.
 
 1. **Resolve target.** Confirm `apps/<slug>/` and its `REQUIREMENTS.md` exist. No spec → backfill
    one first (spec phase, automatic backfill mode). Page already exists as `pages/<page>.py` → stop;

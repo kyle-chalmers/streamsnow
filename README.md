@@ -318,7 +318,7 @@ lines, with depth in per-skill reference files:
 | Skill | What it does |
 |---|---|
 | `/onboard` | Machine, repo and Snowflake setup in four stages; detects what is done and does only what is missing. Also adopts repos that already have apps (maps onto them, writes `MIGRATION.md`) |
-| `/build-app` | The front door for apps: spec (incl. backfill from existing source) → scaffold → build pages → ship, with checkpoints. Hands off to `/onboard` if the machine or repo isn't set up |
+| `/build-app` | The front door for apps: spec (incl. backfill from existing source) → data discovery → page design → scaffold → pages built in parallel by subagents → review → ship, with checkpoints. Hands off to `/onboard` if the machine or repo isn't set up |
 | `/preview-app` | Run an app locally against live Snowflake |
 | `/validate-app` | The pass/fail check that must be clean before shipping |
 | `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` builds the app's `sql_review/` page files |

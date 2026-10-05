@@ -28,6 +28,17 @@ entry.
   style for pages; `/build-app` and `/review-app` read it before the shipped defaults.
 - `/build-app` specs record each page's **Question** (§4) and a **Style** line (§2).
 
+- **`/build-app` orchestrates subagents.** New phases between spec and scaffold: **discover**
+  (a data-scout profiles grain, date range, size and filter values into §3) and **design** (an
+  app-designer plans every page's forms, copy, glossary and shared data, shown as a text
+  wireframe at the new CHECKPOINT 1b). The scaffold builds the shared layer once; one
+  page-builder per page then builds in parallel, owning only its page and its queries, while the
+  orchestrator merges navigation, `sql_review/index.yaml` and the glossary and runs
+  `sql-review generate` once. A verify phase runs perf, visual and cold-reader reviewers with at
+  most two fix rounds before the click-through. Briefs live in `skills/build-app/briefs/`; hosts
+  without subagents follow them one at a time. `check requirements` accepts the `discover` and
+  `design` phases.
+
 ### Changed
 
 - **Default chart palette** no longer uses green, amber or red, which the visualization guide

@@ -27,7 +27,7 @@ real pages, queries, and branding without breaking the governance contract.
    build phase replaces all three with the first real page
    ([pages.md § Replace the starter trio](pages.md#replace-the-starter-trio)), and `validate-app`
    FAILS while any app file still reads `YOUR_TABLE`, so a skipped replacement cannot ship. Show
-   the three as "starter, replaced in the build phase" in the CP1 tree, never as created pages.
+   the three as "starter, replaced in the build phase" when you report the scaffold, never as created pages.
 2. If the staged spec lives outside the app dir, `git mv` it to `apps/<slug>/REQUIREMENTS.md` so §11
    travels with the app. Confirm `apps/<slug>/streamlit_app.py` exists before reporting the phase done.
 3. **Install the app's packages** into the repo's `.venv`, so the first preview works. `streamsnow
@@ -43,6 +43,19 @@ real pages, queries, and branding without breaking the governance contract.
 5. If `streamsnow new` says the app already exists, a prior run left a half-scaffolded app — read its
    §11 and resume rather than re-scaffolding. Pass `--force` only when the user explicitly wants to
    overwrite.
+
+## Foundation (after the scaffold, before any page)
+
+The shared layer every page imports, built once by the orchestrator from the CP1b design so the
+parallel page-builders don't diverge:
+
+1. **Glossary:** one `Metric` per design `glossary` entry in `pages/_glossary.py`.
+2. **Shared data:** for each `shared_data` entry, its `queries/<name>.sql` (with header block)
+   and one cached loader in `pages/_data.py` (`@st.cache_data(ttl=...)`, filters as arguments).
+   The data's date bounds are usually the first.
+3. **About page:** fill `ABOUT` in `pages/about.py` from §1, §2 and §4.
+4. Run `streamsnow check caching apps/<slug>` and `streamsnow check page-imports apps/<slug>`,
+   then commit the foundation and log §11 (`Next: build`).
 
 ## First-build conventions (apply to every page you fill in)
 
