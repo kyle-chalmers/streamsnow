@@ -268,7 +268,7 @@ def test_no_snowflake_cli_labs_anywhere():
     targets = [
         REPO_ROOT / "streamsnow" / "tools" / "doctor.py",
         *sorted((REPO_ROOT / "streamsnow" / "_templates" / "repo").glob("deploy*.yml.j2")),
-        REPO_ROOT / "skills" / "start-app" / "setup.md",
+        REPO_ROOT / "skills" / "onboard" / "setup.md",
     ]
     offenders = [str(p) for p in targets if "snowflake-cli-labs" in p.read_text(encoding="utf-8")]
     assert not offenders, offenders

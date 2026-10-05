@@ -42,3 +42,4 @@ streamsnow.config.local.yaml
 
 # Local plans (working artifacts, not source)
 .planning/
+.playwright-cli/

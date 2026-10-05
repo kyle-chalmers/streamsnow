@@ -27,9 +27,9 @@ interpretation of *their* words in real time.
 
 3. **Re-read the feedback carefully** and split it into distinct items (each paragraph or clause
    that names a different problem is its own item). "Make it better" is not actionable — ask for
-   concrete observations. If feedback references a visual and a Playwright MCP is loaded, offer to
+   concrete observations. If feedback references a visual and the Playwright CLI is available (Node 20+), offer to
    capture the page (per [_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md))
-   and confirm what the user is pointing at; skip silently without the MCP.
+   and confirm what the user is pointing at; skip silently without the CLI.
 4. **Classify each item** per [classification.md](classification.md) — BUG / POLISH / UX /
    NEW-FEATURE / CROSS-CUTTING — and show the numbered table. **Lock the classification with the
    user before planning.** Misreading feedback is this skill's main failure mode.

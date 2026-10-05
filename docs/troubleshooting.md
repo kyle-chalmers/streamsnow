@@ -9,12 +9,12 @@ caught it. Runtime-specific facts link to the official page in
 
 ### 1. `streamsnow: command not found`
 
-- **Symptom:** the plugin's `/start-app --setup` or a doc says to run
+- **Symptom:** the plugin's `/onboard` or a doc says to run
   `streamsnow …` and the shell cannot find it.
 - **Cause:** the CLI was never installed (`uvx streamsnow …` runs are one-shot),
   or `uv tool install` put it in a bin dir that is not on PATH yet.
-- **Fix:** `uv tool install streamsnow`, then re-open the shell. `/start-app
-  --setup` does this for you and refuses to continue until the command works.
+- **Fix:** `uv tool install streamsnow`, then re-open the shell. `/onboard`
+  does this for you and refuses to continue until the command works.
 
 ### 2. `pre-commit` fails on the first commit with "executable not found"
 
@@ -205,19 +205,22 @@ caught it. Runtime-specific facts link to the official page in
   `claude plugin install --scope project streamsnow@streamsnow`, then run
   `/reload-plugins` in Claude Code (no restart needed).
 
-### 20. "Playwright MCP not loaded, so the UI walkthrough was skipped"
+### 20. "Playwright CLI unavailable, so the UI walkthrough was skipped"
 
 - **Symptom:** `/validate-app`, `/preview-app` or `/review-app` say the UI
   walkthrough was skipped; no screenshots under `apps/<slug>/.review/`.
-- **Cause:** the plugin bundles a Playwright MCP that starts through `npx`, so
-  it is missing when Node.js 20+ is not installed or the plugin was not reloaded
-  after installing it. A browser that has never been downloaded fails on first
-  use with "is not installed" instead.
-- **Fix:** `streamsnow doctor` (the `node` row names the install), then
-  `/reload-plugins` and `/mcp` to confirm `playwright` is connected. For a
-  missing browser, run `npx @playwright/mcp@<version> install-browser <name>`
-  with the browser name from the error and the version pinned in the plugin's
-  `.mcp.json` (the error's own command omits the version). `/start-app --setup` runs all of this for you.
+- **Cause:** the walkthrough runs the Playwright CLI through `npx`, so it is
+  skipped when Node.js 20+ with `npx` is not installed. A browser that has never
+  been downloaded fails on first use with an `install-browser` message instead,
+  and on Linux or WSL a first launch can fail on missing system libraries.
+- **Fix:** `streamsnow doctor` (the `node` row names the install). For a missing
+  browser, run `npx -y @playwright/cli@<version> install-browser chrome-for-testing`
+  with the pinned version from `skills/_shared/playwright-walkthrough.md` (never
+  `@latest`). For missing libraries on Linux or WSL, run the same command with
+  `sudo` and `--with-deps` yourself. `/onboard` runs the download for you.
+- **Upgrading from 0.7:** the plugin no longer bundles a Playwright MCP. Run
+  `/reload-plugins` to drop the old server; old `browser_*` tool approvals can
+  be deleted.
 
 ### 21. A teammate's commits skip the governance checks
 
@@ -225,7 +228,7 @@ caught it. Runtime-specific facts link to the official page in
   people.
 - **Cause:** `pre-commit install` runs per clone, so a fresh clone has no hook.
 - **Fix:** `streamsnow doctor` reports it as the `pre-commit-hook` row; run
-  `pre-commit install` in the clone, or `/start-app --setup`.
+  `pre-commit install` in the clone, or `/onboard`.
 
 ## Adding new issues
 

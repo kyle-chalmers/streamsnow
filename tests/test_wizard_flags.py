@@ -1,6 +1,6 @@
 """The non-interactive answer flags on `init` and `configure`.
 
-`/start-app --setup` investigates the account read-only, proposes the five wizard
+`/onboard` investigates the account read-only, proposes the five wizard
 answers, and passes the confirmed ones as flags. The flags feed the same
 `_prompt_config` defaults and prefill logic as the interactive wizard, so the
 written file must be identical for identical answers, and no prompt may fire
@@ -290,7 +290,7 @@ def test_deny_flag_conflicting_with_the_prefilled_allow_list_exits_2(tmp_path, m
 
 def test_setup_skill_probes_are_shell_safe():
     """`-q "<query>"` would let the shell eat the "name" quotes and expand $1."""
-    text = (Path(__file__).resolve().parent.parent / "skills/start-app/setup.md").read_text(
+    text = (Path(__file__).resolve().parent.parent / "skills/onboard/setup.md").read_text(
         encoding="utf-8"
     )
     assert '-q "<query>"' not in text

@@ -36,6 +36,11 @@ git repository still needs its GitHub token pasted in). Without it, paste the
 public key over the `<paste public key>` placeholder. `--viewer-user NAME`
 (repeatable) grants the viewer role to more people.
 
+With Claude Code, `/onboard` prepares this file for you (it runs `ci-key create` and
+`deploy-setup --admin --public-key-file`, writing to `.internal/admin-setup.sql`, which git
+ignores), copies it for Snowsight when you are the admin, or writes a note you can forward when
+you are not. It never runs it.
+
 **Safe to re-run.** Objects use `IF NOT EXISTS`, grants are idempotent, and the
 CI user's key is re-applied with `ALTER USER`, so running the script again after
 rotating the key, or just to check, changes nothing else. Snowflake has no
@@ -143,7 +148,8 @@ Then `streamsnow ci-key push` sets the five secrets from those files, each
 value going straight to `gh secret set` on stdin, `SNOWFLAKE_ACCOUNT` last. It
 prints only names. Prefer to do it by hand? From the repo, run
 `gh secret set NAME < ~/.streamsnow-ci/secrets/NAME` for each of the five
-names in that order.
+names in that order. With Claude Code, `/onboard` runs `ci-key create` and, once
+your admin has run the script, `ci-key push` for you.
 
 Key-pair is the default because
 Snowflake's [MFA rollout](https://docs.snowflake.com/en/user-guide/security-mfa-rollout)

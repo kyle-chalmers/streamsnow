@@ -723,7 +723,7 @@ _REPO_FILES = (
 
 
 def test_init_no_starter_app_writes_repo_files_without_an_app(tmp_path):
-    """`/start-app --setup` used to run only `configure`, and `/start-app` then
+    """The setup skill used to run only `configure`, and `/start-app` then
     ran `new`, which writes app files only: a repo with no .gitignore (so a
     secrets.toml could be committed), no hooks, no CI. `init --no-starter-app`
     is the setup verb that writes the governed repo and nothing app-shaped."""
@@ -775,6 +775,9 @@ def test_new_warns_when_repo_governance_files_are_missing(tmp_path, monkeypatch)
     out = " ".join(result.output.split())
     assert "streamsnow init --no-starter-app" in out
     assert ".gitignore" in out and ".pre-commit-config.yaml" in out
+    # /start-app runs this right after scaffolding (skills/start-app/scaffold.md).
+    assert "Install the app's packages for local preview:" in out
+    assert "apps/sales-order-trends" in out.split("for local preview:")[1]
 
     # Once the repo files exist, `new` is quiet about them.
     assert runner.invoke(app, ["init", "--dir", str(tmp_path), "--no-starter-app"]).exit_code == 0
@@ -796,9 +799,9 @@ def test_init_next_block_puts_the_plugin_first(tmp_path):
 
 
 def test_setup_skill_writes_repo_files_on_a_repo_without_apps():
-    setup = (REPO_ROOT / "skills/start-app/setup.md").read_text(encoding="utf-8")
+    setup = (REPO_ROOT / "skills/onboard/setup.md").read_text(encoding="utf-8")
     assert "streamsnow init --no-starter-app" in setup
-    skill = (REPO_ROOT / "skills/start-app/SKILL.md").read_text(encoding="utf-8")
+    skill = (REPO_ROOT / "skills/onboard/SKILL.md").read_text(encoding="utf-8")
     assert "init --no-starter-app" in skill
 
 
@@ -942,7 +945,7 @@ def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
 
 @_workflow_bash
 def test_fresh_no_starter_repo_passes_its_own_checks_workflow(tmp_path):
-    """`init --no-starter-app` (the /start-app setup path) writes no apps/ directory,
+    """`init --no-starter-app` (the /onboard setup path) writes no apps/ directory,
     and git cannot carry an empty one. The generated checks.yml then failed on its
     first push: `ruff check apps/` errors on a missing path, and `check tombstones`
     refuses a missing apps dir. Run every checks.yml step that needs no network,

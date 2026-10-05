@@ -42,7 +42,7 @@ re-derives its dedup each cycle re-reports findings it already resolved:
 6. **Ask `exit-condition`** with this cycle's counts (no walk flags yet); `continue` → back to
    step 4. Any terminal verdict except `clean` → skip to step 8's stamp decision and report.
 7. **A pre-walk `clean` earns the smoke, and the walk gets the LAST word:** run the browser
-   walkthrough across all pages when the tooling is loaded
+   walkthrough across all pages if the Playwright CLI is available (Node 20+)
    ([_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md)), otherwise
    `/preview-app` and a manual click-through. The walk is a **finding source, not confirmation** —
    re-run `exit-condition` WITH the `--walk-*` flags from its report: `walk-reentry` loops back to

@@ -1,8 +1,8 @@
 """Environment doctor — per-check prerequisite detection for StreamSnow.
 
 The CLI's original ``doctor`` printed a flat pass/fail transcript, which is
-fine for a human at a terminal but opaque to everything else: ``/start-app``'s
-preflight, CI bootstrap steps, and "fix then re-check" loops all need to know
+fine for a human at a terminal but opaque to everything else: ``/onboard`` and
+``/start-app``'s preflight, CI bootstrap steps, and "fix then re-check" loops all need to know
 *which* prerequisite failed and what to do about it, without scraping console
 text. This module restructures the same coverage into per-check subresults so
 those callers get machine-readable state and the CLI keeps a human rendering.
@@ -55,7 +55,7 @@ config but no hooks, CI or ``.gitignore``, so config presence never means
 ``pre-commit-hook`` (required once a config exists: ``pre-commit install`` is
 per clone, and a teammate's commits skip every governance check until it runs;
 the hook must be pre-commit's own, not just any file at that path); ``node``
-(optional warning: the bundled Playwright MCP runs through ``npx``, and without
+(optional warning: the Playwright CLI runs through ``npx``, and without
 it every UI walkthrough is skipped); ``ci-secrets`` (optional: the deploy
 workflow does nothing until its ``SNOWFLAKE_*`` secrets exist; reads secret
 NAMES via ``gh``, and a listing that fails for lack of access says "not
@@ -635,18 +635,18 @@ def check_pre_commit_hook(cfg_result: dict) -> dict:
     return _result("pre-commit-hook", True, REQUIRED, {"path": str(hook), "installed": True})
 
 
-# @playwright/mcp itself declares node >=18, but the playwright-core it pins
+# @playwright/cli itself declares node >=18, but the playwright-core it pins
 # declares >=20 and exits on anything older, so 18 would pass here and then fail.
 _NODE_MIN_MAJOR = 20
 _NODE_HINT = (
     "install Node.js 20+ (brew install node, or nvm on Linux/WSL, where the distro package "
-    "is often older): the bundled "
-    "Playwright browser tool runs through npx, and without it UI walkthroughs are skipped"
+    "is often older): the "
+    "Playwright CLI runs through npx, and without it UI walkthroughs are skipped"
 )
 
 
 def check_node() -> dict:
-    """Node >= 20 with ``npx``, which the plugin's bundled Playwright MCP needs.
+    """Node >= 20 with ``npx``, which the Playwright CLI (the UI walkthrough) needs.
 
     Optional and never gating: the UI walkthrough is advisory. A warning (not a
     quiet skip) when absent, because the walkthrough otherwise degrades silently.
