@@ -782,7 +782,7 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
     ]
     if app_slug is None:
         lines += [
-            "  4. streamsnow new <domain> <function>   (or /start-app) to scaffold your first app",
+            "  4. streamsnow new <domain> <function>   (or /build-app) to scaffold your first app",
             "  One-time Snowflake objects for the first deploy: streamsnow deploy-setup --admin",
             "  (review it, then hand it to your Snowflake admin). streamsnow ci-key create",
             "  makes the CI key pair; pass its .pub to deploy-setup --admin --public-key-file.",
@@ -838,7 +838,7 @@ def new(
     console.print(
         "The starter files are placeholders: queries/example_metric.sql, its entry in "
         "sql_review/index.yaml and pages/overview.py (sample numbers). Replace them with your "
-        "real pages and queries (/start-app does this in its build phase); validate-app FAILS "
+        "real pages and queries (/build-app does this in its build phase); validate-app FAILS "
         "while any file still reads YOUR_TABLE."
     )
     # The runtime-matched install, so the first local preview works. markup off:
@@ -1367,7 +1367,7 @@ def check_requirements_cmd(
     paths: list[str] = typer.Argument(None, help="Files/dirs (default: apps/)."),
     output_format: str = typer.Option("md", "--format"),
 ) -> None:
-    """Validate the REQUIREMENTS.md §11 build-state contract /start-app resumes from."""
+    """Validate the REQUIREMENTS.md §11 build-state contract /build-app resumes from."""
     _run_check(_requirements_main, paths, output_format)
 
 

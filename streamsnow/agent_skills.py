@@ -27,7 +27,7 @@ install is committed, and a link into one machine's Python environment is a
 dangling path on every other machine and after every ``uv tool upgrade``. A
 link into a StreamSnow source checkout also changes the skill names: Codex
 resolves the link, finds the checkout's ``.claude-plugin/plugin.json`` above
-it, and lists the skills as ``streamsnow:start-app``. Copies behave the same
+it, and lists the skills as ``streamsnow:build-app``. Copies behave the same
 everywhere; re-run ``install`` after upgrading the CLI.
 
 Ownership. A manifest (``.streamsnow-skills.json``) in the target records the
@@ -96,7 +96,7 @@ AGENTS: dict[str, AgentTarget] = {
         name="codex",
         repo_dir=".agents/skills",
         user_dir=".agents/skills",
-        invoke_hint="type $start-app (or pick a skill from /skills)",
+        invoke_hint="type $build-app (or pick a skill from /skills)",
         explicit_only_file=_CODEX_EXPLICIT_ONLY,
     ),
 }
@@ -114,7 +114,7 @@ def skills_source() -> Path:
     """
     here = Path(__file__).resolve().parent
     for candidate in (here / "_skills", here.parent / "skills"):
-        if (candidate / "start-app" / "SKILL.md").is_file():
+        if (candidate / "build-app" / "SKILL.md").is_file():
             return candidate
     raise AgentSkillsError(
         "cannot find the bundled skills (expected streamsnow/_skills in the installed "

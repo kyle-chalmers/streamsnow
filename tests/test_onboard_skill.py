@@ -1,4 +1,4 @@
-"""Skill-text contracts for /onboard and the /start-app handoff: the flow's promises, pinned."""
+"""Skill-text contracts for /onboard and the /build-app handoff: the flow's promises, pinned."""
 
 from __future__ import annotations
 
@@ -13,15 +13,15 @@ def _read(*parts: str) -> str:
     return SKILLS.joinpath(*parts).read_text(encoding="utf-8")
 
 
-def test_start_app_has_no_setup_or_adopt_mode():
-    start = _read("start-app", "SKILL.md")
+def test_build_app_has_no_setup_or_adopt_mode():
+    start = _read("build-app", "SKILL.md")
     assert "--setup" not in start
     assert "adopt" not in start.split("## Phase 0")[0]
     assert 'argument-hint: "[<idea>] | --spec"' in start
 
 
-def test_start_app_hands_off_to_onboard_including_when_the_cli_is_missing():
-    phase0 = _read("start-app", "SKILL.md").split("## Phase 0")[1].split("## Phase 1")[0]
+def test_build_app_hands_off_to_onboard_including_when_the_cli_is_missing():
+    phase0 = _read("build-app", "SKILL.md").split("## Phase 0")[1].split("## Phase 1")[0]
     assert "[/onboard](../onboard/SKILL.md)" in phase0
     assert "isn't set up yet" in phase0
     assert "not on PATH" in phase0  # a missing CLI is a handoff, not a dead end
@@ -87,9 +87,9 @@ def test_no_stale_cross_references():
 
 
 def test_scaffold_installs_the_app_packages():
-    scaffold = " ".join(_read("start-app", "scaffold.md").split())
+    scaffold = " ".join(_read("build-app", "scaffold.md").split())
     assert "Install the app's packages for local preview" in scaffold
-    assert "/start-app --setup" not in _read("start-app", "spec.md")
+    assert "/start-app --setup" not in _read("build-app", "spec.md")
 
 
 def test_a_missing_key_never_means_a_new_key():

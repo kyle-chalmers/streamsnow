@@ -20,7 +20,7 @@ _None_
 ## 11. Build Progress
 **Current phase:** build
 ### Sessions
-- 2026-08-01T10:00Z — spec written (/start-app). Next: scaffold (`/start-app acme-sales-dashboard`).
+- 2026-08-01T10:00Z — spec written (/build-app). Next: scaffold (`/build-app acme-sales-dashboard`).
 - 2026-08-02T09:30Z — page overview scaffolded. Next: fill stubs, then /preview-app acme-sales-dashboard.
 """
 

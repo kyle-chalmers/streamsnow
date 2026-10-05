@@ -37,5 +37,5 @@ of it the one-minute minimum. Your number depends on your edition and region pri
 ## Using your own data instead
 
 Any small table you already have works. Answer the wizard's database and schema questions with
-where that table lives, and describe the dashboard you want to `/start-app`. Keep the first app
+where that table lives, and describe the dashboard you want to `/build-app`. Keep the first app
 small: one table, a few visuals, a date range anchored to the data.

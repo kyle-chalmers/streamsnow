@@ -6,14 +6,14 @@ tested (`streamsnow agent-skills install --agent codex` puts them where it looks
 CLI, pre-commit and CI do the enforcing and work the same under any agent. Read the skill text
 with these translations:
 
-- **Skill names.** `/start-app`, `/review-app <slug>` and the rest are Claude Code's syntax. When a
+- **Skill names.** `/build-app`, `/review-app <slug>` and the rest are Claude Code's syntax. When a
   step names the next skill for the user, give your agent's syntax instead (Codex: `$ship-app
   <slug>`, or pick it from `/skills`). When a step says to follow another skill's instructions, read
   that skill's `SKILL.md` (a sibling folder of this one) and do what it says.
 - **Checkpoints.** A checkpoint is a plain question: ask it, then stop and wait for the answer. In a
   non-interactive run (`codex exec`) a checkpoint the prompt did not answer ends the run there; say
   which checkpoint, what is finished and what is still pending, and the command that resumes
-  (`$start-app <slug>` reads §11). When a later prompt from the user answers that checkpoint, record
+  (`$build-app <slug>` reads §11). When a later prompt from the user answers that checkpoint, record
   the answer in §11 and continue from there without asking it again.
 - **Parallel reviewers.** Where a step says "Task" or "subagents", use your agent's own subagents
   if it has them. Otherwise run each reviewer brief yourself, one after another, each against only
@@ -24,4 +24,4 @@ with these translations:
   three guards by hand: never run `snow streamlit deploy` or `drop`, or destructive SQL, yourself
   (deploys go through CI after the ship skill opens a PR); before ending a turn that changed an app,
   run `streamsnow review-gate classify <slug> --format json` and offer a review when it says one is
-  owed; and nothing announces the skills at session start, so point the user at `start-app`.
+  owed; and nothing announces the skills at session start, so point the user at `build-app`.

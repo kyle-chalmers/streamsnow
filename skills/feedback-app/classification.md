@@ -8,7 +8,7 @@ gets updated first.
 | **BUG** | The output is wrong — `23.0` where `23` belongs, a broken link, NaN where 0 should show | Code-only; usually one file, one commit | `fix` |
 | **POLISH** | Surface-level improvement — copy, formatting, captions, spacing | Possibly several files; one commit per kind of change | `feat` |
 | **UX** | Interaction redesign — filter behavior, control layout, page flow | Often a shared helper; restructures how a page works. Sketch before/after in ~5 lines before editing | `refactor` |
-| **NEW-FEATURE** | Adds scope — a new column, chart, filter, or page | Spec sections (§4–§7) updated **first**, then code. A whole new page → route to `/start-app <slug>` (build phase) instead | `feat` |
+| **NEW-FEATURE** | Adds scope — a new column, chart, filter, or page | Spec sections (§4–§7) updated **first**, then code. A whole new page → route to `/build-app <slug>` (build phase) instead | `feat` |
 | **CROSS-CUTTING** | Applies to every page of the app (or every app in the repo) — "every page needs a one-line description" | Apply across this app's pages in one pass; flag the convention for promotion to the repo templates in a follow-up PR | `feat` |
 
 ## Classification rules

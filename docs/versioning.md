@@ -20,7 +20,7 @@ These are what your repo, your CI and your habits depend on, so they are covered
 | CLI commands, sub-commands, flags and positional arguments | `streamsnow init --dir`, `streamsnow check schema-refs --format json` | `tests/test_cli_surface.py` snapshot |
 | Governance check results | exit codes `0` pass / `1` finding / `2` tool error; the keys of `--format=json` output | per-check tests |
 | Config schema | keys of `streamsnow.config.yaml`, `schema_version` | `streamsnow/config.py` validation |
-| Plugin skills | skill names (`/start-app`, `/ship-app`, ...) and their arguments | `tests/test_plugin_surface.py` |
+| Plugin skills | skill names (`/build-app`, `/ship-app`, ...) and their arguments | `tests/test_plugin_surface.py` |
 | Hook behavior | what the deploy guard blocks, what the key guard denies, when the review gate nudges | hook tests |
 | Generated repo files | CI and deploy workflows, pre-commit config, `AGENTS.md`, `CLAUDE.md` written by `streamsnow init` and refreshed by `streamsnow update` | template tests |
 

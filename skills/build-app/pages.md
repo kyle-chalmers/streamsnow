@@ -3,7 +3,7 @@
 Scaffold one page so its charts, KPIs, filters, and queries match the spec. Additive and
 idempotent: never overwrite an existing page or query; leave the app lint-clean and previewable
 with TODO placeholders the developer fills next. This is also the path for adding a page to an app
-that's already live — `/start-app <slug>` resumes into this phase when §4 has an unbuilt page.
+that's already live — `/build-app <slug>` resumes into this phase when §4 has an unbuilt page.
 
 The spec is the contract: read §4 for the page's sections and the Charts/KPIs/Filters/Caching
 sections for its visuals. Don't invent visuals that aren't specced — if the page isn't in §4 yet,
@@ -144,7 +144,7 @@ return get_active_session().sql(sql, params=[start, end]).to_pandas()
 
 ## Build loop
 
-`/start-app` runs these itself between CP1 and CP3; the user only types at the checkpoints.
+`/build-app` runs these itself between CP1 and CP3; the user only types at the checkpoints.
 
 1. **Preview:** `streamsnow preview start <slug>` (`--json` for the URL and status). It prefers the
    repo's `.venv/bin/streamlit`; on exit 1 read the classified hint (no default `snow` connection,

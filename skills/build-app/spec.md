@@ -82,7 +82,7 @@ If `REQUIREMENTS.md` already exists (any mode), ask before overwriting and offer
 **Current phase:** spec
 **Phase notes:** <optional free text — progress, blockers; the phase value itself stays exact>
 ### Sessions
-- <YYYY-MM-DDTHH:MMZ> — spec written (/start-app). Next: scaffold (`/start-app <slug>`).
+- <YYYY-MM-DDTHH:MMZ> — spec written (/build-app). Next: scaffold (`/build-app <slug>`).
 ```
 
 Write every section — `_None_` where one truly doesn't apply, so reviewers see a decision, not an

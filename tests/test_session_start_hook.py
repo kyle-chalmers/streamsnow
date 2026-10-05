@@ -62,7 +62,7 @@ def test_apps_without_config_get_the_adopt_nudge(tmp_path):
     )
     out, _ = _run(tmp_path, with_cli=False)
     assert out.count("\n") == 1
-    assert "/onboard" in out and "/start-app --setup" not in out and PLUGIN_VERSION in out
+    assert "/onboard" in out and "/build-app --setup" not in out and PLUGIN_VERSION in out
     assert "uv tool install streamsnow" in out  # CLI missing → say so
 
 
@@ -71,7 +71,7 @@ def test_configured_repo_banner_names_version_guards_and_skills(tmp_path):
     out, _ = _run(tmp_path, with_cli=True)
     assert out.count("\n") == 1
     assert PLUGIN_VERSION in out
-    assert "guard is ACTIVE" in out and "/start-app" in out and "/ship-app" in out
+    assert "guard is ACTIVE" in out and "/build-app" in out and "/ship-app" in out
     assert "Key guard is ACTIVE" in out
     assert "CLI not on PATH" not in out  # fake streamsnow on PATH → no nag
     assert len(out) < 700  # a banner, not an essay

@@ -121,7 +121,7 @@ caught it. Runtime-specific facts link to the official page in
 ### 9. `requirements` rejects `**Current phase:** build (pages 3/5)`
 
 - **Symptom:** the §11 phase line carries progress narrative and fails.
-- **Cause:** `/start-app` resumes on the exact phase value; narrative makes it
+- **Cause:** `/build-app` resumes on the exact phase value; narrative makes it
   ambiguous.
 - **Fix:** `**Current phase:** build` plus a `**Phase notes:** pages 3/5` line.
 

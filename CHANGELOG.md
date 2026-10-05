@@ -10,6 +10,14 @@ entry.
 
 ### Breaking
 
+- **`/start-app` is renamed `/build-app`**, with no deprecation release
+  (none is needed before 1.0.0, per [docs/versioning.md](docs/versioning.md)). Same
+  front door, same `--spec` mode. Rename a repo overlay
+  `.streamsnow/overlays/start-app.md` to `build-app.md`. Codex users re-run
+  `streamsnow agent-skills install`, which removes an unedited `start-app`
+  copy; if you edited it, the install stops and writes nothing, so move your
+  edits to `.streamsnow/overlays/build-app.md`, delete
+  `.agents/skills/start-app`, and run it again.
 - **SQL review is page-based** (`sql_review/` redesign, phase 1 of 3; design in
   `docs/superpowers/specs/2026-10-04-sql-review-redesign.md`). Each app gets
   one generated SQL file per page, `sql_review/NN_<page>.sql` (`NN` = the page's
@@ -32,9 +40,9 @@ entry.
   dependency. Apps without an `index.yaml` are only reported as uncovered.
 - Generated CI and deploy workflows pin `streamsnow>=0.8,<0.9`.
 - **`/start-app --setup` and `/start-app adopt` are removed**, with no
-  deprecation release (a maintainer exception to
+  deprecation release (none is needed before 1.0.0, per
   [docs/versioning.md](docs/versioning.md)). Use `/onboard`, which does both;
-  `/start-app` hands off to it by itself when the machine or repo isn't ready.
+  `/build-app` hands off to it by itself when the machine or repo isn't ready.
 - **The plugin no longer bundles the Playwright MCP** (`.mcp.json`). UI
   walkthroughs use the Playwright CLI instead; see Changed below.
 
@@ -88,7 +96,7 @@ entry.
   set up your `snow` connection for you, or guide you through it.
 - **Session start** points to `/onboard` when the plugin is enabled but the
   repo isn't set up, and when this clone has no pre-commit hook.
-- `streamsnow new` prints the runtime-matched install command, and `/start-app`
+- `streamsnow new` prints the runtime-matched install command, and `/build-app`
   runs it into the repo `.venv` (which `/onboard` creates) right after
   scaffolding, so the first preview works.
 
@@ -104,7 +112,7 @@ entry.
 ### Removed
 
 - **`/start-app --setup` and `/start-app adopt`.** Use `/onboard`.
-  `/start-app` now hands off to `/onboard` by itself when the machine or repo
+  `/build-app` now hands off to `/onboard` by itself when the machine or repo
   isn't ready. docs/migrating-a-consumer-repo.md maps the old names.
 - **`.mcp.json`** (the bundled Playwright MCP). Skills no longer use an MCP;
   `/reload-plugins` drops the old server, and old `browser_*` tool approvals can
