@@ -24,6 +24,8 @@ layering), consult [_shared/production-gotchas.md](../_shared/production-gotchas
 
 ## UI / Streamlit patterns
 
+Read the house design guide `.streamsnow/design.md` first when it exists
+([overlays.md](../_shared/overlays.md#house-design-guide)): its rules beat the defaults below.
 `st.set_page_config` first and called once; `st.navigation` + `st.Page` for multipage; branding
 applied in the entrypoint; multi-filter pages batched in `st.form` (one rerun, not one per widget);
 consistent chart library; number/`column_config` formatting. Judge chart form, layout, color and
@@ -51,7 +53,10 @@ cosmetic — but the problem is the *inconsistency*; both runtimes are legitimat
 ## Docs / governance
 
 App `AGENTS.md` ↔ code drift (tables/pages it claims vs. what exists), `REQUIREMENTS.md` coverage of
-what shipped, README present and not a placeholder. Run `streamsnow check security apps/<slug>` for
+what shipped, README present and not a placeholder. In-app documentation: the About page's `ABOUT`
+filled and matching the spec (§1, §2, each §4 page's question), every metric a page shows in
+`pages/_glossary.py`, each page ending in its definitions and sources footer
+([explainability.md](../_shared/explainability.md)). Run `streamsnow check security apps/<slug>` for
 egress / code-exec / write-SQL / dynamic-SQL.
 
 ## Merge rules

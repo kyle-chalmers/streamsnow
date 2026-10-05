@@ -101,7 +101,8 @@ in the StreamSnow repo is a complete, validate-clean example.
 ## Related defaults
 
 Design for the use case and the people who read the page. The three guides below are starting
-points with their reasons, not rules. The repo's house style (`brand:` config, its overlay,
+points with their reasons, not rules. The repo's house style (`brand:` config, the house design
+guide `.streamsnow/design.md` per [overlays.md](overlays.md#house-design-guide), its overlay,
 `AGENTS.md`) wins, and so does a judgment that fits this audience better. `/review-app` raises
 departures; nothing blocks on them.
 - [streamlit-performance.md](streamlit-performance.md): fetch less, cache by what changes the
@@ -109,4 +110,9 @@ departures; nothing blocks on them.
 - [visualization-guide.md](visualization-guide.md): form from the question, labels, layout, KPI
   cards, color.
 - [explainability.md](explainability.md): a text budget, the page's question, definitions at the
-  number, empty and stale states, the cold-reader check.
+  number, in-app documentation (the About page), empty and stale states, the cold-reader check.
+
+The scaffold ships the shared pieces these guides call for, each imported package-qualified:
+`pages/_glossary.py` (the definitions table above), `pages/_layout.py` (`definitions_expander`,
+`empty_state`, `sources_footer`, `show_sql`), `pages/_time_controls.py` (`date_range`, bounded by
+the data), `pages/_data.py` (loaders several pages share) and `pages/about.py`.

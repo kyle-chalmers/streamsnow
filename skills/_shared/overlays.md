@@ -38,6 +38,15 @@ themselves (hooks, CI, pre-commit, the generator's read-only guard) run outside
 skill prose entirely and are unaffected either way — CI remains the enforced
 backstop even if local prose is subverted.
 
+## House design guide
+
+`.streamsnow/design.md` (optional, committed) holds the repo's house style for app pages, the
+choices `brand:` in `streamsnow.config.yaml` can't express: "no pie charts", "KPI deltas compare
+year over year", "dense pages for analysts". Every skill that designs, builds or reviews a page
+reads it before the defaults in [page-conventions.md § Related defaults](page-conventions.md#related-defaults),
+and it wins over them. Same carve-out as an overlay: it shapes design, never a gate. Short
+rules with a reason each; an app's REQUIREMENTS.md §2 `Style:` overrides it for that app.
+
 ## Authoring
 
 Create `.streamsnow/overlays/` (committed — the generated `.gitignore` excludes

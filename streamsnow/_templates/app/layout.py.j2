@@ -1,0 +1,58 @@
+"""Shared page pieces for {{ app_title }}: definitions, empty states, sources and SQL.
+
+Import package-qualified: ``from pages._layout import definitions_expander``.
+Nothing runs at import time (the container runtime shares one process across viewers).
+"""
+
+from collections.abc import Iterable, Sequence
+
+import streamlit as st
+from pages._glossary import glossary_lines
+
+
+def definitions_expander(*keys: str, how_to_read: Sequence[str] = ()) -> None:
+    """One collapsed expander per page: the definitions of the metrics it shows.
+
+    ``how_to_read`` is optional, at most three short lines, for pages whose encoding or
+    workflow isn't obvious (skills/_shared/explainability.md).
+    """
+    with st.expander("Definitions"):
+        for line in how_to_read[:3]:
+            st.markdown(f"- {line}")
+        for line in glossary_lines(*keys):
+            st.markdown(f"- {line}")
+
+
+def empty_state(message: str) -> None:
+    """Say why a section is empty and what to widen, instead of drawing empty axes."""
+    st.info(message)
+
+
+def sources_footer(sources: Iterable[str], as_of: str) -> None:
+    """The page footer: the objects this page reads, and how fresh the data is."""
+    st.divider()
+    st.caption("Sources: " + " · ".join(sources))
+    st.caption(f"Data as of: {as_of}")
+
+
+def show_sql(title: str, sql: str, params: Sequence[object] | None = None) -> None:
+    """A collapsed expander with the exact query behind a visual, ready to paste into Snowsight.
+
+    Pass the same SQL text and bind values the loader runs, so what is shown is what ran.
+    """
+    with st.expander(f"SQL: {title}"):
+        st.code(sql, language="sql")
+        if params:
+            st.caption(
+                "Bound values, in order: " + ", ".join(_sql_literal(p) for p in params)
+            )
+
+
+def _sql_literal(value: object) -> str:
+    """A bound value as Snowsight would take it: '2025-01-31', 'West', 42."""
+    if isinstance(value, bool) or value is None:
+        return str(value).upper()
+    if isinstance(value, int | float):
+        return str(value)
+    text = value.isoformat() if hasattr(value, "isoformat") else str(value)
+    return "'" + text.replace("'", "''") + "'"
