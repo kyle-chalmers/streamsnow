@@ -6,8 +6,8 @@ ways in, from fastest to most complete:
 - **[Path A — see it work in 2 minutes](#path-a--run-the-example-no-snowflake)**
   with the bundled example dashboard. No Snowflake account, no config.
 - **[Path B — with Claude Code](#path-b--with-claude-code)**: install the plugin
-  and let `/start-app --setup` drive the machine and repo setup, one confirmed
-  step at a time.
+  and let `/onboard` drive the machine, repo and Snowflake setup, explaining
+  each step as it goes.
 - **[Path C — CLI only](#path-c--cli-only)**: the same governed repo, built by
   hand with the `streamsnow` CLI.
 
@@ -30,7 +30,7 @@ Snowflake pages for every fact below are collected in
 **On Windows**, run StreamSnow inside [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
 (Windows Subsystem for Linux, Microsoft's built-in Linux layer): run `wsl --install` in an
 administrator PowerShell, restart, and do everything below inside the Ubuntu app it adds. Local
-preview and the safety hooks only work on macOS and Linux today; `/start-app --setup` says the
+preview and the safety hooks only work on macOS and Linux today; `/onboard` says the
 same if you start on plain Windows.
 
 Install uv with `brew install uv` (macOS) or see [astral.sh/uv](https://docs.astral.sh/uv/);
@@ -109,42 +109,65 @@ Then, in a Claude Code session in that directory (an already-open one is fine;
 
 ```
 /reload-plugins
-/start-app --setup
+/onboard
 ```
 
-What `--setup` does, in order. Claude runs each step itself after a one-line
-explanation of what it installs and why, and waits for your yes; you only do the
-sign-ins, the Snowflake admin script, and the deploy key.
+`/onboard` works in four stages and says what it is doing, and why, at every step.
 
-1. Installs the `streamsnow` CLI (`uv tool install streamsnow`) if it is not on
-   your PATH. Every later skill calls it, so this is required.
-2. Runs `streamsnow doctor` and walks each missing prerequisite (Python, uv,
-   git identity, `snow`, `pre-commit` and its git hook, Node.js) one at a time,
-   then opens and closes a blank page to confirm the bundled browser tool works.
-3. Runs `streamsnow init --no-starter-app`: five questions (runtime, account
-   locator, the database apps query, allowed schemas, deploy source), then the
-   governed repo files (`AGENTS.md`, `CLAUDE.md`, pre-commit hooks, CI and deploy
-   workflows, `.gitignore`, `README.md`, `deploy/tombstones.yml`). No example
-   app: `/start-app` scaffolds your real one. Everything else is a commented
-   default in `streamsnow.config.yaml`.
-4. Saves the plugin into the repo's Claude settings so teammates are offered it,
-   and sets the deploy workflow's GitHub secrets: the plain values itself, the
-   private key by a command you run (see [Deploy setup](deploy-setup.md)).
-5. Prints the one-time `snow connection add … --default` command for your
-   account and, once you have run it, confirms the connection exists.
-6. Hands you to `/start-app` to spec, scaffold, build, preview, validate,
-   review and ship your first app.
+1. **Check and prepare.** It installs the `streamsnow` CLI if it is not on your
+   PATH, runs `streamsnow doctor`, and lists every Snowflake access you already
+   have (`snow` connections, a Snowflake MCP server, a dbt profile, `SNOWFLAKE_*`
+   variable names), reading names only, never values. It reads your account with
+   read-only `SHOW` queries to propose the setup answers, then installs whatever
+   is missing after one approval: Python, uv, `pre-commit`, `snow`, `gh`, and
+   Node.js, which runs the Playwright browser tool that clicks through your app
+   and screenshots each page. It downloads that tool and its browser now, creates
+   the repo's Python environment (`.venv`), and saves the plugin into the repo's
+   Claude settings so teammates are offered it.
+2. **One round of questions.** Clickable choices for what it could not settle:
+   whether to set up your Snowflake connection for you or guide you through it,
+   the five setup answers (runtime, account, the database apps query, allowed
+   schemas, deploy source), your git name and email if they are missing, and who
+   runs the Snowflake admin script.
+3. **Build.** After you confirm, `streamsnow init --no-starter-app` writes
+   `streamsnow.config.yaml` and the governed repo files (`AGENTS.md`, `CLAUDE.md`,
+   pre-commit hooks, CI and deploy workflows, `.gitignore`, `README.md`,
+   `deploy/tombstones.yml`). No example app: `/start-app` scaffolds your real one.
+   Then it installs the pre-commit hook for your clone.
+4. **Finish.** It runs `streamsnow ci-key create` (save a copy of the private key
+   somewhere safe, such as a password manager), prepares the Snowflake admin
+   script in `.internal/admin-setup.sql`, and once your admin has run it, sets the
+   deploy workflow's GitHub secrets with `streamsnow ci-key push`.
 
-**Joining a repo someone already set up?** Clone it, open Claude Code in it,
-accept the StreamSnow plugin when prompted, and run `/start-app --setup`. It sees
-the existing `streamsnow.config.yaml` and governed files, skips scaffolding, and
-only sets up your machine: tools, your git identity, the pre-commit hook for your
-clone, your Snowflake connection, and the browser check.
+It ends at "ready to build and preview" (next: `/start-app`) or "ready to deploy".
+Re-run `/onboard` any time to check.
+
+### If you are the Snowflake admin
+
+`/onboard` copies `.internal/admin-setup.sql` to your clipboard. In Snowsight,
+open a new SQL worksheet, paste, and choose Run All, then tell Claude it ran.
+Claude never runs the admin script itself.
+
+### If someone else is
+
+`/onboard` writes a short note naming the file, with a link to
+[Deploy setup](deploy-setup.md), for you to forward. You can build and preview
+now; deploys wait until your admin has run it and you re-run `/onboard`.
+
+### Joining a repo someone already set up
+
+Clone it, open Claude Code in it, accept the StreamSnow plugin when prompted, and
+run `/onboard`. It sees the existing `streamsnow.config.yaml` and governed files,
+skips scaffolding, and only sets up your machine: tools, your git identity, the
+pre-commit hook for your clone, your Snowflake connection, and the browser check.
+Your session's first line tells you if your clone still needs it.
+
+### Repos that already have Streamlit apps
 
 If the directory already has Streamlit apps but no `streamsnow.config.yaml`,
-`--setup` switches to **adopt mode**: it inventories what exists, pre-answers the configure questions from
-your deploy scripts and CI, and writes a `MIGRATION.md` checklist instead of
-scaffolding over anything.
+`/onboard` switches to **adopt mode**: it inventories what exists, pre-answers
+the configure questions from your deploy scripts and CI, and writes a
+`MIGRATION.md` checklist instead of scaffolding over anything.
 
 You will see the plugin's SessionStart line the next time you open Claude Code
 in the repo: the plugin version, the skills, and which guards are active. If it
