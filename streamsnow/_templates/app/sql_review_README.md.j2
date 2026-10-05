@@ -1,0 +1,32 @@
+# SQL review: {{ app_title }}
+
+One SQL file per page of the app, one runnable section per metric, in on-screen
+order. Use them to check any number the app shows against the data.
+
+## How to run a section
+
+- **DataGrip** (or another SQL IDE): open this folder, open a page file, put the
+  cursor inside a section, and press Cmd/Ctrl+Enter. Each section runs on its
+  own; its `params` CTE at the top holds the review window.
+- **Snowsight**: paste one section (from its `--N_key` tag to its `;`) into a
+  worksheet and run it.
+- **Any editor**: the files are plain SQL; read them anywhere.
+
+Each section starts with a tag like `--1_total_revenue`: metric 1 on that page,
+key `total_revenue` in `index.yaml`. To change what a section runs, edit
+`index.yaml` or the app's `queries/*.sql` and run
+`streamsnow sql-review generate {{ app_slug }}`; never edit a page file by hand.
+`AGENTS.md` here has the folder rules.
+
+## Latest review
+
+<!-- sql-review-latest:start -->
+No live review logged yet.
+<!-- sql-review-latest:end -->
+
+## Index
+
+The tables below are generated from `index.yaml`.
+
+<!-- sql-review-index:start -->
+<!-- sql-review-index:end -->

@@ -47,11 +47,13 @@ branch protection rule (or ruleset) on `main` that lists the checks jobs as
 required status checks. With that in place, the deploy job can safely assume
 merged code already passed.
 
-An app's `sql_review/` directory (the paste-runnable SQL audit trail that
-`streamsnow sql-review` maintains) is a **repo-side artifact for human
-reviewers** — the running app never reads it, and the scaffolded
-`snowflake.yml` does not declare it among the app's `artifacts:`. It exists so
-someone can re-run each visual's SQL in Snowsight, not to ship.
+An app's `sql_review/` directory (one runnable SQL file per page, which
+`streamsnow sql-review` generates from its `index.yaml`) is a **repo-side
+artifact for human reviewers** — the running app never reads it, and the
+scaffolded `snowflake.yml` does not declare it among the app's `artifacts:`. It
+exists so someone can re-run each visual's SQL in DataGrip or Snowsight, not to
+ship. The app's `review.py` (the no-op `review_value` marker its pages import)
+does ship, and is in `artifacts:`.
 
 ## Retiring or renaming an app
 
@@ -189,7 +191,11 @@ installs `streamsnow>=0.7.1,<0.8`, the first release with that
 steps cleanly while `apps/` holds no app directory, and installs
 `streamsnow>=0.7.2,<0.8`, the first release whose `verify-deploy` reads
 `DESCRIBE STREAMLIT` (an older one reports those checks as passed without
-running them).
+running them). 0.8 moves every generated pin to `streamsnow>=0.8,<0.9`, adds
+the repo's `.sqlfluff` (created when missing, never overwritten) and the
+`sql-review check --lint-files` pre-commit hook; apps still need their
+`sql_review/` moved to the new format by hand
+([Auditing a visual](auditing-a-visual.md#for-the-developer-on-the-other-side-of-this)).
 
 ## See also
 

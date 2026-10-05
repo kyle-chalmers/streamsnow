@@ -92,6 +92,7 @@ RENDER_MAP: tuple[RenderItem, ...] = (
     ),
     RenderItem("repo/README.md.j2", "README.md"),
     RenderItem("repo/tombstones.yml.j2", "deploy/tombstones.yml"),
+    RenderItem("repo/sqlfluff.j2", ".sqlfluff"),
     RenderItem(
         "repo/osv_allowlist.json.j2", "osv_allowlist.json", lambda c: c.runtime == "warehouse"
     ),
@@ -109,14 +110,15 @@ RENDER_MAP: tuple[RenderItem, ...] = (
     RenderItem("app/config.toml.j2", "apps/{slug}/.streamlit/config.toml"),
     RenderItem("app/secrets.toml.example.j2", "apps/{slug}/.streamlit/secrets.toml.example"),
     RenderItem("app/example_metric.sql.j2", "apps/{slug}/queries/example_metric.sql"),
-    # The audit trail exists from commit 1: a starter manifest for the example
-    # query, so `sql-review generate` has something to render and the pattern
-    # is visible before the first real page lands.
-    RenderItem(
-        "app/sql_review_manifest.json.j2",
-        "apps/{slug}/sql_review/manifests/example_metric.json",
-    ),
+    RenderItem("app/review.py.j2", "apps/{slug}/review.py"),
     RenderItem("app/overview.py.j2", "apps/{slug}/pages/overview.py"),
+    # SQL review exists from commit 1: an index for the starter page's one
+    # metric, so `sql-review generate` (which init and new run) writes its page
+    # file and the pattern is visible before the first real page lands.
+    RenderItem("app/index.yaml.j2", "apps/{slug}/sql_review/index.yaml"),
+    RenderItem("app/sql_review_AGENTS.md.j2", "apps/{slug}/sql_review/AGENTS.md"),
+    RenderItem("app/sql_review_CLAUDE.md.j2", "apps/{slug}/sql_review/CLAUDE.md"),
+    RenderItem("app/sql_review_README.md.j2", "apps/{slug}/sql_review/README.md"),
 )
 
 # Just the app subset (for `streamsnow new` and additional apps).
@@ -125,15 +127,19 @@ APP_ITEMS = tuple(i for i in RENDER_MAP if i.output.startswith("apps/{slug}/"))
 REPO_ITEMS = tuple(i for i in RENDER_MAP if not i.output.startswith("apps/{slug}/"))
 # Repo-level files `streamsnow update` creates when missing but never rewrites:
 # they hold the user's own entries (osv_allowlist.json is absent from
-# warehouse repos scaffolded before 0.7.1, which is why update adds it).
-CREATE_IF_MISSING_ITEMS = tuple(i for i in REPO_ITEMS if i.output == "osv_allowlist.json")
+# warehouse repos scaffolded before 0.7.1, which is why update adds it; a team
+# tunes .sqlfluff, which repos scaffolded before 0.8.0 lack).
+CREATE_IF_MISSING_ITEMS = tuple(
+    i for i in REPO_ITEMS if i.output in ("osv_allowlist.json", ".sqlfluff")
+)
 # Governance files re-rendered by `streamsnow update`. README/.gitignore are
 # user-owned; deploy/tombstones.yml is a REGISTRY users append to — an update
 # re-render would wipe their tombstone entries.
 GOVERNANCE_ITEMS = tuple(
     i
     for i in REPO_ITEMS
-    if i.output not in ("README.md", ".gitignore", "deploy/tombstones.yml", "osv_allowlist.json")
+    if i.output
+    not in ("README.md", ".gitignore", "deploy/tombstones.yml", "osv_allowlist.json", ".sqlfluff")
 )
 
 

@@ -41,11 +41,11 @@ def _write(p: Path, text: str) -> Path:
 
 
 def _scaffold_with_trail(cfg: Config, root: Path, slug: str) -> Path:
-    """scaffold() plus the sql_review companion `init`/`new` generate right after it.
+    """scaffold() plus the sql_review page files `init`/`new` generate right after it.
 
-    A manifest whose review file was never rendered is a provenance finding
-    (the trail promises a file that does not exist) and, since 0.7, provenance
-    findings fail validate-app regardless of the coverage policy.
+    An index.yaml page whose file was never rendered is a provenance finding
+    (the index promises a file that does not exist), and provenance findings
+    fail validate-app regardless of the coverage policy.
     """
     scaffold(cfg, root, slug)
     assert sql_review.main(["generate", slug, "--dir", str(root)]) == 0
@@ -53,11 +53,11 @@ def _scaffold_with_trail(cfg: Config, root: Path, slug: str) -> Path:
 
 
 def _finish_starter(app: Path) -> Path:
-    """Finish the scaffold's placeholder trio the way a user does: the query and its
-    manifest window read a real table, and the starter page renders the query's results
-    in place of its sample metric and chart. validate-app FAILS (placeholders) until
-    this happens."""
-    for rel in ("queries/example_metric.sql", "sql_review/manifests/example_metric.json"):
+    """Finish the scaffold's placeholder trio the way a user does: the query and the
+    review window in sql_review/index.yaml read a real table, and the starter page renders
+    the query's results (still marked with review_value) in place of its sample metric and
+    chart. validate-app FAILS (placeholders) until this happens."""
+    for rel in ("queries/example_metric.sql", "sql_review/index.yaml"):
         f = app / rel
         f.write_text(
             f.read_text(encoding="utf-8").replace("YOUR_TABLE", "ORDERS"), encoding="utf-8"
@@ -66,7 +66,7 @@ def _finish_starter(app: Path) -> Path:
     text, n = re.subn(
         r"# STREAMSNOW_STARTER_PLACEHOLDER.*?st\.plotly_chart\(fig, use_container_width=True\)\n",
         'df = load_example("2024-01-01", "2024-12-31")\n'
-        'branded_metric("Rows", f"{int(df[\'N\'].sum()):,}")\n'
+        'branded_metric("Rows", review_value("example_metric", f"{int(df[\'N\'].sum()):,}"))\n'
         'fig = px.bar(df, x="DT", y="N", color_discrete_sequence=BRAND_CHART_COLORS)\n'
         "st.plotly_chart(fig, use_container_width=True)\n",
         page.read_text(encoding="utf-8"),
@@ -1650,25 +1650,27 @@ def test_coverage_policy_fail_gates_validate_app(tmp_path):
     assert "coverage policy: fail" in sqlr["name"]
 
 
-def test_implicit_review_window_is_a_validate_warning_never_a_failure(tmp_path):
-    """A manifest with no set_block reviews the year ending today, which returns zero
-    rows for data that ends in the past. validate-app reports it as a sql-review
-    warning under both coverage policies; it never gates."""
-    import json as _json
-
+def test_sql_review_advisory_is_a_validate_warning_never_a_failure(tmp_path):
+    """A query whose comments outweigh its SQL gets an `advisory` finding (comments
+    over a quarter of the lines usually restate the SQL). validate-app reports it as a
+    sql-review warning under both coverage policies; it never gates."""
     for policy in ("warn", "fail"):
         cfg_data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
         cfg_data["sql_review"] = {"coverage": policy}
         cfg = Config.from_dict(cfg_data)
         root = tmp_path / policy
-        app = _scaffold_with_trail(cfg, root, "window-app")
-        mp = app / "sql_review/manifests/example_metric.json"
-        manifest = _json.loads(mp.read_text(encoding="utf-8"))
-        assert "MAX(metric_date)" in manifest["set_block"]["end_date"]  # the starter anchors it
-        del manifest["set_block"], manifest["set_block_note"]
-        mp.write_text(_json.dumps(manifest), encoding="utf-8")
-        assert sql_review.main(["generate", "window-app", "--dir", str(root)]) == 0
+        app = _finish_starter(_scaffold_with_trail(cfg, root, "advisory-app"))
+        q = app / "queries/example_metric.sql"
+        q.write_text(
+            q.read_text(encoding="utf-8").replace(
+                "GROUP BY metric_date\n",
+                "-- One row per day.\n-- Days with no rows are absent, not zero.\n"
+                "-- The chart fills the gaps.\nGROUP BY metric_date\n",
+            ),
+            encoding="utf-8",
+        )
+        assert sql_review.main(["generate", "advisory-app", "--dir", str(root)]) == 0
         res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
         sqlr = next(c for c in res["checks"] if c["name"].startswith("sql-review"))
         assert sqlr["ok"] and not sqlr["findings"], policy
-        assert [w["kind"] for w in sqlr["warnings"]] == ["window"], policy
+        assert [w["kind"] for w in sqlr["warnings"]] == ["advisory"], policy

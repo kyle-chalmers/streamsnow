@@ -248,22 +248,27 @@ so hand-rendered review copies get written once, drift silently, and end up
 *worse* than nothing: they document a query the app no longer runs. The fix is
 to make the rendered copy a build product, not prose:
 
-- Each feature's filter combos, token values, and bind placeholders live in a
-  JSON **manifest** under `apps/<slug>/sql_review/manifests/` (in the app dir
-  on purpose — renaming or retiring the app moves its audit trail with it).
-- `streamsnow sql-review generate` renders the paste-runnable `.review.sql`
-  files and stamps each with a **provenance line** — content hashes of every
-  input (manifest, query templates, dispatcher modules) and of the rendered
-  output itself.
+- Each page's metrics, their token values and bind values live in one
+  **index** per app, `apps/<slug>/sql_review/index.yaml` (in the app dir on
+  purpose — renaming or retiring the app moves its review SQL with it). Up to
+  0.7 this was a JSON manifest per feature; 0.8 moved to one file per page,
+  one section per metric, because reviewers think in pages and visuals.
+- `streamsnow sql-review generate` renders one runnable file per page and
+  stamps each with a **provenance line** — content hashes of every input
+  (index, query templates, the page's nav entry, the lint config) and of the
+  rendered output itself.
 - `streamsnow sql-review check` recomputes both hashes **without importing any
   app code** — a shared pre-commit/CI hook that imports consumer modules would
-  execute arbitrary code on every commit — so an edited template, manifest, or
-  hand-edited rendered file all read as DRIFT, and every `queries/*.sql` must
-  be claimed by some manifest (a query the generator can't account for is a
-  named failure, never a silent skip).
+  execute arbitrary code on every commit — so an edited template, index, or
+  hand-edited rendered file all read as DRIFT, and every nav page and
+  `queries/*.sql` must be accounted for by the index (a page or query the
+  generator can't account for is a named finding, never a silent skip). Since
+  0.8 the check also reads each page's `review_value("<key>", …)` markers by
+  AST, so a visual with no section (or a section with no visual) is a named
+  failure too.
 
 Rendered files are also verified against a statement-root allowlist (`SELECT`
-/ `WITH…SELECT` / `SHOW` / `DESCRIBE` / `EXPLAIN` / session-variable `SET`) —
+/ `WITH…SELECT` / `SHOW` / `DESCRIBE` / `EXPLAIN`) —
 an allowlist rather than a write-verb denylist *as the primary guard*, because
 the failure mode of a denylist is the statement type nobody thought of.
 

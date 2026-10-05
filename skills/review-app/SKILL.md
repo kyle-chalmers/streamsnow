@@ -1,6 +1,6 @@
 ---
 name: review-app
-description: Review an app the way a senior reviewer would — parallel reviewers across SQL, data, UI, runtime, and docs — then optionally apply the fixes. Use when the user says "review this app", "audit my dashboard", "fix the findings", "auto-fix until clean", or after validation passes. Flags — --fix applies findings as atomic commits, --auto loops review→fix until clean, --sql writes the paste-and-runnable SQL companions.
+description: Review an app the way a senior reviewer would — parallel reviewers across SQL, data, UI, runtime, and docs — then optionally apply the fixes. Use when the user says "review this app", "audit my dashboard", "fix the findings", "auto-fix until clean", or after validation passes. Flags — --fix applies findings as atomic commits, --auto loops review→fix until clean, --sql builds the runnable sql_review/ page files.
 argument-hint: "<slug> [--fix | --auto | --sql]"
 allowed-tools: [Bash, Read, Edit, Glob, Grep, Task]
 ---
@@ -22,10 +22,10 @@ can't catch.
 - **`--auto`** — loop review → fix → re-review until no new mechanical findings remain, then a
   render smoke. Follow [auto-loop.md](auto-loop.md). Warn it takes minutes (and Snowflake credits
   when the lineage pass joins); `--no-lineage` keeps it static-only.
-- **`--sql`** — build the manifest-driven `sql_review/` audit trail (`streamsnow sql-review`
-  discover → author manifests → generate → index) + live-verified lineage README. Follow
-  [sql-companions.md](sql-companions.md). Read-only; runs automatically when the post-review gap
-  check `streamsnow sql-review check <slug>` reports uncovered queries or drift.
+- **`--sql`** — build the app's `sql_review/` page files (mark visuals with `review_value` →
+  write `sql_review/index.yaml` → `streamsnow sql-review generate` → `check`). Follow
+  [sql-companions.md](sql-companions.md). Read-only; runs only when `--sql` is passed (the review
+  pass reports `sql-review check` gaps but does not build the files itself).
 
 ## Review pass
 

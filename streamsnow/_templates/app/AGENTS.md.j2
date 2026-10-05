@@ -13,5 +13,21 @@ App-specific context. Inherits the repo rulebook in the top-level `AGENTS.md`.
 ## Queries
 
 - `queries/example_metric.sql`: placeholder; repoint `YOUR_TABLE` at a real object in an allowed schema
-  (its `sql_review/manifests/example_metric.json` window reads it too), or delete both once real queries
-  exist. `validate-app` fails while any app file still reads `YOUR_TABLE`.
+  (the review window in `sql_review/index.yaml` reads it too). Or, once real queries exist, delete the
+  query and its `example_metric` entry in `sql_review/index.yaml`, then run
+  `streamsnow sql-review generate {{ app_slug }}`, which removes the rendered `sql_review/01_overview.sql`.
+  `validate-app` fails while any app file still reads `YOUR_TABLE`.
+
+## SQL review
+
+`sql_review/` holds one runnable SQL file per page, generated from `sql_review/index.yaml`; its
+`AGENTS.md` has the rules. Each metric a page shows is listed there and marked in the page with
+`review_value("<key>", value)`.
+
+## Data notes
+
+Facts about the data this app reads that a reviewer needs and the SQL does not say: grain (one row
+per what), metric definitions, known quirks and exclusions, freshness (when sources load).
+Keep them here, in one place; `sql_review/` points to this section.
+
+- _None recorded yet._

@@ -1,0 +1,66 @@
+# sql_review/: rules for {{ app_slug }}
+
+SQL a person can open, run, and trace to every metric on every page of this app.
+Data notes (grain, definitions, quirks, freshness) live in `../AGENTS.md`, not here.
+
+## Layout
+
+- `index.yaml`: the only file to edit by hand here. Pages, their metrics in on-screen order,
+  the app query behind each metric, token samples, bind values, objects read, review window.
+- `NN_<page>.sql`: generated, one per page; `NN` is the page's position in the app's navigation.
+- `README.md`: the human index; the tables between its markers are generated.
+- `app_specific_reporting_objects/<DATABASE>.<SCHEMA>.<OBJECT>.sql`: maintained DDL for objects
+  built to make this app work, one file per object.
+
+## Page file format
+
+- Lines 1-8 are the header; the first metric tag is line 9 and its SQL starts on line 10.
+- Each section starts with a tag line `--N_key` (N = on-screen position, key = the metric key in
+  `index.yaml`), directly above its SQL, and ends with one `;`. One blank line between sections.
+- Each section runs on its own: its `params` CTE holds the review window, `{TOKENS}` carry their
+  sample values, and `:binds` read `params` (`params.start_date` in `index.yaml`).
+- Reordering metrics or pages renumbers files and tags; the key stays the stable name.
+
+## Editing rules
+
+- Never edit a generated page file or the generated README tables: `check` reports it as a hand
+  edit. Change `index.yaml` or `../queries/*.sql`, then run `streamsnow sql-review generate {{ app_slug }}`.
+- Metric keys: snake_case, five words or fewer, describing the value shown (`revenue_by_region`).
+- Every metric needs exactly one `review_value("<key>", value)` call on its page, wrapping the
+  value its visual shows (`from review import review_value`). `check` matches them to the index.
+- A query file that is only inlined into others is listed under `fragments:` with a reason.
+
+## Comments in queries
+
+- Every CTE gets a one-line comment directly above its name saying what it is for. For the first
+  CTE, put `WITH` on its own line, then the comment, then `name AS (`.
+- Every non-obvious filter, join, or CASE gets a one-line comment saying why.
+- One line per comment, 100 characters or fewer. Never restate the SQL. Roughly one comment per 5
+  to 10 SQL lines; comments under about a quarter of the query.
+- `check` enforces the CTE comments and line length; the rest is the reviewer's judgement.
+
+## Objects (app_specific_reporting_objects/)
+
+- One file per object, headed by `-- Object:`, `-- Purpose:`, `-- Used by:` (generated from
+  `index.yaml`), and `-- Grants:` (must match the object's `grants:` in `index.yaml`).
+- List each object under `objects:` in `index.yaml` and name it in the `reads:` of every metric
+  that reads it. `check` fails on a DDL file nothing reads, or an object with no DDL file.
+- A human applies DDL. Claude deploys it only when the user explicitly says to.
+- These files are DDL on purpose: they are exempt from the read-only guard and no review command
+  ever runs them.
+
+## Commands
+
+- `streamsnow sql-review generate {{ app_slug }}`: write page files, README tables, Used by lines.
+- `streamsnow sql-review check {{ app_slug }}`: offline gate (pre-commit, CI, `validate-app`):
+  index, provenance, markers, objects, sqlfluff lint of `../queries/*.sql`, comment rules.
+- Lint settings are the repo's `.sqlfluff`.
+- `/sql-review` (a later StreamSnow release) will run a live review against Snowflake and
+  write a committed review log here. Until then, run sections by hand.
+
+<!-- streamsnow: edit below this line; generate keeps it -->
+
+## Notes for this app
+
+Add folder-specific notes here. `streamsnow sql-review generate` refreshes everything above the
+marker line and keeps this section as written.

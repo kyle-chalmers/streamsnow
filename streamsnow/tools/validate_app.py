@@ -69,8 +69,8 @@ _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 # that IS app source (config.toml lives there), so it is never skipped.
 _KEEP_DOTTED = frozenset({".streamlit"})
 
-# The scaffold's starter trio (queries/example_metric.sql, its sql_review
-# manifest, and pages/overview.py with sample numbers) all carry this token until
+# The scaffold's starter trio (queries/example_metric.sql, the review window in
+# sql_review/index.yaml, and pages/overview.py with sample numbers) carry this token until
 # replaced. 0.7.1 made it a warning so a fresh scaffold passed its own gate; the
 # placeholder app then validated clean and deployed beside the real one (CI
 # deploys every apps/*/). It FAILS now: an unfinished scaffold must not ship.
@@ -80,11 +80,12 @@ _PLACEHOLDER_RE = re.compile(r"\bYOUR_TABLE\b")
 # that validated PASS. The template marks that block STREAMSNOW_STARTER_PLACEHOLDER; the
 # sample values match too, which also covers pages scaffolded before the marker existed.
 _STARTER_SAMPLE_RE = re.compile(
-    r'\bSTREAMSNOW_STARTER_PLACEHOLDER\b|"1,234", delta="\+5\.3%"|\["alpha", "beta", "gamma"\]'
+    r'\bSTREAMSNOW_STARTER_PLACEHOLDER\b|"1,234"\)?, delta="\+5\.3%"|\["alpha", "beta", "gamma"\]'
 )
-# Authored files only. Rendered *.review.sql files repeat their query's text, so
-# scanning them would report every placeholder twice.
-_PLACEHOLDER_SUFFIXES = (".py", ".sql", ".json")
+# Authored files only. Generated sql_review page files (NN_<page>.sql) repeat
+# their query's text, so scanning them would report every placeholder twice.
+_PLACEHOLDER_SUFFIXES = (".py", ".sql", ".json", ".yaml")
+_GENERATED_PAGE_FILE_RE = re.compile(r"^\d{2}_[a-z0-9_]+\.sql$")
 
 # Container-runtime fields that must be ABSENT in warehouse mode.
 _CONTAINER_ONLY = ("runtime_name", "compute_pool", "external_access_integrations")
@@ -359,6 +360,11 @@ def _check_manifest(app_dir: Path, cfg: Config) -> list[str]:
     return problems
 
 
+def _is_generated_review_sql(app_dir: Path, path: Path) -> bool:
+    rel = path.relative_to(app_dir).parts
+    return len(rel) == 2 and rel[0] == "sql_review" and bool(_GENERATED_PAGE_FILE_RE.match(rel[1]))
+
+
 def _check_placeholders(app_dir: Path) -> list[dict]:
     """Authored app files (queries, pages, manifests) still carrying starter content.
 
@@ -371,9 +377,9 @@ def _check_placeholders(app_dir: Path) -> list[dict]:
         (
             _PLACEHOLDER_RE,
             "scaffold placeholder YOUR_TABLE: replace the starter content "
-            "(repoint the query at a real table, or delete the starter query, its "
-            "sql_review manifest and pages/overview.py once real pages exist). CI "
-            "deploys every app under apps/",
+            "(repoint the query and the review window in sql_review/index.yaml at a real "
+            "table, or delete the starter query, its index.yaml entry and pages/overview.py "
+            "once real pages exist). CI deploys every app under apps/",
         ),
         (
             _STARTER_SAMPLE_RE,
@@ -384,7 +390,7 @@ def _check_placeholders(app_dir: Path) -> list[dict]:
     )
     found: list[dict] = []
     for path in sorted(_walk_app_files(app_dir)):
-        if path.suffix not in _PLACEHOLDER_SUFFIXES or path.name.endswith(".review.sql"):
+        if path.suffix not in _PLACEHOLDER_SUFFIXES or _is_generated_review_sql(app_dir, path):
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -462,15 +468,13 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     reqs = check_requirements.scan_paths([app_dir])
     checks.append({"name": "requirements", "ok": reqs["ok"], "findings": reqs["findings"]})
 
-    # sql_review freshness + coverage. Correctness findings (drift, hand edits,
-    # unbound binds, write statements, collisions, orphans) always fail: they
-    # mean the committed audit trail lies about what the app runs. Coverage
-    # (an unclaimed queries/*.sql) follows `sql_review.coverage` in config —
-    # `warn` (default) reports it, `fail` gates on it — so an adopting fleet
-    # backfills on its own schedule and flips the switch when ready. `check`
-    # is import-free by design, so it is safe inside this gate.
-    # An implicit (CURRENT_DATE) review window is an advisory `window` warning
-    # under every policy; split_by_policy is the one place that rule lives.
+    # sql_review: index, provenance, markers, objects, lint, comments. Those
+    # always fail: they mean the committed review SQL does not match what the
+    # app runs. Coverage (a nav page or query that index.yaml does not account
+    # for) follows `sql_review.coverage` in config: `warn` (default) reports
+    # it, `fail` gates on it, so an adopting fleet backfills on its own schedule.
+    # `advisory` never gates; split_by_policy is the one place those rules live.
+    # `check` is import-free by design, so it is safe inside this gate.
     sqlr = sql_review._check_app(app_dir.parent.parent, app_dir)
     policy = cfg.sql_review.coverage
     hard, soft = sql_review.split_by_policy(sqlr, policy)

@@ -68,10 +68,11 @@ extra question.
 
 If a "fix" can't be confirmed green by a matching check, it's Bucket B — not an auto-fix.
 
-A fix that touches `queries/*.sql` (or the data modules the token dispatchers call into) makes the
-rendered audit trail stale: run `streamsnow sql-review generate <slug>` and then
+A fix that touches `queries/*.sql`, `sql_review/index.yaml` or a page's `review_value` markers
+makes the generated review SQL stale: run `streamsnow sql-review generate <slug>` and then
 `streamsnow sql-review check <slug>` **before the commit**, and commit the regenerated
-`sql_review/` files with it — otherwise the very next `check` reads DRIFT.
+`sql_review/` files with it — otherwise the very next `check` reads DRIFT. A fixed query must also
+stay lint-clean and keep a comment above every CTE (`check` reports both).
 
 ## Runtime-aware fixes
 

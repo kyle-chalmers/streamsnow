@@ -49,31 +49,34 @@ run the spec phase first ([spec.md](spec.md)) and resume.
 7. **Log it:** append a §11 session line (`page <name> scaffolded — queries TODO. Next: fill stubs,
    then /preview-app <slug>`). Don't commit yet — the page is a reviewable stub; the commit happens
    in step 8, once the real SQL lands.
-8. **Fill the stubs, then land the page WITH its audit trail — one commit.** After the page's real
+8. **Fill the stubs, then land the page WITH its review SQL: one commit.** After the page's real
    query bodies replace the placeholders:
-   1. `streamsnow sql-review discover <slug> --write` — proposes (and persists) a skeleton manifest
-      under `apps/<slug>/sql_review/manifests/` for each query no manifest claims yet. It never
-      overwrites an existing manifest, and exit 1 here just means gaps existed — that's why you ran it.
-   2. **Improve the skeleton's dispatcher literals, and anchor its window.** `discover` fills each
-      `{TOKEN}` dispatcher with a `-- TODO: sample fragment for <TOKEN>` placeholder; replace every
-      one with a real sample fragment the page actually renders (e.g. `AND region = 'West'` for a
-      region filter) so the review SQL exercises the query the way the dashboard does. Fix the
-      `description`/`pages` fields if the header's `Feeds` line was still a TODO. Then add a
-      `set_block` whose window ends at the data's latest date, never today:
-      `"end_date": "(SELECT MAX(<date_col>) FROM <db>.<schema>.<table>)::DATE"` and
-      `"start_date": "(SELECT DATEADD('year', -1, MAX(<date_col>)) FROM <db>.<schema>.<table>)::DATE"`
-      (the same object and column the page's default date range reads). The skeleton has none,
-      and the implicit default is the year ending `CURRENT_DATE`, which returns zero rows for any
-      data that ends in the past; `sql-review check` flags it as a `window` warning.
-   3. `streamsnow sql-review generate <slug>` — renders the paste-runnable
-      `sql_review/<feature>.review.sql` files with provenance lines.
-   4. Commit the page module, its `queries/*.sql`, the manifest(s), and the rendered `.review.sql`
-      **together** — a page and its audit trail land together. Splitting them leaves a window where
-      `streamsnow sql-review check` reads uncovered queries or drift, and a reviewer can't re-run
-      the numbers behind the new visuals.
-9. **End of the build phase** (all §4 pages built): `streamsnow sql-review index <slug>` rebuilds
-   the `sql_review/README.md` coverage table so it reflects every page's queries; include the
-   refreshed README in the final build commit.
+   1. **Mark each visual.** Wrap the value each visual shows in
+      `review_value("<metric_key>", value)` (`from review import review_value`), e.g.
+      `st.metric("Revenue", review_value("total_revenue", total))`. Keys are snake_case, five
+      words or fewer, and name the value shown. It is a no-op at runtime.
+   2. **List the page in `apps/<slug>/sql_review/index.yaml`.** Add the page's `path` (as in its
+      `st.Page(...)`) with one entry under `metrics:` per marked visual, in on-screen order: `key`,
+      `query` (`queries/<name>.sql`), `tokens` (a real sample value for every `{TOKEN}` the page
+      renders, e.g. `REGION_FILTER: "AND region = 'West'"`), `binds` (every `:1`/`:name`, usually
+      `params.start_date`), `reads` (the objects it reads), and `notes` when a definition needs
+      one. Keep `review_window` anchored to the data's latest date, never today:
+      `end_date: "(SELECT MAX(<date_col>) FROM <db>.<schema>.<table>)::DATE"`. A view or table you
+      built for this app goes under `objects:` with its DDL in
+      `sql_review/app_specific_reporting_objects/` (see that folder's rules in
+      `sql_review/AGENTS.md`).
+   3. **Comment the queries.** Every CTE gets a one-line comment directly above its name; every
+      non-obvious filter, join or CASE gets a one-line "why". `check` enforces the CTE comments and
+      the 100-character limit, and lints each query with the repo's `.sqlfluff`.
+   4. `streamsnow sql-review generate <slug>`: writes `sql_review/NN_<page>.sql` (one runnable
+      section per metric) and refreshes the README tables. Then `streamsnow sql-review check <slug>`
+      must be clean.
+   5. Commit the page module, its `queries/*.sql`, `index.yaml`, and the generated page file and
+      README **together**: a page and its review SQL land together. Splitting them leaves a window
+      where `check` reads drift or uncovered pages, and a reviewer can't re-run the numbers behind
+      the new visuals.
+9. **End of the build phase** (all §4 pages built): `streamsnow sql-review check <slug>` reports no
+   `coverage` warning, so every page in the nav is in `index.yaml`.
 
 ## Replace the starter trio
 
@@ -87,15 +90,15 @@ same commit as that page (step 8), whatever the page is called:
    placeholder, so the default-page gotcha below does not apply), and delete `pages/overview.py`.
 2. **`queries/example_metric.sql`** (reads `YOUR_TABLE`). Delete it once the page's real queries
    exist. Never repoint it into a real query under the example name.
-3. **`sql_review/manifests/example_metric.json`** and its rendered
-   `sql_review/example_metric.review.sql`. Delete both with the query: `generate` would fail on
-   the missing template, and `check` reports a leftover review file as an orphan.
+3. **The `example_metric` entry in `sql_review/index.yaml`**, and the `YOUR_TABLE` in its
+   `review_window`. Replace them with the real page's entry and window (step 8.2), then run
+   `streamsnow sql-review generate <slug>`: it removes the stale `sql_review/01_overview.sql`
+   when no page needs it, and `check` reports a leftover page file as an orphan.
 
 Then `streamsnow validate-app <slug>` must PASS: its `placeholders` check FAILS while any query,
-page or manifest still carries `YOUR_TABLE` or the starter page's sample block. Do not grep the
+page or `index.yaml` still carries `YOUR_TABLE` or the starter page's sample block. Do not grep the
 app folder for the token instead: the app's own `AGENTS.md` names `YOUR_TABLE` in its
-instructions, so a correct app still matches. `streamsnow sql-review index <slug>` then drops the
-example row from the README.
+instructions, so a correct app still matches.
 
 ## Connection pattern by runtime
 
