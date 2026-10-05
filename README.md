@@ -107,7 +107,7 @@ behalf. Here is exactly what that means for your credentials.
   `SNOWFLAKE_*` values.
 
 <p align="center">
-  <a href="docs/images/secrets-flow.png"><img alt="The CI key flow: on your machine, streamsnow ci-key create makes a key pair. The public half goes into the admin script, which you or your Snowflake admin run, so Snowflake stores it on the CI user. The private half goes through streamsnow ci-key push to a GitHub secret. On merge, the deploy job signs in with the private key and Snowflake checks it against the public key. Claude sees file names and a fingerprint, never the key." src="docs/images/secrets-flow.png" width="100%"></a>
+  <a href="docs/images/secrets-flow.png"><img alt="The CI key flow: on your machine, streamsnow ci-key create makes a key pair. The public half goes into the admin script, which you or your Snowflake admin run, so Snowflake stores it on the CI user. The private half goes through streamsnow ci-key push to a GitHub secret. On merge, the deploy job signs in with the private key and Snowflake checks it against the public key. Claude sees file names and a fingerprint, never the key. Make sure to save the private key in a secure location." src="docs/images/secrets-flow.png" width="100%"></a>
 </p>
 
 The limits, stated plainly: Claude runs as your user account, so the key guard
