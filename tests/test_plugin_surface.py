@@ -173,10 +173,14 @@ def test_readme_trust_section_matches_the_code():
     section = readme[start : readme.index("\n## ", start + 1)]
     assert "streamsnow ci-key push" in section
     assert "hooks/secret_guard.py" in section
-    assert "SECURITY.md" in section
+    assert "SECURITY.md#how-streamsnow-handles-secrets" in section
     assert (REPO_ROOT / "hooks" / "secret_guard.py").is_file()
     assert readme.index("## What Claude can and can't see") < readme.index(
         "## Install with your coding agent"
+    )
+    hooks = readme[readme.index("## Hooks, in full") :]
+    assert any(
+        line.startswith("|") and "hooks/secret_guard.py" in line for line in hooks.splitlines()
     )
     security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
     assert "## How StreamSnow handles secrets" in security

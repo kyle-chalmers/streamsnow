@@ -52,22 +52,29 @@ read-only guard notes in `streamsnow/tools/sql_review.py`).
 `SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` is read only for an encrypted key, which
 `ci-key create` does not make.
 
-**Where the key lives.** `~/.streamsnow-ci/` (mode 700): the private key
+**Where the key lives.** `~/.streamsnow-ci/`: the private key
 `streamsnow_ci_rsa_key.p8` (mode 600), the public key `.pub`, and `secrets/`
-with one file per secret (mode 600; the private-key entry is a link to the `.p8`). `ci-key create` refuses a directory inside
-a git repository, never overwrites an existing key, and never prints a value.
-`ci-key push` reads each file and passes it to `gh secret set` on stdin, then
-prints only names; if one fails it stops before `SNOWFLAKE_ACCOUNT`.
+with one file per secret (mode 600; the private-key entry is a link to the
+`.p8`). `ci-key create` makes the directory at mode 700 (it warns, but does not
+change it, if an existing one is looser), refuses a directory inside a git
+repository, never overwrites an existing key, and never prints a value. `ci-key push` reads each file and passes it to `gh secret set`
+on stdin, and never prints a secret value (on a failure it prints gh's error
+with the values redacted); if one fails it stops before `SNOWFLAKE_ACCOUNT`.
 
 **The key guard** (`hooks/secret_guard.py`, Claude Code `PreToolUse`) denies
 any Bash, PowerShell, Read, Grep, Glob, Edit, Write or NotebookEdit call that
 names `.streamsnow-ci` or `streamsnow_ci_rsa_key`, in any case and with either
 path separator. It allows only a plain `streamsnow ci-key ...` or
-`streamsnow deploy-setup ...` command with no chaining, substitution or
-subexpressions. A redirect into the key directory is also denied.
+`streamsnow deploy-setup ...` command, and only when it contains none of `|`,
+`;`, `&&`, `||`, `<`, a newline, `$(`, a backtick, `(` or `)`, or any `&` other
+than one leading PowerShell call operator. A `>` redirect into the key
+directory is also denied, and so is a malformed or wrongly typed tool call that
+names the key directory.
 Its gaps: it matches text, so a command built to hide the path (shell
-variables, globs) can get past it; it runs only in Claude Code; and if the hook
-cannot start at all, the call goes through. It backs up `ci-key push`, which
+variables, globs) can get past it; it runs only in Claude Code and only for the
+tools in its matcher, so something outside it, such as an MCP filesystem server,
+is not covered; and if the hook cannot start at all, the call goes through.
+It backs up `ci-key push`, which
 is the main protection.
 
 **Never printed** by any skill: `snow connection list`, MCP configuration,

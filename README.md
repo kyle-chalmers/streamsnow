@@ -85,7 +85,7 @@ StreamSnow asks Claude to set up Snowflake access, CI and deploy secrets on your
 behalf. Here is exactly what that means for your credentials.
 
 - **Claude never sees a password, private key or token.** Sign-ins happen in
-  your browser. Snowflake passwords are never used at all.
+  your browser, and StreamSnow never asks for, stores or handles a Snowflake password.
 - **The CI key goes from a file on your machine to GitHub without passing
   through Claude.** `streamsnow ci-key create` makes the key pair in
   `~/.streamsnow-ci` and prints only file names and a fingerprint. `streamsnow
