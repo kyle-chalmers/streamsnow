@@ -6,9 +6,7 @@ All notable changes to StreamSnow are recorded here. This project follows
 period. Before 1.0, a breaking change can land in any minor release and is called out in its
 entry.
 
-## [Unreleased]
-
-Version 0.8.0.
+## [0.8.0] - 2026-10-05
 
 ### Breaking
 
