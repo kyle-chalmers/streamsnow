@@ -1,0 +1,22 @@
+name: labels
+
+# Syncs .github/labels.yml to the repository's labels. Existing labels named in an `aliases`
+# entry are renamed in place, so issues keep them. Labels not in the file are left alone.
+on:
+  push:
+    branches: [main]
+    paths: [".github/labels.yml"]
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EndBug/label-sync@52074158190acb45f3077f9099fea818aa43f97a # v2.3.3
+        with:
+          config-file: .github/labels.yml
+          delete-other-labels: false

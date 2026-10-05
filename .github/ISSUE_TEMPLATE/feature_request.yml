@@ -1,0 +1,72 @@
+name: Feature request
+description: A well-scoped change you would like StreamSnow to make.
+title: "[feature]: "
+labels: ["type:feature", "status:needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are judged against the mission, vision and principles at the top of the
+        [README](https://github.com/kyle-chalmers/streamsnow#mission). If the idea is still open-ended,
+        [start a discussion in Ideas](https://github.com/kyle-chalmers/streamsnow/discussions/categories/ideas)
+        first. A request with a clear problem and a concrete proposal can go straight to
+        implementation once the maintainer approves it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The problem, in terms of your workflow. Not the solution yet.
+      placeholder: "When my team ships a second app, we have to ..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What StreamSnow should do. Command names, flags or output are welcome.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI command
+        - Governance check
+        - Review
+        - Scaffolding or templates
+        - Deploy
+        - Preview
+        - doctor / configure / onboarding
+        - migrate
+        - Plugin skill
+        - Plugin hook
+        - Docs
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: principle
+    attributes:
+      label: Which README principle does this serve?
+      description: One line is enough, e.g. "faithful to a real fleet".
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and workarounds you have tried
+  - type: dropdown
+    id: breaking
+    attributes:
+      label: Would this change or remove an existing command, flag, config key or check result?
+      options:
+        - "No, it only adds"
+        - "Yes, it changes existing behavior"
+        - "Not sure"
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to open the PR for this myself once it is accepted.

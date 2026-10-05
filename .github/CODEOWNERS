@@ -1,0 +1,14 @@
+# Every change needs the maintainer's review. The explicit entries below stay owned by the
+# maintainer even after co-maintainers own other areas: they decide what runs in CI with
+# secrets, what ships to users, and what the plugin's hooks are allowed to block.
+*                               @kyle-chalmers
+
+/.github/                       @kyle-chalmers
+/.claude-plugin/                @kyle-chalmers
+/.mcp.json                      @kyle-chalmers
+/hooks/                         @kyle-chalmers
+/pyproject.toml                 @kyle-chalmers
+/RELEASING.md                   @kyle-chalmers
+/.claude/                       @kyle-chalmers
+/docs/versioning.md             @kyle-chalmers
+/tests/fixtures/cli_surface.json @kyle-chalmers

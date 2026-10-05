@@ -1,0 +1,85 @@
+name: maintainer-digest
+
+# One notification a day that answers "does anything need me?", so the maintainer does not
+# have to watch the repository. Plain github-script, no AI: it only lists and counts.
+#
+# It comments on a single pinned issue labeled `digest` (created on first run) and @mentions
+# the repository owner, which reaches email and GitHub Mobile. Nothing new and nothing
+# waiting means no comment at all. Daily suits launch weeks; once traffic settles, change the
+# cron to weekly (e.g. "17 14 * * 1").
+#
+# Note: GitHub disables scheduled workflows on public repos after 60 days without repository
+# activity. Any push re-enables them.
+on:
+  schedule:
+    - cron: "17 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  discussions: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const since = new Date(Date.now() - (context.eventName === 'schedule' ? 1 : 7) * 864e5);
+            const issues = (await github.paginate(github.rest.issues.listForRepo,
+              { owner, repo, state: 'open', per_page: 100 })).filter(i => !i.pull_request);
+            const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 });
+            const has = (i, l) => i.labels.some(x => (x.name || x) === l);
+            const digest0 = issues.find(i => has(i, 'digest'));
+            const work = issues.filter(i => !has(i, 'digest'));
+            const line = i => `- #${i.number} ${i.title}`;
+            const ageDays = i => Math.floor((Date.now() - new Date(i.updated_at)) / 864e5);
+
+            const needsYou = [];
+            const add = (title, list) => { if (list.length) needsYou.push(`**${title}** (${list.length})\n${list.join('\n')}`); };
+            add('Triaged: label `ready-for-agent` to build, or decline',
+              work.filter(i => has(i, 'status:triaged')).map(line));
+            add('Needs a scope or design decision',
+              work.filter(i => has(i, 'status:needs-maintainer')).map(line));
+            add('Possible security reports',
+              work.filter(i => has(i, 'type:security')).map(line));
+            add('Agent runs that failed',
+              work.filter(i => has(i, 'status:blocked')).map(line));
+            add('Open PRs awaiting review or merge',
+              prs.filter(p => !p.draft).map(p => `- #${p.number} ${p.title} (@${p.user.login})`));
+
+            const fyi = [];
+            const fresh = work.filter(i => new Date(i.created_at) > since);
+            if (fresh.length) fyi.push(`**New issues** (${fresh.length})\n${fresh.map(line).join('\n')}`);
+            const waiting = work.filter(i => has(i, 'status:needs-info'));
+            if (waiting.length) fyi.push(`**Waiting on reporters** (${waiting.length})\n` +
+              waiting.map(i => `${line(i)} (quiet ${ageDays(i)}d)`).join('\n'));
+            const working = work.filter(i => has(i, 'status:agent-working'));
+            if (working.length) fyi.push(`**Agent working** (${working.length})\n${working.map(line).join('\n')}`);
+            try {
+              const q = await github.graphql(`query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){
+                discussions(first:20,orderBy:{field:CREATED_AT,direction:DESC}){nodes{number title createdAt category{name}}}}}`,
+                { owner, repo });
+              const d = q.repository.discussions.nodes.filter(n => new Date(n.createdAt) > since);
+              if (d.length) fyi.push(`**New discussions** (${d.length})\n` +
+                d.map(n => `- ${n.category.name}: [${n.title}](https://github.com/${owner}/${repo}/discussions/${n.number})`).join('\n'));
+            } catch (e) { core.info(`discussions unavailable: ${e.message}`); }
+
+            if (!needsYou.length && !fresh.length) { core.info('Nothing new and nothing waiting.'); return; }
+
+            let digest = digest0;
+            if (!digest) {
+              digest = (await github.rest.issues.create({ owner, repo, title: 'Maintainer digest',
+                labels: ['digest'],
+                body: 'Daily summary from `.github/workflows/maintainer-digest.yml`. Each comment lists what needs the maintainer. Pin this issue; do not close it.' })).data;
+            }
+            const day = new Date().toISOString().slice(0, 10);
+            const body = [`### ${day} @${owner}`,
+              needsYou.length ? '## Needs you\n\n' + needsYou.join('\n\n') : '## Needs you\n\nNothing.',
+              fyi.length ? '## FYI\n\n' + fyi.join('\n\n') : ''].join('\n\n');
+            await github.rest.issues.createComment({ owner, repo, issue_number: digest.number, body });

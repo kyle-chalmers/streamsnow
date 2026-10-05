@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ideas and feature discussion
+    url: https://github.com/kyle-chalmers/streamsnow/discussions/categories/ideas
+    about: Not sure it belongs in StreamSnow yet? Start here. Ideas that gain traction become issues.
+  - name: Questions and help
+    url: https://github.com/kyle-chalmers/streamsnow/discussions/categories/q-a
+    about: How do I...? Ask in Q&A so the answer is searchable for the next person.
+  - name: Report a security vulnerability
+    url: https://github.com/kyle-chalmers/streamsnow/security/advisories/new
+    about: Please report vulnerabilities privately, never in a public issue (see SECURITY.md).
+  - name: Troubleshooting guide
+    url: https://github.com/kyle-chalmers/streamsnow/blob/main/docs/troubleshooting.md
+    about: Common setup and deploy errors, with fixes.

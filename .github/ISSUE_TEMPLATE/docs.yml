@@ -1,0 +1,22 @@
+name: Documentation
+description: Something in the docs is wrong, missing or unclear.
+title: "[docs]: "
+labels: ["type:docs", "status:needs-triage"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Which page or section?
+      placeholder: "docs/deploying.md, 'Git repository source'"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording or fix

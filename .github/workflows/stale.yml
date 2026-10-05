@@ -1,0 +1,34 @@
+name: stale
+
+# Closes ONLY issues waiting on their reporter (`status:needs-info`): a nudge after 7 quiet
+# days, closed 7 days later. Any reply or edit clears the `stale` mark, and claude-triage
+# re-checks the issue. Nothing else in this repository ever goes stale, and PRs are never
+# touched: auto-closing real bug reports is how a new project loses its first users.
+on:
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v10
+        with:
+          only-issue-labels: "status:needs-info"
+          days-before-issue-stale: 7
+          days-before-issue-close: 7
+          stale-issue-label: "stale"
+          stale-issue-message: >-
+            This issue is still waiting on the details requested above. It will close in 7 days
+            without a reply. Replying or editing the issue keeps it open.
+          close-issue-message: >-
+            Closing because the requested details did not arrive. Reopen it, or comment, whenever
+            you have them.
+          close-issue-reason: "not_planned"
+          exempt-all-milestones: true
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
