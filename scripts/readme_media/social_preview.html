@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>StreamSnow social preview</title>
+<!-- Rendered at 1280x640 by render_social.py. Fonts fall back to the system sans
+     stack when Google Fonts is unreachable. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --blue: #29B5E8;
+    --navy: #11567F;
+    --ice: #E8F4FA;
+    --orange: #D97757;
+    --bg: #07182A;
+  }
+  html, body { margin: 0; padding: 0; }
+  body {
+    width: 1280px;
+    height: 640px;
+    overflow: hidden;
+    background: var(--bg);
+    font-family: "Inter", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: var(--ice);
+    position: relative;
+  }
+  .glow {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(900px 420px at 50% 38%, rgba(41, 181, 232, 0.20), transparent 70%),
+      radial-gradient(600px 300px at 88% 110%, rgba(17, 86, 127, 0.55), transparent 70%),
+      radial-gradient(500px 260px at 6% -10%, rgba(17, 86, 127, 0.45), transparent 70%);
+  }
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(232, 244, 250, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(232, 244, 250, 0.045) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  }
+  .wave {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 150px; opacity: 0.55;
+  }
+  main {
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 34px;
+    padding-bottom: 30px;
+    box-sizing: border-box;
+  }
+  .logo { height: 140px; }
+  h1 {
+    margin: 0;
+    font-size: 46px;
+    line-height: 1.2;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    text-align: center;
+    max-width: 1060px;
+  }
+  h1 em { font-style: normal; color: var(--blue); }
+  .steps {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 23px;
+    font-weight: 500;
+    color: #9CCFE6;
+    letter-spacing: 0.01em;
+  }
+  .steps .sep { color: rgba(156, 207, 230, 0.45); }
+  .steps .last { color: var(--ice); }
+  .dot {
+    display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--orange); margin-left: 4px; transform: translateY(-1px);
+  }
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="grid"></div>
+  <svg class="wave" viewBox="0 0 1280 150" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0 95 C 160 55, 320 135, 480 95 S 800 55, 960 95 S 1200 125, 1280 90"
+          fill="none" stroke="#29B5E8" stroke-opacity="0.35" stroke-width="2"/>
+    <path d="M0 120 C 180 85, 340 150, 520 118 S 840 80, 1010 118 S 1210 140, 1280 115"
+          fill="none" stroke="#29B5E8" stroke-opacity="0.18" stroke-width="2"/>
+  </svg>
+  <main>
+    <img class="logo" src="../../docs/images/logo-dark.svg" alt="StreamSnow">
+    <h1>Build, govern, and ship<br><em>Streamlit-in-Snowflake</em> apps with AI.</h1>
+    <div class="steps">
+      <span>Scaffold</span><span class="sep">·</span>
+      <span>Guardrails</span><span class="sep">·</span>
+      <span>Preview</span><span class="sep">·</span>
+      <span>Validate</span><span class="sep">·</span>
+      <span class="last">Deploy</span><span class="dot"></span>
+    </div>
+  </main>
+</body>
+</html>

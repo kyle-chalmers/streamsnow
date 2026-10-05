@@ -148,7 +148,9 @@ Then `streamsnow ci-key push` sets the five secrets from those files, each
 value going straight to `gh secret set` on stdin, `SNOWFLAKE_ACCOUNT` last. It
 prints only names. Prefer to do it by hand? From the repo, run
 `gh secret set NAME < ~/.streamsnow-ci/secrets/NAME` for each of the five
-names in that order. With Claude Code, `/onboard` runs `ci-key create` and, once
+names in this order: `SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY_RAW`,
+`SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`, then `SNOWFLAKE_ACCOUNT` (last, because
+it switches the deploy job on). With Claude Code, `/onboard` runs `ci-key create` and, once
 your admin has run the script, `ci-key push` for you.
 
 Key-pair is the default because

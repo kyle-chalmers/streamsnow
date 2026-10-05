@@ -1,0 +1,201 @@
+# CLI reference
+
+Every `streamsnow` command, its flags, and what the governance checks return. The
+skills and CI call these same commands, so this page is also what they do under the
+hood. Run any command with `--help` for the same text in your terminal.
+
+Command and flag names are part of the stable surface
+([Versioning and stability](versioning.md)); `tests/test_cli_surface.py` pins them.
+
+**Jump to:** [Setup](#setup) · [Apps](#apps) · [validate-app](#validate-app) ·
+[Checks](#checks) · [SQL review](#sql-review) · [Review](#review) ·
+[Migrate](#migrate) · [Deploy](#deploy) · [CI key](#ci-key) · [Other agents](#other-agents)
+
+## Conventions
+
+- **Exit codes.** Every check and gate exits `0` pass, `1` finding, `2` tool error
+  (bad config, unreadable file, a tool that could not run).
+- **`--format md|json`.** Checks default to `md` (human-readable). `json` prints one
+  object; its keys are public and only ever gain new keys.
+- **Paths.** Checks take files or directories and default to `apps/`.
+- **Config.** Commands find `streamsnow.config.yaml` by walking up from the current
+  directory; `--config <path>` points at another one.
+
+## Setup
+
+| Command | What it does |
+|---|---|
+| `streamsnow doctor` | Checks the machine and repo for what StreamSnow needs: required `python`, `git`, `uv`; optional `snow`, a `snow` connection, `gh`, `pre-commit` and its hook, `node` (the browser tool), the config, repo files, git identity and CI secrets. Each sub-check reports `{name, ok, level, detail, hint}`; `level` is `required` or `optional`. `--format json` (or `--json`) prints `{"ok", "checks": [...]}`. Exits `1` only when a required check fails. |
+| `streamsnow configure` | Writes or edits `streamsnow.config.yaml` with a five-question wizard. Re-running prefills from the current file. |
+| `streamsnow init` | `configure`, then the governed repo files, then a starter app. |
+| `streamsnow update` | Re-renders the governance files from your config and the installed templates. Dry run unless `--apply`. |
+
+**Wizard answer flags** (shared by `configure` and `init`; giving all five skips the
+prompts): `--runtime container|warehouse`, `--account <locator>` or
+`--connection <snow connection>`, `--database`, `--schemas` (comma-separated
+`schema_allow`), `--deploy-source stage-copy|git-repository`, plus optional
+`--deny-schemas` (default `RAW,STAGING`; `''` denies none).
+
+| Flag | Command | Meaning |
+|---|---|---|
+| `--dir` | `configure`, `init`, `update` | Repo directory (default `.`) |
+| `--config` | `configure`, `init` | Import an existing config file |
+| `--app <slug>` | `init` | Starter app slug (default `example-dashboard`) |
+| `--no-starter-app` | `init` | Repo files only, no example app (what `/onboard` runs) |
+| `--force` | `init` | Overwrite existing scaffold files |
+| `--reconfigure` | `init` | Re-run the wizard although a config exists (needed with answer flags on an existing config) |
+| `--apply` | `update` | Write the changes (default is a dry run) |
+
+**What `init` writes:** `streamsnow.config.yaml`, `AGENTS.md`, `CLAUDE.md`,
+`.pre-commit-config.yaml`, the CI and deploy workflows, `.sqlfluff`, `.gitignore`,
+`README.md`, `deploy/tombstones.yml`, `osv_allowlist.json` (warehouse runtime only),
+and the starter app. **What `update` re-renders:** `AGENTS.md`, `CLAUDE.md`,
+pre-commit, CI and the deploy workflow. It leaves `README.md`, `.gitignore`,
+`deploy/tombstones.yml`, `.sqlfluff` and `osv_allowlist.json` alone (it creates the
+last two if they are missing).
+
+## Apps
+
+| Command | What it does |
+|---|---|
+| `streamsnow new <domain> <function>` | Scaffolds `apps/<domain>-<function>/`. `--force` overwrites. |
+| `streamsnow preview start <slug>` | Runs the app locally against live Snowflake in the background and polls its health endpoint. `--port`, `--timeout` (seconds, default 60). A bare `streamsnow preview <slug>` means `start`. |
+| `streamsnow preview status <slug>` | Is it running, and where. |
+| `streamsnow preview logs <slug>` | The last lines of its log (`--lines`). |
+| `streamsnow preview stop <slug>` | Stops it. |
+| `streamsnow nav <slug>` | Lists the app's pages in navigation order, one JSON object per line (`--json-array` for one array). Handles `st.navigation`, single-page and legacy `pages/` apps. |
+
+All `preview` verbs take `--dir` and `--json`.
+
+## validate-app
+
+`streamsnow validate-app <slug>` is the deterministic ship gate: PASS or FAIL for one
+app. Flags: `--dir`, `--config`, `--format md|json`. JSON is
+`{"app", "runtime", "ok", "checks": [{"name", "ok", "findings"}]}`. It runs, in order:
+
+| Step | What fails it |
+|---|---|
+| `required-files` | A file every app needs is missing |
+| `manifest` | `snowflake.yml` is invalid or disagrees with the config |
+| `artifacts` | `snowflake.yml` `artifacts:` disagrees with the files on disk |
+| `naming` | The slug is not `<domain>-<function>` kebab-case |
+| `schema-refs` | A query or SQL string names a denied schema |
+| `app-security` | Egress, code execution, write SQL or dynamic SQL in app code (the `check security` rules) |
+| `bind-predicates` | The `:N IS NULL OR` bind trap |
+| `sql-tokens` | A `{TOKEN}` inside a SQL comment |
+| `session-fallback` | `get_active_session()` without a broad `try/except` (whole app, not only new calls) |
+| `page-imports` | An import that works under `streamlit run` but not deployed |
+| `caching` | A data-fetching function without `@st.cache_data(ttl=...)` |
+| `path-leaks` | A personal absolute path in committed code or docs |
+| `requirements` | `REQUIREMENTS.md` §11 build state is malformed |
+| `sql-review (coverage policy: warn\|fail)` | SQL review drift, hand edits, marker mismatches or lint; uncovered pages fail only under `fail` |
+| `placeholders` | The starter's `YOUR_TABLE` or sample numbers are still there |
+
+A freshly scaffolded app **fails** `placeholders` on purpose until you repoint the
+starter query and review window; every other step passing is what proves the scaffold
+is whole.
+
+## Checks
+
+`streamsnow check <name> [paths]...` runs one check. Every check takes
+`--format md|json` and prints `{"ok": bool, "findings": [...]}` in JSON, plus the
+extra keys listed below.
+
+| Check | Blocks | Extra flags | Extra JSON keys |
+|---|---|---|---|
+| `schema-refs` | References to denied schemas (`governance.schema_deny`, minus exact `read_exceptions`) | `--config` | |
+| `security` | Egress, code execution, write SQL, dynamic SQL in app code | | |
+| `caching` | Data-fetching functions without `@st.cache_data(ttl=...)` | | |
+| `bind-predicates` | The `:N IS NULL OR` Go-driver bind trap | | |
+| `sql-tokens` | `{TOKEN}` placeholders inside SQL comments (`render_sql` would substitute them) | | |
+| `session-fallback` | `get_active_session()` without a broad `try/except` | `--base-ref` (default `origin/main`), `--all` | |
+| `page-imports` | Imports that resolve under `streamlit run` but not deployed | | |
+| `artifacts` | `snowflake.yml` `artifacts:` out of sync with files on disk | `--fix` repairs it | `fixed` (with `--fix`) |
+| `path-leaks` | Personal absolute paths (home directories) | | |
+| `requirements` | A malformed `REQUIREMENTS.md` §11 build-state block | | |
+| `branding-parity` | `_BRANDING_VERSION` skew across apps' `branding.py` copies | | |
+| `dependency-vulns` | Exact dependency pins with known vulnerabilities (OSV.dev); range pins are reported unscanned | `--allowlist` (default `osv_allowlist.json` next to the config), `--best-effort` (warn when OSV.dev is unreachable) | `unscanned`, `allowlisted`, `expired`, `checked` |
+| `tombstones` | A PR that renames or removes an app without adding it to `deploy/tombstones.yml` | `--base-ref` (default `origin/main`), `--registry`, `--apps-dir`, `--config`, `--drop-sql` (print `DROP STREAMLIT IF EXISTS` for tombstoned apps; the deploy job runs it) | `tombstones`, `notes` |
+
+**`session-fallback` is new-only by default:** it flags only calls added since
+`--base-ref`, so an adopting repo is not failed for legacy debt. `--all` scans
+everything; `validate-app` always scans the whole app.
+
+## SQL review
+
+| Command | What it does |
+|---|---|
+| `streamsnow sql-review generate <slug>` | Writes one runnable file per page, `sql_review/NN_<page>.sql`, from `sql_review/index.yaml`. `--dir`. |
+| `streamsnow sql-review check [<slug>]` | Fails on drift, hand edits, `review_value` marker mismatches and lint; uncovered pages or queries fail or warn per `sql_review.coverage`. No slug checks every app. `--dir`, `--format md\|json`, `--lint-files <file>...` (lint only these; pre-commit passes the staged files). |
+
+See [Auditing a visual](auditing-a-visual.md) for the file format.
+
+## Review
+
+| Command | What it does |
+|---|---|
+| `streamsnow review-gate classify [<slug>]` | Does this change need a review before shipping? Classifies each changed app's diff as trivial or needing the review loop (no slug: every changed app). `--base-ref`, `--format md\|json`. `/ship-app` runs it. |
+| `streamsnow review-gate baseline <slug>` | Prints the app's current baseline digest. |
+| `streamsnow review-gate stamp <artifact> --slug <slug>` | Writes or refreshes the `Reviewed-baseline` and `Reviewed-files` lines in a review artifact (`--base-ref`). |
+| `streamsnow review-gate stop-hook` | The plugin's warn-only Stop-hook nudge (`--payload both\|system-only`). |
+| `streamsnow review-loop <verb>` | Deterministic bookkeeping for `/review-app --auto`: `parse-findings`, `dedup-findings`, `merge-findings`, `write-resolutions`, `exit-condition`. Called by the skill, not by hand. |
+
+## Migrate
+
+`streamsnow migrate <verb>` is the engine behind `/migrate-app`. Each verb prints
+JSON for the skill to act on.
+
+| Verb | Arguments | What it does |
+|---|---|---|
+| `preflight` | `<source> --target-slug <slug> [--dir]` | Is the source safe to migrate into that slug |
+| `scan-hardfails` | `<source> [--config]` | Denied-schema references and hardcoded secrets in the source |
+| `translate-deps` | `<source> --out <file> [--offline]` | Translates the source's dependencies into a warehouse-runtime `environment.yml` |
+| `graft-plan` | `<source>` | Where to graft the source's entrypoint (`pages/*`, `pages/overview.py` or `streamlit_app.py`) |
+| `scan-imports` | `<source>` | Relative imports and nested `__init__.py` files |
+| `scan-conformance` | `<app_path> [--config]` | Uncached queries, `SELECT *`, altair imports, legacy `pages/` layouts, grants |
+| `scan-inline-sql` | `<app_path>` | Inline SQL literals that belong in `queries/*.sql` |
+
+## Deploy
+
+| Command | What it does |
+|---|---|
+| `streamsnow deploy-setup` | Prints the one-time Snowflake DDL for your deploy source; review it, then run it. Never runs anything itself. |
+| `streamsnow deploy-sql <slug>` | Prints the `CREATE OR REPLACE STREAMLIT` SQL for one app (`--sha`, `--config`). The deploy job runs it. |
+| `streamsnow verify-deploy <slug>` | Checks that a deployed app actually serves: the object exists, a live version is set, the version source matches `--sha`, and container logs show no crash loop. A check that cannot run is reported as skipped, never as a pass. |
+| `streamsnow config-get <key>` | Prints one config value by dotted path, e.g. `deploy.git_repository_fqn`. |
+| `streamsnow stage-path` | Prints the stage-copy base path, `@DB.SCHEMA.STAGE`. |
+
+`deploy-setup` flags: `--admin` (the full bootstrap a first deploy needs, in
+`USE ROLE` sections, to hand a Snowflake admin), `--public-key-file <pem>` (with
+`--admin`: the CI user's public key), `--viewer-user <user>` (with `--admin`,
+repeatable), `--teardown` (print the reverse of `--admin`; keeps the governance
+database), `--source stage-copy|git-repository` (preview the other source),
+`--git-origin <url>`, `--github-auth pat|github-app|public`, `--config`. See
+[Deploy setup](deploy-setup.md).
+
+`verify-deploy` flags: `--sha`, `--attempts` (default 3) and `--delay` (seconds,
+default 20) to absorb a cold start, `--temporary-connection` (connect from
+`SNOWFLAKE_*` environment variables, as CI does), `--config`, `--format md|json`.
+
+`verify-deploy` checks only the app you name. The deploy workflow runs it for every
+directory under `apps/`, so an app whose directory was renamed or removed is never
+verified again; `check tombstones` is what catches it, at PR time.
+
+## CI key
+
+| Command | What it does |
+|---|---|
+| `streamsnow ci-key create` | Creates (or reuses) the CI user's key pair and the five deploy secret files under `--dir` (default `~/.streamsnow-ci`, outside any repo). Never overwrites a key and never prints a secret. `--account`, `--config`. |
+| `streamsnow ci-key push` | Sets the five GitHub secrets from those files via `gh secret set` on stdin, `SNOWFLAKE_ACCOUNT` last. `--dir`, `--repo owner/name`. |
+
+How the key moves, and what Claude can and cannot see:
+[README](../README.md#what-claude-can-and-cant-see) and [Deploy setup](deploy-setup.md).
+
+## Other agents
+
+| Command | What it does |
+|---|---|
+| `streamsnow agent-skills install` | Copies the skills into `.agents/skills/` for Codex (`--agent codex`). `--scope repo` (default, committed with the repo) or `--scope user` (`~/.agents/skills`), `--dir`, `--dry-run`, `--force` (overwrite edited or foreign folders). |
+| `streamsnow agent-skills list` | What is installed where. Same `--agent`, `--scope`, `--dir`. |
+
+`streamsnow --version` (or `-V`) prints the version.

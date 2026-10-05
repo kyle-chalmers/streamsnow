@@ -29,9 +29,10 @@ Snowflake pages for every fact below are collected in
 
 **On Windows**, run StreamSnow inside [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
 (Windows Subsystem for Linux, Microsoft's built-in Linux layer): run `wsl --install` in an
-administrator PowerShell, restart, and do everything below inside the Ubuntu app it adds. Local
-preview and the safety hooks only work on macOS and Linux today; `/onboard` says the
-same if you start on plain Windows.
+administrator PowerShell, restart, and do everything below inside the Ubuntu app it adds. The
+CLI, local preview and the safety guards run on native Windows since 0.7.7, but the plugin's
+SessionStart hook is still a bash script and `/onboard` sends native Windows to WSL, so WSL is
+the supported route for now.
 
 Install uv with `brew install uv` (macOS) or see [astral.sh/uv](https://docs.astral.sh/uv/);
 `uv tool install snowflake-cli` and `uv tool install pre-commit` cover the other
@@ -131,8 +132,8 @@ Then, in a Claude Code session in that directory (an already-open one is fine;
    runs the Snowflake admin script.
 3. **Build.** After you confirm, `streamsnow init --no-starter-app` writes
    `streamsnow.config.yaml` and the governed repo files (`AGENTS.md`, `CLAUDE.md`,
-   pre-commit hooks, CI and deploy workflows, `.gitignore`, `README.md`,
-   `deploy/tombstones.yml`). No example app: `/build-app` scaffolds your real one.
+   pre-commit hooks, CI and deploy workflows, `.sqlfluff`, `.gitignore`, `README.md`,
+   `deploy/tombstones.yml`, plus `osv_allowlist.json` on the warehouse runtime). No example app: `/build-app` scaffolds your real one.
    Then it installs the pre-commit hook for your clone.
 4. **Finish.** It runs `streamsnow ci-key create` (save a copy of the private key
    somewhere safe, such as a password manager), prepares the Snowflake admin
@@ -300,10 +301,13 @@ actionable hints; `preview status`, `preview logs`, and `preview stop` manage it
 from there.
 
 `validate-app` is the deterministic gate: required files, manifest contents,
-naming, and the governance checks (`schema-refs`, `security`,
+naming, the governance checks (`schema-refs`, `app-security`,
 `bind-predicates`, `caching`, `sql-tokens`, `session-fallback`,
-`page-imports`, `artifacts`, `path-leaks`, `requirements`, the same names you
-pass to `streamsnow check`). Any **FAIL** must be fixed before shipping. The
+`page-imports`, `artifacts`, `path-leaks`, `requirements`; each has a
+`streamsnow check` subcommand of the same name, except `app-security`, which is
+`streamsnow check security`), the app's SQL review, and `placeholders`. The
+[CLI reference](cli-reference.md#validate-app) lists every step. Any **FAIL**
+must be fixed before shipping. The
 `placeholders` check **fails** while any app file still reads the starter's
 `YOUR_TABLE`: the example query, the review window in
 `sql_review/index.yaml`, and `pages/overview.py`, whose numbers are samples. Replace or
@@ -328,6 +332,7 @@ Reproducing CI locally, job by job:
 
 | CI job | Local command |
 |---|---|
+| Lint | `ruff check apps/` |
 | Governance gate | `for d in apps/*/; do streamsnow validate-app "$(basename "$d")"; done` |
 | SQL review | `streamsnow sql-review check` |
 | Tombstones | `streamsnow check tombstones --base-ref origin/main` |
@@ -380,7 +385,7 @@ claude plugin install --scope project streamsnow@streamsnow    # then /reload-pl
 ```bash
 uv tool upgrade streamsnow
 streamsnow update            # dry-run: what the new templates would change
-streamsnow update --apply    # re-render AGENTS.md, hooks, CI, deploy.yml
+streamsnow update --apply    # re-render AGENTS.md, CLAUDE.md, hooks, CI, deploy.yml
 ```
 
 ## The config file
@@ -392,11 +397,17 @@ secrets / `secrets.toml`). The load-bearing sections:
 | Section | What it controls |
 |---------|------------------|
 | `runtime` | `container` (default) or `warehouse` |
-| `snowflake.objects` | where apps deploy (app database/schema), the warehouse, and container `compute_pool` (default `SYSTEM_COMPUTE_POOL_CPU`, which Snowflake pre-provisions) + `external_access_integration` |
+| `project` | `name` and `slug` for the generated README and AGENTS.md |
+| `snowflake.account`, `snowflake.connection_name` | the account locator (not the full hostname) and the `snow` CLI connection the CLI and preview use |
+| `snowflake.objects` | where apps deploy (app database/schema), the stage for stage-copy deploys, the warehouse, and container `compute_pool` (default `SYSTEM_COMPUTE_POOL_CPU`, which Snowflake pre-provisions) + `external_access_integration`; optional `runtime_name` (default `SYSTEM$ST_CONTAINER_RUNTIME_PY3_11`) and `container_python` (default `3.11`) |
 | `snowflake.roles` | `ci_role` (deploys and owns the apps, reads the data) and `viewer_role` (opens deployed apps; data reads are opt-in) |
 | `governance` | `database`, `schema_allow`, `schema_deny`, `read_exceptions` — the data guardrails. `schema_deny` is what the `schema-refs` check enforces (a denylist); `schema_allow` is the convention the scaffolded queries and docs point at, not an enforced gate |
 | `deploy.source` | `stage-copy` (default) or `git-repository`; `deploy.artifact_exclude` names non-code files your pipeline ships by another step |
+| `deploy.git_*` | git-repository only: `git_repository_fqn`, `git_origin` (the GitHub HTTPS URL Snowflake fetches; `deploy-setup` needs it), `git_branch` (default `main`), `api_integration_name`, `secret_name`, and `github_auth_mode` (`pat` default, `github-app` set up the same way, or `public` for no secret). See [Git repository deploys](git-repository.md) |
 | `sql_review.coverage` | `warn` (default) or `fail` — whether a page or query missing from `sql_review/index.yaml` fails `validate-app`, pre-commit and CI |
+| `review_gate` | the warn-only review nudge: `enabled` (default `true`), and optionally `apps_dir` and `base_ref` |
+| `brand` | optional theme for scaffolded apps: `theme.primary`, `theme.background`, `theme.text_color`, `theme.secondary_background`, `font` (default `Inter, sans-serif`) and `chart_sequence` |
+| `cache_ttl` | top-level, optional: the default `@st.cache_data` TTL in seconds (default `1800`) written into AGENTS.md and the starter page |
 
 See [`streamsnow.config.example.yaml`](../streamsnow.config.example.yaml) for an
 annotated template.

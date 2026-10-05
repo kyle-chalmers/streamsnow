@@ -7,21 +7,27 @@ source of truth behind both.
 
 1. **PyPI CLI — `streamsnow`** (`pip install streamsnow` / `uvx streamsnow`).
    This is the substrate: the typed `streamsnow.config.yaml` model, the
-   scaffolder + Jinja templates, and the governance tools (`validate-app`,
-   `check schema-refs|security|caching|bind-predicates`, `deploy-*`). It
-   generates a governed repo and app from your config, and runs the checks.
+   scaffolder + Jinja templates, and the governance tools (`validate-app`, the
+   13 `check` subcommands, `sql-review`, `deploy-*`; all listed in the
+   [CLI reference](cli-reference.md)). It generates a governed repo and app from
+   your config, and runs the checks.
 
-2. **Claude Code plugin** (`/plugin marketplace add kyle-chalmers/streamsnow`).
-   The skills and hooks (SessionStart, deploy safety, review nudge) that make Claude Code a domain
-   expert for this stack (`/build-app`, `/preview-app`, `/validate-app`,
-   `/review-app`, `/ship-app`, …). Served straight from the public repo — no
-   publish step, and no install beyond adding the marketplace.
+2. **Claude Code plugin** (`claude plugin marketplace add --scope project
+   kyle-chalmers/streamsnow`, then `claude plugin install --scope project
+   streamsnow@streamsnow`). The skills and hooks (SessionStart banner, deploy
+   safety, CI-key guard, review nudge) that make Claude Code a domain expert for
+   this stack (`/build-app`, `/preview-app`, `/validate-app`, `/review-app`,
+   `/ship-app`, …). Served straight from the public repo, with no publish step.
+
+![How the repos fit together: the StreamSnow repo publishes the CLI package to PyPI and the plugin to the Claude Code marketplace; streamsnow init generates your analytics monorepo; the same checks run in your editor, pre-commit, Claude Code and CI; on merge CI deploys to Snowflake.](images/repos-flow.png)
 
 The `streamsnow` package is the **one implementation, many consumers** core: the
-CLI, the plugin skills, pre-commit, and CI all call the same code. A generated
-repo pins `streamsnow` as a dependency, so `streamsnow check …` runs identically
-in your editor, in pre-commit, and in CI — versioned and upgrade-safe (bump the
-pin to adopt a new release).
+CLI, the plugin skills, pre-commit, and CI all call the same code. The generated
+CI and deploy workflows install a pinned range (`uv tool install
+'streamsnow>=0.8,<0.9'`), and pre-commit and your editor use the `streamsnow` on
+your PATH, so `streamsnow check …` runs the same rules everywhere. To adopt a new
+minor release, upgrade your local install and run `streamsnow update --apply`,
+which re-renders the workflows with the new pin.
 
 ## Why there's no copy-paste (`cp -r`) kit
 

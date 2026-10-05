@@ -6,8 +6,10 @@ The generated deploy pipeline only ever runs ``CREATE OR REPLACE STREAMLIT``
 (:mod:`streamsnow.deploy`). It has **no delete path**. So when an app directory
 is renamed or removed, the previously deployed object keeps existing in
 Snowflake, frozen at the source of the last merge that deployed it — and
-``streamsnow verify-deploy`` reports it unhealthy on every later merge. Nothing
-ever cleans it up, because nothing is left in the repo that knows it exists.
+nothing after the merge notices: ``streamsnow verify-deploy`` only checks the
+app directories that still exist. Nothing ever cleans it up, because nothing is
+left in the repo that knows it exists, so this PR-time check is the only
+detection.
 
 The organizing principle: **detection is automated and total; destruction
 requires explicit committed consent.** This tool is the consent gate,

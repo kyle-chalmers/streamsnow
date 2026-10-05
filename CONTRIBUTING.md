@@ -1,11 +1,11 @@
 # Contributing to StreamSnow
 
-Thanks for your interest! StreamSnow is in early, active development.
+Thanks for your interest! StreamSnow is in beta and under active development.
 
 ## Mission first
 
-Every change is judged against the mission, vision and nine principles at the
-top of the [README](README.md). Two of them are worth restating here because
+Every change is judged against the mission and vision at the top of the
+[README](README.md) and the nine [principles](docs/principles.md). Two of them are worth restating here because
 they decide most reviews: **faithful to a real fleet** (a check that fails a
 well-run production app is a defect in the check until proven otherwise —
 `tests/fixtures/fleet/` is the regression net, extend it when you find a new
@@ -59,6 +59,12 @@ uv run python -m streamsnow.tools.check_export_clean .
 CI runs the same checks on Linux, macOS and Windows. Keep changes focused; describe what
 tool/skill/template you touched and why, and fill in the PR template.
 
+- Add one line under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) for every
+  user-visible change.
+- Adding a command, flag or argument? Regenerate the CLI snapshot with
+  `uv run python tests/test_cli_surface.py --update` and say so in the PR. Renaming or
+  removing one is a breaking change ([Versioning and stability](docs/versioning.md)).
+
 ## Where feedback goes
 
 - **Questions** and **open-ended ideas** go to
@@ -101,8 +107,8 @@ Want to implement something yourself? Comment on a `status:triaged` issue (or on
 
 ## What gets accepted
 
-- Changes that serve the mission and respect the eight principles at the top of the
-  [README](README.md). The "This is for you if / not for you" list there is the scope line.
+- Changes that serve the mission and respect the nine [principles](docs/principles.md). The
+  "This is for you if / not for you" list in the [README](README.md) is the scope line.
 - **Small and focused first.** Bug fixes and docs fixes are welcome directly as PRs. A new
   feature or a new check needs an issue that the maintainer marked `status:triaged` or
   `ready-for-agent` first, so nobody spends a weekend on something that will not merge.

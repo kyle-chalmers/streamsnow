@@ -5,12 +5,27 @@ streamsnow init           Configure + scaffold a governed repo (+ starter app un
                           --no-starter-app)
 streamsnow new            Scaffold another app in an existing StreamSnow repo
 streamsnow doctor         Check the local environment for prerequisites
-streamsnow check ...      Run a governance check (e.g. schema-refs)
+streamsnow validate-app   The pass/fail gate for one app (every check + SQL review)
+streamsnow check ...      Run one governance check (e.g. schema-refs)
+streamsnow preview ...    Run an app locally against Snowflake (start/status/stop/logs)
+streamsnow nav            Enumerate an app's pages in navigation order
+streamsnow sql-review ... Generate and check an app's page-based review SQL
+streamsnow review-gate    Decide whether a change needs a review before shipping
+streamsnow review-loop    Deterministic primitives for the /review-app --auto loop
+streamsnow migrate ...    Migration engine for /migrate-app (preflight, scans, graft plan)
+streamsnow agent-skills   Install the skills for Codex and other agents
 streamsnow deploy-setup   Emit the one-time Snowflake DDL for your deploy source
                           (--admin: full bootstrap; --teardown: start-fresh reverse)
+streamsnow deploy-sql     Emit the CREATE OR REPLACE STREAMLIT SQL for one app (deploy job)
+streamsnow verify-deploy  Check that a deployed app actually serves
 streamsnow ci-key create  Make the CI user's key pair + the deploy secret files
 streamsnow ci-key push    Set the five deploy secrets on GitHub from those files
-streamsnow update         Re-vendor templates/tools and bump the plugin
+streamsnow config-get     Print one config value by dotted path (deploy job)
+streamsnow stage-path     Print the stage-copy base path @DB.SCHEMA.STAGE (deploy job)
+streamsnow update         Re-render the governance files (AGENTS.md, CLAUDE.md, pre-commit,
+                          CI, deploy workflow) from the config; checks run from the package
+
+Full reference: docs/cli-reference.md
 """
 
 from __future__ import annotations
@@ -682,8 +697,8 @@ def init(
     no_starter_app: bool = typer.Option(
         False,
         "--no-starter-app",
-        help="Write the governed repo files (AGENTS.md, hooks, CI, .gitignore, README, "
-        "tombstones) without the example app. The setup path for /onboard.",
+        help="Write the governed repo files (AGENTS.md, CLAUDE.md, hooks, CI, .sqlfluff, "
+        ".gitignore, README, tombstones) without the example app. The setup path for /onboard.",
     ),
     runtime: str = typer.Option(None, "--runtime", help=_ANSWER_HELP["runtime"]),
     account: str = typer.Option(None, "--account", help=_ANSWER_HELP["account"]),
@@ -771,8 +786,10 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
     lines = [
         "",
         "Next:",
-        "  1. Claude Code users: /plugin marketplace add kyle-chalmers/streamsnow",
-        "                        /plugin install streamsnow@streamsnow   then /onboard",
+        "  1. Claude Code users, from this directory:",
+        "       claude plugin marketplace add --scope project kyle-chalmers/streamsnow",
+        "       claude plugin install --scope project streamsnow@streamsnow",
+        "     then /reload-plugins and /onboard in a Claude Code session here.",
         "     (CLI only? skip this step. Codex: streamsnow agent-skills install --agent codex)",
         f"  2. {_connection_hint(cfg, _snow_connections())}",
         "     (one-time; st.connection('snowflake') reads this default connection locally.",

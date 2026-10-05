@@ -187,9 +187,9 @@ the deploy-safety hook on purpose: destruction goes through the registry.
 
 **Symptom:** an app directory was renamed (or removed), and the *old* deployed
 object is still live in Snowflake — frozen at the source of the last merge
-that deployed it, flagged unhealthy by `streamsnow verify-deploy` on every
-later merge, and cleaned up by nothing, because nothing left in the repo knows
-it exists.
+that deployed it, never checked again (`streamsnow verify-deploy` only looks at
+app directories that still exist), and cleaned up by nothing, because nothing
+left in the repo knows it exists.
 
 The pipeline only ever runs `CREATE OR REPLACE STREAMLIT`. The slug *is* the
 object identity, so `git mv apps/a apps/b` doesn't rename the deployed object —

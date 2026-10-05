@@ -182,7 +182,9 @@ caught it. Runtime-specific facts link to the official page in
 
 ### 14. Renamed an app, the old one is still live
 
-- **Symptom:** `verify-deploy` flags an orphan after a `git mv`.
+- **Symptom:** after a `git mv` (or deleting an app directory), the old app is
+  still listed in Snowsight, frozen at its last deploy. Nothing in CI reports
+  it: `verify-deploy` only checks the app directories that still exist.
 - **Cause:** a `CREATE OR REPLACE` pipeline has no delete path; the slug is the
   object identity.
 - **Fix:** add the old identifier to `deploy/tombstones.yml` in the same PR.
