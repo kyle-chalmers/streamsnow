@@ -107,3 +107,31 @@ def test_main_exit_codes_and_json(tmp_path, capsys):
         _BRANDING.format(version="1.2.0"), encoding="utf-8"
     )
     assert check_branding_parity.main([str(tmp_path / "apps")]) == 0
+
+
+def _template_version() -> str:
+    return check_branding_parity._extract_version(check_branding_parity._TEMPLATE)[0]
+
+
+def test_upgrade_lag_behind_the_installed_template_is_a_note(tmp_path):
+    # A repo upgrades StreamSnow and scaffolds one new app: that app carries the
+    # template's stamp and the older apps trail it by a minor version. That is an
+    # upgrade, not a hand edit, so the repo that passed before must still pass.
+    new = _template_version()
+    old_major = check_branding_parity.Version(new).major
+    _app(tmp_path, "acme-sales-dashboard", new)
+    behind = _app(tmp_path, "marketing-campaign-dashboard", f"{old_major}.0.0")
+    if new == f"{old_major}.0.0":
+        return  # no minor-version lag to exercise at this template version
+    res = check_branding_parity.scan_paths([tmp_path / "apps"])
+    assert res["ok"], res["findings"]
+    assert any(str(behind / "branding.py") in n for n in res["notes"])
+
+
+def test_major_lag_behind_the_installed_template_is_still_a_finding(tmp_path):
+    new = _template_version()
+    major = check_branding_parity.Version(new).major
+    _app(tmp_path, "acme-sales-dashboard", new)
+    _app(tmp_path, "marketing-campaign-dashboard", f"{max(major - 1, 0)}.9.0")
+    res = check_branding_parity.scan_paths([tmp_path / "apps"])
+    assert not res["ok"]

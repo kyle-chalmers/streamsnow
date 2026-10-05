@@ -43,13 +43,22 @@ def apply_branding() -> None:
     pio.templates.default = "streamsnow_brand"
 
 
+_UNITS = ((1, ""), (1e3, "k"), (1e6, "M"), (1e9, "B"))
+
+
 def fmt_number(x: float, decimals: int = 1) -> str:
     """Compact number for cards and labels: 950, 12.3k, 4.5M, 1.2B. Counts stay integers."""
     sign, n = ("-" if x < 0 else ""), abs(x)
-    for limit, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "k")):
-        if n >= limit:
-            return f"{sign}{n / limit:.{decimals}f}{suffix}"
-    return f"{sign}{n:,.0f}" if float(n).is_integer() else f"{sign}{n:,.{decimals}f}"
+    # Pick the unit after rounding, so 999_999 reads "1.0M", never "1000.0k".
+    unit = 0
+    while unit < len(_UNITS) - 1 and round(n / _UNITS[unit][0], decimals) >= 1000:
+        unit += 1
+    limit, suffix = _UNITS[unit]
+    if unit == 0:
+        return (
+            f"{sign}{n:,.0f}" if float(n).is_integer() else f"{sign}{n:,.{decimals}f}"
+        )
+    return f"{sign}{n / limit:.{decimals}f}{suffix}"
 
 
 def fmt_currency(x: float, symbol: str = "$", decimals: int = 1) -> str:
@@ -64,6 +73,18 @@ def fmt_pct(ratio: float, decimals: int = 1) -> str:
 
 
 _DELTA_COLORS = {"up": BRAND_STATUS_COLORS["good"], "down": BRAND_STATUS_COLORS["bad"]}
+_NEUTRAL_INK = "#6b7280"
+
+
+def _delta_ink(delta: str, delta_color: str = "normal") -> str:
+    """The delta's color by meaning: up is good ("normal"), up is bad ("inverse"), or
+    grey ("off"). A delta with no non-zero digit ("0%", "+0.0 pts") is no change: grey."""
+    if delta_color == "off" or not any(c in "123456789" for c in delta):
+        return _NEUTRAL_INK
+    down = delta.lstrip().startswith(("-", "\u2212"))
+    if delta_color == "inverse":
+        down = not down
+    return _DELTA_COLORS["down" if down else "up"]
 
 
 def branded_metric(
@@ -96,10 +117,7 @@ def branded_metric(
     )
     delta_html = ""
     if delta:
-        direction = "down" if delta.lstrip().startswith(("-", "\u2212")) else "up"
-        if delta_color == "inverse":
-            direction = "up" if direction == "down" else "down"
-        delta_ink = "#6b7280" if delta_color == "off" else _DELTA_COLORS[direction]
+        delta_ink = _delta_ink(delta, delta_color)
         delta_html = f'<div style="font-size:0.8rem;color:{delta_ink};">{html.escape(delta)}</div>'
     st.markdown(
         f'<div style="border-left:4px solid {color};padding:0.25rem 0.75rem;margin:0.25rem 0;">'

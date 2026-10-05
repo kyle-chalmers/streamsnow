@@ -8,6 +8,9 @@ schema_version: 1
 # warehouse = legacy: instant start, Anaconda channel, no compute pool/EAI.
 runtime: container
 
+# Default @st.cache_data TTL (seconds) written into AGENTS.md and the starter page.
+# cache_ttl: 1800
+
 project:
   name: "Acme Dashboards"
   slug: "acme-dashboards"
@@ -32,6 +35,9 @@ snowflake:
     # own pool here only if you want dedicated nodes (one app per node).
     compute_pool: "SYSTEM_COMPUTE_POOL_CPU"
     external_access_integration: "PYPI_ACCESS_INTEGRATION"
+    # Container runtime image and the Python version local venvs pin to (defaults shown):
+    # runtime_name: "SYSTEM$ST_CONTAINER_RUNTIME_PY3_11"
+    # container_python: "3.11"
 
   roles:
     ci_role: "STREAMSNOW_DEPLOY_ROLE"      # deploy/owner role used by CI
@@ -41,16 +47,18 @@ governance:
   database: "ANALYTICS_DB"             # the BI database your apps query
   schema_allow: ["ANALYTICS", "REPORTING"]
   schema_deny: ["RAW", "STAGING", "BRIDGE"]
-  read_exceptions: []                  # sanctioned direct reads, e.g. "DATA_STORE.SOME_VIEW"
+  read_exceptions: []                  # exact objects readable despite schema_deny,
+                                       # e.g. "ANALYTICS_DB.RAW.CALENDAR_DIM"
 
 deploy:
   source: "stage-copy"                 # stage-copy (default) | git-repository
   # git-repository only:
   # git_repository_fqn: "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO"
   # git_branch: "main"
+  # git_origin: "https://github.com/acme/acme-dashboards"   # the repo Snowflake fetches from
   # api_integration_name: "GITHUB_API_INTEGRATION"
   # secret_name: "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET"
-  # github_auth_mode: "pat"            # pat | github-app
+  # github_auth_mode: "pat"            # pat | github-app (same setup as pat) | public (no secret)
   # Files your deploy pipeline ships by another step and so may be left out of
   # each app's snowflake.yml artifacts:. Exact relative paths, non-code only
   # (.toml/.md/.txt/images); pages/, queries/ and *.py/*.sql are never excludable.
