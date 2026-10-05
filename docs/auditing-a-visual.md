@@ -40,7 +40,7 @@ schemas. This page is the runbook for the person who looks at a chart and asks
    matches the section's `params` CTE, and its filter widgets match the
    section's filter values. The app's `AGENTS.md` has a Data notes section
    (grain, definitions, quirks, when sources load). If the numbers still
-   disagree, you have a real finding: file it via `/feedback-app <slug>`
+   disagree, you have a real finding: file it via `/build-app <slug> --feedback`
    (quoting the page file and section tag you ran), or route deeper lineage
    questions to `/audit-lineage <slug>`.
 

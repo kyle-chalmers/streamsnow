@@ -25,7 +25,7 @@
 > **Status: beta, functional.** The CLI (configure / init / new / doctor /
 > validate-app / preview / check / sql-review / review-gate / review-loop /
 > migrate / nav / deploy-sql / deploy-setup / ci-key / verify-deploy / update /
-> agent-skills) and the Claude Code plugin (9 skills + shared recipes) are
+> agent-skills) and the Claude Code plugin (8 skills + shared recipes) are
 > implemented and CI-green for
 > both runtimes and both deploy sources. Published on PyPI (`uvx streamsnow` /
 > `pip install streamsnow`); APIs may still evolve toward 1.0 — see
@@ -175,7 +175,7 @@ for what differs outside Claude Code.
 ## How the skills fit together
 
 <p align="center">
-  <a href="docs/images/skills-flow.png"><img alt="StreamSnow skills flow: /onboard sets up your machine, repo and Snowflake once (re-run it any time to check); then your idea goes into /build-app, which runs spec and pages, /preview-app, the /validate-app pass/fail gate, and /review-app, stopping for your OK along the way; then you type /ship-app to open the PR. On merge, CI deploys the live app to Snowflake. /migrate-app and /feedback-app both re-enter at /preview-app, so every path passes the /validate-app gate, and /audit-lineage optionally checks numbers against the live warehouse." src="docs/images/skills-flow.png" width="100%"></a>
+  <a href="docs/images/skills-flow.png"><img alt="StreamSnow skills flow: /onboard sets up your machine, repo and Snowflake once (re-run it any time to check); then your idea goes into /build-app, which runs spec and pages, /preview-app, the /validate-app pass/fail gate, and /review-app, stopping for your OK along the way; then you type /ship-app to open the PR. On merge, CI deploys the live app to Snowflake. /migrate-app re-enters at /preview-app, feedback re-enters through /build-app --feedback, so every path passes the /validate-app gate, and /audit-lineage optionally checks numbers against the live warehouse." src="docs/images/skills-flow.png" width="100%"></a>
 </p>
 
 The source is [docs/images/skills-flow.excalidraw](docs/images/skills-flow.excalidraw);
@@ -308,7 +308,7 @@ streamsnow update --apply                # re-render AGENTS.md, hooks, CI, deplo
 
 Generated CI and deploy workflows pin `streamsnow>=0.8,<0.9`; bump the pin with
 `update --apply` when you move majors.
-`claude plugin details streamsnow@streamsnow` lists the 9 skills below.
+`claude plugin details streamsnow@streamsnow` lists the 8 skills below.
 
 ## The skills
 
@@ -318,12 +318,11 @@ lines, with depth in per-skill reference files:
 | Skill | What it does |
 |---|---|
 | `/onboard` | Machine, repo and Snowflake setup in four stages; detects what is done and does only what is missing. Also adopts repos that already have apps (maps onto them, writes `MIGRATION.md`) |
-| `/build-app` | The front door for apps: spec (incl. backfill from existing source) → data discovery → page design → scaffold → pages built in parallel by subagents → review → ship, with checkpoints. Hands off to `/onboard` if the machine or repo isn't set up |
+| `/build-app` | The front door for apps: spec (incl. backfill from existing source) → data discovery → page design → scaffold → pages built in parallel by subagents → review → ship, with checkpoints. `--feedback` turns feedback on a live app into classified fixes built the same way. Hands off to `/onboard` if the machine or repo isn't set up |
 | `/preview-app` | Run an app locally against live Snowflake |
 | `/validate-app` | The pass/fail check that must be clean before shipping |
 | `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` builds the app's `sql_review/` page files |
 | `/audit-lineage` | Live-warehouse column + lineage verification (read-only, bounded) |
-| `/feedback-app` | Turn user feedback into classified, atomic-commit fixes |
 | `/ship-app` | Validate-gated stage → commit → push → PR → watch CI |
 | `/migrate-app` | Port an external Streamlit app in (lift, then conform) |
 
@@ -445,7 +444,7 @@ streamsnow/            the PyPI package — CLI, config, policy, scaffolder, too
                        caching, dependency vulns, tombstones, path leaks,
                        sql_review generator, review gate/loop, migrate, doctor)
 .claude-plugin/        Claude Code plugin manifest + marketplace
-skills/  agents/  hooks/   Claude Code plugin surface (9 skills, incl. onboard/; hooks)
+skills/  agents/  hooks/   Claude Code plugin surface (8 skills, incl. onboard/; hooks)
 docs/  examples/            guides + a runnable no-Snowflake example app
 ```
 
