@@ -42,6 +42,10 @@ def _denied(out: str) -> bool:
                 "new_string": "b",
             },
         ),
+        ("Grep", {"pattern": "PRIVATE", "glob": "~/.streamsnow-ci/**"}),
+        ("Write", {"file_path": "C:\\Users\\X\\.streamsnow-ci\\secrets\\X", "content": "x"}),
+        ("NotebookEdit", {"notebook_path": "~/.streamsnow-ci/n.ipynb", "new_source": "x"}),
+        ("SomeNewTool", {"anything": "~/.streamsnow-ci/streamsnow_ci_rsa_key.p8"}),
         ("Bash", {"command": "cat ~/.streamsnow-ci/streamsnow_ci_rsa_key.p8"}),
         (
             "Bash",
@@ -118,6 +122,17 @@ def test_denied(tool, tool_input):
         ),
         ("Bash", {"command": "ls -la"}),
         ("Read", {"file_path": "/repo/README.md"}),
+        # Docs that only mention the key directory stay editable and searchable.
+        (
+            "Edit",
+            {
+                "file_path": "/repo/SECURITY.md",
+                "old_string": "the key directory",
+                "new_string": "the key directory (~/.streamsnow-ci)",
+            },
+        ),
+        ("Write", {"file_path": "/repo/docs/x.md", "content": "Keys live in ~/.streamsnow-ci."}),
+        ("Grep", {"pattern": "streamsnow-ci|streamsnow_ci_rsa_key", "path": "/repo"}),
     ],
 )
 def test_allowed(tool, tool_input):

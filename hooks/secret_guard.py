@@ -4,9 +4,9 @@
 `streamsnow ci-key create` keeps the CI user's private key and the deploy
 secret files in ~/.streamsnow-ci, and `streamsnow ci-key push` moves them to
 GitHub on gh's stdin, so nothing needs to read them. This hook denies any tool
-call that names that directory or the key file, except a plain
-`streamsnow ci-key ...` or `streamsnow deploy-setup ...` command (deploy-setup
-reads the PUBLIC key via --public-key-file).
+call whose command or file location names that directory or the key file,
+except a plain `streamsnow ci-key ...` or `streamsnow deploy-setup ...` command
+(deploy-setup reads the PUBLIC key via --public-key-file).
 
 A backstop, not a sandbox: matching command text can be dodged on purpose
 (shell variables, globs), and it only runs inside Claude Code. Not repo-gated:
@@ -25,6 +25,20 @@ import sys
 
 PROTECTED = re.compile(r"\.streamsnow-ci|streamsnow_ci_rsa_key", re.IGNORECASE)
 SHELL_TOOLS = {"Bash", "PowerShell"}
+# The inputs that say WHERE a file tool reads, writes or searches. Only these
+# are checked, so Claude can still write or search docs that merely mention the
+# key directory (README, SECURITY.md, setup.md). Grep's `pattern` is the text
+# it looks for, not a location, so it is left out; Glob's `pattern` is a path.
+# A tool not listed here has every string checked.
+PATH_KEYS = {
+    "Read": ("file_path",),
+    "Edit": ("file_path",),
+    "MultiEdit": ("file_path",),
+    "Write": ("file_path",),
+    "NotebookEdit": ("notebook_path",),
+    "Grep": ("path", "glob"),
+    "Glob": ("pattern", "path"),
+}
 REASON = (
     "streamsnow key guard: the CI key directory (~/.streamsnow-ci) is off-limits to "
     "Claude's tools. Use `streamsnow ci-key create` and `streamsnow ci-key push`; "
@@ -100,6 +114,9 @@ def _decide(payload: object, raw: str) -> bool:
         if not protected(command):
             return False
         return not allowed_command(command)
+    if isinstance(tool, str) and tool in PATH_KEYS:
+        locations = [tool_input.get(k) for k in PATH_KEYS[tool]]
+        return any(protected(s) for v in locations for s in _strings(v))
     return any(protected(s) for s in _strings(tool_input))
 
 

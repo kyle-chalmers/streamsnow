@@ -64,7 +64,10 @@ with the values redacted); if one fails it stops before `SNOWFLAKE_ACCOUNT`.
 **The key guard** (`hooks/secret_guard.py`, Claude Code `PreToolUse`) denies
 any Bash, PowerShell, Read, Grep, Glob, Edit, Write or NotebookEdit call that
 names `.streamsnow-ci` or `streamsnow_ci_rsa_key`, in any case and with either
-path separator. It allows only a plain `streamsnow ci-key ...` or
+path separator. For shell tools it checks the command; for file and search
+tools it checks where the call reads, writes or searches (the file path, or
+Grep's path and glob), not the text being written or searched for, so docs
+that mention the directory stay editable. It allows only a plain `streamsnow ci-key ...` or
 `streamsnow deploy-setup ...` command, and only when it contains none of `|`,
 `;`, `&&`, `||`, `<`, a newline, `$(`, a backtick, `(` or `)`, or any `&` other
 than one leading PowerShell call operator. A `>` redirect into the key
