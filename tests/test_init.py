@@ -570,7 +570,7 @@ def _repoint_starter(app_dir: Path) -> None:
 
 # The starter page's sample block, from its marker through the sample chart.
 _STARTER_SAMPLE_BLOCK = re.compile(
-    r"# STREAMSNOW_STARTER_PLACEHOLDER.*?st\.plotly_chart\(fig, use_container_width=True\)\n",
+    r'# STREAMSNOW_STARTER_PLACEHOLDER.*?st\.plotly_chart\(fig, width="stretch"\)\n',
     re.S,
 )
 
@@ -584,7 +584,7 @@ def _finish_starter(app_dir: Path) -> None:
         'df = load_example("2024-01-01", "2024-12-31")\n'
         'branded_metric("Rows", review_value("example_metric", f"{int(df[\'N\'].sum()):,}"))\n'
         'fig = px.bar(df, x="DT", y="N", color_discrete_sequence=BRAND_CHART_COLORS)\n'
-        "st.plotly_chart(fig, use_container_width=True)\n",
+        'st.plotly_chart(fig, width="stretch")\n',
         page.read_text(encoding="utf-8"),
     )
     assert n == 1, "starter page sample block not found"

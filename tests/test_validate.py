@@ -64,11 +64,11 @@ def _finish_starter(app: Path) -> Path:
         )
     page = app / "pages/overview.py"
     text, n = re.subn(
-        r"# STREAMSNOW_STARTER_PLACEHOLDER.*?st\.plotly_chart\(fig, use_container_width=True\)\n",
+        r'# STREAMSNOW_STARTER_PLACEHOLDER.*?st\.plotly_chart\(fig, width="stretch"\)\n',
         'df = load_example("2024-01-01", "2024-12-31")\n'
         'branded_metric("Rows", review_value("example_metric", f"{int(df[\'N\'].sum()):,}"))\n'
         'fig = px.bar(df, x="DT", y="N", color_discrete_sequence=BRAND_CHART_COLORS)\n'
-        "st.plotly_chart(fig, use_container_width=True)\n",
+        'st.plotly_chart(fig, width="stretch")\n',
         page.read_text(encoding="utf-8"),
         flags=re.S,
     )
