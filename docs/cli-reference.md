@@ -87,7 +87,7 @@ app. Flags: `--dir`, `--config`, `--format md|json`. JSON is
 | `page-imports` | An import that works under `streamlit run` but not deployed |
 | `caching` | A data-fetching function without `@st.cache_data(ttl=...)` |
 | `path-leaks` | A personal absolute path in committed code or docs |
-| `requirements` | `REQUIREMENTS.md` §11 build state is malformed |
+| `requirements` | `REQUIREMENTS.md` §11 build state is malformed (see the `check requirements` row below) |
 | `sql-review (coverage policy: warn\|fail)` | SQL review drift, hand edits, marker mismatches or lint; uncovered pages fail only under `fail` |
 | `placeholders` | The starter's `YOUR_TABLE` or sample numbers are still there |
 
@@ -112,7 +112,7 @@ extra keys listed below.
 | `page-imports` | Imports that resolve under `streamlit run` but not deployed | | |
 | `artifacts` | `snowflake.yml` `artifacts:` out of sync with files on disk | `--fix` repairs it | `fixed` (with `--fix`) |
 | `path-leaks` | Personal absolute paths (home directories) | | |
-| `requirements` | A malformed `REQUIREMENTS.md` §11 build-state block | | |
+| `requirements` | A malformed `REQUIREMENTS.md` §11 build-state block: `Current phase` must be one of `spec`, `discover`, `design`, `scaffold`, `build`, `preview`, `verify`, `ship`, `done`, `in-production`, `in-production (backfilled)`, and the last Sessions line must start with an ISO timestamp and, for an unfinished build, name the `Next:` step | | |
 | `branding-parity` | `_BRANDING_VERSION` skew across apps' `branding.py` copies | | |
 | `dependency-vulns` | Exact dependency pins with known vulnerabilities (OSV.dev); range pins are reported unscanned | `--allowlist` (default `osv_allowlist.json` next to the config), `--best-effort` (warn when OSV.dev is unreachable) | `unscanned`, `allowlisted`, `expired`, `checked` |
 | `tombstones` | A PR that renames or removes an app without adding it to `deploy/tombstones.yml` | `--base-ref` (default `origin/main`), `--registry`, `--apps-dir`, `--config`, `--drop-sql` (print `DROP STREAMLIT IF EXISTS` for tombstoned apps; the deploy job runs it) | `tombstones`, `notes` |

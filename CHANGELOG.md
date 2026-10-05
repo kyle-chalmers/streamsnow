@@ -111,6 +111,12 @@ entry.
 
 ### Fixed
 
+- **Docs follow the new `/build-app` phases.** The skills diagram shows spec, discover and
+  design (with the new CP1b wireframe checkpoint), the foundation scaffold, the parallel page
+  build, preview and verify, then validate, review and ship. The Getting started and examples
+  app trees list the new `pages/` modules and the About page, and the CLI reference lists the
+  `REQUIREMENTS.md` §11 phases `check requirements` accepts.
+
 - **Docs that disagreed with the code:**
   - `verify-deploy` does not flag a renamed or removed app's old object; only
     `check tombstones` catches it, at PR time (deploying, troubleshooting #14, production
