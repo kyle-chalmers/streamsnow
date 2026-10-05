@@ -68,7 +68,9 @@ brand:                                 # optional — neutral defaults if omitte
   theme:
     primary: "#3B82F6"
     background: "#FFFFFF"
-  chart_sequence: ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"]
+  # Categorical series colors, in order. Keep status hues (green/amber/red) out:
+  # they mean good/warning/bad. A dark theme needs its own colorblind-checked set.
+  chart_sequence: ["#2A78D6", "#EB6834", "#1BAF7A", "#4A3AA7", "#E87BA4"]
 
 sql_review:                            # optional — the runnable review SQL gate
   coverage: warn                       # warn (default): a page or query missing from an app's

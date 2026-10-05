@@ -22,7 +22,14 @@ What it reports:
   (scaffolded before the convention existed), or apps lagging the stamp in the
   *installed StreamSnow template* (that lag appears on every StreamSnow
   upgrade and is expected until the next re-scaffold, so it informs rather
-  than blocks).
+  than blocks). The same holds when the newest app copy *is* the installed
+  template's version and the lag is within one major version: the newest app
+  was simply scaffolded after an upgrade, the template's minor bumps are
+  additive, and failing the older apps would turn a passing repo red on its
+  first ``streamsnow new`` after upgrading. A different major version, or a
+  newest stamp that isn't the installed template's (someone bumped it by
+  hand), stays a finding. Like every case here, this compares stamps only: a
+  hand edit that keeps the stamp is invisible to this check.
 
 Versions compare via ``packaging.version`` where they parse; unparseable
 stamps fall back to string comparison and simply must all match.
@@ -70,6 +77,16 @@ def _sort_key(version: str) -> tuple[int, Version | str]:
         return (0, version)
 
 
+def _upgrade_lag(version: str, reference: str, template: str) -> bool:
+    """True when the newest copy is the installed template and ``version`` trails it
+    within the same major version (an upgrade, not a hand edit)."""
+    try:
+        old, new = Version(version), Version(reference)
+    except InvalidVersion:
+        return False
+    return reference == template and old.major == new.major and old < new
+
+
 def scan_paths(paths: list[Path]) -> dict:
     findings: list[dict] = []
     notes: list[str] = []
@@ -90,8 +107,19 @@ def scan_paths(paths: list[Path]) -> dict:
 
     if stamped:
         reference = max((v for _, v, _ in stamped), key=_sort_key)
+        template_version = _extract_version(_TEMPLATE)
         for branding, version, line in stamped:
-            if version != reference:
+            if version == reference:
+                continue
+            if template_version is not None and _upgrade_lag(
+                version, reference, template_version[0]
+            ):
+                notes.append(
+                    f"{branding}: _BRANDING_VERSION {version!r} predates the installed "
+                    f"template ({reference!r}, additive) — copy branding.py from a newer app "
+                    "when convenient"
+                )
+            else:
                 findings.append(
                     {
                         "file": str(branding),
@@ -101,7 +129,6 @@ def scan_paths(paths: list[Path]) -> dict:
                         "regenerate branding.py (or copy it from an up-to-date app)",
                     }
                 )
-        template_version = _extract_version(_TEMPLATE)
         if template_version is not None:
             if _sort_key(template_version[0]) > _sort_key(reference):
                 notes.append(

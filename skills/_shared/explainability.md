@@ -41,12 +41,29 @@ definition says so.
 ## How to read the page (only when needed)
 
 When the encoding or the workflow isn't obvious (a cohort grid, a target band, a drill-down
-path), add up to three lines to the page's existing glossary expander:
+path), add up to three lines to the page's Definitions expander
+(`definitions_expander(..., how_to_read=[...])`):
 - what the page shows
 - what good or bad looks like
 - where to go next
 
 A page has one expander for this, not two. An obvious chart gets none.
+
+## Document the app inside the app
+
+Readers shouldn't need a wiki, or the author, to know what an app is for and where its numbers
+come from. Generate the documentation from what the app already holds, never write it by hand,
+so it can't drift:
+- **Per page:** definitions at each number, then one collapsed Definitions expander
+  (`definitions_expander` in `pages/_layout.py`) and the sources and "Data as of" footer.
+- **About page** (`pages/about.py`, last in the navigation): purpose, audience and owner, each
+  page and its question, the full glossary, and every query with the schemas it reads, parsed
+  from the `queries/*.sql` headers. Tables and short lines; it's the one page allowed more text.
+- **"Show the SQL"** (`show_sql`) under a visual whose readers verify numbers themselves: the exact
+  query and bound values, ready to paste into Snowsight.
+
+Keep reader documentation and maintainer documentation apart: the About page is for the people
+who use the app; `AGENTS.md`, REQUIREMENTS.md and `sql_review/` are for the people who change it.
 
 ## Empty, stale and broken states
 

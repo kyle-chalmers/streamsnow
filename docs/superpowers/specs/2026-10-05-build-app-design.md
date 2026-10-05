@@ -88,8 +88,13 @@ fixed contracts.**
   - dispatches agents
   - runs the gate commands
   - stops at checkpoints
-- **Agent briefs.** Each agent has a fixed brief in the plugin's `agents/` directory, using the
-  same format `/sql-review` introduces (§8). A brief names:
+- **Agent briefs.** Each agent has a fixed brief in `skills/build-app/briefs/<role>.md`, with the
+  sections Role, Inputs, Owns, Steps, Returns (a JSON shape), Verify and Degrade, pinned by
+  `tests/test_build_app_briefs.py`. *Decided during implementation:* briefs live inside the skill,
+  not in the plugin's `agents/` directory, because the skill folder ships to every agent host
+  (`streamsnow agent-skills install`), its links are test-checked, every role needs the shell
+  anyway (so plugin-level tool limits add little), and it is how `/review-app` already dispatches
+  its reviewers. A brief names:
   - its inputs
   - the files it owns (no two agents write the same file)
   - the result it returns, with a fixed shape
@@ -145,8 +150,11 @@ phase names are added to the lifecycle values it recognizes.
 
    Doing this once, before any page, is what lets pages be built in parallel without diverging.
 6. **Build pages.** One `page-builder` agent per §4 page, run in parallel.
-   - Each owns three things: `pages/<page>.py`, that page's `queries/*.sql`, and the page's
-     `sql_review` file.
+   - Each owns `pages/<page>.py` and the queries only that page uses. *Corrected during
+     implementation:* `sql_review/index.yaml` and the navigation are shared (every generated review
+     file hashes the whole index, and its `NN` comes from the navigation order), so the
+     orchestrator owns them: builders return their nav, index and glossary entries, and the
+     orchestrator merges them and runs `sql-review generate` once per round.
    - Each runs `streamsnow check schema-refs`, `caching`, `bind-predicates` and `page-imports` on
      its own files before returning.
    - Page-builders import shared loaders from `pages/_data.py` and never edit it. A builder that
@@ -319,7 +327,7 @@ Two other workstreams touch the same files. This design depends on both and must
   with a Playwright walk.
 - **Asks:**
   - Keep `bench` and the preview capture callable from `/build-app`'s verify phase.
-  - Share one brief format for `agents/*.md`.
+  - Share one brief format: the section layout in `skills/build-app/briefs/` (above).
 - Page-builders target the new per-page `sql_review` layout, so this design's implementation
   follows that redesign's phase 1.
 
@@ -363,7 +371,7 @@ skill list once the SQL review redesign retires `/audit-lineage`.
      - the templates render and pass `validate-app` on a fresh scaffold
      - the fleet fixtures still validate clean
 2. **Orchestration.**
-   - The `agents/*.md` briefs: `data-scout`, `app-designer`, `page-builder`, `perf-reviewer`,
+   - The briefs in `skills/build-app/briefs/`: `data-scout`, `app-designer`, `page-builder`, `perf-reviewer`,
      `viz-critic`, `cold-reader`.
    - The phase rewrite of `SKILL.md` and its sub-files.
    - The verify loop.

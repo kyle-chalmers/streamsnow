@@ -20,6 +20,8 @@ pages:
         binds: {"1": params.start_date, "2": params.end_date}
         notes: "Starter metric. Repoint YOUR_TABLE here and in queries/example_metric.sql."
         reads: [{{ gov_database }}.{{ schema_allow[0] }}.YOUR_TABLE]
+  - path: pages/about.py   # documents the app; it shows no data of its own
+    metrics: []
 # Objects created to make this app work (views, dynamic tables); each needs a
 # DDL file in app_specific_reporting_objects/ named <DATABASE>.<SCHEMA>.<OBJECT>.sql.
 objects: []

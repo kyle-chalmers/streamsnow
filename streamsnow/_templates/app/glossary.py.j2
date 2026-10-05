@@ -1,0 +1,53 @@
+"""Metric definitions for {{ app_title }}: one table, read everywhere a number is shown.
+
+Every metric a page shows gets one entry here. The same text then feeds ``st.metric(help=...)``,
+table column tooltips, chart tooltips, each page's Definitions expander and the About page, so
+two places never define a number differently (skills/_shared/page-conventions.md).
+
+Import package-qualified: ``from pages._glossary import metric_help``. A bare
+``from _glossary import ...`` works under ``streamlit run`` and fails deployed.
+"""
+
+from typing import NamedTuple
+
+
+class Metric(NamedTuple):
+    key: str
+    label: str
+    definition: str
+    formula: str
+
+
+# One Metric per number the app shows. Formulas use ÷, and a ratio is
+# SUM(numerator) ÷ SUM(denominator) at the rendered grain. Example:
+#   Metric("active_accounts", "Active accounts",
+#          "Accounts with at least one order in the period.",
+#          "COUNT(DISTINCT account_id)"),
+_DEFINITIONS: tuple[Metric, ...] = ()
+_BY_KEY = {m.key: m for m in _DEFINITIONS}
+
+
+def all_metrics() -> tuple[Metric, ...]:
+    """Every definition, in table order (the About page lists them all)."""
+    return _DEFINITIONS
+
+
+def metric_help(key: str) -> str:
+    """Definition and formula, for ``st.metric(help=...)`` and ``branded_metric(help=...)``."""
+    m = _BY_KEY[key]
+    return f"{m.definition} Formula: {m.formula}"
+
+
+def column_help(*keys: str) -> dict[str, str]:
+    """``help=`` text per column key, for ``st.column_config``."""
+    return {k: metric_help(k) for k in keys}
+
+
+def glossary_lines(*keys: str) -> list[str]:
+    """Markdown lines for the given keys (all metrics when none are given)."""
+    return [f"**{_BY_KEY[k].label}**: {metric_help(k)}" for k in keys or _BY_KEY]
+
+
+def hover_definition(key: str) -> str:
+    """The definition, %-escaped for a Plotly hovertemplate."""
+    return metric_help(key).replace("%", "%%")

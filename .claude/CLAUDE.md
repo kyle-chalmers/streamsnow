@@ -9,8 +9,8 @@ Instructions for AI agents (Claude Code locally, and the `claude-*` workflows in
 
 StreamSnow is a Python CLI (`streamsnow/`) plus a Claude Code plugin (`skills/`, `hooks/`,
 `.claude-plugin/`) for building, governing and shipping Streamlit-in-Snowflake apps. Every
-change is judged against the Mission, Vision and eight Principles at the top of
-[README.md](../README.md). Read them before changing behavior.
+change is judged against the Mission and Vision at the top of [README.md](../README.md) and
+the nine [Principles](../docs/principles.md). Read them before changing behavior.
 
 ## Commands
 

@@ -15,9 +15,10 @@ with these translations:
   which checkpoint, what is finished and what is still pending, and the command that resumes
   (`$build-app <slug>` reads §11). When a later prompt from the user answers that checkpoint, record
   the answer in §11 and continue from there without asking it again.
-- **Parallel reviewers.** Where a step says "Task" or "subagents", use your agent's own subagents
-  if it has them. Otherwise run each reviewer brief yourself, one after another, each against only
-  its own brief; the merged report has the same shape either way.
+- **Subagents and briefs.** Where a step says "Task", "subagents" or "dispatch" with a brief
+  (`/review-app`'s reviewers, `/build-app`'s `briefs/`), use your agent's own subagents if it has
+  them. Otherwise run each brief yourself, one after another, each against only its own inputs and
+  writing only the files it owns; the merged result has the same shape either way.
 - **Cross-agent review.** Never shell out to the agent you are running in: inside Codex, `codex` is
   the host, not an external reviewer ([cross-agent-review.md](cross-agent-review.md)).
 - **No plugin hooks.** The Claude Code plugin's hooks do not run with these copies, so keep their

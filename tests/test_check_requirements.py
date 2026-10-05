@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from streamsnow.tools import check_requirements
 
 _GOOD = """\
@@ -60,6 +62,14 @@ def test_unknown_phase_flagged(tmp_path):
     res = check_requirements.check_file(p)
     assert not res["ok"]
     assert any("not a recognized phase" in f["detail"] for f in res["findings"])
+
+
+@pytest.mark.parametrize("phase", ["discover", "design"])
+def test_discover_and_design_phases_accepted(tmp_path, phase):
+    # /build-app profiles the data and plans every page between spec and scaffold.
+    text = _GOOD.replace("**Current phase:** build", f"**Current phase:** {phase}")
+    p = _write(tmp_path / "apps/a/REQUIREMENTS.md", text)
+    assert check_requirements.check_file(p)["ok"]
 
 
 def test_backfilled_phase_accepted(tmp_path):

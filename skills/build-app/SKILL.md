@@ -1,84 +1,85 @@
 ---
 name: build-app
-description: The front door for building a Streamlit-in-Snowflake app from idea to opened PR, or resuming one mid-build. Owns the spec, scaffold, page-building, and ship phases, with human checkpoints between them. Start here for any new app, to document an existing one, or to add a page. Use when the user says "build an app", "new dashboard", "add a page", "spec this out", or "pick up where we left off".
+description: The front door for building a Streamlit-in-Snowflake app from idea to opened PR, or resuming one mid-build. Orchestrates spec, data discovery, page design, scaffold, a parallel page build and review by subagents, and ship, with human checkpoints between them. Start here for any new app, to document an existing one, or to add a page. Use when the user says "build an app", "new dashboard", "add a page", "spec this out", or "pick up where we left off".
 argument-hint: "[<idea>] | --spec"
-allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion]
+allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Task, Agent]
 ---
 
 # /build-app
 
 > **Repo overlay:** if `.streamsnow/overlays/build-app.md` exists in this repo, read it first — committed, repo-specific additions/overrides ([_shared/overlays.md](../_shared/overlays.md)). Outside Claude Code, also read [_shared/other-agents.md](../_shared/other-agents.md).
 
-One command owns the app lifecycle: **spec → scaffold → build → preview → verify → ship → done**.
-It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume an interrupted build, tells the user the exact
-next command at each judgment point, and never skips a checkpoint.
+Lifecycle: **spec → discover → design → scaffold → build → preview → verify → ship → done**.
+It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume and never skips a checkpoint.
 
-> **Wizard, not a runner.** It runs everything deterministic itself — the `streamsnow` CLI steps,
-> preview launch, validation, and the `/review-app` procedure — and stops only at the three human
-> checkpoints (spec confirmed, pages clicked through, ready to ship). The user types checkpoints.
+> **Orchestrator.** You run every deterministic step (the `streamsnow` CLI, merges, generation,
+> validation) and own the shared files. Bounded work goes to subagents with fixed briefs in
+> [briefs/](briefs/), each naming its inputs, the only files it may write, and the result it
+> returns. The CLI and gates decide pass/fail, never a subagent. Without subagents, follow each
+> brief yourself, one at a time ([_shared/other-agents.md](../_shared/other-agents.md)).
 
 ## Modes
 
-- **Default** — a new app, or a slug to resume. If `apps/<slug>/REQUIREMENTS.md` §11 exists, resume
-  from its `Current phase`; never restart a build that's underway.
-- **`--spec [<slug>]`** — write or refresh the requirements spec only, then stop for review. Covers
-  brand-new specs, ticket ingestion, and **backfill** (reverse-engineering the spec from an existing
-  app's source — automatic when `apps/<slug>/` already has code). Follow [spec.md](spec.md).
+- **Default** — a new app, or a slug to resume from §11 `Current phase`; never restart a build.
+- **`--spec [<slug>]`** — write or refresh the spec only, then stop. Covers new specs, tickets and
+  **backfill** from an existing app's source (automatic when `apps/<slug>/` has code). [spec.md](spec.md).
 
 ## Phase 0 · Preflight
 
 1. Report which `streamsnow` runs and its version, then run `streamsnow doctor --format json`.
-2. If `streamsnow` is not on PATH, a `required` check fails, or `streamsnow.config.yaml` is
-   missing, say "This machine or repo isn't set up yet, so I'm running onboarding first", follow
-   [/onboard](../onboard/SKILL.md)'s instructions in full, then continue at Phase 1. `optional`
-   failures get one line and no handoff.
-   - `--spec` mode only: offer `/onboard` but carry on without config if the user prefers;
-     schema choices in §3 then stay unverified.
+2. `streamsnow` not on PATH, a `required` check failing, or no `streamsnow.config.yaml`: say "This
+   machine or repo isn't set up yet, so I'm running onboarding first", follow
+   [/onboard](../onboard/SKILL.md) in full, then continue. `optional` failures get one line.
+   In `--spec` mode, offer `/onboard` but carry on without config if the user prefers.
 
-## Phase 1 — Spec
+## Phase 1 — Spec, then CHECKPOINT 1
 
-3. Follow [spec.md](spec.md) to produce `apps/<slug>/REQUIREMENTS.md` — the contract every later
-   phase builds and audits against. Confirm the one-screen summary with the user before moving on.
+3. Follow [spec.md](spec.md) for `apps/<slug>/REQUIREMENTS.md`. **CP1:** confirm its one-screen
+   summary (pages and their questions, sources, TTLs, runtime). Block until confirmed.
 
-## Phase 2 — Scaffold, then CHECKPOINT 1
+## Phase 2 — Discover and design, then CHECKPOINT 1b
 
-4. Follow [scaffold.md](scaffold.md): `streamsnow new <domain> <function>` plus the first-build
-   conventions. Runtime comes from the spec §9 / repo default — see
-   [_shared/runtime-decision.md](../_shared/runtime-decision.md); decide before scaffolding.
-5. **CP1:** show the scaffold tree and the §4 page list (created vs. TODO). Ask: continue /
-   edit the spec / stop. Block until the user chooses.
+4. Follow [design.md](design.md): **data-scout** profiles the data into §3, **app-designer** plans
+   every page (forms, copy, glossary, shared data) into §4–§8. **CP1b:** the text wireframe.
 
-## Phase 3 — Build pages, then CHECKPOINT 2
+## Phase 3 — Scaffold the foundation
 
-6. For each TODO page in §4 order, follow [pages.md](pages.md) — page module, `queries/*.sql` with
-   header blocks, `st.navigation` registration — then fill the stubs against the spec. Run the
-   matching `streamsnow check` commands as you go; problems are cheapest here.
-7. Launch the preview yourself per [pages.md § Build loop](pages.md#build-loop) (`streamsnow
-   preview start <slug>`), hand over the URL, and ask for a click-through of every page.
-8. **CP2:** the user confirms pages render, charts populate, and filters work — the correctness
-   check no static gate can make. Block until they answer.
+5. Follow [scaffold.md](scaffold.md): `streamsnow new <domain> <function>` (runtime from §9,
+   [_shared/runtime-decision.md](../_shared/runtime-decision.md)), then the shared layer from the
+   design: glossary, `pages/_data.py` loaders and their queries, About page. Commit it.
 
-## Phase 4 — Check & ship, then CHECKPOINT 3
+## Phase 4 — Build pages in parallel
 
-9. Run `streamsnow validate-app <slug>` — the pass/fail check that must be clean before shipping.
-   Fix and re-run on any FAIL (`/validate-app` explains each one).
-10. **Run the review yourself:** follow `/review-app`'s instructions in full for this app (default
-    mode; `--auto` only if the user asked for the hands-off loop). Present its verdict.
-11. **CP3:** validation passes, review is clean, user is ready → hand off to `/ship-app <slug>`
-    (a first deploy may need one-time admin DDL from `streamsnow deploy-setup --admin`: surface it, don't run it).
+6. Follow [pages.md § Parallel build](pages.md#parallel-build): one **page-builder** per §4 page,
+   dispatched in one message; each writes only its page and its own queries and returns its nav,
+   index and glossary entries. Merge them, run `streamsnow sql-review generate <slug>` once, and
+   commit the round: pages and their review SQL land together.
+
+## Phase 5 — Preview, verify, then CHECKPOINT 2
+
+7. Follow [verify.md](verify.md): preview and walkthrough, then **perf-reviewer**, **viz-critic**
+   and **cold-reader** in parallel; fixes go to each file's owner, at most two rounds.
+   **CP2:** the user clicks through every page. Block until they answer.
+
+## Phase 6 — Check and ship, then CHECKPOINT 3
+
+8. `streamsnow validate-app <slug>` until PASS (`/validate-app` explains each FAIL); then follow
+   `/review-app`'s instructions in full and present its verdict.
+9. **CP3:** validation passes, review is clean, user is ready → `/ship-app <slug>` (a first deploy
+   may need admin DDL from `streamsnow deploy-setup --admin`: surface it, don't run it).
 
 ## State — §11 Build Progress
 
-§11 lives inside `apps/<slug>/REQUIREMENTS.md`: a `Current phase` line (the lifecycle above) plus
-an append-only `Sessions` log whose last line always names the next command. Update it via `Edit`
-on every phase transition — never rewrite past session lines. On resume, read `Current phase` and
-jump to the matching phase; `done` or `in-production (backfilled)` means the app is live — new
-§4 pages route to the build phase, anything else to `/feedback-app` or `/review-app`.
+A `Current phase` line (the lifecycle above) plus an append-only `Sessions` log whose last line
+names the next command. Update it on every phase change; never rewrite past lines. On resume,
+jump to `Current phase`. `done` or `in-production (backfilled)` means the app is live: new §4
+pages re-enter at design; anything else goes to `/feedback-app` or `/review-app`.
 Apps started before 0.8 name the old `start-app` skill in that log; say `/build-app` instead.
 
 ## Out of scope
 
-Porting an external app → `/migrate-app`; feedback on a live app → `/feedback-app`; review depth → `/review-app`; live lineage → `/audit-lineage`; machine, repo and Snowflake setup → `/onboard`.
+Porting an external app → `/migrate-app`; feedback on a live app → `/feedback-app`; review depth →
+`/review-app`; live lineage → `/audit-lineage`; machine, repo and Snowflake setup → `/onboard`.
 
 ## Done when
 

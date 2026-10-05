@@ -1,4 +1,30 @@
-# Build phase — add one page to an app
+# Build phase — the parallel build, and how one page is built
+
+## Parallel build
+
+The orchestrator builds every §4 page at once and owns every file pages share; each
+**page-builder** ([briefs/page-builder.md](briefs/page-builder.md)) owns one page.
+
+1. **Owners.** The orchestrator: `streamlit_app.py`, `sql_review/` (`index.yaml` and everything
+   `generate` writes), `pages/_*.py`, `pages/about.py`, shared queries and REQUIREMENTS.md. Each
+   page-builder: `pages/<page>.py` and the queries the design lists for that page alone.
+   `index.yaml` and the navigation are shared on purpose: every generated review file hashes the
+   whole index, and its `NN` comes from the navigation order.
+2. **Dispatch** one page-builder per page in one message (`mode: build`), each with its design
+   entry, its `page_queries` and the shared loaders available.
+3. **Merge** the returns: reject any write outside a builder's own files; add `nav_entry` to
+   `st.navigation` in §4 order (About stays last); add `index_entry` under `pages:`; add
+   `glossary_entries` to `pages/_glossary.py`; resolve `data_requests` by adding the loader to
+   `pages/_data.py` and re-dispatching the pages that asked.
+4. **Generate once:** `streamsnow sql-review generate <slug>`, then `streamsnow sql-review check
+   <slug>` and the four `check` commands from step 6 below. Fix shared files yourself; send page
+   findings back to that page's builder in `fix` mode.
+5. **Commit the round** (pages, their queries, `index.yaml`, the generated review files, the
+   shared files you changed) and log it in §11 (`Next: verify`).
+
+Without subagents, build the pages one at a time with the steps below; you then own every file.
+
+## One page
 
 Scaffold one page so its charts, KPIs, filters, and queries match the spec. Additive and
 idempotent: never overwrite an existing page or query; leave the app lint-clean and previewable
@@ -9,7 +35,10 @@ The spec is the contract: read §4 for the page's sections and the Charts/KPIs/F
 sections for its visuals. Don't invent visuals that aren't specced — if the page isn't in §4 yet,
 run the spec phase first ([spec.md](spec.md)) and resume.
 
-## Steps
+### Steps
+
+In a parallel build, steps 5, 7, 8.2 and 8.4–9 are the orchestrator's (above): the page-builder
+returns their inputs instead of editing shared files.
 
 1. **Resolve target.** Confirm `apps/<slug>/` and its `REQUIREMENTS.md` exist. No spec → backfill
    one first (spec phase, automatic backfill mode). Page already exists as `pages/<page>.py` → stop;
@@ -39,7 +68,13 @@ run the spec phase first ([spec.md](spec.md)) and resume.
    loader per query calling the app's `sql_loader`. Match a sibling page's patterns. TTL = repo
    default unless §8 says otherwise (then cite it in a comment). Imports of app-root modules
    (`branding`, `sql_loader`) stay bare; anything you factor out into `pages/` is imported
-   package-qualified (`from pages._header import ...`) — see Gotchas.
+   package-qualified (`from pages._header import ...`) — see Gotchas. Use the scaffold's shared
+   modules rather than writing your own: each metric gets a `pages/_glossary.py` entry and its
+   `help=`; the page ends with `definitions_expander(<its keys>)` and `sources_footer(...)` from
+   `pages/_layout.py`; the period picker is `date_range` from `pages/_time_controls.py`; data
+   another page also reads goes in `pages/_data.py`. Add `show_sql(...)` under a visual when §2
+   says the readers check numbers themselves (analysts), passing the same SQL and binds the loader
+   runs.
 5. **Register the page**: add an `st.Page(...)` entry to the existing `st.navigation` structure in
    `streamlit_app.py`. Show the diff before applying and use multi-line `Edit` context so the match
    is unambiguous. One nav group → add to it; several → ask which.
@@ -93,7 +128,12 @@ same commit as that page (step 8), whatever the page is called:
 3. **The `example_metric` entry in `sql_review/index.yaml`**, and the `YOUR_TABLE` in its
    `review_window`. Replace them with the real page's entry and window (step 8.2), then run
    `streamsnow sql-review generate <slug>`: it removes the stale `sql_review/01_overview.sql`
-   when no page needs it, and `check` reports a leftover page file as an orphan.
+   when no page needs it, and `check` reports a leftover page file as an orphan. Keep the
+   `pages/about.py` entry (`metrics: []`): the About page stays in the navigation.
+
+The About page is not part of the trio. When the build phase ends, fill its `ABOUT` constants
+from REQUIREMENTS.md (§1 purpose, §2 audience, the owner, §4 each page and its question, known
+caveats); its definitions and data sources fill themselves from the glossary and query headers.
 
 Then `streamsnow validate-app <slug>` must PASS: its `placeholders` check FAILS while any query,
 page or `index.yaml` still carries `YOUR_TABLE` or the starter page's sample block. Do not grep the

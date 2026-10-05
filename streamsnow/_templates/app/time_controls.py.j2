@@ -1,0 +1,31 @@
+"""The period picker every page of {{ app_title }} shares, so pages never disagree on a period.
+
+Import package-qualified: ``from pages._time_controls import date_range``. The bounds come
+from the data (``MAX(<date_col>)``, loaded once and cached), never from ``date.today()``.
+"""
+
+from datetime import date, timedelta
+
+import streamlit as st
+
+
+def date_range(
+    min_date: date, max_date: date, default_days: int = 365, key: str = "date_range"
+) -> tuple[date, date]:
+    """A date-range picker bounded by the data, defaulting to the last ``default_days``."""
+    default_start = max(min_date, max_date - timedelta(days=default_days))
+    picked = st.date_input(
+        "Period",
+        value=(default_start, max_date),
+        min_value=min_date,
+        max_value=max_date,
+        key=key,
+    )
+    # While the viewer has clicked only the first date, the picker returns one value.
+    start, end = (
+        picked
+        if isinstance(picked, tuple) and len(picked) == 2
+        else (default_start, max_date)
+    )
+    st.caption(f"Selected: {start:%b %d, %Y} to {end:%b %d, %Y}")
+    return start, end

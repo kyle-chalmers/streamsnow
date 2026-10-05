@@ -36,7 +36,11 @@ RUFF_VERSION = "0.15.9"
 # once Snowflake ships a fixed version for the warehouse runtime.
 WAREHOUSE_STREAMLIT_PIN = "1.52.2"
 
-_DEFAULT_CHART_SEQUENCE = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#06B6D4"]
+# Categorical default with no status hues (green/amber/red mean good/warning/bad;
+# visualization-guide.md). Adjacent pairs pass the colorblind (deutan/tritan)
+# separation check on the default light theme; slots 3 and 5 sit below 3:1
+# against white, so charts label those series directly.
+_DEFAULT_CHART_SEQUENCE = ["#2A78D6", "#EB6834", "#1BAF7A", "#4A3AA7", "#E87BA4"]
 _HEX = re.compile(r"^#[0-9A-Fa-f]{3,8}$")
 _FONT = re.compile(r"^[A-Za-z0-9 ,'\-]+$")  # font-family list, no quotes/newlines/braces
 
@@ -112,6 +116,13 @@ RENDER_MAP: tuple[RenderItem, ...] = (
     RenderItem("app/example_metric.sql.j2", "apps/{slug}/queries/example_metric.sql"),
     RenderItem("app/review.py.j2", "apps/{slug}/review.py"),
     RenderItem("app/overview.py.j2", "apps/{slug}/pages/overview.py"),
+    # Shared page modules (imported package-qualified, `from pages._x import`) and the
+    # About page, which documents the app from its own glossary and query headers.
+    RenderItem("app/glossary.py.j2", "apps/{slug}/pages/_glossary.py"),
+    RenderItem("app/layout.py.j2", "apps/{slug}/pages/_layout.py"),
+    RenderItem("app/time_controls.py.j2", "apps/{slug}/pages/_time_controls.py"),
+    RenderItem("app/data.py.j2", "apps/{slug}/pages/_data.py"),
+    RenderItem("app/about.py.j2", "apps/{slug}/pages/about.py"),
     # SQL review exists from commit 1: an index for the starter page's one
     # metric, so `sql-review generate` (which init and new run) writes its page
     # file and the pattern is visible before the first real page lands.
