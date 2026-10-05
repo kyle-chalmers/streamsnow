@@ -12,6 +12,9 @@ A backstop, not a sandbox: matching command text can be dodged on purpose
 (shell variables, globs), and it only runs inside Claude Code. Not repo-gated:
 the key is equally sensitive in any repo. Stdlib only, no network. Any error
 after a match still denies (fail closed on a match); everything else passes.
+If the launcher cannot start this hook (no uv), the guard is off for that call;
+`streamsnow ci-key push`, which keeps secrets off argv and out of Claude's
+context, remains the main protection.
 """
 
 from __future__ import annotations
@@ -35,9 +38,16 @@ _PROGRAM = (
     r"""|(?:[^\s'"]*[\\/])?streamsnow(?:\.exe)?)"""
 )
 _ALLOWED = re.compile(rf"^\s*(?:&\s*)?{_PROGRAM}\s+(?:ci-key|deploy-setup)(?:\s|$)", re.IGNORECASE)
-# Anything that chains or substitutes. A single LEADING `&` is PowerShell's
-# call operator and is stripped before this check; any other `&` counts.
-_CHAINING = re.compile(r"[|;&<\n\r`]|\$\(")
+# Anything that chains, substitutes or groups: no allowed form needs it. `(` and
+# `)` cover bash process substitution (`>(cmd)`) and PowerShell subexpressions
+# (`(cmd)`, `@(cmd)`). A single LEADING `&` is PowerShell's call operator and is
+# stripped before this check; any other `&` counts.
+_CHAINING = re.compile(r"[|;&<()\n\r`]|\$\(")
+# A `>` redirect whose target names the key directory would truncate key
+# material. A protected path BEFORE the `>` (the public key as an argument) is fine.
+_REDIRECT_INTO_PROTECTED = re.compile(
+    r">>?\s*\S*(?:\.streamsnow-ci|streamsnow_ci_rsa_key)", re.IGNORECASE
+)
 
 
 def protected(text: str) -> bool:
@@ -48,7 +58,7 @@ def allowed_command(command: str) -> bool:
     if not _ALLOWED.match(command):
         return False
     rest = re.sub(r"^\s*&\s*", "", command, count=1)
-    return not _CHAINING.search(rest)
+    return not _CHAINING.search(rest) and not _REDIRECT_INTO_PROTECTED.search(rest)
 
 
 def _strings(value) -> list[str]:
@@ -75,30 +85,31 @@ def _emit_deny() -> None:
     )
 
 
+def _decide(payload: object, raw: str) -> bool:
+    """True to deny. Raises on malformed input; the caller fails closed on a match."""
+    if not isinstance(payload, dict):
+        return protected(raw)
+    tool = payload.get("tool_name", "")
+    tool_input = payload.get("tool_input") or {}
+    if not isinstance(tool_input, dict):
+        return protected(raw)
+    if isinstance(tool, str) and tool in SHELL_TOOLS:
+        command = tool_input.get("command", "")
+        if not isinstance(command, str):
+            return protected(raw)
+        if not protected(command):
+            return False
+        return not allowed_command(command)
+    return any(protected(s) for s in _strings(tool_input))
+
+
 def main() -> int:
     raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
     try:
-        payload = json.loads(raw)
-    except ValueError:
-        if protected(raw):
-            _emit_deny()
-        return 0
-    if not isinstance(payload, dict):
-        return 0
-    tool = payload.get("tool_name", "")
-    tool_input = payload.get("tool_input") or {}
-    if tool in SHELL_TOOLS:
-        command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
-        if not protected(command):
-            return 0
-        try:
-            if allowed_command(command):
-                return 0
-        except Exception:  # noqa: BLE001  fail closed on a match
-            pass
-        _emit_deny()
-        return 0
-    if any(protected(s) for s in _strings(tool_input)):
+        deny = _decide(json.loads(raw), raw)
+    except Exception:  # noqa: BLE001  fail closed on a match, open otherwise
+        deny = protected(raw)
+    if deny:
         _emit_deny()
     return 0
 

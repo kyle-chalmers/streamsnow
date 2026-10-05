@@ -64,6 +64,24 @@ def _denied(out: str) -> bool:
             },
         ),
         ("Bash", {"command": "streamsnow ci-key create --dir $(echo ~/.streamsnow-ci)"}),
+        (
+            "Bash",
+            {"command": "streamsnow ci-key push >(cat ~/.streamsnow-ci/secrets/SNOWFLAKE_ACCOUNT)"},
+        ),
+        (
+            "PowerShell",
+            {
+                "command": "streamsnow ci-key push (Get-Content ~/.streamsnow-ci/secrets/SNOWFLAKE_ACCOUNT)"
+            },
+        ),
+        (
+            "PowerShell",
+            {"command": "streamsnow ci-key push @(gc ~/.streamsnow-ci/secrets/SNOWFLAKE_ACCOUNT)"},
+        ),
+        (
+            "Bash",
+            {"command": "streamsnow ci-key push > ~/.streamsnow-ci/secrets/SNOWFLAKE_ACCOUNT"},
+        ),
     ],
 )
 def test_denied(tool, tool_input):
@@ -108,7 +126,47 @@ def test_allowed(tool, tool_input):
 
 def test_non_ascii_payload_decodes():
     assert _run("Read", {"file_path": "/repo/café/README.md"}) == ""
-    assert _denied(_run("Read", {"file_path": "/Users/zoë/.streamsnow-ci/x"}))
+    assert _denied(_run("Read", {"file_path": "/home/zoë/.streamsnow-ci/x"}))
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"tool_name": "Bash", "tool_input": {"command": ["cat", "~/.streamsnow-ci/x"]}},
+        {"tool_name": "Bash", "tool_input": {"command": None, "note": "~/.streamsnow-ci/x"}},
+        {"tool_name": ["Read"], "tool_input": {"file_path": "~/.streamsnow-ci/x"}},
+        {"tool_name": {"a": 1}, "tool_input": {"file_path": "~/.streamsnow-ci/x"}},
+        ["Read", "~/.streamsnow-ci/x"],
+        "~/.streamsnow-ci/x",
+        {"tool_name": "Bash", "tool_input": "cat ~/.streamsnow-ci/x"},
+        {"tool_name": "PowerShell", "tool_input": ["cat", "~/.streamsnow-ci/x"]},
+    ],
+)
+def test_malformed_payload_naming_the_key_dir_is_denied(payload):
+    proc = subprocess.run(
+        [sys.executable, str(HOOK)], input=json.dumps(payload).encode("utf-8"), capture_output=True
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert _denied(proc.stdout.decode("utf-8").strip())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"tool_name": "Bash", "tool_input": {"command": ["ls", "-la"]}},
+        {"tool_name": ["Read"], "tool_input": {"file_path": "/repo/README.md"}},
+        ["Read", "/repo/README.md"],
+        "just a string",
+        {"tool_name": "Bash", "tool_input": "ls"},
+        None,
+    ],
+)
+def test_malformed_payload_not_naming_the_key_dir_passes(payload):
+    proc = subprocess.run(
+        [sys.executable, str(HOOK)], input=json.dumps(payload).encode("utf-8"), capture_output=True
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.decode("utf-8").strip() == ""
 
 
 def test_unparseable_payload_naming_the_key_dir_is_denied():
