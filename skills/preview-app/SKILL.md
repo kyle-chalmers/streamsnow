@@ -1,6 +1,6 @@
 ---
 name: preview-app
-description: Run an app locally against live Snowflake so the user can see it in the browser, wiring up secrets.toml first if missing. Use when the user says "preview my app", "run my app", "let me see it in the browser", or after /start-app scaffolds an app.
+description: Run an app locally against live Snowflake so the user can see it in the browser, wiring up secrets.toml first if missing. Use when the user says "preview my app", "run my app", "let me see it in the browser", or after /build-app scaffolds an app.
 argument-hint: "<slug>"
 allowed-tools: [Bash, Read, Write, Edit]
 ---
@@ -33,7 +33,7 @@ first script run finishes; data errors surface in the browser and in `logs`, not
 
 ## Steps
 
-1. **Resolve the slug.** Named → use it; fresh from a `/start-app` scaffold → that app; otherwise
+1. **Resolve the slug.** Named → use it; fresh from a `/build-app` scaffold → that app; otherwise
    list `apps/*/` and ask. Confirm `apps/<slug>/` exists.
 2. **Verify prereqs once per session** with `streamsnow doctor`; anything missing → offer
    `/onboard` rather than launching into a broken environment.

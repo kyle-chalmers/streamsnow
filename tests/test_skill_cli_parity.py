@@ -99,6 +99,6 @@ def test_every_cited_streamsnow_verb_exists(path: Path):
 
 def test_scan_actually_sees_verbs():
     """Guard the regex: the front-door skill must cite at least the core verbs."""
-    text = (REPO_ROOT / "skills" / "start-app" / "SKILL.md").read_text(encoding="utf-8")
+    text = (REPO_ROOT / "skills" / "build-app" / "SKILL.md").read_text(encoding="utf-8")
     seen = {m.group(1) for m in _CALL_RE.finditer(text)}
     assert {"doctor", "validate-app"} <= seen

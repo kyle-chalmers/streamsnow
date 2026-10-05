@@ -17,7 +17,7 @@ COMMANDS_DIR = REPO_ROOT / "commands"
 PLUGIN_MANIFEST = REPO_ROOT / ".claude-plugin" / "plugin.json"
 
 EXPECTED_SKILLS = {
-    "start-app",
+    "build-app",
     "onboard",
     "review-app",
     "audit-lineage",
@@ -28,16 +28,18 @@ EXPECTED_SKILLS = {
     "migrate-app",
 }
 
-# Retired v0.2 names -> the surface that replaced them. The alias stubs were
-# removed in 0.7.3; the names stay here so nothing re-introduces them.
+# Retired names -> the surface that replaced them. The v0.2 alias stubs were
+# removed in 0.7.3, and /start-app became /build-app in 0.8.0; the names stay
+# here so nothing re-introduces them.
 RETIRED_NAMES = {
-    "new-app": "/start-app",
-    "refine-requirements": "/start-app --spec",
-    "add-page": "/start-app",
+    "new-app": "/build-app",
+    "refine-requirements": "/build-app --spec",
+    "add-page": "/build-app",
     "apply-review": "/review-app --fix",
     "auto-review-app": "/review-app --auto",
     "sql-review": "/review-app --sql",
     "deep-dive-data": "/audit-lineage",
+    "start-app": "/build-app",
 }
 
 _LINK_RE = re.compile(r"\]\(([^)#]+\.md)\)")

@@ -14,13 +14,14 @@ starting MIGRATION.md.
 
 | Custom skill | Plugin equivalent | Notes |
 |---|---|---|
-| `start-app` | **`/start-app`** | Same front-door idea; the plugin version also owns spec + scaffold + pages directly |
-| `refine-requirements` | `/start-app --spec` | Ticket ingestion is generic; a tracker-specific ingest (e.g. a Jira project key) stays a local note |
-| `backfill-requirements` | `/start-app --spec <slug>` (automatic backfill) | Upstreamed in v0.3 — the plugin detects existing source and backfills, `(inferred)` markers included |
-| `new-app` | `/start-app` (scaffold phase) | `streamsnow new` replaces the local Copier flow |
-| `add-page` | `/start-app` (build phase) | Resumes into the build phase for an existing app |
+| `start-app` | **`/build-app`** | Same front-door idea (the plugin's `/start-app`, renamed `/build-app` in 0.8.0); it also owns spec + scaffold + pages directly |
+| `refine-requirements` | `/build-app --spec` | Ticket ingestion is generic; a tracker-specific ingest (e.g. a Jira project key) stays a local note |
+| `backfill-requirements` | `/build-app --spec <slug>` (automatic backfill) | Upstreamed in v0.3 — the plugin detects existing source and backfills, `(inferred)` markers included |
+| `new-app` | `/build-app` (scaffold phase) | `streamsnow new` replaces the local Copier flow |
+| `add-page` | `/build-app` (build phase) | Resumes into the build phase for an existing app |
 | `onboard` | **`/onboard`** | Restored as its own skill in 0.8.0 (it was `/start-app --setup` from 0.3 to 0.7). Same doctor-driven walkthrough, now staged, with the Snowflake admin step |
 | `/start-app --setup`, `/start-app adopt` | `/onboard` | Removed from `/start-app` in 0.8.0 |
+| `/start-app` | `/build-app` | Renamed in 0.8.0 |
 | `review-app` | **`/review-app`** | Same five dimensions |
 | `apply-review` | `/review-app --fix` | Same A/B/C bucketing, atomic commits |
 | `auto-review-app` | `/review-app --auto` | Same convergence loop |
@@ -56,7 +57,7 @@ at the verb:
 | `check_dependency_vulns.py` + `osv_allowlist.json` | `streamsnow check dependency-vulns` | Same allowlist filename, discovered beside the config; `--best-effort` for pre-commit, fail-closed in CI |
 | `check_tombstones.py` + a tombstone registry | `streamsnow check tombstones` (+ `--drop-sql` in deploy) | Registry standardized at `deploy/tombstones.yml` |
 | `check_branding_parity.py` | `streamsnow check branding-parity` | Keyed on the `_BRANDING_VERSION` stamp, not file diffing |
-| a `REQUIREMENTS.md` §11 validator | `streamsnow check requirements` | Validates exactly what `/start-app` resumes from |
+| a `REQUIREMENTS.md` §11 validator | `streamsnow check requirements` | Validates exactly what `/build-app` resumes from |
 | manifest/artifacts populater | `streamsnow check artifacts --fix` | Repairs `snowflake.yml` `artifacts:` from disk as a minimal edit |
 | `review_gate.py` | `streamsnow review-gate` | classify / baseline / stamp / stop-hook; the plugin's Stop hook runs the same file |
 | `review_loop.py` | `streamsnow review-loop` | parse / dedup / resolutions / exit-condition / merge |
@@ -104,7 +105,7 @@ a trial run), **extends** (domain-specific variant → keep, note it in AGENTS.m
    shadow the plugin's until you delete them).
 2. **`streamsnow configure`** (≤5 questions) if the repo doesn't have `streamsnow.config.yaml` yet —
    or run `/onboard` and let it inventory + configure + write `MIGRATION.md` for you.
-3. **Trial run:** take ONE real change through `/start-app → /preview-app → /validate-app →
+3. **Trial run:** take ONE real change through `/build-app → /preview-app → /validate-app →
    /review-app → /ship-app` with the plugin versions.
 4. **Delete the shadows** the trial proved covered; keep the extends with a one-line AGENTS.md note
    each; leave unrelated skills alone.

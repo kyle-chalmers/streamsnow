@@ -18,7 +18,7 @@ interpretation of *their* words in real time.
 ## Preflight
 
 1. Confirm `apps/<slug>/streamlit_app.py` exists. If `REQUIREMENTS.md` is missing, offer to
-   backfill it first (`/start-app --spec <slug>`, automatic backfill mode) so scope changes have a
+   backfill it first (`/build-app --spec <slug>`, automatic backfill mode) so scope changes have a
    spec to land in — one confirmation, then proceed.
 2. Confirm a clean working tree (`git status --porcelain apps/<slug>`); otherwise ask to
    stash/commit first — one commit per feedback item only works on a clean tree.
@@ -38,7 +38,7 @@ interpretation of *their* words in real time.
 
 5. **Plan the edits** per bucket (see classification.md): name files and fixes for BUG/POLISH,
    sketch before/after for UX, update the spec **first** for NEW-FEATURE (a whole new page →
-   route to `/start-app <slug>` instead), list every affected file for CROSS-CUTTING. Show the full
+   route to `/build-app <slug>` instead), list every affected file for CROSS-CUTTING. Show the full
    plan; confirm before touching code.
 6. **Apply confirmed items in order, one commit each:** edit → lint (`ruff check` + `ruff format`
    on the app) → stage exactly the touched files → commit
@@ -58,7 +58,7 @@ interpretation of *their* words in real time.
    Snowflake credits on lineage each cycle; never auto-run it (same stance as /ship-app). Declined
    → a single static diff-scoped `/review-app <slug>` pass. `.apps[0].verdict == "trivial"` or
    `.apps[0].reviewed` → no review is owed; skip the follow-up and say why. Skip also when
-   `--no-followup-review` is passed, when only docs/captions changed, or when `/start-app` is
+   `--no-followup-review` is passed, when only docs/captions changed, or when `/build-app` is
    orchestrating (it reviews at its own checkpoint). The gate decides *whether* review is owed —
    never re-derive substantive-vs-trivial by hand.
 

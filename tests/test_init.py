@@ -723,7 +723,7 @@ _REPO_FILES = (
 
 
 def test_init_no_starter_app_writes_repo_files_without_an_app(tmp_path):
-    """The setup skill used to run only `configure`, and `/start-app` then
+    """The setup skill used to run only `configure`, and `/build-app` then
     ran `new`, which writes app files only: a repo with no .gitignore (so a
     secrets.toml could be committed), no hooks, no CI. `init --no-starter-app`
     is the setup verb that writes the governed repo and nothing app-shaped."""
@@ -775,7 +775,7 @@ def test_new_warns_when_repo_governance_files_are_missing(tmp_path, monkeypatch)
     out = " ".join(result.output.split())
     assert "streamsnow init --no-starter-app" in out
     assert ".gitignore" in out and ".pre-commit-config.yaml" in out
-    # /start-app runs this right after scaffolding (skills/start-app/scaffold.md).
+    # /build-app runs this right after scaffolding (skills/build-app/scaffold.md).
     assert "Install the app's packages for local preview:" in out
     assert "apps/sales-order-trends" in out.split("for local preview:")[1]
 
@@ -867,8 +867,8 @@ def test_validate_app_fails_on_the_scaffold_placeholders(tmp_path):
     assert placeholder_findings() == []
 
 
-def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypatch):
-    """The /start-app end state (pages.md § Replace the starter trio): `new`, then the
+def test_build_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypatch):
+    """The /build-app end state (pages.md § Replace the starter trio): `new`, then the
     first real page (with its review_value marker), its query and its index.yaml entry
     replace all three starter files. The app must validate clean, which proves the
     documented replacement leaves nothing dangling (nav entry, artifacts, sql_review)."""
@@ -942,7 +942,7 @@ def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
     # `grep -rn YOUR_TABLE apps/<slug>` must print nothing, but the app's own AGENTS.md
     # names the token in its instructions, so this correct app failed that check.
     assert "YOUR_TABLE" in (a / "AGENTS.md").read_text(encoding="utf-8")
-    pages = (REPO_ROOT / "skills/start-app/pages.md").read_text(encoding="utf-8")
+    pages = (REPO_ROOT / "skills/build-app/pages.md").read_text(encoding="utf-8")
     assert "grep -rn YOUR_TABLE" not in pages
     assert "Then `streamsnow validate-app <slug>` must PASS" in pages
 

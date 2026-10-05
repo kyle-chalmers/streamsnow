@@ -75,7 +75,7 @@ def test_repo_install_lays_out_skills_and_shared_so_links_resolve(tmp_path):
     manifest = json.loads((dest / ags.MANIFEST_NAME).read_text(encoding="utf-8"))
     assert manifest["agent"] == "codex"
     assert "_shared" in manifest["entries"]
-    assert "start-app/SKILL.md" in manifest["files"]
+    assert "build-app/SKILL.md" in manifest["files"]
 
 
 def test_human_only_skills_are_explicit_only_in_codex(tmp_path):
@@ -106,7 +106,7 @@ def test_user_scope_installs_under_home(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     assert ags.main(["install", "--agent", "codex", "--scope", "user"]) == 0
-    assert (home / ".agents" / "skills" / "start-app" / "SKILL.md").is_file()
+    assert (home / ".agents" / "skills" / "build-app" / "SKILL.md").is_file()
 
 
 def test_reinstall_is_a_no_op_and_keeps_the_manifest(tmp_path, capsys):
@@ -114,16 +114,16 @@ def test_reinstall_is_a_no_op_and_keeps_the_manifest(tmp_path, capsys):
     assert ags.main(args) == 0
     assert ags.main(args) == 0
     out = capsys.readouterr().out
-    assert "unchanged  start-app" in out
+    assert "unchanged  build-app" in out
 
 
 def test_refuses_to_overwrite_an_edited_skill_without_force(tmp_path, capsys):
     args = ["install", "--agent", "codex", "--dir", str(tmp_path)]
     assert ags.main(args) == 0
-    edited = tmp_path / ".agents" / "skills" / "start-app" / "SKILL.md"
+    edited = tmp_path / ".agents" / "skills" / "build-app" / "SKILL.md"
     edited.write_text(edited.read_text(encoding="utf-8") + "\nlocal note\n", encoding="utf-8")
     assert ags.main(args) == 1
-    assert "start-app/SKILL.md was edited" in capsys.readouterr().out
+    assert "build-app/SKILL.md was edited" in capsys.readouterr().out
     assert "local note" in edited.read_text(encoding="utf-8")  # nothing written
     assert ags.main([*args, "--force"]) == 0
     assert "local note" not in edited.read_text(encoding="utf-8")
@@ -139,7 +139,7 @@ def test_refuses_a_same_named_folder_it_did_not_write(tmp_path, capsys):
     assert ags.main(args) == 1
     assert "not installed by streamsnow" in capsys.readouterr().out
     assert "description: mine" in (foreign / "SKILL.md").read_text(encoding="utf-8")
-    assert not (tmp_path / ".agents" / "skills" / "start-app").exists()
+    assert not (tmp_path / ".agents" / "skills" / "build-app").exists()
 
 
 def _fake_source(root: Path, skills: list[str]) -> Path:
@@ -155,32 +155,32 @@ def _fake_source(root: Path, skills: list[str]) -> Path:
 
 def test_upgrade_updates_changed_skills_and_removes_retired_ones(tmp_path):
     dest = tmp_path / "dest"
-    old = _fake_source(tmp_path / "v1", ["start-app", "retired-app"])
+    old = _fake_source(tmp_path / "v1", ["build-app", "retired-app"])
     ags.apply_install(ags.plan_install(old, dest, CODEX))
 
-    new = _fake_source(tmp_path / "v2", ["start-app"])
-    (new / "start-app" / "SKILL.md").write_text(
-        "---\nname: start-app\ndescription: v2\n---\n", encoding="utf-8"
+    new = _fake_source(tmp_path / "v2", ["build-app"])
+    (new / "build-app" / "SKILL.md").write_text(
+        "---\nname: build-app\ndescription: v2\n---\n", encoding="utf-8"
     )
     plan = ags.plan_install(new, dest, CODEX)
     assert plan.conflicts == []
-    assert plan.updated == ["start-app"] and plan.removed == ["retired-app"]
+    assert plan.updated == ["build-app"] and plan.removed == ["retired-app"]
     ags.apply_install(plan)
-    assert "v2" in (dest / "start-app" / "SKILL.md").read_text(encoding="utf-8")
+    assert "v2" in (dest / "build-app" / "SKILL.md").read_text(encoding="utf-8")
     assert not (dest / "retired-app").exists()
     assert json.loads((dest / ags.MANIFEST_NAME).read_text(encoding="utf-8"))["entries"] == [
         "_shared",
-        "start-app",
+        "build-app",
     ]
 
 
 def test_a_file_added_inside_an_installed_skill_blocks_the_upgrade(tmp_path):
     dest = tmp_path / "dest"
-    src = _fake_source(tmp_path / "v1", ["start-app"])
+    src = _fake_source(tmp_path / "v1", ["build-app"])
     ags.apply_install(ags.plan_install(src, dest, CODEX))
-    (dest / "start-app" / "team-notes.md").write_text("ours\n", encoding="utf-8")
+    (dest / "build-app" / "team-notes.md").write_text("ours\n", encoding="utf-8")
     plan = ags.plan_install(src, dest, CODEX)
-    assert plan.conflicts == ["start-app/team-notes.md was added after the install"]
+    assert plan.conflicts == ["build-app/team-notes.md was added after the install"]
 
 
 @pytest.mark.parametrize("bad", ["..", "../outside", "/tmp", "a/b", ".", ""])
@@ -188,7 +188,7 @@ def test_a_manifest_entry_outside_the_skills_folder_is_refused(tmp_path, bad):
     # The manifest is committed with the repo, so a crafted entry must never steer
     # a --force upgrade into deleting a folder outside the skills directory.
     dest = tmp_path / "repo" / ".agents" / "skills"
-    src = _fake_source(tmp_path / "v1", ["start-app"])
+    src = _fake_source(tmp_path / "v1", ["build-app"])
     ags.apply_install(ags.plan_install(src, dest, CODEX))
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -204,36 +204,36 @@ def test_a_manifest_entry_outside_the_skills_folder_is_refused(tmp_path, bad):
 
 def test_a_symlinked_skills_folder_is_refused(tmp_path):
     elsewhere = tmp_path / "elsewhere"
-    (elsewhere / "start-app").mkdir(parents=True)
-    (elsewhere / "start-app" / "keep.txt").write_text("keep\n", encoding="utf-8")
+    (elsewhere / "build-app").mkdir(parents=True)
+    (elsewhere / "build-app" / "keep.txt").write_text("keep\n", encoding="utf-8")
     dest = tmp_path / "repo" / ".agents" / "skills"
     dest.parent.mkdir(parents=True)
     dest.symlink_to(elsewhere, target_is_directory=True)
-    src = _fake_source(tmp_path / "v1", ["start-app"])
+    src = _fake_source(tmp_path / "v1", ["build-app"])
     with pytest.raises(ags.AgentSkillsError, match="symbolic link"):
         ags.plan_install(src, dest, CODEX, force=True)
-    assert (elsewhere / "start-app" / "keep.txt").is_file()
+    assert (elsewhere / "build-app" / "keep.txt").is_file()
 
 
 def test_an_upgrade_that_drops_a_file_is_not_drift(tmp_path):
     dest = tmp_path / "dest"
-    old = _fake_source(tmp_path / "v1", ["start-app"])
-    (old / "start-app" / "extra.md").write_text("old recipe\n", encoding="utf-8")
+    old = _fake_source(tmp_path / "v1", ["build-app"])
+    (old / "build-app" / "extra.md").write_text("old recipe\n", encoding="utf-8")
     ags.apply_install(ags.plan_install(old, dest, CODEX))
-    new = _fake_source(tmp_path / "v2", ["start-app"])
+    new = _fake_source(tmp_path / "v2", ["build-app"])
     plan = ags.plan_install(new, dest, CODEX)
     assert plan.conflicts == []
     ags.apply_install(plan)
-    assert not (dest / "start-app" / "extra.md").exists()
+    assert not (dest / "build-app" / "extra.md").exists()
 
 
 def test_a_file_deleted_inside_an_installed_skill_is_drift(tmp_path):
     dest = tmp_path / "dest"
-    src = _fake_source(tmp_path / "v1", ["start-app"])
+    src = _fake_source(tmp_path / "v1", ["build-app"])
     ags.apply_install(ags.plan_install(src, dest, CODEX))
-    (dest / "start-app" / "SKILL.md").unlink()
+    (dest / "build-app" / "SKILL.md").unlink()
     plan = ags.plan_install(src, dest, CODEX)
-    assert "start-app/SKILL.md was deleted after the install" in plan.conflicts
+    assert "build-app/SKILL.md was deleted after the install" in plan.conflicts
 
 
 def test_list_reports_install_state(tmp_path, capsys):
@@ -244,7 +244,7 @@ def test_list_reports_install_state(tmp_path, capsys):
     capsys.readouterr()
     assert ags.main(["list", *base]) == 0
     out = capsys.readouterr().out
-    assert re.search(r"start-app\s+installed\s", out)
+    assert re.search(r"build-app\s+installed\s", out)
     assert "holds the skills from streamsnow" in out
 
 

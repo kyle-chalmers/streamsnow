@@ -2,7 +2,7 @@
 
 The CLI's original ``doctor`` printed a flat pass/fail transcript, which is
 fine for a human at a terminal but opaque to everything else: ``/onboard`` and
-``/start-app``'s preflight, CI bootstrap steps, and "fix then re-check" loops all need to know
+``/build-app``'s preflight, CI bootstrap steps, and "fix then re-check" loops all need to know
 *which* prerequisite failed and what to do about it, without scraping console
 text. This module restructures the same coverage into per-check subresults so
 those callers get machine-readable state and the CLI keeps a human rendering.

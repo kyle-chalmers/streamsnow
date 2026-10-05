@@ -1,6 +1,6 @@
 """Validate the §11 Build Progress block in each app's ``REQUIREMENTS.md``.
 
-§11 is the resume contract between sessions: ``/start-app`` reads the
+§11 is the resume contract between sessions: ``/build-app`` reads the
 ``**Current phase:**`` line to jump back into the lifecycle after a context
 reset, and the *last* line of the ``### Sessions`` log to know the exact next
 command. ``/feedback-app`` and the build phase append to the same log. When a
@@ -46,7 +46,7 @@ from pathlib import Path
 
 _KIND = "requirements"
 
-# The /start-app lifecycle plus the backfill terminal state. Matching is
+# The /build-app lifecycle plus the backfill terminal state. Matching is
 # case-insensitive; trailing punctuation and markdown emphasis are stripped.
 _PHASES = frozenset(
     {
@@ -101,7 +101,7 @@ def check_file(path: Path) -> dict:
                 {
                     "file": str(path),
                     "line": 1,
-                    "detail": "missing `## 11. Build Progress` section — /start-app "
+                    "detail": "missing `## 11. Build Progress` section — /build-app "
                     "cannot resume this app without it (it holds the current phase "
                     "and the session log)",
                 }

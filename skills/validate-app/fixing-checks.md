@@ -40,7 +40,7 @@ artifacts and the config loader rejects them.
 
 **requirements.** `**Current phase:**` must be an exact lifecycle value. Progress narrative
 ("pages 3/5", "QC pending") goes on a `**Phase notes:**` line under it — never appended to the
-phase, which `/start-app` resumes on.
+phase, which `/build-app` resumes on.
 
 **placeholders.** An app file (query, page or `sql_review/index.yaml`) still contains the
 scaffold's `YOUR_TABLE`, or `pages/overview.py` still shows the starter's hard-coded sample metric
@@ -48,7 +48,7 @@ and chart (the block marked `STREAMSNOW_STARTER_PLACEHOLDER`): the starter trio 
 `streamsnow new` (`queries/example_metric.sql`, its `index.yaml` entry and review window, and
 `pages/overview.py`) was never replaced. The sample values never read the query, so repointing
 `YOUR_TABLE` alone does not clear the page. Replace the trio the way
-[start-app's build phase](../start-app/pages.md#replace-the-starter-trio) does, or repoint the query
+[build-app's build phase](../build-app/pages.md#replace-the-starter-trio) does, or repoint the query
 and the `index.yaml` review window at a real table and render the query's results in place of the
 sample block (keep its `review_value("example_metric", …)` wrapper). Never rename the token or delete only the marker to dodge the check:
 CI deploys every app under `apps/`, and this is what stops a placeholder app shipping.

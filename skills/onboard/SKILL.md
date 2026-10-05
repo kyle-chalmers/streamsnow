@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: Get this machine, this repo and its Snowflake account ready for StreamSnow. Detects what is already done and does only what is missing, so it is safe to re-run to ask "am I set up?". Use when the user says "set me up", "onboard", "I just cloned this repo", "is my machine ready", "add StreamSnow to this repo", or "set up Snowflake for StreamSnow", and when /start-app finds the machine or repo isn't ready.
+description: Get this machine, this repo and its Snowflake account ready for StreamSnow. Detects what is already done and does only what is missing, so it is safe to re-run to ask "am I set up?". Use when the user says "set me up", "onboard", "I just cloned this repo", "is my machine ready", "add StreamSnow to this repo", or "set up Snowflake for StreamSnow", and when /build-app finds the machine or repo isn't ready.
 argument-hint: "(none: detects what this machine and repo need)"
 allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion]
 ---
@@ -67,7 +67,7 @@ Only what Stage 1 could not settle:
 ## Done when
 
 Name the end state:
-- **Ready to build and preview:** Stages 1 to 3 pass. Next: `/start-app`.
+- **Ready to build and preview:** Stages 1 to 3 pass. Next: `/build-app`.
 - **Ready to deploy:** Stage 4 passes too.
 
 With only the first, name what is pending ("waiting on your Snowflake admin") and say that
@@ -75,4 +75,4 @@ re-running `/onboard` re-checks.
 
 ## Out of scope
 
-Building an app: `/start-app`. Porting one: `/migrate-app`. Deploying: `/ship-app`.
+Building an app: `/build-app`. Porting one: `/migrate-app`. Deploying: `/ship-app`.

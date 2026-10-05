@@ -138,7 +138,7 @@ Local preview runs the app with the repo's `.venv` (it prefers `.venv/bin/stream
 `.venv\Scripts\streamlit.exe` on Windows). If the repo root has no `.venv`, create it now:
 `uv venv --python 3.11`. One line to the user: "Creating this repo's Python environment, where
 each app's packages get installed." Do not install packages here: the exact versions depend on
-the app's runtime, and `/start-app` installs them right after it scaffolds the app. If `.venv`
+the app's runtime, and `/build-app` installs them right after it scaffolds the app. If `.venv`
 already exists, leave it alone.
 
 ## 2 · Repo configuration + governed repo files
@@ -150,7 +150,7 @@ only, so a repo set up that way has no hooks, no CI and no `.gitignore` (an app'
 missing; the fix is `streamsnow init --no-starter-app`, which runs the config wizard (or reuses an
 existing `streamsnow.config.yaml`) and then writes the governed repo files: `AGENTS.md`,
 `CLAUDE.md`, `.gitignore`, `.pre-commit-config.yaml`, `.github/workflows/`, `README.md` and
-`deploy/tombstones.yml`. It writes no example app; `/start-app` scaffolds the real one with
+`deploy/tombstones.yml`. It writes no example app; `/build-app` scaffolds the real one with
 `streamsnow new`. Which case applies (no config, apps without config, config with missing files)
 is decided in [SKILL.md](SKILL.md) Stage 3.
 
@@ -354,7 +354,7 @@ to the repository the probe found.
 - **Not in Claude Code?** After `init`, `streamsnow agent-skills install --agent codex` copies these
   skills into the repo's `.agents/skills/`, where every teammate's Codex finds them; commit it.
 - `streamsnow init` without the flag also scaffolds an `example-dashboard` starter app. That is
-  the CLI-only path; with Claude the real app comes from `/start-app`, so pass the flag.
+  the CLI-only path; with Claude the real app comes from `/build-app`, so pass the flag.
 - The first deploy needs one-time Snowflake objects that an admin creates: see §2d.
 
 ## 2d · Snowflake admin setup (once per account)
@@ -482,8 +482,8 @@ Everything green, config written, and the governed repo files on disk (`ls AGENT
 .pre-commit-config.yaml` answers). Branch on intent, and let the user choose:
 
 ```
-Building a new dashboard?          → /start-app
-Documenting an existing app?       → /start-app --spec <slug>
+Building a new dashboard?          → /build-app
+Documenting an existing app?       → /build-app --spec <slug>
 Porting an external Streamlit app? → /migrate-app
 Just want to run one locally?      → /preview-app <slug>
 ```
