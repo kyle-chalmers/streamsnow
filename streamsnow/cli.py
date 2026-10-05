@@ -1493,12 +1493,14 @@ def review_gate_cmd(ctx: typer.Context) -> None:
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def sql_review_cmd(ctx: typer.Context) -> None:
-    """Runnable SQL per app page, from sql_review/index.yaml (generate | check).
+    """Runnable SQL per app page, from sql_review/index.yaml (generate | check |
+    probe | run | bench | log).
 
     Each page of an app gets apps/<slug>/sql_review/NN_<page>.sql with one
     runnable section per metric, so a person can trace each visual back to the
     data. `check` is the import-free gate: provenance, review_value markers,
-    the DDL folder, sqlfluff lint and comment rules, coverage."""
+    the DDL folder, sqlfluff lint and comment rules, coverage. `probe`, `run`,
+    `bench` and `log` are the live review the /sql-review skill drives."""
     raise typer.Exit(code=_sql_review_main(list(ctx.args)))
 
 

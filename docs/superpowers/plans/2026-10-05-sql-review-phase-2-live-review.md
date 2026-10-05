@@ -108,3 +108,32 @@ same text serves for agent tools without subagents (`skills/_shared/other-agents
 - Version 0.9.0 in the four version files + template pins `>=0.9,<0.10`.
 - Done when CI is green and one manual live run on a real app produced a log, recorded in the
   PR description (commit, connection name, counts; no data).
+
+## As built (deviations from this plan)
+
+Recorded when phase 2 landed, after a sub-agent review of this plan against the spec, the code
+and read-only probes of a real Snowflake account.
+
+- **Version:** no version bump in the feature PR (the maintainer's call); 0.9.0 ships in its own
+  release PR, with the template pins.
+- **Partitions:** `QUERY_HISTORY_BY_SESSION` has no partition columns. `bench` takes elapsed
+  time and bytes from `SNOWFLAKE.INFORMATION_SCHEMA.QUERY_HISTORY_BY_USER` by query id and the
+  actual partitions scanned and total from `GET_QUERY_OPERATOR_STATS`.
+- **Measuring without rows:** `run` and `bench` wrap a section as `COUNT(*)`, `HASH_AGG` over
+  positional columns sorted by name, and per-column `SUM`, cast to text in Snowflake. Columns
+  come from `SELECT * FROM (<section>) WHERE 1 = 0` plus `DESCRIBE RESULT`, which also replaces
+  per-column `DESCRIBE` as the compile check. `bench` times that wrapper, not the bare query.
+- **Session:** `USE SECONDARY ROLES NONE` after `USE ROLE` (secondary roles would hide a missing
+  grant); the role defaults to `snowflake.roles.ci_role`. `snow sql` runs with
+  `--enable-templating NONE` and reads the script from stdin.
+- **Runs:** every verb writes into `.streamsnow/sql-review/<slug>/<run_id>/` (not optional
+  `--out`), which carries its own `.gitignore`; later verbs take `--run <id>`.
+- **Finding schema:** `page` and `metric` may be null and `object` was added, for object
+  findings. `log --dry-run` validates without writing (the reviewers' verify command).
+- **Privacy:** the committed log shows totals only for a single all-numeric row or 10+ rows.
+- **Agent briefs** live in `skills/sql-review/reviewers/` (shipped by `agent-skills install`)
+  and are mirrored word for word in the plugin's `agents/`, pinned by a test.
+- **Done-when:** the manual live run on a real app could not happen in the implementation
+  session (no Snowflake CLI access there); the maintainer waived it for the merge and does it
+  after. Every SQL shape the verbs emit was validated against Snowflake through a read-only
+  connection instead.

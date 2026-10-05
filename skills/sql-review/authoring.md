@@ -1,13 +1,13 @@
-# `--sql`: build the app's `sql_review/` page files
+# Build or repair an app's `sql_review/` page files
 
 Give every page of `apps/<slug>/` a runnable SQL file, one section per metric, driven by
 `apps/<slug>/sql_review/index.yaml` and `streamsnow sql-review`. **Read-only**: never mutates
 Snowflake, never deploys. The tool owns everything deterministic: rendering, the read-only guard,
 sqlfluff layout, provenance digests, the README tables, the marker and coverage checks. Your
 judgment work is the **index** (which metric each visual is, its sample tokens and binds) and the
-query comments. Data-correctness judgment lives in `/audit-lineage`, code judgment in the review
-pass, the ship gate in `streamsnow validate-app`. This runs only when the user passes `--sql`;
-the review pass does not start it on its own.
+query comments. Data-correctness judgment is the live review that follows
+([SKILL.md](SKILL.md), from step 4), code judgment is `/review-app`, and the ship gate is
+`streamsnow validate-app`.
 
 **`index.yaml` and `queries/*.sql` are the editing surface; a page file never is.** Each
 `sql_review/NN_<page>.sql` carries a provenance digest, and `sql-review check` flags a hand-edited
@@ -67,13 +67,13 @@ regenerated. The folder's own rules are in `apps/<slug>/sql_review/AGENTS.md`.
    index, an unresolved `{TOKEN}`, a surviving bind, more than one statement in a query, or a
    write-shaped statement stops it with nothing written. Fix the index or query, never the output.
 7. `streamsnow sql-review check <slug>` must be clean.
-8. **Live-verify when connected** (`streamsnow doctor` / `snow connection list`): it's a branch,
-   not a gate. Per object in `reads:`, a zero-row resolve probe
-   (`SELECT COUNT(*) FROM <fqn> WHERE 1=0`), and run each section once (`LIMIT` any row-returning
-   probe; no DDL, no writes, nothing outside `governance.schema_allow`). Without a connection,
-   say the sections were generated from static analysis only. Never fabricate column lists.
+8. **Commit the page files** (with `index.yaml`, the markers and the query comments) before the
+   live review: `probe` and `run` refuse page files that do not match what the app runs. Never
+   run sections by hand to test them; `probe` compiles every section and `run` measures it.
+   Without a connection, say the sections were generated from static analysis only. Never
+   fabricate column lists: `probe` reports the real ones.
 9. **Report the coverage delta**: pages and metrics covered, pages and queries still uncovered
-   (`check` names them), declared fragments, and which sections ran live.
+   (`check` names them), and declared fragments.
 
 ## Judgment calls
 
@@ -81,12 +81,12 @@ regenerated. The folder's own rules are in `apps/<slug>/sql_review/AGENTS.md`.
   `reads:` lists all three objects.
 - **No `{TOKEN}`s and no binds in a query** → no `tokens:` or `binds:` needed. That's fine.
 - **Zero rows in the review window** is a finding to report (the UI may render empty), not an
-  error to fix here: route the judgment to `/audit-lineage`.
+  error to fix here: the page reviewer judges it from the `run` result.
 
 ## Edge cases
 
-- **Auth expires mid-run:** finish the rest static-only, say which sections did not run, and how
-  to finish (`snow connection test`, re-run step 8).
+- **Auth expires mid-run:** the live command exits 2 and names the failure; reconnect
+  (`snow connection test`) and re-run it with the same `--run <run_id>`.
 - **"Does not exist or not authorized" on a probe:** either genuinely missing or the role can't see
   it: run `streamsnow check schema-refs apps/<slug>` to confirm the reference is allowed, check
   grants, and report it rather than guessing columns.

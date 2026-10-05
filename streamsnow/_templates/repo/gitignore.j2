@@ -17,9 +17,13 @@ apps/*/.review/
 # Playwright CLI snapshots and logs, if a walk runs outside .review/
 .playwright-cli/
 
-# Local preview lifecycle state + logs (streamsnow preview). Only preview/ —
-# .streamsnow/overlays/ is COMMITTED repo-owned skill augmentation.
+# Local preview lifecycle state + logs (streamsnow preview). Only preview/ and
+# sql-review/ are ignored: .streamsnow/overlays/ is COMMITTED repo-owned skill
+# augmentation.
 .streamsnow/preview/
+# Live SQL review evidence (streamsnow sql-review probe/run/bench): aggregates
+# only, never committed. The committed record is apps/<slug>/sql_review/review_log/.
+.streamsnow/sql-review/
 
 # Local-only working notes (handoffs, evidence, drafts): never committed
 .internal/

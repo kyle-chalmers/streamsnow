@@ -25,8 +25,8 @@ starting MIGRATION.md.
 | `review-app` | **`/review-app`** | Same five dimensions |
 | `apply-review` | `/review-app --fix` | Same A/B/C bucketing, atomic commits |
 | `auto-review-app` | `/review-app --auto` | Same convergence loop |
-| `sql-review` | `/review-app --sql` | Runnable SQL per page, one section per metric, from `sql_review/index.yaml` |
-| `deep-dive-data` | **`/audit-lineage`** | Renamed; same bounded read-only tracing. Warehouse-specific rules (e.g. an environment-specific schema helper, an intermediate-layer deploy note) stay local |
+| `sql-review` | **`/sql-review`** (or `/review-app --sql`) | Runnable SQL per page from `sql_review/index.yaml`, then the live review and its signed log |
+| `deep-dive-data` | **`/sql-review`** | `/audit-lineage` until 0.8; now part of the live SQL review. Warehouse-specific rules (e.g. an environment-specific schema helper, an intermediate-layer deploy note) stay local |
 | `feedback-app` | `/build-app <slug> --feedback` | Upstreamed in v0.3 as `/feedback-app`; folded into `/build-app` after 0.8.0. Same classification buckets and per-item commits; fixes beyond one file go through the build and verify phases |
 | `preview-app` | **`/preview-app`** | Unchanged surface |
 | `validate-app` | **`/validate-app`** | The plugin's gate is `streamsnow validate-app`; a local `--pr` checklist variant is an *extends*, keep it if you use it |
@@ -61,7 +61,7 @@ at the verb:
 | manifest/artifacts populater | `streamsnow check artifacts --fix` | Repairs `snowflake.yml` `artifacts:` from disk as a minimal edit |
 | `review_gate.py` | `streamsnow review-gate` | classify / baseline / stamp / stop-hook; the plugin's Stop hook runs the same file |
 | `review_loop.py` | `streamsnow review-loop` | parse / dedup / resolutions / exit-condition / merge |
-| a sql-review generator + manifests dir | `streamsnow sql-review` | generate / check; one `apps/<slug>/sql_review/index.yaml` per app replaces per-feature manifests |
+| a sql-review generator + manifests dir | `streamsnow sql-review` | generate / check (live: probe / run / bench / log); one `apps/<slug>/sql_review/index.yaml` per app replaces per-feature manifests |
 | an entrypoint/nav extractor | `streamsnow nav <slug>` | AST-based; JSONL or `--json-array` |
 | a background preview launcher | `streamsnow preview start\|status\|stop\|logs` | State under `.streamsnow/` (gitignored) |
 | migrate-app detection scripts | `streamsnow migrate <verb>` | preflight / scan-hardfails / translate-deps / graft-plan / scan-imports / scan-conformance / scan-inline-sql |
@@ -79,7 +79,7 @@ encodes *your* organization:
   spec ingestion and issue filing.
 - **Warehouse-specific data rules** — named schemas' semantics (a source-system schema helper, an
   intermediate layer's deploy ownership), soft-delete flag conventions beyond the generic patterns
-  `/audit-lineage` already flags.
+  `/sql-review` already flags.
 - **Company governance values** — your real database/schema/role names live in
   `streamsnow.config.yaml`, never in skills.
 - **Repo-housekeeping checks** — a `check_root_files.py` (allowlist of files
@@ -112,7 +112,8 @@ a trial run), **extends** (domain-specific variant → keep, note it in AGENTS.m
 5. **Old names are gone.** The pre-0.3 aliases (`/new-app`, `/refine-requirements`,
    `/add-page`, `/auto-review-app`, `/sql-review`, `/apply-review`,
    `/deep-dive-data`) were removed in 0.7.3; use the plugin equivalents in the table above, and
-   update any docs or scripts that still call the old names.
+   update any docs or scripts that still call the old names. `/onboard` (0.8) and `/sql-review`
+   (after 0.8) came back as new skills; `/audit-lineage` is now part of `/sql-review`.
 
 ## Adoption knobs added in 0.7
 

@@ -1,6 +1,6 @@
 # cross-agent-review
 
-Purpose: fan one qualitative review prompt to external AI CLIs (`agy`, `codex`) **in parallel** with the host agent's own reviewers (Claude Code: Task subagents), then merge all findings into one attributed list. This is a contract that /review-app and /audit-lineage read and follow — not an invocable skill. It never blocks: `streamsnow validate-app` is the only deterministic PASS/FAIL gate; everything here is judgment that a human decides on.
+Purpose: fan one qualitative review prompt to external AI CLIs (`agy`, `codex`) **in parallel** with the host agent's own reviewers (Claude Code: Task subagents), then merge all findings into one attributed list. This is a contract that /review-app and /sql-review read and follow — not an invocable skill. It never blocks: `streamsnow validate-app` is the only deterministic PASS/FAIL gate; everything here is judgment that a human decides on.
 
 ## When it runs
 
@@ -46,7 +46,7 @@ Build **one** review prompt string (the caller supplies it — the same prompt i
 
 Give each external CLI a generous wall-clock budget (180s shown). On timeout or non-zero exit, drop that reviewer's output, note `<cli> review skipped (timeout/error)`, and continue — partial coverage beats a stalled review.
 
-All reviewers are read-only: they critique source, they do not edit it. Any live-DB lineage step stays inside /audit-lineage and uses `snow sql` (read-only, bounded) — never delegated to an external CLI.
+All reviewers are read-only: they critique source, they do not edit it. Any live-DB step stays inside /sql-review and goes through the `streamsnow sql-review` commands (read-only, guarded) — never delegated to an external CLI.
 
 ## Finding format (every reviewer emits this)
 
@@ -65,6 +65,6 @@ All reviewers are read-only: they critique source, they do not edit it. Any live
 
 ## Contract for callers
 
-- /review-app and /audit-lineage call this recipe, supply the prompt + dimensions, and receive one merged finding list.
+- /review-app and /sql-review call this recipe, supply the prompt + dimensions, and receive one merged finding list.
 - The merged list is qualitative only — it advises, it never gates a ship. Mechanical auto-fixes flow on to /review-app --fix; judgment items go to the user.
 - Output schema is stable across reviewer count so downstream skills need no special-casing for the cross-agent case.
