@@ -1,0 +1,106 @@
+name: Bug report
+description: StreamSnow did something wrong (a command, check, template, skill or hook).
+title: "[bug]: "
+labels: ["type:bug", "status:needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. A complete report gets fixed fastest:
+        new issues are triaged automatically, and an incomplete one is labeled
+        `status:needs-info` until the missing details arrive.
+
+        **Never paste credentials, private keys, Snowflake account identifiers or real data.**
+        A fictional example is enough. Security problems go to
+        [private reporting](https://github.com/kyle-chalmers/streamsnow/security/advisories/new) instead.
+  - type: input
+    id: version
+    attributes:
+      label: StreamSnow version
+      description: Output of `streamsnow --version`.
+      placeholder: "streamsnow 0.7.6"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is StreamSnow installed?
+      multiple: true
+      options:
+        - PyPI CLI (uv tool / uvx / pip)
+        - Claude Code plugin
+        - Agent skills for Codex or another agent (agent-skills install)
+        - From a git checkout
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows (native)
+        - Windows (WSL)
+        - CI runner
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - CLI command
+        - Governance check (streamsnow check ...)
+        - Review (sql-review / review-gate / review-loop)
+        - Scaffolding or templates (init / new / update)
+        - Deploy (deploy-sql / deploy-setup / ci-key / verify-deploy)
+        - Preview
+        - doctor / configure / onboarding
+        - migrate
+        - Plugin skill
+        - Plugin hook
+        - Docs
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands or skill invocations, in order.
+      placeholder: |
+        1. streamsnow init --config streamsnow.config.yaml --dir demo --app sales
+        2. streamsnow check schema-refs apps
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the full error or the relevant output.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config (redacted)
+      description: The runtime and deploy-source parts of `streamsnow.config.yaml`, with account names, hosts and secrets removed.
+      render: yaml
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: This report contains no credentials, private keys, Snowflake account identifiers or real data.
+          required: true
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
