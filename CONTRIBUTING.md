@@ -4,7 +4,7 @@ Thanks for your interest! StreamSnow is in early, active development.
 
 ## Mission first
 
-Every change is judged against the mission, vision and eight principles at the
+Every change is judged against the mission, vision and nine principles at the
 top of the [README](README.md). Two of them are worth restating here because
 they decide most reviews: **faithful to a real fleet** (a check that fails a
 well-run production app is a defect in the check until proven otherwise —
