@@ -33,7 +33,7 @@ The trust rules at the top of [setup.md](setup.md) apply throughout.
 3. With any Snowflake access: the read-only investigation (setup.md §2b), including the
    admin check (setup.md §2d step 1).
 4. One batched approval for every missing tool, then install one at a time and re-run
-   doctor after each (setup.md §0b and §1).
+   doctor after each (setup.md §0b and §1). If `snow` was just installed or fixed, redo step 3.
 5. The project Python environment (setup.md §1c) and the browser check (setup.md §1b).
 6. Add the plugin to the repo's Claude settings when missing (setup.md §2e).
 
@@ -54,6 +54,7 @@ Only what Stage 1 could not settle:
   `streamsnow init --no-starter-app` (setup.md §2c).
 - Apps, no config: the adopt flow ([adopt.md](adopt.md)).
 - Config present and doctor's `repo-files` lists missing files: `init --no-starter-app` writes only those.
+- A non-default connection: choose how local preview reads it (setup.md §3).
 - Then `pre-commit install`, and doctor until every required row passes. Show the tree and the result.
 
 ## Stage 4 · Finish what waits on others
@@ -61,8 +62,7 @@ Only what Stage 1 could not settle:
 1. Snowflake admin setup when not confirmed (setup.md §2d): `streamsnow ci-key create`, the
    admin file in `.internal/`, the hand-off. Never run the admin SQL.
 2. Once the admin objects are confirmed: `streamsnow ci-key push` (setup.md §2e).
-3. A non-default connection: choose how local preview reads it (setup.md §3).
-4. Offer to commit the new repo files and `.claude/settings.json`.
+3. Offer to commit the new repo files and `.claude/settings.json`.
 
 ## Done when
 

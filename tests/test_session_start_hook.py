@@ -28,6 +28,7 @@ def _run(project_dir: Path, *, with_cli: bool) -> tuple[str, float]:
         "PATH": "/usr/bin:/bin",  # no streamsnow on PATH unless we add a fake one
         "CLAUDE_PROJECT_DIR": str(project_dir),
         "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "GIT_CONFIG_NOSYSTEM": "1",  # a system core.hooksPath must not move the hook
     }
     if with_cli:
         fake_bin = project_dir / "fakebin"
@@ -134,3 +135,12 @@ def test_configured_banner_lists_onboard(tmp_path):
     (tmp_path / "streamsnow.config.yaml").write_text("schema_version: 1\n", encoding="utf-8")
     out, _ = _run(tmp_path, with_cli=True)
     assert "/onboard" in out
+
+
+def test_disabled_plugin_gets_no_nudge(tmp_path):
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text(
+        '{"enabledPlugins": {"streamsnow@streamsnow": false}}', encoding="utf-8"
+    )
+    out, _ = _run(tmp_path, with_cli=True)
+    assert out == ""

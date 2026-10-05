@@ -849,6 +849,7 @@ def new(
         "(if this repo already has a .venv, run only the part after &&)",
         markup=False,
         highlight=False,
+        soft_wrap=True,  # never break the command mid-line; it gets pasted
     )
     console.print(
         f"Next: streamsnow validate-app {slug}, then add {slug} to README.md's Apps table "

@@ -17,7 +17,7 @@ if [ ! -f "$root/streamsnow.config.yaml" ]; then
     exit 0
   fi
   # The plugin is enabled for this repo, but the repo isn't set up yet.
-  if grep -q 'streamsnow@streamsnow' "$root/.claude/settings.json" 2>/dev/null; then
+  if grep -q '"streamsnow@streamsnow"[[:space:]]*:[[:space:]]*true' "$root/.claude/settings.json" 2>/dev/null; then
     echo "StreamSnow ${ver:-?}: StreamSnow is enabled here but the repo isn't set up yet: run /onboard.${cli}"
   fi
   exit 0

@@ -90,3 +90,17 @@ def test_scaffold_installs_the_app_packages():
     scaffold = " ".join(_read("start-app", "scaffold.md").split())
     assert "Install the app's packages for local preview" in scaffold
     assert "/start-app --setup" not in _read("start-app", "spec.md")
+
+
+def test_a_missing_key_never_means_a_new_key():
+    flat = " ".join(SETUP.split())
+    assert "never run `ci-key create` on your own" in flat
+
+
+def test_token_users_never_paste_the_token():
+    assert "--token-file-path" in SETUP
+
+
+def test_walkthrough_cd_runs_in_a_subshell():
+    walk = _read("_shared", "playwright-walkthrough.md")
+    assert "(cd D && " in walk and "`cd D &&" not in walk

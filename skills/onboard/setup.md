@@ -123,7 +123,7 @@ so app walkthroughs work later."
   (no sudo needed). Ignore the CLI's update and install banners; never install `@latest` or
   globally.
 - Smoke test from a temporary directory, so no CLI files land in the repo:
-  `cd "$(mktemp -d)" && P -s=streamsnow-check open about:blank --browser=chromium --idle-timeout=60000`,
+  `(cd "$(mktemp -d)" && P -s=streamsnow-check open about:blank --browser=chromium --idle-timeout=60000)`,
   then `P -s=streamsnow-check close`. Report "browser tool works" in one line.
 - On Linux or WSL, a launch that fails on missing system libraries needs one command the user runs
   (it asks for their password): `sudo npx -y @playwright/cli@<that version> install-browser --with-deps chrome-for-testing`.
@@ -209,7 +209,7 @@ then needs the per-app `secrets.toml` override from step 3.
 | A default `snow` connection (`snow-key-file` in `streamsnow doctor --format json` names it) | Use it. Confirm with the user that it is the account these apps are for. |
 | `snow` connections, none of them default | List the names only: `snow connection list --format json \| python3 -c "import json,sys; [print(r.get('connection_name'), r.get('is_default')) for r in json.load(sys.stdin)]"`. Ask which one is this account. Making it the default (`snow connection set-default <name>`) repoints every tool that reads the default, so ask before running it. |
 | No `snow` connection, but a Snowflake MCP server or a dbt profile | Investigate through those (2b). Then offer to add a `snow` connection as below, since local preview needs one. |
-| No Snowflake access on this machine | Ask (Stage 2): "Should I set up the connection for you, or would you rather do it yourself and I guide you?" Then ask how they sign in: SSO (`--authenticator externalbrowser`), a key pair (`--private-key-file <path>` with `--authenticator SNOWFLAKE_JWT`), or a programmatic access token. **I set it up for you:** they give the account identifier (Snowsight's account menu, bottom left, under account details) and username as answers; run `snow connection add --connection-name <slug> --account <account> --user <user> --authenticator <method> --default --no-interactive` (drop `--default` to leave their current default alone), then `snow connection test -c <slug>`, and tell them to approve in the browser window that opens. The account and username then appear in the chat; they are not secrets. **I'll guide you:** have them run `snow connection add --connection-name <slug> --default` in their own terminal with only the sign-in flag, and explain each prompt it asks. Either way, re-run the investigation with the new connection. |
+| No Snowflake access on this machine | Ask (Stage 2): "Should I set up the connection for you, or would you rather do it yourself and I guide you?" Then ask how they sign in: SSO (`--authenticator externalbrowser`), a key pair (`--private-key-file <path>` with `--authenticator SNOWFLAKE_JWT`), or a programmatic access token. **I set it up for you:** for a token, they save it to a file themselves and you pass `--authenticator PROGRAMMATIC_ACCESS_TOKEN --token-file-path <path>` (never take the token in chat). They give the account identifier (Snowsight's account menu, bottom left, under account details) and username as answers; run `snow connection add --connection-name <slug> --account <account> --user <user> --authenticator <method> --default --no-interactive` (drop `--default` to leave their current default alone), then `snow connection test -c <slug>`, and tell them to approve in the browser window that opens. The account and username then appear in the chat; they are not secrets. **I'll guide you:** have them run `snow connection add --connection-name <slug> --default` in their own terminal with only the sign-in flag, and explain each prompt it asks. Either way, re-run the investigation with the new connection. |
 | No Snowflake account | Point them to a Snowflake trial. Trial accounts have no compute pools, so expect the `warehouse` runtime. |
 
 Never ask for a password, token or key in chat, and never open or edit the connection files. Don't
@@ -376,7 +376,9 @@ warehouse, the CI and viewer roles, a CI service user and the grants that tie th
    themselves (you never open it; a lost key means rotating).
 4. **The admin file.** Run
    `streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > .internal/admin-setup.sql`
-   (make `.internal/` first; it is gitignored, so the file is never committed). It runs unedited
+   (make `.internal/` first). Repos set up on 0.7.1 or later gitignore `.internal/`; check with
+   `git check-ignore -q .internal/admin-setup.sql` and add `.internal/` to `.gitignore` if it is
+   not, so the file is never committed. It runs unedited
    and is safe to re-run; `streamsnow deploy-setup --teardown` prints the start-fresh reverse.
 5. **Hand it off.** You never run the admin SQL, whoever the user is.
    - **The user is the admin:** copy it for Snowsight: `pbcopy < .internal/admin-setup.sql` on
@@ -403,7 +405,11 @@ everyone who opens this repo is offered the same tools automatically." Then run
 deploy workflow signs in to Snowflake with these GitHub secrets; until they exist, merging
 deploys nothing." Skip this when the row says "not checked" because the user cannot list secrets
 (only someone with access to the repo's settings can set them), when there is no GitHub remote
-yet, or while §2d is not confirmed. Otherwise run `streamsnow ci-key push`: it sets
+yet, or while §2d is not confirmed. Otherwise run `streamsnow ci-key push`. If it says the key
+files are missing (a teammate's machine, or the admin registered someone else's key), never run
+`ci-key create` on your own: a new key would not match the public key Snowflake holds, and every
+deploy would fail. Either push from the machine that made the key, or do §2d steps 3 to 5 so the
+admin registers the new `.pub`. When it runs, it sets
 `SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY_RAW`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE` and then
 `SNOWFLAKE_ACCOUNT`, each straight from its file to `gh` on stdin, and prints only names.
 Setting `SNOWFLAKE_ACCOUNT` switches the deploy job on, so tell the user the next merge to

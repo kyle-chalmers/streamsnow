@@ -30,12 +30,13 @@ session names are machine-wide, and `open` on a name already in use closes that 
 
 1. Make `D = <repo>/apps/<slug>/.review/walkthrough-<ts>/` (an absolute path; `.review/` is
    gitignored). Open the browser from inside it, so the CLI's own `.playwright-cli/` snapshot and
-   log files land there too: `cd D && P S open <base_url> --browser=chromium --idle-timeout=600000`.
+   log files land there too, in a subshell so your own working directory does not move:
+   `(cd D && P S open <base_url> --browser=chromium --idle-timeout=600000)`.
    Always start at the app **root**, never a `/<page>` deep link (Streamlit serves the navigation
    shell from root; a direct page URL can render a stale or unbranded fallback). Then
    `P S resize 1280 4000`: Streamlit scrolls inside its own container, so a full-page screenshot
    of a normal-height window captures only the first screen. Every later command writes to
-   absolute paths under `D`, so your working directory never matters again.
+   absolute paths under `D`, so they work from wherever you are.
 2. If `open` fails because the browser is not installed (the error names `install-browser`), run
    `P install-browser chrome-for-testing` once (no sudo needed) and retry. Still failing: degrade
    as above, with the error's first line.
