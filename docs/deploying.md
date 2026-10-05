@@ -203,6 +203,7 @@ the repo's `.sqlfluff` (created when missing, never overwritten) and the
 `sql-review check --lint-files` pre-commit hook; apps still need their
 `sql_review/` moved to the new format by hand
 ([Auditing a visual](auditing-a-visual.md#for-the-developer-on-the-other-side-of-this)).
+0.9 moves every generated pin to `streamsnow>=0.9,<0.10`.
 
 ## See also
 

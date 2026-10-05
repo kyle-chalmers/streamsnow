@@ -347,7 +347,7 @@ streamsnow update                        # dry-run: governance files the new tem
 streamsnow update --apply                # re-render AGENTS.md, CLAUDE.md, hooks, CI, deploy.yml
 ```
 
-Generated CI and deploy workflows pin `streamsnow>=0.8,<0.9`; bump the pin with
+Generated CI and deploy workflows pin `streamsnow>=0.9,<0.10`; bump the pin with
 `update --apply` when you move to a new minor release (before 1.0, minors can break).
 `claude plugin details streamsnow@streamsnow` lists the 8 skills below.
 

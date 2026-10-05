@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-05
+
 ### Breaking
 
 - **`/audit-lineage` is replaced by `/sql-review`**, with no deprecation release (none is
@@ -75,6 +77,8 @@ entry.
 
 ### Changed
 
+- Generated CI and deploy workflows pin `streamsnow>=0.9,<0.10`; run
+  `streamsnow update --apply` to move an existing repo's pin.
 - **A redesigned README.** It now has a logo with light and dark variants, a nav row, a demo
   GIF, a quick-start callout near the top, a "Without / with StreamSnow" table that pairs real
   production incidents with the check that prevents each, a new "How the repos fit together"
