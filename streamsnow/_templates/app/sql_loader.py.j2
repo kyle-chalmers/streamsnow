@@ -33,8 +33,10 @@ def query_headers() -> list[dict[str, str]]:
     for path in sorted(_QUERIES.glob("*.sql")):
         fields: dict[str, str] = {}
         for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue  # blank lines before or inside the header block
             if not line.startswith("--"):
-                break
+                break  # the first SQL line ends the header
             match = _HEADER_LINE.match(line)
             if match:
                 fields[match.group(1)] = match.group(2).strip()

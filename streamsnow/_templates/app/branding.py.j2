@@ -48,17 +48,18 @@ _UNITS = ((1, ""), (1e3, "k"), (1e6, "M"), (1e9, "B"))
 
 def fmt_number(x: float, decimals: int = 1) -> str:
     """Compact number for cards and labels: 950, 12.3k, 4.5M, 1.2B. Counts stay integers."""
-    sign, n = ("-" if x < 0 else ""), abs(x)
+    n = abs(x)
     # Pick the unit after rounding, so 999_999 reads "1.0M", never "1000.0k".
     unit = 0
     while unit < len(_UNITS) - 1 and round(n / _UNITS[unit][0], decimals) >= 1000:
         unit += 1
     limit, suffix = _UNITS[unit]
     if unit == 0:
-        return (
-            f"{sign}{n:,.0f}" if float(n).is_integer() else f"{sign}{n:,.{decimals}f}"
-        )
-    return f"{sign}{n / limit:.{decimals}f}{suffix}"
+        text = f"{n:,.0f}" if float(n).is_integer() else f"{n:,.{decimals}f}"
+    else:
+        text = f"{n / limit:.{decimals}f}{suffix}"
+    # The sign follows the rounded text: -0.04 reads "0.0", never "-0.0".
+    return f"-{text}" if x < 0 and any(c in "123456789" for c in text) else text
 
 
 def fmt_currency(x: float, symbol: str = "$", decimals: int = 1) -> str:
