@@ -9,20 +9,239 @@ sql_review/index.yaml:
 ``streamsnow sql-review check`` reads these calls without running the page, to
 prove every metric in the index is on its page and every marked visual is in
 the index. Outside review preview mode the call returns its input and does
-nothing else: no query, no file, no import. Streamlit in Snowflake never sets
-the review flag.
+nothing else: no query, no file, no import.
+
+Review preview mode (``streamsnow preview start <slug> --review-capture DIR``)
+records what each visual received, so ``streamsnow sql-review compare`` can
+hold the screen to the reviewed SQL: one small JSON file per marked visual,
+``<page>__<key>.json``, holding the row count, the column totals and hashed
+column names. Never a row, never a column name in clear. Capture problems are
+logged and never break the page. Streamlit in Snowflake gives an app no way to
+set environment variables, so capture never runs there.
 """
 
 import os
 
 # Read once at import. Only review preview mode sets it.
-_CAPTURE = os.environ.get("STREAMSNOW_REVIEW_CAPTURE")
+_CAPTURE = os.environ.get("STREAMSNOW_REVIEW_CAPTURE") or None
+
+# A number as a page shows it ("$12.3K", "45%", "(1,234)"), matched on stripped
+# text of 40 characters or fewer. Only text of this shape is recorded, so a name
+# or an id in a metric never reaches the capture.
+# streamsnow.tools.sql_review_compare holds the same pattern (a test keeps them equal).
+_DISPLAY = (
+    r"^(?=.*\d)\(?[+\-\u2212]?[$\u20ac\u00a3\u00a5]?[+\-\u2212]?"
+    r"(?:\d{1,3}(?:,\d{3})+|\d{1,15})?(?:\.\d+)?\s?[kKmMbBtT%]?\)?$"
+)
+_DISPLAY_MAX = 40
+# The index's metric key shape: it never contains "__", so file names split cleanly.
+_KEY = r"^[a-z][a-z0-9]*(?:_[a-z0-9]+){0,4}$"
 
 
 def review_value(key, value):
     """Return ``value`` unchanged; ``key`` names its metric in sql_review/index.yaml."""
     if _CAPTURE is None:
         return value
-    # Review preview mode: a later StreamSnow release records the value the
-    # visual received here. Until then the flag changes nothing.
+    try:
+        _capture(key, value)
+    except Exception:  # noqa: BLE001  (a capture must never break the page)
+        _warn(key)
     return value
+
+
+def _capture(key, value):
+    import json
+    import re
+    import sys
+
+    if type(key) is not str or not re.match(_KEY, key):
+        _warn(key, "the key is not a metric key from sql_review/index.yaml")
+        return
+    page_path, stem = _page(sys._getframe(2))
+    payload = {"schema": 1, "key": key, "page": stem, "page_path": page_path}
+    payload.update(_summarise(value))
+    name = (stem or "") + "__" + key + ".json"
+    _write_atomic(os.path.join(_CAPTURE, name), json.dumps(payload, indent=2) + "\n")
+
+
+def _page(frame):
+    """The page that called review_value: the innermost app file on the stack.
+
+    ``sql-review check`` requires the call to sit in the page file itself, so
+    the first frame inside the app folder (other than this file) is the page.
+    The stem follows the rule the index uses for its page files.
+    """
+    import re
+
+    root = os.path.realpath(os.path.dirname(__file__))
+    root_key = os.path.normcase(root) + os.sep
+    here = os.path.normcase(os.path.realpath(__file__))
+    while frame is not None:
+        real = os.path.realpath(frame.f_code.co_filename)
+        key = os.path.normcase(real)
+        if key != here and key.startswith(root_key) and key.endswith(".py"):
+            rel = os.path.relpath(real, root).replace(os.sep, "/")
+            base = os.path.splitext(os.path.basename(rel))[0]
+            return rel, re.sub(r"[^a-z0-9]+", "_", base.lower()).strip("_") or "page"
+        frame = frame.f_back
+    return None, None
+
+
+def _classes(value):
+    """(top-level module, class name) for every class of ``value``.
+
+    Classification reads the type, never the instance: on a Snowpark DataFrame
+    an attribute lookup can run a query, and on Snowpark pandas ``.shape`` does.
+    """
+    return {(c.__module__.split(".")[0], c.__name__) for c in type(value).__mro__}
+
+
+def _summarise(value):
+    import decimal
+    import math
+    import re
+
+    kinds = _classes(value)
+    if ("pandas", "Styler") in kinds:
+        value = value.data
+        kinds = _classes(value)
+    if ("pandas", "Series") in kinds:
+        value = value.to_frame()
+        kinds = _classes(value)
+    if ("pandas", "DataFrame") in kinds:
+        return _frame(value)
+    scalar = {"kind": "scalar", "row_count": None, "columns": []}
+    if type(value) is bool or ("numpy", "bool") in kinds or ("numpy", "bool_") in kinds:
+        pass
+    elif issubclass(type(value), int) or ("numpy", "integer") in kinds:
+        return dict(scalar, headline={"value": str(int(value)), "type": "int"})
+    elif issubclass(type(value), float) or ("numpy", "floating") in kinds:
+        number = float(value)
+        text = repr(number) if math.isfinite(number) else None
+        return dict(scalar, headline={"value": text, "type": "float"})
+    elif issubclass(type(value), decimal.Decimal):
+        text = str(value) if value.is_finite() else None
+        return dict(scalar, headline={"value": text, "type": "decimal"})
+    elif issubclass(type(value), str):
+        text = value.strip()
+        shown = text if len(text) <= _DISPLAY_MAX and re.match(_DISPLAY, text) else None
+        return {
+            "kind": "text",
+            "row_count": None,
+            "columns": [],
+            "headline": {"value": shown},
+        }
+    return {
+        "kind": "unsupported",
+        "row_count": None,
+        "columns": [],
+        "headline": {"type": type(value).__name__},
+    }
+
+
+def _frame(df):
+    """Row count, hashed column names and per-column totals: never a row."""
+    import decimal
+
+    # Names collide once normalised ("Orders", "Orders %"): number every repeat
+    # so no total overwrites another, and say which ones compare cannot pair
+    # by name.
+    normals = [_normal(str(column)) for column in df.columns]
+    names = []
+    seen = {}
+    for normal in normals:
+        seen[normal] = seen.get(normal, 0) + 1
+        names.append(normal if seen[normal] == 1 else normal + "#" + str(seen[normal]))
+    collided = [
+        _digest(name)
+        for name, normal in zip(names, normals)
+        if normals.count(normal) > 1
+    ]
+    totals = {}
+    floats = []
+    for i, name in enumerate(names):
+        series = df.iloc[:, i]
+        kind = series.dtype.kind
+        digest = _digest(name)
+        if kind in "iuf":
+            totals[digest] = _number(series.sum(min_count=1))
+            if kind == "f":
+                floats.append(digest)
+        elif kind == "O":
+            values = series.dropna()
+            if len(values) and all(type(v) is decimal.Decimal for v in values):
+                totals[digest] = _number(sum(values, decimal.Decimal(0)))
+    return {
+        "kind": "frame",
+        "row_count": len(df),
+        "columns": [_digest(n) for n in names],
+        "headline": {"totals": totals, "float_columns": floats, "collided": collided},
+    }
+
+
+def _normal(name):
+    import re
+
+    return re.sub(r"[^a-z0-9#]", "", name.casefold())
+
+
+def _digest(name):
+    """A column name, normalised and hashed: pivoted columns can be data values."""
+    import hashlib
+
+    return hashlib.sha256(_normal(name).encode("utf-8")).hexdigest()[:12]
+
+
+def _number(value):
+    import decimal
+    import math
+
+    if issubclass(type(value), decimal.Decimal):
+        return str(value) if value.is_finite() else None
+    try:
+        if issubclass(type(value), int) or ("numpy", "integer") in _classes(value):
+            return str(int(value))
+        number = float(value)
+    except (TypeError, ValueError):  # pandas.NA: the column had no values
+        return None
+    return repr(number) if math.isfinite(number) else None
+
+
+def _write_atomic(path, text):
+    """Replace the capture in one step: Streamlit reruns the page at any time."""
+    import tempfile
+    import time
+
+    folder = os.path.dirname(path)
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", suffix=".part", dir=folder)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:  # Windows: a reader holds the old file open
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _warn(key, reason=None):
+    try:
+        import logging
+        import sys
+
+        why = reason or type(sys.exc_info()[1]).__name__
+        logging.getLogger("streamsnow.review").warning(
+            "review_value(%s): capture skipped: %s", repr(key)[:80], why
+        )
+    except Exception:  # noqa: BLE001, S110  (logging a capture problem must not break it either)
+        pass

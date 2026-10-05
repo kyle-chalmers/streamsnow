@@ -19,8 +19,8 @@ confirmation, safe secrets provisioning, URL surfacing, triage.
 
 - `streamsnow preview start <slug>` (bare `streamsnow preview <slug>` is shorthand for `start`) —
   verifies the entrypoint and port, launches `streamlit run` detached with output to a log, then
-  polls the health endpoint until it answers or the timeout expires. `--port N` if 8501 is busy;
-  `--json` for structured output. Exit 0 = serving; on exit 1 the log tail was **classified**
+  polls the health endpoint until it answers or the timeout expires. `--port N` (`0`: any free),
+  `--json`, `--review-capture DIR` (/sql-review). Exit 0 = serving; on exit 1 the log tail was **classified**
   (missing `secrets.toml`, bad account locator, missing package, port collision,
   session-outside-Snowflake) into an actionable hint — read it before improvising.
 - `streamsnow preview status <slug>` — running/not-running + live health probe; stale state from a

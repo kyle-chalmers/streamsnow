@@ -61,7 +61,7 @@ at the verb:
 | manifest/artifacts populater | `streamsnow check artifacts --fix` | Repairs `snowflake.yml` `artifacts:` from disk as a minimal edit |
 | `review_gate.py` | `streamsnow review-gate` | classify / baseline / stamp / stop-hook; the plugin's Stop hook runs the same file |
 | `review_loop.py` | `streamsnow review-loop` | parse / dedup / resolutions / exit-condition / merge |
-| a sql-review generator + manifests dir | `streamsnow sql-review` | generate / check (live: probe / run / bench / log); one `apps/<slug>/sql_review/index.yaml` per app replaces per-feature manifests |
+| a sql-review generator + manifests dir | `streamsnow sql-review` | generate / check (live: probe / run / bench / compare / log); one `apps/<slug>/sql_review/index.yaml` per app replaces per-feature manifests |
 | an entrypoint/nav extractor | `streamsnow nav <slug>` | AST-based; JSONL or `--json-array` |
 | a background preview launcher | `streamsnow preview start\|status\|stop\|logs` | State under `.streamsnow/` (gitignored) |
 | migrate-app detection scripts | `streamsnow migrate <verb>` | preflight / scan-hardfails / translate-deps / graft-plan / scan-imports / scan-conformance / scan-inline-sql |
