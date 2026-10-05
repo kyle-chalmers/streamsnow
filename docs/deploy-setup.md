@@ -135,7 +135,9 @@ PKCS#8 key pair Snowflake's
 and one file per secret below to `~/.streamsnow-ci` (`--dir` to change it),
 reuses an existing key rather than replacing it, and prints only file names,
 the key's `SHA256:` fingerprint (compare it with `RSA_PUBLIC_KEY_FP` in
-`DESC USER`). The admin script registers the public key.
+`DESC USER`). The admin script registers the public key. Save a copy of the
+private key (`streamsnow_ci_rsa_key.p8`) somewhere safe, such as a password
+manager; if it is lost, make a new pair and re-run the admin script.
 
 Then `streamsnow ci-key push` sets the five secrets from those files, each
 value going straight to `gh secret set` on stdin, `SNOWFLAKE_ACCOUNT` last. It

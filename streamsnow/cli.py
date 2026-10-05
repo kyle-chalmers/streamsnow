@@ -1025,6 +1025,8 @@ def ci_key_create(
     print("  2. Once your admin has run it: streamsnow ci-key push")
     print("     (sets the five GitHub secrets from these files, SNOWFLAKE_ACCOUNT last;")
     print("      no value is ever printed)")
+    print(f"  3. Save a copy of {result.private_key} somewhere safe,")
+    print("     such as a password manager. If it is lost, make a new pair and re-run step 1.")
 
 
 @ci_key_app.command(name="push")

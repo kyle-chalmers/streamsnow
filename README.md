@@ -91,6 +91,10 @@ behalf. Here is exactly what that means for your credentials.
   `~/.streamsnow-ci` and prints only file names and a fingerprint. `streamsnow
   ci-key push` hands each secret to the GitHub CLI on standard input, never on
   the command line, and prints only names.
+- **Save a copy of the private key somewhere safe.** Put
+  `~/.streamsnow-ci/streamsnow_ci_rsa_key.p8` in a password manager or similar
+  store yourself; Claude never opens it. If it is ever lost, make a new pair
+  and re-run the admin script ([rotating the key](SECURITY.md#how-streamsnow-handles-secrets)).
 - **Snowflake gets only the public half of the key.** It goes into the admin
   script, which you or your Snowflake admin run. Claude never runs it and
   creates no Snowflake objects itself.

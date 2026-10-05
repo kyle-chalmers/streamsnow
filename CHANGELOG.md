@@ -46,7 +46,8 @@ All notable changes to StreamSnow are recorded here. This project follows
   takes the whole process tree, since `streamlit.exe` is a launcher whose
   child process holds the port.
 - `ci-key create`'s closing steps point at `ci-key push` instead of a
-  `gh secret set` loop. docs/deploy-setup.md keeps the manual loop for anyone
+  `gh secret set` loop, and remind you to save a copy of the private key
+  somewhere safe, such as a password manager. docs/deploy-setup.md keeps the manual loop for anyone
   who prefers it.
 - **`/start-app --setup` sets the deploy secrets with `ci-key push`.** Claude
   runs `streamsnow ci-key create` and, once your admin has run the admin script,

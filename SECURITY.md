@@ -58,6 +58,8 @@ with one file per secret (mode 600; the private-key entry is a link to the
 `.p8`). `ci-key create` makes the directory at mode 700 (it warns, but does not
 change it, if an existing one is looser), refuses a directory inside a git
 repository, never overwrites an existing key, and never prints a value.
+Save a copy of the `.p8` in a password manager or similar safe store yourself
+(Claude never opens it); a lost key is replaced by rotating, below.
 `ci-key push` reads each file and passes it to `gh secret set` on stdin, and
 never prints a secret value (on a failure it prints gh's error with the
 values redacted); if one fails it stops before `SNOWFLAKE_ACCOUNT`.

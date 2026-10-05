@@ -223,3 +223,4 @@ def test_create_next_block_points_at_push(tmp_path):
     assert res.exit_code == 0, res.output
     assert "streamsnow ci-key push" in res.output
     assert "for s in" not in res.output
+    assert "password manager" in res.output

@@ -332,7 +332,9 @@ to the repository the probe found.
 - The first deploy needs one-time Snowflake objects (database, schema, warehouse, roles, a CI
   service user, grants). `streamsnow deploy-setup --admin` prints the reviewable DDL; surface it
   for the user's Snowflake admin, never run it yourself. You run `streamsnow ci-key create` for the
-  CI key pair (it prints only file names and a fingerprint), then `deploy-setup --admin
+  CI key pair (it prints only file names and a fingerprint) and tell the user, in one line, to
+  save a copy of the `.p8` somewhere safe such as a password manager themselves (you never open
+  it; a lost key means rotating), then `deploy-setup --admin
   --public-key-file <its .pub>` so the file runs unedited; it is safe to re-run, and
   `deploy-setup --teardown` prints the start-fresh reverse.
 
