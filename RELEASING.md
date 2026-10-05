@@ -99,9 +99,9 @@ only when every gate below is true. Track the work in the `1.0.0` milestone.
 
 **Before the 1.0 release candidate:**
 
-- Every planned breaking change has landed, each with its deprecation stub or redirect
-  (for example, retired skill entry points redirect to their replacements, as the 0.7.0
-  alias commands did). Nothing on the stable surface is still expected to move.
+- Every planned breaking change has landed. Nothing on the stable surface is still
+  expected to move, because from 1.0.0 the deprecation policy applies to every rename or
+  removal.
 - Native Windows is finished or explicitly documented as out of scope: the session hook
   (`hooks/session_start.sh`) runs without bash or WSL, and no Windows test is skipped
   without a written reason.
