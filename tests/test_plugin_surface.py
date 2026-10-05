@@ -20,7 +20,7 @@ EXPECTED_SKILLS = {
     "build-app",
     "onboard",
     "review-app",
-    "audit-lineage",
+    "sql-review",
     "feedback-app",
     "preview-app",
     "validate-app",
@@ -29,17 +29,18 @@ EXPECTED_SKILLS = {
 }
 
 # Retired names -> the surface that replaced them. The v0.2 alias stubs were
-# removed in 0.7.3, and /start-app became /build-app in 0.8.0; the names stay
-# here so nothing re-introduces them.
+# removed in 0.7.3, /start-app became /build-app in 0.8.0, and /sql-review
+# replaced /audit-lineage after 0.8.0; the names stay here so nothing
+# re-introduces them.
 RETIRED_NAMES = {
     "new-app": "/build-app",
     "refine-requirements": "/build-app --spec",
     "add-page": "/build-app",
     "apply-review": "/review-app --fix",
     "auto-review-app": "/review-app --auto",
-    "sql-review": "/review-app --sql",
-    "deep-dive-data": "/audit-lineage",
+    "deep-dive-data": "/sql-review",
     "start-app": "/build-app",
+    "audit-lineage": "/sql-review",
 }
 
 _LINK_RE = re.compile(r"\]\(([^)#]+\.md)\)")
@@ -211,3 +212,26 @@ def test_readme_trust_section_matches_the_code():
     )
     security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
     assert "## How StreamSnow handles secrets" in security
+
+
+AGENTS_DIR = REPO_ROOT / "agents"
+
+
+def test_plugin_agents_are_the_sql_review_briefs_word_for_word():
+    """Claude Code runs the reviewers as plugin agents; other agent tools follow
+    the same briefs from skills/sql-review/reviewers/, the only copy
+    `agent-skills install` ships. One text, two places: a test keeps them equal."""
+    briefs = sorted((SKILLS_DIR / "sql-review" / "reviewers").glob("*.md"))
+    agents = sorted(AGENTS_DIR.glob("*.md"))
+    assert [f"sql-review-{b.name}" for b in briefs] == [a.name for a in agents]
+    for brief, agent in zip(briefs, agents, strict=True):
+        text = agent.read_text(encoding="utf-8")
+        assert text.startswith("---\n"), agent.name
+        _, front, body = text.split("---\n", 2)
+        assert re.search(rf"^name: {re.escape(agent.stem)}$", front, re.M), agent.name
+        assert re.search(r"^description: .{40,}", front, re.M), agent.name
+        assert re.search(r"^tools: [A-Za-z, ]+$", front, re.M), agent.name
+        assert set(re.findall(r"^([a-z-]+):", front, re.M)) == {"name", "description", "tools"}
+        assert body.lstrip("\n") == brief.read_text(encoding="utf-8"), agent.name
+        # No relative links: the agents/ copy has no neighbours to point at.
+        assert not _LINK_RE.search(body), agent.name

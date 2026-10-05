@@ -41,8 +41,8 @@ schemas. This page is the runbook for the person who looks at a chart and asks
    section's filter values. The app's `AGENTS.md` has a Data notes section
    (grain, definitions, quirks, when sources load). If the numbers still
    disagree, you have a real finding: file it via `/feedback-app <slug>`
-   (quoting the page file and section tag you ran), or route deeper lineage
-   questions to `/audit-lineage <slug>`.
+   (quoting the page file and section tag you ran), or run the live review,
+   `/sql-review <slug>`, below.
 
 ## What you can trust about these files
 
@@ -100,8 +100,42 @@ every CTE needs a one-line comment above it). Whether a *coverage* gap (a page
 or query `index.yaml` does not account for) fails or only warns is your
 repo's `sql_review.coverage` setting: `warn` by default so a fleet backfills
 on its own schedule, `fail` once coverage is where you want it. `advisory`
-never fails. `/review-app --sql` is the assisted path that builds the index
-and marks the visuals.
+never fails. `/sql-review` (or `/review-app --sql`) is the assisted path that
+builds the index and marks the visuals, then reviews it live.
+
+## The live review: `/sql-review`
+
+`/sql-review <slug>` checks every number against Snowflake and leaves a record
+a person signs. It runs on request and is recommended before a release or a
+deploy; it never blocks one.
+
+1. **Facts, from tools.** `streamsnow sql-review probe <slug>` checks that every
+   object the index names exists, that the app's role has a direct grant on
+   it, that each view in `app_specific_reporting_objects/` matches what is
+   live, and that every section compiles. `streamsnow sql-review run <slug>`
+   runs every section wrapped in an aggregate: the row count, a total per
+   numeric column and an order-insensitive hash come back; rows never do. Both
+   run as the app's CI role with secondary roles off, tag their queries
+   `streamsnow:sql-review:<slug>`, and refuse anything that is not read-only
+   or that reads a denied schema before it is sent.
+2. **Judgment, cited.** Reviewer agents read the page files and those results
+   (one per page, one per reporting object, an optimizer for sections slower
+   than 10 seconds). Every finding cites the ids of the results it rests on, and
+   a verifier in a fresh context tries to refute each one.
+3. **A record, signed.** `streamsnow sql-review log` refuses a finding whose
+   evidence is not in the run, then writes
+   `sql_review/review_log/YYYY-MM-DD_<sha>.md`: the commit, connection, role and
+   warehouse; a table per page (metric, SQL status, rows, headline, screen
+   match, findings); the verified findings by severity; and a sign-off block a
+   person fills in. Headlines show totals only for a single all-numeric row or
+   a result of ten rows or more, never a small-group breakdown. The README's
+   "Latest review" links the newest log.
+
+The run's evidence stays on your machine under `.streamsnow/sql-review/`, which
+ignores itself in git. An optimization is proposed only with
+`streamsnow sql-review bench` showing the rewrite returns the same rows and
+hash, with before and after timings; nobody is ever told to buy a bigger
+warehouse.
 
 **Upgrading from 0.7.** The 0.7 format (`sql_review/manifests/*.json` and
 `*.review.sql` files) was removed in 0.8.0 with no automatic migration.

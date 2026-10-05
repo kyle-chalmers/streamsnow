@@ -1800,6 +1800,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("log", help="Write the committed review log from verified findings.")
     live(p, snowflake=False)
     p.add_argument("--findings", required=True, help="JSON file of verified findings.")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate the findings against the run and print the log; write nothing.",
+    )
     return ap
 
 

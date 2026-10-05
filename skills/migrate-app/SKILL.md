@@ -77,7 +77,7 @@ it documents every verb: when to run it, what its JSON says, the judgment call t
 ## Hand-offs
 
 PASS → /ship-app opens the PR (first-time accounts may need one-time `streamsnow deploy-setup`
-DDL); deeper quality → /review-app + /audit-lineage; an app already in the repo → Step 2 only.
+DDL); deeper quality → /review-app + /sql-review; an app already in the repo → Step 2 only.
 
 ## Done when
 

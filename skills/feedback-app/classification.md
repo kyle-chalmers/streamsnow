@@ -14,7 +14,7 @@ gets updated first.
 ## Classification rules
 
 - **Wrong output beats everything:** if an item is both a UX gripe and a wrong number, it's a BUG
-  first — and wrong numbers may be the warehouse's doing, so consider `/audit-lineage` before
+  first — and wrong numbers may be the warehouse's doing, so consider `/sql-review` before
   patching Python.
 - **Scope smell test:** if fixing it requires a table/chart/filter the spec doesn't mention, it's
   NEW-FEATURE regardless of how the user phrased it.

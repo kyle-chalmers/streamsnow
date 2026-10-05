@@ -1391,6 +1391,11 @@ def cmd_log(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
             )
         )
         return 1
+    if getattr(args, "dry_run", False):
+        print(
+            json.dumps({"ok": True, "run_id": run_dir.name, "dry_run": True, "log": text}, indent=2)
+        )
+        return 0
     sha = str(read_json(run_dir / META).get("commit") or "0" * 7)[:7]
     path = _log_path(app, today, sha, run_dir.name)
     sr._write(path, text)

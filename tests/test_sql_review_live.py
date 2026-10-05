@@ -315,7 +315,9 @@ def test_the_scaffold_placeholder_is_refused(repo: Path) -> None:
 
 def test_a_denied_schema_in_a_section_is_never_sent(repo: Path) -> None:
     cfg = repo / "streamsnow.config.yaml"
-    cfg.write_text(cfg.read_text(encoding="utf-8").replace('["RAW"]', '["REPORTING"]'), encoding="utf-8")
+    cfg.write_text(
+        cfg.read_text(encoding="utf-8").replace('["RAW"]', '["REPORTING"]'), encoding="utf-8"
+    )
     fake = FakeSnow()
     with pytest.raises(live.ToolError, match="denied schema"):
         _live(repo, fake, "run")
@@ -657,3 +659,16 @@ def test_log_without_a_run_step_is_a_tool_error(
 )
 def test_headline_never_shows_a_small_group(entry: dict, shown: str) -> None:
     assert shown in live.headline(entry)
+
+
+def test_log_dry_run_validates_and_writes_nothing(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    run_id = _full_run(repo, capsys)
+    findings = str(_findings_file(tmp_path, [GOOD]))
+    assert _live(repo, FakeSnow(), "log", "--run", run_id, "--findings", findings, "--dry-run") == 0
+    out = _out(capsys)
+    assert out["dry_run"] is True and "## Sign-off" in out["log"]
+    assert not (repo / "apps" / SLUG / "sql_review" / live.REVIEW_LOG_DIR).exists()
+    readme = (repo / "apps" / SLUG / "sql_review" / "README.md").read_text(encoding="utf-8")
+    assert "No live review logged yet." in readme

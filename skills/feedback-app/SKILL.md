@@ -73,7 +73,7 @@ interpretation of *their* words in real time.
 - **Never expand scope silently.** A NEW-FEATURE item updates the spec before any code.
 - **The user's words are the spec for BUG items** — quote them in the commit body so the reviewer
   sees the why.
-- Feedback about wrong *numbers* usually needs evidence, not a guess: offer `/audit-lineage <slug>`
+- Feedback about wrong *numbers* usually needs evidence, not a guess: offer `/sql-review <slug>`
   before "fixing" a calculation the warehouse may be driving.
 
 ## Done when

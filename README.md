@@ -175,7 +175,7 @@ for what differs outside Claude Code.
 ## How the skills fit together
 
 <p align="center">
-  <a href="docs/images/skills-flow.png"><img alt="StreamSnow skills flow: /onboard sets up your machine, repo and Snowflake once (re-run it any time to check); then your idea goes into /build-app, which runs spec and pages, /preview-app, the /validate-app pass/fail gate, and /review-app, stopping for your OK along the way; then you type /ship-app to open the PR. On merge, CI deploys the live app to Snowflake. /migrate-app and /feedback-app both re-enter at /preview-app, so every path passes the /validate-app gate, and /audit-lineage optionally checks numbers against the live warehouse." src="docs/images/skills-flow.png" width="100%"></a>
+  <a href="docs/images/skills-flow.png"><img alt="StreamSnow skills flow: /onboard sets up your machine, repo and Snowflake once (re-run it any time to check); then your idea goes into /build-app, which runs spec and pages, /preview-app, the /validate-app pass/fail gate, and /review-app, stopping for your OK along the way; then you type /ship-app to open the PR. On merge, CI deploys the live app to Snowflake. /migrate-app and /feedback-app both re-enter at /preview-app, so every path passes the /validate-app gate, and /sql-review optionally checks numbers against the live warehouse." src="docs/images/skills-flow.png" width="100%"></a>
 </p>
 
 The source is [docs/images/skills-flow.excalidraw](docs/images/skills-flow.excalidraw);
@@ -321,8 +321,8 @@ lines, with depth in per-skill reference files:
 | `/build-app` | The front door for apps: spec (incl. backfill from existing source) → scaffold → build pages → ship, with checkpoints. Hands off to `/onboard` if the machine or repo isn't set up |
 | `/preview-app` | Run an app locally against live Snowflake |
 | `/validate-app` | The pass/fail check that must be clean before shipping |
-| `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` builds the app's `sql_review/` page files |
-| `/audit-lineage` | Live-warehouse column + lineage verification (read-only, bounded) |
+| `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` runs `/sql-review` |
+| `/sql-review` | Proves an app's numbers against live Snowflake: page files, objects, grants and drift, every section run as aggregates, reviewer agents with a verifier, and a committed review log a person signs |
 | `/feedback-app` | Turn user feedback into classified, atomic-commit fixes |
 | `/ship-app` | Validate-gated stage → commit → push → PR → watch CI |
 | `/migrate-app` | Port an external Streamlit app in (lift, then conform) |
@@ -391,6 +391,13 @@ your repo's call — `sql_review: {coverage: warn | fail}` in `streamsnow.config
 can trace a covered visual back to the data and confirm it — see
 **[Auditing a visual](docs/auditing-a-visual.md)**. 0.8.0 replaced the 0.6/0.7 manifest format with
 no automatic migration (the same page has the upgrade steps).
+
+**`/sql-review <slug>`** is the live review. `streamsnow sql-review probe` and `run` check every
+object, grant and DDL file and run every section against Snowflake as aggregates (row counts,
+totals and a hash, never rows), under the app's role with secondary roles off. Reviewer agents
+judge the SQL and must cite those results; a verifier drops what the evidence does not support;
+`streamsnow sql-review log` writes `sql_review/review_log/YYYY-MM-DD_<sha>.md` with a sign-off
+block for a person. `bench` proves an optimization returns the same result before proposing it.
 
 ## Make it yours — repo overlays (new in 0.6.1)
 

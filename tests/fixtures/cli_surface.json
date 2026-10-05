@@ -378,6 +378,7 @@
       "arguments": [
         "--connection",
         "--dir",
+        "--dry-run",
         "--findings",
         "--format",
         "--lint-files",
