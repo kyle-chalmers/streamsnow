@@ -9,6 +9,7 @@ streamsnow check ...      Run a governance check (e.g. schema-refs)
 streamsnow deploy-setup   Emit the one-time Snowflake DDL for your deploy source
                           (--admin: full bootstrap; --teardown: start-fresh reverse)
 streamsnow ci-key create  Make the CI user's key pair + the deploy secret files
+streamsnow ci-key push    Set the five deploy secrets on GitHub from those files
 streamsnow update         Re-vendor templates/tools and bump the plugin
 """
 
@@ -1021,10 +1022,40 @@ def ci_key_create(
         f"{result.public_key} > admin-setup.sql"
     )
     print("     (review, then run it as ACCOUNTADMIN)")
-    print("  2. In your repo, store the five secrets (values go straight from file to GitHub;")
-    print("     SNOWFLAKE_ACCOUNT last, since it switches the deploy job on):")
-    names = " ".join(_ci_key.SECRET_NAMES)
-    print(f'     for s in {names}; do gh secret set "$s" < "{d}/secrets/$s"; done')
+    print("  2. Once your admin has run it: streamsnow ci-key push")
+    print("     (sets the five GitHub secrets from these files, SNOWFLAKE_ACCOUNT last;")
+    print("      no value is ever printed)")
+
+
+@ci_key_app.command(name="push")
+def ci_key_push(
+    directory: Path = typer.Option(
+        _ci_key.DEFAULT_DIR, "--dir", help="The directory `ci-key create` wrote."
+    ),
+    repo: str = typer.Option(
+        None, "--repo", help="owner/name, when the checkout has several GitHub remotes."
+    ),
+) -> None:
+    """Set the five deploy secrets on GitHub from the files `ci-key create` wrote.
+
+    Each value goes from its file straight to `gh secret set` on stdin, never on
+    the command line, and is never printed. SNOWFLAKE_ACCOUNT goes last because
+    it switches the deploy job on; a failure stops before it.
+    """
+    try:
+        result = _ci_key.push(directory, repo=repo)
+    except _ci_key.CiKeyError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    print(f"Setting the deploy secrets on {result.repo} (SNOWFLAKE_ACCOUNT last):")
+    for name in result.done:
+        print(f"  {name}: set")
+    if result.failed:
+        print(f"  {result.failed}: failed: {result.message}")
+        for name in result.not_attempted:
+            print(f"  {name}: not set (stopped after the failure)")
+        raise typer.Exit(1)
+    print("Done. The next merge to main deploys.")
 
 
 _SSH_GITHUB_RE = re.compile(

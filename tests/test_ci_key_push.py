@@ -142,3 +142,53 @@ def test_repo_flag_is_passed_through(tmp_path):
     for cmd, _ in gh.calls:
         if cmd[1:3] in (["secret", "set"], ["repo", "view"]):
             assert cmd[-2:] == ["--repo", "acme/other"]
+
+
+def _cli(*args: str):
+    from typer.testing import CliRunner
+
+    from streamsnow.cli import app
+
+    return CliRunner().invoke(app, list(args))
+
+
+def test_cli_prints_names_only(tmp_path, monkeypatch):
+    gh = FakeGh()
+    monkeypatch.setattr(ci_key.subprocess, "run", gh)
+    monkeypatch.setattr(ci_key.shutil, "which", _which)
+    res = _cli("ci-key", "push", "--dir", str(_secrets_dir(tmp_path)))
+    assert res.exit_code == 0, res.output
+    for name in ci_key.SECRET_NAMES:
+        assert f"{name}: set" in res.output
+    for value in [*VALUES.values(), "MIIEvQIBADAN"]:
+        assert value not in res.output
+    assert "acme/apps" in res.output
+
+
+def test_cli_partial_failure_exits_1_and_names_what_was_not_set(tmp_path, monkeypatch):
+    gh = FakeGh(fail_on=("SNOWFLAKE_ROLE",))
+    monkeypatch.setattr(ci_key.subprocess, "run", gh)
+    monkeypatch.setattr(ci_key.shutil, "which", _which)
+    res = _cli("ci-key", "push", "--dir", str(_secrets_dir(tmp_path)))
+    assert res.exit_code == 1
+    assert "SNOWFLAKE_ROLE: failed" in res.output
+    assert "SNOWFLAKE_ACCOUNT: not set" in res.output
+    assert "STREAMSNOW_DEPLOY_ROLE" not in res.output
+
+
+def test_cli_precheck_failure_exits_2(tmp_path, monkeypatch):
+    monkeypatch.setattr(ci_key.shutil, "which", lambda name: None)
+    res = _cli("ci-key", "push", "--dir", str(_secrets_dir(tmp_path)))
+    assert res.exit_code == 2
+
+
+def test_create_next_block_points_at_push(tmp_path):
+    import shutil as _shutil
+
+    if _shutil.which("openssl") is None:
+        pytest.skip("needs openssl")
+    example = Path(__file__).resolve().parent.parent / "streamsnow.config.example.yaml"
+    res = _cli("ci-key", "create", "--config", str(example), "--dir", str(tmp_path / "ci"))
+    assert res.exit_code == 0, res.output
+    assert "streamsnow ci-key push" in res.output
+    assert "for s in" not in res.output
