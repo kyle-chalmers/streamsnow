@@ -903,6 +903,10 @@ def _grant_status(got: list[sx.ResultSet] | sx.SnowError | None, expected: set[s
         for r in sx.upper_rows(got[0])
         if str(r.get("PRIVILEGE", "")).upper() in ("SELECT", "OWNERSHIP")
     }
+    # Every role inherits PUBLIC, so a grant to it reaches all of them. Shared
+    # data (SNOWFLAKE_SAMPLE_DATA) is usually readable this way and no other.
+    if "PUBLIC" in holders:
+        return {"status": "pass", "roles": sorted(expected), "via_public": True}
     missing = sorted(expected - holders)
     if not missing:
         return {"status": "pass", "roles": sorted(expected)}
