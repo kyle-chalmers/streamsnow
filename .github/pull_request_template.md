@@ -19,7 +19,7 @@ Closes #
 ## Stable surface
 
 - [ ] This PR does **not** rename or remove a command, flag, config key, check result, skill name or generated file ([docs/versioning.md](../docs/versioning.md)).
-      If it does, explain the deprecation path here and expect the `breaking-change` label.
+      If it does, explain the migration path here and expect the `breaking-change` label (from 1.0.0 it also needs a deprecation period).
 
 ## AI assistance
 

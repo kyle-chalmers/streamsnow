@@ -2,8 +2,9 @@
 
 All notable changes to StreamSnow are recorded here. This project follows
 [semantic versioning](https://semver.org/): from 1.0.0 the stable surface in
-[docs/versioning.md](docs/versioning.md) breaks only in a major release, and before 1.0
-breaking changes still get one minor release of deprecation warnings first.
+[docs/versioning.md](docs/versioning.md) breaks only in a major release, after a deprecation
+period. Before 1.0, a breaking change can land in any minor release and is called out in its
+entry.
 
 ## [Unreleased]
 
@@ -11,7 +12,7 @@ breaking changes still get one minor release of deprecation warnings first.
 
 - **Versioning and stability policy** ([docs/versioning.md](docs/versioning.md)): what the
   stable surface is, why a stricter check counts as a breaking change (warn-only for one
-  minor release first), the deprecation window, and the path to 1.0.0. A new
+  minor release first), the deprecation window that applies from 1.0.0, and the path to 1.0.0. A new
   `tests/test_cli_surface.py` pins every command, flag and argument in
   `tests/fixtures/cli_surface.json`, so a rename or removal fails CI as BREAKING. The
   release gates for 1.0.0 are in `RELEASING.md`.

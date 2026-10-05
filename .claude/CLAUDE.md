@@ -58,7 +58,7 @@ in `tests/fixtures/cli_surface.json`.
   `uv run python tests/test_cli_surface.py --update` and say so in the PR.
 - A check must not start failing repos that passed before without a warn-only release first.
 - If a task needs a breaking change, stop and explain on the issue or PR. The maintainer
-  decides; it gets the `breaking-change` label and a deprecation path.
+  decides; it gets the `breaking-change` label and, from 1.0.0, a deprecation path.
 
 ## Off-limits for agents
 
