@@ -22,7 +22,7 @@ All notable changes to StreamSnow are recorded here. This project follows
   Not repo-gated, and it denies rather than asks.
 - **README: "What Claude can and can't see"**, before the install section, with
   a secrets-flow diagram, and a matching "How StreamSnow handles secrets"
-  section in SECURITY.md. A test keeps the README's claims tied to the code.
+  section in SECURITY.md. A test checks the README still names `ci-key push` and the guard.
 
 ### Changed
 

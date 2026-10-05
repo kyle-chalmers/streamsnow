@@ -96,7 +96,7 @@ behalf. Here is exactly what that means for your credentials.
   creates no Snowflake objects itself.
 - **Claude's tools are blocked from the key directory.** The plugin's key
   guard (`hooks/secret_guard.py`) denies any read, search, edit or shell
-  command that names it, apart from plain `streamsnow ci-key` and
+  command that points at it, apart from plain `streamsnow ci-key` and
   `streamsnow deploy-setup` commands.
 - **Setup queries are read-only.** The setup flow reads your account with
   `SHOW` and `SELECT` queries only, and never prints connection files or

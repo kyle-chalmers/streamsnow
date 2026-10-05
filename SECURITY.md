@@ -57,9 +57,10 @@ read-only guard notes in `streamsnow/tools/sql_review.py`).
 with one file per secret (mode 600; the private-key entry is a link to the
 `.p8`). `ci-key create` makes the directory at mode 700 (it warns, but does not
 change it, if an existing one is looser), refuses a directory inside a git
-repository, never overwrites an existing key, and never prints a value. `ci-key push` reads each file and passes it to `gh secret set`
-on stdin, and never prints a secret value (on a failure it prints gh's error
-with the values redacted); if one fails it stops before `SNOWFLAKE_ACCOUNT`.
+repository, never overwrites an existing key, and never prints a value.
+`ci-key push` reads each file and passes it to `gh secret set` on stdin, and
+never prints a secret value (on a failure it prints gh's error with the
+values redacted); if one fails it stops before `SNOWFLAKE_ACCOUNT`.
 
 **The key guard** (`hooks/secret_guard.py`, Claude Code `PreToolUse`) denies
 any Bash, PowerShell, Read, Grep, Glob, Edit, Write or NotebookEdit call that
@@ -67,18 +68,20 @@ names `.streamsnow-ci` or `streamsnow_ci_rsa_key`, in any case and with either
 path separator. For shell tools it checks the command; for file and search
 tools it checks where the call reads, writes or searches (the file path, or
 Grep's path and glob), not the text being written or searched for, so docs
-that mention the directory stay editable. It allows only a plain `streamsnow ci-key ...` or
-`streamsnow deploy-setup ...` command, and only when it contains none of `|`,
+that mention the directory stay editable. It allows only a plain
+`streamsnow ci-key ...` or `streamsnow deploy-setup ...` command, and only when it contains none of `|`,
 `;`, `&&`, `||`, `<`, a newline, `$(`, a backtick, `(` or `)`, or any `&` other
 than one leading PowerShell call operator. A `>` redirect into the key
 directory is also denied, and so is a malformed or wrongly typed tool call that
 names the key directory.
+
 Its gaps: it matches text, so a command built to hide the path (shell
-variables, globs) can get past it; it runs only in Claude Code and only for the
+variables, globs) can get past it, and so can a recursive search started above
+the directory (from your home folder, say) that never names it, or a program
+written in `streamsnow`'s place; it runs only in Claude Code and only for the
 tools in its matcher, so something outside it, such as an MCP filesystem server,
 is not covered; and if the hook cannot start at all, the call goes through.
-It backs up `ci-key push`, which
-is the main protection.
+It backs up `ci-key push`, which is the main protection.
 
 **Never printed** by any skill: `snow connection list`, MCP configuration,
 connection files, `profiles.yml`, and `SNOWFLAKE_*` environment values. Setup
@@ -90,7 +93,7 @@ reads named keys through a filter instead.
 
 **Rotating the key.** Move `~/.streamsnow-ci/streamsnow_ci_rsa_key.p8` and
 `.pub` aside, run `streamsnow ci-key create`, regenerate the admin file with
-`streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub`,
+`streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > admin-setup.sql`,
 have the admin run its `ALTER USER` statement, then run `streamsnow ci-key push`.
 
 ## Everything else
