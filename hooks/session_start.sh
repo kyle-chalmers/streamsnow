@@ -16,4 +16,4 @@ if [ ! -f "$root/streamsnow.config.yaml" ]; then
   exit 0
 fi
 
-echo "StreamSnow ${ver:-?} repo. Governance: AGENTS.md. Skills: /start-app (front door: setup/adopt/spec/build; runs preview, validate and review itself) /preview-app /validate-app /review-app /audit-lineage /feedback-app /ship-app /migrate-app. Deploy-safety guard is ACTIVE (destructive snow/SQL commands pause; /ship-app is the deploy path). Review gate is ACTIVE (warn-only; REVIEW_GATE_OFF=1 or apps/<slug>/.review/SKIP silences it).${cli}"
+echo "StreamSnow ${ver:-?} repo. Governance: AGENTS.md. Skills: /start-app (front door: setup/adopt/spec/build; runs preview, validate and review itself) /preview-app /validate-app /review-app /audit-lineage /feedback-app /ship-app /migrate-app. Deploy-safety guard is ACTIVE (destructive snow/SQL commands pause; /ship-app is the deploy path). Key guard is ACTIVE (Claude's tools can't open ~/.streamsnow-ci). Review gate is ACTIVE (warn-only; REVIEW_GATE_OFF=1 or apps/<slug>/.review/SKIP silences it).${cli}"

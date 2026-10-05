@@ -1,5 +1,5 @@
 {
-  "//": "StreamSnow Claude Code hooks. SessionStart emits a one-line skill pointer; PreToolUse pauses destructive Streamlit/SQL commands; Stop nudges (warn-only, system-message only) when a substantive app change ends unreviewed. All are guarded to fire only inside a StreamSnow repo (repo-gated on streamsnow.config.yaml), stdlib-only, no network, and fail-open. Explicit timeouts so a hung hook can never stall a session. The Python hooks launch through `uv run --no-project --offline --no-python-downloads ...; exit 0`: one string that parses in sh, Git Bash and PowerShell (Claude Code's hook shells), with no python3 on PATH required (Windows often has none, or only the Store stub), no network, never touching the user's project env, and exit 0 on any launcher failure, because exit 2 from a PreToolUse hook blocks the tool call. tests/test_hook_commands.py runs these strings through every shell.",
+  "//": "StreamSnow Claude Code hooks. SessionStart emits a one-line skill pointer; PreToolUse pauses destructive Streamlit/SQL commands; Stop nudges (warn-only, system-message only) when a substantive app change ends unreviewed. A second PreToolUse guard denies Claude's tools access to the CI key directory (~/.streamsnow-ci); unlike the others it is not repo-gated and it denies rather than asks. All but the key guard are repo-gated (on streamsnow.config.yaml) and fail-open; all are stdlib-only with no network. Explicit timeouts so a hung hook can never stall a session. The Python hooks launch through `uv run --no-project --offline --no-python-downloads ...; exit 0`: one string that parses in sh, Git Bash and PowerShell (Claude Code's hook shells), with no python3 on PATH required (Windows often has none, or only the Store stub), no network, never touching the user's project env, and exit 0 on any launcher failure, because exit 2 from a PreToolUse hook blocks the tool call. tests/test_hook_commands.py runs these strings through every shell.",
   "hooks": {
     "SessionStart": [
       {
@@ -19,6 +19,16 @@
           {
             "type": "command",
             "command": "uv run --no-project --no-config --offline --no-python-downloads --quiet \"${CLAUDE_PLUGIN_ROOT}/hooks/deploy_safety.py\"; exit 0",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell|Read|Grep|Glob|Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --no-config --offline --no-python-downloads --quiet \"${CLAUDE_PLUGIN_ROOT}/hooks/secret_guard.py\"; exit 0",
             "timeout": 10
           }
         ]

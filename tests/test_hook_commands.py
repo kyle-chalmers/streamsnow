@@ -30,10 +30,19 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOKS = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
 PYTHON_HOOK_EVENTS = ("PreToolUse", "Stop")
+# Every (event, index) whose command launches a Python hook: PreToolUse has two
+# (deploy_safety, secret_guard), and each must survive every shell.
+PYTHON_HOOKS = [
+    (event, i)
+    for event in PYTHON_HOOK_EVENTS
+    for i, entry in enumerate(HOOKS[event])
+    if entry["hooks"][0]["command"].startswith("uv run ")
+]
+HOOK_IDS = [f"{e}[{i}]" for e, i in PYTHON_HOOKS]
 
 
-def _command(event: str) -> str:
-    return HOOKS[event][0]["hooks"][0]["command"]
+def _command(event: str, index: int = 0) -> str:
+    return HOOKS[event][index]["hooks"][0]["command"]
 
 
 def _git_bash() -> str | None:
@@ -72,9 +81,14 @@ shells = pytest.mark.parametrize("shell", [argv for _, argv in SHELLS], ids=SHEL
 
 
 def _run(
-    shell: list[str], event: str, payload: dict, *, env: dict[str, str] | None = None
+    shell: list[str],
+    event: str,
+    payload: dict,
+    *,
+    env: dict[str, str] | None = None,
+    index: int = 0,
 ) -> subprocess.CompletedProcess[str]:
-    command = _command(event).replace("${CLAUDE_PLUGIN_ROOT}", REPO_ROOT.as_posix())
+    command = _command(event, index).replace("${CLAUDE_PLUGIN_ROOT}", REPO_ROOT.as_posix())
     return subprocess.run(
         [*shell, command],
         input=json.dumps(payload),
@@ -109,8 +123,9 @@ def _env_without_uv() -> dict[str, str]:
 
 
 def test_every_python_hook_uses_the_cross_shell_launcher() -> None:
-    for event in PYTHON_HOOK_EVENTS:
-        command = _command(event)
+    assert len(PYTHON_HOOKS) >= 3
+    for event, index in PYTHON_HOOKS:
+        command = _command(event, index)
         assert command.startswith("uv run --no-project "), command
         for flag in ("--no-config", "--offline", "--no-python-downloads", "--quiet"):
             assert flag in command, (flag, command)
@@ -144,25 +159,59 @@ def test_deploy_guard_passes_read_only_through_every_shell(
 
 
 @shells
-@pytest.mark.parametrize("event", PYTHON_HOOK_EVENTS)
-def test_hook_fails_open_when_uv_is_missing(shell: list[str], event: str, tmp_path: Path) -> None:
+@pytest.mark.parametrize("event,index", PYTHON_HOOKS, ids=HOOK_IDS)
+def test_hook_fails_open_when_uv_is_missing(
+    shell: list[str], event: str, index: int, tmp_path: Path
+) -> None:
     payload = _payload(_project(tmp_path), "snow streamlit deploy my_app")
-    proc = _run(shell, event, payload, env=_env_without_uv())
+    proc = _run(shell, event, payload, env=_env_without_uv(), index=index)
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
     assert proc.stdout.strip() == ""
 
 
 @shells
-@pytest.mark.parametrize("event", PYTHON_HOOK_EVENTS)
+@pytest.mark.parametrize("event,index", PYTHON_HOOKS, ids=HOOK_IDS)
 def test_hook_fails_open_when_no_python_is_found(
-    shell: list[str], event: str, tmp_path: Path
+    shell: list[str], event: str, index: int, tmp_path: Path
 ) -> None:
     """uv exits 2 when it cannot find an interpreter offline; exit 2 from a
     PreToolUse hook would block every shell command in the session."""
     env = dict(os.environ, UV_PYTHON="3.99")  # a version nothing has installed
     payload = _payload(_project(tmp_path), "snow streamlit deploy my_app")
-    proc = _run(shell, event, payload, env=env)
+    proc = _run(shell, event, payload, env=env, index=index)
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    assert proc.stdout.strip() == ""
+
+
+def _secret_guard_index() -> int:
+    return next(
+        i
+        for i, e in enumerate(HOOKS["PreToolUse"])
+        if "secret_guard.py" in e["hooks"][0]["command"]
+    )
+
+
+@shells
+def test_key_guard_denies_through_every_shell(shell: list[str], tmp_path: Path) -> None:
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "cat ~/.streamsnow-ci/streamsnow_ci_rsa_key.p8"},
+        "cwd": str(tmp_path),  # not a StreamSnow repo: the key guard is not repo-gated
+    }
+    proc = _run(shell, "PreToolUse", payload, index=_secret_guard_index())
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+@shells
+def test_key_guard_allows_ci_key_push_through_every_shell(shell: list[str], tmp_path: Path) -> None:
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "streamsnow ci-key push"},
+        "cwd": str(tmp_path),
+    }
+    proc = _run(shell, "PreToolUse", payload, index=_secret_guard_index())
+    assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == ""
 
 

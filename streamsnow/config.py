@@ -519,8 +519,13 @@ def load_config(path: Path | None = None) -> Config:
         )
     try:
         data = yaml.safe_load(Path(cfg_path).read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as exc:  # pragma: no cover - passthrough
-        raise ConfigError(f"{cfg_path}: invalid YAML: {exc}") from exc
+    except yaml.YAMLError as exc:
+        # Problem and position only: PyYAML's full message quotes a snippet of
+        # the file, and --config can point at a file that holds a secret.
+        mark = getattr(exc, "problem_mark", None)
+        where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
+        problem = getattr(exc, "problem", None) or type(exc).__name__
+        raise ConfigError(f"{cfg_path}: invalid YAML{where}: {problem}") from exc
     except OSError as exc:
         # An explicit path that doesn't exist must be the same friendly error
         # as no discovered config — not a raw traceback (seen live from

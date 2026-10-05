@@ -196,6 +196,18 @@ def test_bare_account_with_metacharacters_rejected():
         Config.from_dict(d)
 
 
+def test_invalid_yaml_error_names_the_position_not_the_content(tmp_path):
+    # --config can point at a file holding a secret; the error must not quote it.
+    from streamsnow.config import ConfigError, load_config
+
+    bad = tmp_path / "x.yaml"
+    bad.write_text("a: [unclosed SECRETVALUE\n", encoding="utf-8")
+    with pytest.raises(ConfigError) as err:
+        load_config(bad)
+    assert "invalid YAML at line" in str(err.value)
+    assert "SECRETVALUE" not in str(err.value)
+
+
 def test_explicit_missing_config_path_is_a_config_error(tmp_path):
     """An explicit --config path that doesn't exist must raise the friendly
     ConfigError, not a raw FileNotFoundError traceback (seen live from
