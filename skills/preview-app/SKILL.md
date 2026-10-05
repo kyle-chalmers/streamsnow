@@ -36,7 +36,7 @@ first script run finishes; data errors surface in the browser and in `logs`, not
 1. **Resolve the slug.** Named → use it; fresh from a `/start-app` scaffold → that app; otherwise
    list `apps/*/` and ask. Confirm `apps/<slug>/` exists.
 2. **Verify prereqs once per session** with `streamsnow doctor`; anything missing → offer
-   `/start-app --setup` rather than launching into a broken environment.
+   `/onboard` rather than launching into a broken environment.
 3. **Ensure a connection exists.** The default `snow` connection (doctor's `snow-connection`
    check) is what `st.connection("snowflake")` reads; missing → hand the user the `snow connection
    add … --default` line from `streamsnow configure`. Only when an app needs a different role or
@@ -77,7 +77,7 @@ first script run finishes; data errors surface in the browser and in `logs`, not
 For a hands-off pass, enumerate the app's pages with `streamsnow nav <slug>` (one JSON object per
 page — title, path, group; `--json-array` for one payload) and drive a Playwright browser across
 each per [_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md) — advisory only,
-silent skip without the MCP. The nav list is the loop input; never guess page URLs from filenames.
+silent skip without the CLI. The nav list is the loop input; never guess page URLs from filenames.
 
 ## Done when
 

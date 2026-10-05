@@ -1,7 +1,7 @@
 """Load and validate ``streamsnow.config.yaml`` — the single source of truth.
 
 Every other consumer (the validation tools, CI/workflow rendering, the scaffold
-templates, ``AGENTS.md``, ``.mcp.json``, the branding generator) reads
+templates, ``AGENTS.md``, the branding generator) reads
 org-specific values from here. **Secrets never live in this file.**
 
 Two requirements are load-bearing (flagged by the cross-agent review):
