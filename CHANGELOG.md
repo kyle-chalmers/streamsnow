@@ -24,6 +24,9 @@ Version 0.8.0.
   and `index` verbs are gone. `check` reports an app still on the old format
   as an `index` finding; `docs/auditing-a-visual.md` has the upgrade steps, and
   `generate` deletes the old `*.review.sql` files.
+  This skips the deprecation release in [docs/versioning.md](docs/versioning.md)
+  as a maintainer-approved exception: the 0.7 format had no known users
+  (decision 11 of the redesign spec).
 - **`sql-review check` lints app queries with sqlfluff** (Snowflake dialect,
   the repo's new `.sqlfluff`, created by `init` and by `update` when missing)
   and requires a one-line comment directly above every CTE, with comment lines

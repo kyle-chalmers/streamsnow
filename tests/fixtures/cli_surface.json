@@ -369,15 +369,12 @@
     "sql-review": {
       "verbs": [
         "check",
-        "discover",
-        "generate",
-        "index"
+        "generate"
       ],
       "arguments": [
         "--dir",
-        "--feature",
         "--format",
-        "--write",
+        "--lint-files",
         "slug"
       ]
     }
