@@ -26,7 +26,13 @@ layering), consult [_shared/production-gotchas.md](../_shared/production-gotchas
 
 `st.set_page_config` first and called once; `st.navigation` + `st.Page` for multipage; branding
 applied in the entrypoint; multi-filter pages batched in `st.form` (one rerun, not one per widget);
-consistent chart library; number/`column_config` formatting. If a Playwright MCP is loaded, drive a
+consistent chart library; number/`column_config` formatting. Judge chart form, layout, color and
+copy against [visualization-guide.md](../_shared/visualization-guide.md) and
+[explainability.md](../_shared/explainability.md), and load paths against
+[streamlit-performance.md](../_shared/streamlit-performance.md). They are defaults, so ask whether
+a choice fits this audience and question, not whether it matches the guide. A departure is
+nice-to-have, should-fix when it misleads because it isn't disclosed (visualization-guide's
+"Departures to tell the reader about"), or when it breaks a house rule from the overlay. If a Playwright MCP is loaded, drive a
 live walkthrough per [_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md) to
 confirm visuals populate under default filters — a whole band of empty visuals under defaults is
 **critical**; a single intentional empty-state beside an `st.info`/`st.warning` is fine. Degrade
