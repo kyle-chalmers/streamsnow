@@ -101,16 +101,21 @@ The SQL-externalization worklist. Exit 0 always.
 
 ## The sql-review bootstrap (end of Step 2)
 
-Once queries live in `queries/*.sql`, the app owes its audit trail — the paste-runnable review SQL
-a reviewer opens in Snowsight to re-run the numbers behind each visual:
+Once queries live in `queries/*.sql`, the app owes its review SQL: one runnable file per page, a
+section per metric, that a reviewer opens in DataGrip or Snowsight to re-run the numbers behind
+each visual. The conformed app has no `sql_review/` yet; start it from a fresh scaffold's files
+(`streamsnow new` in a scratch repo shows them) or write them by hand:
 
-1. `streamsnow sql-review discover <slug> --write` — persists a skeleton manifest per uncovered
-   query (exit 1 just means gaps existed; it never overwrites an existing manifest).
-2. Author the manifests: replace each dispatcher's `-- TODO: sample fragment for <TOKEN>`
-   placeholder with a real fragment the app renders (e.g. `AND region = 'West'`); fix
-   `description`/`pages` from the query headers.
-3. `streamsnow sql-review generate <slug>` — renders `sql_review/*.review.sql` with provenance;
-   `streamsnow sql-review index <slug>` rebuilds the README coverage table.
+1. Copy `review.py` to the app root and add it to `snowflake.yml` artifacts; wrap each visual's
+   value in `review_value("<metric_key>", value)`.
+2. Write `sql_review/index.yaml`: each page path from `streamlit_app.py`, its metrics in on-screen
+   order with `query`, real sample `tokens` (e.g. `REGION_FILTER: "AND region = 'West'"`, a value
+   the app actually renders), `binds` (`params.start_date`), `reads`; a `review_window` anchored
+   to the data's latest date; `fragments:` for inlined CTE files.
+3. Comment each query's CTEs (one line directly above each name); keep the queries lint-clean
+   with the repo's `.sqlfluff` (`streamsnow update` adds it to an older repo).
+4. `streamsnow sql-review generate <slug>` writes the page files, README and folder `AGENTS.md`;
+   `streamsnow sql-review check <slug>` must be clean.
 
-Commit the manifests and rendered files inside the conform commit — the conformed app and its
-audit trail land together, and `streamsnow sql-review check` stays green from the first PR.
+Commit `index.yaml` and the generated files inside the conform commit: the conformed app and its
+review SQL land together, and `streamsnow sql-review check` stays green from the first PR.

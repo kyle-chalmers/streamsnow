@@ -1,0 +1,28 @@
+"""Mark the value each visual shows, for SQL review. Scaffolded by StreamSnow.
+
+Wrap the value a visual displays, keyed by its metric key in
+sql_review/index.yaml:
+
+    st.metric("Revenue", review_value("total_revenue", total))
+    st.dataframe(review_value("orders_by_region", df))
+
+``streamsnow sql-review check`` reads these calls without running the page, to
+prove every metric in the index is on its page and every marked visual is in
+the index. Outside review preview mode the call returns its input and does
+nothing else: no query, no file, no import. Streamlit in Snowflake never sets
+the review flag.
+"""
+
+import os
+
+# Read once at import. Only review preview mode sets it.
+_CAPTURE = os.environ.get("STREAMSNOW_REVIEW_CAPTURE")
+
+
+def review_value(key, value):
+    """Return ``value`` unchanged; ``key`` names its metric in sql_review/index.yaml."""
+    if _CAPTURE is None:
+        return value
+    # Review preview mode: a later StreamSnow release records the value the
+    # visual received here. Until then the flag changes nothing.
+    return value

@@ -7,6 +7,7 @@ table in an allowed schema ({{ schema_allow | join(', ') }}).
 import plotly.express as px
 import streamlit as st
 from branding import BRAND_CHART_COLORS, branded_metric
+from review import review_value
 from sql_loader import load_sql
 
 
@@ -39,7 +40,8 @@ st.caption(
     "Sample numbers, not data: replace this page, or wire load_example to a real table "
     "in place of YOUR_TABLE (validate-app fails until you do)."
 )
-branded_metric("Rows", "1,234", delta="+5.3%")
+# review_value ties this visual to its metric in sql_review/index.yaml (a no-op at runtime).
+branded_metric("Rows", review_value("example_metric", "1,234"), delta="+5.3%")
 
 fig = px.bar(
     x=["alpha", "beta", "gamma"],

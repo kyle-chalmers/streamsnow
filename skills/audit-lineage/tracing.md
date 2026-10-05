@@ -50,27 +50,25 @@ From the DDL plus the app's predicates:
 
 ## 4 · Hand-back into `sql_review/`
 
-The lineage pass ends holding exactly what the app's audit trail needs — traced upstream objects
-and live confirmation per object — so spend it before it goes cold:
+The lineage pass ends holding exactly what the app's review SQL needs (traced upstream objects
+and live confirmation per object), so spend it before it goes cold:
 
-1. `streamsnow sql-review check <slug>` — freshness + coverage gate for the rendered companions.
-   Clean → skip straight to the index step.
-2. **On gaps** (uncovered queries, missing files): interactively, offer
-   `streamsnow sql-review discover <slug> --write` followed by
-   `streamsnow sql-review generate <slug>`, flagging that the skeleton manifests carry `-- TODO`
-   dispatcher literals a person (or the `/review-app --sql` recipe) still has to replace with real
-   sample fragments. Inside `/review-app --auto` there is nobody to ask — bootstrap silently with
-   the static skeleton defaults and add a punch-list item to author the manifests properly.
-   **On DRIFT**: `streamsnow sql-review generate <slug>` regenerates; never edit a `.review.sql`
-   body — the manifest under `sql_review/manifests/` is the editing surface.
-3. `streamsnow sql-review index <slug>` rebuilds the README coverage table between its markers
-   (the tool owns the skeleton; it preserves the Upstream and Verified cells per query and every
-   line outside the markers). Then edit the two human columns from this pass's results:
-   - **Upstream object(s)** — the fully-qualified object(s) the lineage walk (section 2 above)
-     traced for that query, replacing the `_(fill via /review-app --sql)_` placeholder.
-   - **Verified** — today's date, only on rows whose objects THIS pass confirmed live (resolve
-     probe + `INFORMATION_SCHEMA.COLUMNS` both answered). Anything untraced or unreachable stays
-     `no` — a Verified date you didn't earn this pass is fabrication, not paperwork.
+1. `streamsnow sql-review check <slug>`: the offline gate for the generated page files.
+2. **Record what this pass traced** in `sql_review/index.yaml`: each metric's `reads:` lists the
+   fully-qualified objects the lineage walk (section 2 above) traced for its query. A view or
+   table built for this app goes under `objects:` with its DDL in
+   `sql_review/app_specific_reporting_objects/`. Data facts a reviewer needs (grain, a quirk, a
+   load cadence) go in the app `AGENTS.md` Data notes, not in `index.yaml`. Then
+   `streamsnow sql-review generate <slug>` refreshes the page files and README tables.
+3. **On coverage gaps** (a nav page or query `index.yaml` does not cover): interactively, offer to
+   add the missing pages and metrics, with real sample tokens a person confirms; never generate
+   from placeholder samples, because a section that runs on a made-up value proves nothing.
+   Inside `/review-app --auto` there is nobody to ask: add a punch-list item instead.
+   **On DRIFT**: `streamsnow sql-review generate <slug>` regenerates; never edit a page file:
+   `index.yaml` and `queries/*.sql` are the editing surface.
+4. Report which objects THIS pass confirmed live (resolve probe + `INFORMATION_SCHEMA.COLUMNS`
+   both answered) and which were untraced or unreachable. Never claim a confirmation you did not
+   earn this pass.
 
 ## Troubleshooting
 
