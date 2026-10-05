@@ -13,9 +13,11 @@ entry.
 - **`/start-app` is renamed `/build-app`**, with no deprecation release (a
   maintainer exception to [docs/versioning.md](docs/versioning.md)). Same
   front door, same `--spec` mode. Rename a repo overlay
-  `.streamsnow/overlays/start-app.md` to `build-app.md`, and Codex users re-run
-  `streamsnow agent-skills install`, which removes the old `start-app` copy
-  unless it was edited.
+  `.streamsnow/overlays/start-app.md` to `build-app.md`. Codex users re-run
+  `streamsnow agent-skills install`, which removes an unedited `start-app`
+  copy; if you edited it, the install stops and writes nothing, so move your
+  edits to `.streamsnow/overlays/build-app.md`, delete
+  `.agents/skills/start-app`, and run it again.
 - **`/start-app --setup` and `/start-app adopt` are removed**, with no
   deprecation release (a maintainer exception to
   [docs/versioning.md](docs/versioning.md)). Use `/onboard`, which does both;

@@ -9,5 +9,5 @@ acme-collections-overview — promise-kept performance for the collections team.
 **Current phase:** build
 **Phase notes:** pages 1/2 built; agent-detail page pending QC
 ### Sessions
-- 2026-09-01T10:00Z — spec written. Next: scaffold (`/build-app acme-collections-overview`).
+- 2026-09-01T10:00Z — spec written. Next: scaffold (`/start-app acme-collections-overview`).
 - 2026-09-02T09:30Z — overview page built against live data. Next: build agent-detail page.

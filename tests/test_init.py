@@ -867,7 +867,7 @@ def test_validate_app_fails_on_the_scaffold_placeholders(tmp_path):
     assert placeholder_findings() == []
 
 
-def test_start_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypatch):
+def test_build_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypatch):
     """The /build-app end state (pages.md § Replace the starter trio): `new`, then the
     first real page, its query and an anchored manifest replace all three starter
     files. The app must validate clean, which proves the documented replacement

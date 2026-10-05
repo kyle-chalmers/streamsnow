@@ -74,6 +74,7 @@ an append-only `Sessions` log whose last line always names the next command. Upd
 on every phase transition — never rewrite past session lines. On resume, read `Current phase` and
 jump to the matching phase; `done` or `in-production (backfilled)` means the app is live — new
 §4 pages route to the build phase, anything else to `/feedback-app` or `/review-app`.
+Apps started before 0.8 name the old `start-app` skill in that log; say `/build-app` instead.
 
 ## Out of scope
 
