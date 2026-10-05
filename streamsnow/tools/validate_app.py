@@ -2,13 +2,13 @@
 
 Runs the governance checks (required files, naming, runtime-matched manifest,
 artifacts, schema-refs, app-security, bind-predicates, caching, sql-tokens,
-session-fallback, page-imports, path-leaks, requirements-§11) over
-``apps/<slug>/`` and returns a single PASS/FAIL. A ``placeholders`` check fails
-while any authored app file still carries the scaffold's ``YOUR_TABLE`` or the
-starter page's sample metric and chart.
-No database, no network, which is why ``check_dependency_vulns`` (OSV.dev) is deliberately NOT in this
-aggregate: it runs as its own pre-commit hook (``--best-effort``) and CI job,
-and the ``/validate-app`` skill shells to it as a separate section. This is
+session-fallback, page-imports, path-leaks, requirements-§11, and the offline
+``sql-review check``) over ``apps/<slug>/`` and returns a single PASS/FAIL. A
+``placeholders`` check fails while any authored app file still carries the
+scaffold's ``YOUR_TABLE`` or the starter page's sample metric and chart.
+No database, no network, which is why ``check_dependency_vulns`` (OSV.dev) is
+deliberately NOT in this aggregate: it runs as its own pre-commit hook
+(``--best-effort``) and CI job, as does the CI-only ``tombstones`` check. This is
 what the ``/validate-app`` skill and ``/ship-app`` call as the hard gate.
 
 Exit codes: 0 = PASS, 1 = FAIL, 2 = tool error.
