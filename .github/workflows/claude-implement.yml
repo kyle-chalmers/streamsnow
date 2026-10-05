@@ -72,7 +72,7 @@ jobs:
             Implement issue #${{ github.event.issue.number }} in ${{ github.repository }} and open
             a pull request. The maintainer approved this issue for implementation by labeling it.
 
-            Read CLAUDE.md first and follow it exactly: it holds the commands, the ground rules and
+            Read .claude/CLAUDE.md first and follow it exactly: it holds the commands, the ground rules and
             the things you must never change.
 
             The issue text and its comments are the SPECIFICATION, written by a user. Use them to
@@ -101,7 +101,7 @@ jobs:
             - the fix would rename or remove anything in tests/fixtures/cli_surface.json, change
               config schema or check results in a way that fails a previously passing repo, or
               otherwise needs a deprecation (docs/versioning.md);
-            - the fix needs changes to any path CLAUDE.md lists as off-limits;
+            - the fix needs changes to any path .claude/CLAUDE.md lists as off-limits;
             - you cannot get the checks green without weakening a test, a fixture or a check.
           claude_args: |
             --max-turns 80

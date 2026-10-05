@@ -9,6 +9,6 @@
 /hooks/                         @kyle-chalmers
 /pyproject.toml                 @kyle-chalmers
 /RELEASING.md                   @kyle-chalmers
-/CLAUDE.md                      @kyle-chalmers
+/.claude/                       @kyle-chalmers
 /docs/versioning.md             @kyle-chalmers
 /tests/fixtures/cli_surface.json @kyle-chalmers

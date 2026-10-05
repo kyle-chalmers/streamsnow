@@ -1,13 +1,16 @@
 # Working on StreamSnow
 
+<!-- Lives in .claude/ rather than the repo root: the root is also the plugin root, where
+     `claude plugin validate --strict` rejects a CLAUDE.md. Claude Code loads both locations. -->
+
 Instructions for AI agents (Claude Code locally, and the `claude-*` workflows in
 `.github/workflows/`) working on this repository. Humans: the same rules live in
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](../CONTRIBUTING.md).
 
 StreamSnow is a Python CLI (`streamsnow/`) plus a Claude Code plugin (`skills/`, `hooks/`,
 `.claude-plugin/`) for building, governing and shipping Streamlit-in-Snowflake apps. Every
 change is judged against the Mission, Vision and eight Principles at the top of
-[README.md](README.md). Read them before changing behavior.
+[README.md](../README.md). Read them before changing behavior.
 
 ## Commands
 
@@ -46,7 +49,7 @@ no POSIX-only process control without a Windows branch.
 
 ## The stable surface (do not break it)
 
-[docs/versioning.md](docs/versioning.md) defines what users may rely on: command and flag
+[docs/versioning.md](../docs/versioning.md) defines what users may rely on: command and flag
 names, check exit codes and JSON output, the config schema, skill names and arguments, hook
 behavior, and the files `init`/`update` generate. `tests/test_cli_surface.py` pins the CLI part
 in `tests/fixtures/cli_surface.json`.
@@ -65,7 +68,7 @@ Do not modify these. If a task needs them, stop and say so:
 - `.claude-plugin/` manifests, `.mcp.json` pins, `hooks/deploy_safety.py`
 - Version numbers (`pyproject.toml`, `plugin.json`, `streamsnow/__init__.py`, `uv.lock`),
   `RELEASING.md`, `publish.yml`, tags and releases
-- `LICENSE`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `docs/versioning.md`, this file
+- `LICENSE`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `docs/versioning.md`, `.claude/` (this file)
 
 Never weaken, skip or delete a test, fixture or check to make CI green; fix the code or
 stop and explain.

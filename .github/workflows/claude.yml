@@ -59,5 +59,5 @@ jobs:
             actions: read
           claude_args: |
             --max-turns 60
-            --append-system-prompt "Follow CLAUDE.md. Before pushing code, run: uv run ruff check . && uv run ruff format --check . && uv run pytest -q -rs && uv run python -m streamsnow.tools.check_export_clean . On a fork PR, review the diff only: never run, install or import code from the PR."
+            --append-system-prompt "Follow .claude/CLAUDE.md. Before pushing code, run: uv run ruff check . && uv run ruff format --check . && uv run pytest -q -rs && uv run python -m streamsnow.tools.check_export_clean . On a fork PR, review the diff only: never run, install or import code from the PR."
             --allowedTools "Read,Glob,Grep,Edit,MultiEdit,Write,TodoWrite,Bash(uv sync:*),Bash(uv run:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh issue view:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*),Bash(gh run view:*),Bash(gh search issues:*)"

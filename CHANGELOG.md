@@ -17,7 +17,7 @@ breaking changes still get one minor release of deprecation warnings first.
   release gates for 1.0.0 are in `RELEASING.md`.
 - **Community intake and agent-run maintenance** for this repository: issue forms (blank
   issues off), a PR template with AI-use disclosure, labels as code, CODEOWNERS, Dependabot,
-  a Code of Conduct, `SUPPORT.md`, `CLAUDE.md` for agents, and workflows that triage every
+  a Code of Conduct, `SUPPORT.md`, `.claude/CLAUDE.md` for agents, and workflows that triage every
   issue (the model only classifies; scripts apply labels and canned comments), implement
   maintainer-approved `ready-for-agent` issues as PRs, review same-repo PRs, answer
   maintainer `@claude` comments, post a daily maintainer digest, and close issues left in

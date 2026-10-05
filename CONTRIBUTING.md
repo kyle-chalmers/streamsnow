@@ -90,7 +90,7 @@ automation does the rest:
    a question, or closes it with a reason. Only people with triage access can apply labels,
    so this label is the gate.
 3. **Implementation (agent).** `claude-implement` picks up `ready-for-agent` issues
-   (`status:agent-working`), writes the change and its tests following [CLAUDE.md](CLAUDE.md),
+   (`status:agent-working`), writes the change and its tests following [.claude/CLAUDE.md](.claude/CLAUDE.md),
    runs every check, and opens a PR that closes the issue. If the issue is ambiguous or
    needs a breaking change, it stops and asks on the issue instead.
 4. **Review and merge (maintainer).** CI and `claude-review` run on the PR. The maintainer
