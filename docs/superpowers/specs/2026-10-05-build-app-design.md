@@ -62,7 +62,7 @@ never a gate. Three layers apply; when they conflict, the more specific one wins
      **`.streamsnow/design.md`**: "we never use pie charts", "KPI cards compare year over year,
      not month over month", "our analysts want dense pages".
    - Every app-touching skill reads it before designing or reviewing a page. That covers
-     `/build-app`, `/review-app`, `/feedback-app` and `/migrate-app`.
+     `/build-app` (including `--feedback`), `/review-app` and `/migrate-app`.
    - It follows the same precedence as overlays ([overlays.md](../../../skills/_shared/overlays.md)):
      it overrides the defaults but cannot weaken a gate.
 3. **Per app.** REQUIREMENTS.md §2 (Audience & Use) records who reads the app and any style
@@ -385,9 +385,9 @@ skill list once the SQL review redesign retires `/audit-lineage`.
 - **Location and name of the house style guide.** `.streamsnow/design.md` is the proposal.
   `streamsnow init` could write a commented starter, or the file could stay opt-in with no
   starter.
-- **Which skills read the design layers.** Recommended: `/feedback-app` and `/migrate-app` as
-  well as `/build-app` and `/review-app`, so a live app's fixes and a ported app's conform step
-  follow the same style.
+- **Which skills read the design layers.** *Resolved:* `/feedback-app` folded into
+  `/build-app --feedback`, and `/migrate-app`'s conform step runs through `/build-app`, so every
+  app-touching path reads them.
 - **Warehouse runtime support.** Whether its Streamlit pin (1.52.2) supports metric sparklines.
   The guides degrade if it doesn't.
 - **Overlap with the SQL review optimizer.** The SQL review redesign plans an `optimizer` agent

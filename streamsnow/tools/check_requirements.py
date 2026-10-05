@@ -3,7 +3,7 @@
 §11 is the resume contract between sessions: ``/build-app`` reads the
 ``**Current phase:**`` line to jump back into the lifecycle after a context
 reset, and the *last* line of the ``### Sessions`` log to know the exact next
-command. ``/feedback-app`` and the build phase append to the same log. When a
+command. Feedback rounds (``/build-app --feedback``) and the build phases append to the same log. When a
 hand edit drops the phase line, mangles the timestamp, or deletes the session
 log, those skills don't error — they silently forget where the build was and
 either restart a phase that already ran or stall waiting for state that isn't

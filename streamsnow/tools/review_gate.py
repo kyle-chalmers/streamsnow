@@ -2,7 +2,7 @@
 """Review-gate decision function — "does this change need review, and how deep?"
 
 Single source of truth for the review-escalation decision, shared by
-`/ship-app`'s preflight, `/feedback-app`'s followup step, and the warn-only
+`/ship-app`'s preflight, `/build-app --feedback`'s follow-up step, and the warn-only
 `Stop` hook. In the source monorepo, before this tool existed, each caller
 hand-rolled its own substantive-vs-trivial bash and they drifted: every
 automatic path ran a single-pass review while the full review loop ended up
