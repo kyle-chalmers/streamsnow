@@ -120,7 +120,20 @@ entry.
   build, preview and verify, then validate, review and ship. The Getting started and examples
   app trees list the new `pages/` modules and the About page, and the CLI reference lists the
   `REQUIREMENTS.md` §11 phases `check requirements` accepts.
-
+- **`validate-app` and `check security` no longer fail an app on its own maintained DDL.**
+  Files in `sql_review/app_specific_reporting_objects/` hold `CREATE` statements by design (a
+  human applies them; StreamSnow never executes them), but `app-security` flagged them as write
+  SQL, so any app that declared a reporting object could not pass the gate or the pre-commit hook.
+  A file directly in that folder of an app may now use `CREATE`, `ALTER` and `GRANT`; any other
+  write there, and the same statements anywhere else in an app, still fail.
+- **`/validate-app` matches the gate it runs.** It lists all 15 steps under their printed names
+  (adding `manifest`, `naming`, `path-leaks`, `requirements`, `sql-review` and `placeholders`),
+  reports sql-review warnings on a PASS instead of calling the app clean, names the real focused
+  commands (`streamsnow sql-review check <slug>`, `check session-fallback --all`), and drops false
+  claims (schema-refs requiring an allowed-schema reference, both dependency manifests failing).
+  Its fixing guide adds `manifest`, `naming` and `path-leaks`, the full `app-security` kinds and
+  waivers, the new phases `discover` and `design`, and covers the About page and `pages/_data.py`
+  loaders from the new scaffold. `docs/cli-reference.md`'s `validate-app` rows follow.
 - **Docs that disagreed with the code:**
   - `verify-deploy` does not flag a renamed or removed app's old object; only
     `check tombstones` catches it, at PR time (deploying, troubleshooting #14, production

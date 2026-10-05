@@ -630,6 +630,70 @@ def test_validate_app_fails_on_violations(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Maintained DDL in sql_review/app_specific_reporting_objects/                 #
+# --------------------------------------------------------------------------- #
+_ROLLUP = "ANALYTICS_DB.REPORTING.REGION_ROLLUP"
+_ROLLUP_DDL = (
+    f"-- Object: {_ROLLUP}\n"
+    "-- Purpose: Orders per region and day, so the Overview page does not scan ORDERS.\n"
+    "-- Used by: stale\n"
+    "-- Grants: ROLE_APP_READER\n"
+    "CREATE OR REPLACE VIEW ANALYTICS_DB.REPORTING.REGION_ROLLUP AS\n"
+    "SELECT region, order_date, COUNT(*) AS n FROM ANALYTICS_DB.REPORTING.ORDERS GROUP BY 1, 2;\n"
+)
+
+
+def test_security_allows_create_in_maintained_ddl_and_nowhere_else(tmp_path):
+    # The DDL folder holds CREATE on purpose; the same CREATE anywhere else in the app,
+    # including a look-alike folder sql-review never validates, is still a write.
+    _write(tmp_path / "apps/x/snowflake.yml", "definition_version: 2\n")
+    # A planted manifest must not turn a nested folder into an app root.
+    _write(tmp_path / "apps/x/pages/snowflake.yml", "definition_version: 2\n")
+    ddl = _write(
+        tmp_path / f"apps/x/sql_review/app_specific_reporting_objects/{_ROLLUP}.sql", _ROLLUP_DDL
+    )
+    assert check_app_security.scan_paths([ddl])["ok"]
+    for rel in (
+        "apps/x/queries/rollup.sql",
+        "apps/x/app_specific_reporting_objects/r.sql",
+        "apps/x/sql_review/app_specific_reporting_objects/old/r.sql",
+        "apps/x/pages/sql_review/app_specific_reporting_objects/r.sql",
+    ):
+        p = _write(tmp_path / rel, _ROLLUP_DDL)
+        kinds = {f["kind"] for f in check_app_security.scan_paths([p])["findings"]}
+        assert kinds == {"write-sql"}, rel
+
+
+def test_security_still_flags_destructive_sql_in_maintained_ddl(tmp_path):
+    # The exemption covers defining an object, not destroying data.
+    _write(tmp_path / "apps/x/snowflake.yml", "definition_version: 2\n")
+    p = _write(
+        tmp_path / f"apps/x/sql_review/app_specific_reporting_objects/{_ROLLUP}.sql",
+        _ROLLUP_DDL + "DELETE FROM ANALYTICS_DB.REPORTING.ORDERS;\nDROP TABLE A.B.C;\n",
+    )
+    verbs = {
+        f["detail"].rsplit(" ", 1)[-1]
+        for f in check_app_security.scan_paths([p])["findings"]
+        if f["kind"] == "write-sql"
+    }
+    assert verbs == {"DELETE", "DROP"}
+
+
+def test_validate_app_passes_with_a_maintained_reporting_object(tmp_path):
+    cfg = _cfg()
+    app = _finish_starter(_scaffold_with_trail(cfg, tmp_path, "obj-app"))
+    _write(app / f"sql_review/app_specific_reporting_objects/{_ROLLUP}.sql", _ROLLUP_DDL)
+    index_path = app / "sql_review/index.yaml"
+    index = yaml.safe_load(index_path.read_text(encoding="utf-8"))
+    index["objects"] = [{"name": _ROLLUP, "grants": ["ROLE_APP_READER"]}]
+    index["pages"][0]["metrics"][0]["reads"].append(_ROLLUP)
+    index_path.write_text(yaml.safe_dump(index, sort_keys=False), encoding="utf-8")
+    assert sql_review.main(["generate", app.name, "--dir", str(tmp_path)]) == 0
+    res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+    assert res["ok"], res["checks"]
+
+
+# --------------------------------------------------------------------------- #
 # Manifest runtime-rule regression tests (ported from validate_yaml.py).
 # --------------------------------------------------------------------------- #
 def _manifest(app_dir: Path):
