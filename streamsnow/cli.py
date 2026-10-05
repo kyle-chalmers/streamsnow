@@ -1464,8 +1464,9 @@ _PREVIEW_VERBS = {"start", "status", "stop", "logs"}
 def preview(ctx: typer.Context) -> None:
     """Run an app locally against live Snowflake (reads .streamlit/secrets.toml).
 
-    Subcommands: start <slug> (background launch + health poll), status <slug>,
-    stop <slug>, logs <slug>. A bare `streamsnow preview <slug>` is shorthand
+    Subcommands: start <slug> (background launch + health poll; --port 0 picks a
+    free port, --review-capture DIR is /sql-review's review preview mode),
+    status <slug>, stop <slug>, logs <slug>. A bare `streamsnow preview <slug>` is shorthand
     for `preview start <slug>` (compatibility with pre-0.6 usage).
     """
     argv = list(ctx.args)
@@ -1494,13 +1495,13 @@ def review_gate_cmd(ctx: typer.Context) -> None:
 )
 def sql_review_cmd(ctx: typer.Context) -> None:
     """Runnable SQL per app page, from sql_review/index.yaml (generate | check |
-    probe | run | bench | log).
+    probe | run | bench | compare | log).
 
     Each page of an app gets apps/<slug>/sql_review/NN_<page>.sql with one
     runnable section per metric, so a person can trace each visual back to the
     data. `check` is the import-free gate: provenance, review_value markers,
     the DDL folder, sqlfluff lint and comment rules, coverage. `probe`, `run`,
-    `bench` and `log` are the live review the /sql-review skill drives."""
+    `bench`, `compare` and `log` are the live review the /sql-review skill drives."""
     raise typer.Exit(code=_sql_review_main(list(ctx.args)))
 
 

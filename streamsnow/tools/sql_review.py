@@ -98,6 +98,8 @@ Verbs
                      (the pre-commit hook passes the staged ones; CI lints all).
 ``probe | run | bench | log <slug>``
                      the live review against Snowflake; see ``sql_review_live``.
+``compare <slug>``   the screen against ``run``: what each visual received in
+                     review preview mode; see ``sql_review_compare``.
 
 Exit codes: 0 = clean, 1 = findings/drift/gaps, 2 = tool error.
 """
@@ -1772,7 +1774,7 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument(
             "--run",
             default=None,
-            help="Run id or 'latest' (default: a new run; for log, the latest run).",
+            help="Run id or 'latest' (default: a new run; for log and compare, the latest run).",
         )
         if snowflake:
             p.add_argument("--connection", default=None, help="snow connection (default: config).")
@@ -1797,6 +1799,20 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--metric", required=True, help="Page#metric, e.g. 01#2.")
     p.add_argument("--sql-file", default=None, help="Candidate replacement for the query file.")
     p.add_argument("--runs", type=int, default=3, help="Timed runs per variant (1-5, default 3).")
+    p = sub.add_parser("compare", help="What each visual received vs run, with tolerance.")
+    live(p, snowflake=False)
+    p.add_argument(
+        "--capture",
+        default=None,
+        metavar="DIR",
+        help="Captures from review preview mode (default: the run's capture/ folder).",
+    )
+    p.add_argument(
+        "--screen",
+        default=None,
+        metavar="FILE",
+        help="The browser walk's notes (default: the run's screen.json, when present).",
+    )
     p = sub.add_parser("log", help="Write the committed review log from verified findings.")
     live(p, snowflake=False)
     p.add_argument("--findings", required=True, help="JSON file of verified findings.")

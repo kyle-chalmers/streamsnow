@@ -118,15 +118,27 @@ deploy; it never blocks one.
    run as the app's CI role with secondary roles off, tag their queries
    `streamsnow:sql-review:<slug>`, and refuse anything that is not read-only
    or that reads a denied schema before it is sent.
-2. **Judgment, cited.** Reviewer agents read the page files and those results
+2. **The screen, held to the SQL.** `streamsnow preview start <slug> --port 0
+   --review-capture <dir>` runs the app in review preview mode: each
+   `review_value` call records what its visual received (a row count, hashed
+   column names and column totals, or the number a metric shows; never a
+   row). After every page has been opened once at its default filters,
+   `streamsnow sql-review compare <slug>` holds each capture to its `run`
+   result: within 0.5% or the displayed rounding (`$12.3K` covers 12,250 to
+   12,350), integers exactly. A mismatch (a sliced frame, a renamed and
+   dropped column, a forgotten `* 100`, defaults that drifted from the index)
+   goes to the reviewers as a candidate finding. A browser walk with the
+   Playwright CLI adds a cross-check that never counts as evidence. Streamlit
+   in Snowflake never captures: an app there cannot set the flag.
+3. **Judgment, cited.** Reviewer agents read the page files and those results
    (one per page, one per reporting object, an optimizer for sections slower
    than 10 seconds). Every finding cites the ids of the results it rests on, and
    a verifier in a fresh context tries to refute each one.
-3. **A record, signed.** `streamsnow sql-review log` refuses a finding whose
+4. **A record, signed.** `streamsnow sql-review log` refuses a finding whose
    evidence is not in the run, then writes
    `sql_review/review_log/YYYY-MM-DD_<sha>.md`: the commit, connection, role and
    warehouse; a table per page (metric, SQL status, rows, headline, screen
-   match, findings); the verified findings by severity; and a sign-off block a
+   match from `compare`, findings); the verified findings by severity; and a sign-off block a
    person fills in. Headlines show totals only for a single all-numeric row or
    a result of ten rows or more, never a small-group breakdown. The README's
    "Latest review" links the newest log.

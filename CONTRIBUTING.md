@@ -116,6 +116,11 @@ Want to implement something yourself? Comment on a `status:triaged` issue (or on
   skill names, generated files) needs the maintainer's sign-off and a CHANGELOG entry that
   says what to do. From 1.0.0 it also follows the deprecation policy in
   [docs/versioning.md](docs/versioning.md).
+- **Until 1.0.0, assume StreamSnow has no users.** A change to what StreamSnow generates (app
+  templates such as `review.py` or `index.yaml`, repo files) needs no migration code, refresh
+  step or compatibility shim for apps an older release generated. It still needs its CHANGELOG
+  entry, under `### Breaking` when it breaks something, and the agent rules on the CLI surface
+  and on stricter checks in [.claude/CLAUDE.md](.claude/CLAUDE.md) still apply.
 
 ## AI-assisted contributions
 

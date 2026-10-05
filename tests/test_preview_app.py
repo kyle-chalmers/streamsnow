@@ -556,3 +556,157 @@ def test_start_warehouse_app_without_streamlit_prints_install_hint(tmp_path, mon
     out = capsys.readouterr().out
     assert "uv pip install" in out and "'streamlit==1.50.0'" in out
     assert "-e apps/" not in out
+
+
+# --------------------------------------------------------------------------- #
+# Review preview mode (--review-capture) and --port 0
+# --------------------------------------------------------------------------- #
+# Stand-in server that records the capture flag it was started with.
+FAKE_SERVER_REPORTING_ENV = (
+    "import os, pathlib, sys\n"
+    "pathlib.Path(sys.argv[0]).with_name('env.txt').write_text("
+    "os.environ.get('STREAMSNOW_REVIEW_CAPTURE', '<unset>'), encoding='utf-8')\n"
+) + FAKE_SERVER
+
+# Stand-in that loses its port once (another process took it), then serves.
+FAKE_PORT_RACE = (
+    "import pathlib, sys\n"
+    "marker = pathlib.Path(sys.argv[0]).with_name('raced')\n"
+    "if not marker.exists():\n"
+    "    marker.write_text('1', encoding='utf-8')\n"
+    "    print('Port ' + sys.argv[1] + ' is already in use', flush=True)\n"
+    "    sys.exit(1)\n"
+) + FAKE_SERVER
+
+
+def _json_out(capsys) -> dict:
+    return json.loads(capsys.readouterr().out)
+
+
+def test_review_capture_reaches_the_child_and_nothing_else_does(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    _fake_launcher(tmp_path, FAKE_SERVER_REPORTING_ENV, monkeypatch)
+    monkeypatch.setenv("STREAMSNOW_REVIEW_CAPTURE", "/stray/from/the/shell")
+    run_dir = ".streamsnow/sql-review/acme-sales-dashboard/20261005-120000-abc1234"
+    try:
+        args = _start_args(repo, 0) + ["--review-capture", f"{run_dir}/capture", "--json"]
+        assert preview_app.main(args) == 0
+        payload = _json_out(capsys)
+        capture = (repo / run_dir / "capture").resolve()
+        assert payload["review_capture"] == str(capture)
+        assert capture.is_dir()
+        # Inside the run directory the sql-review .gitignore covers it already.
+        assert not (capture / ".gitignore").exists()
+        assert (tmp_path / "env.txt").read_text(encoding="utf-8") == str(capture)
+        state = json.loads(
+            (repo / ".streamsnow/preview" / f"{SLUG}.json").read_text(encoding="utf-8")
+        )
+        assert state["review_capture"] == str(capture)
+        assert preview_app.main(["status", SLUG, "--dir", str(repo), "--json"]) == 0
+        assert _json_out(capsys)["review_capture"] == str(capture)
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+    capsys.readouterr()
+
+    # A normal preview never inherits a stray shell export.
+    try:
+        assert preview_app.main(_start_args(repo, 0) + ["--json"]) == 0
+        assert _json_out(capsys)["review_capture"] is None
+        assert (tmp_path / "env.txt").read_text(encoding="utf-8") == "<unset>"
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_review_capture_elsewhere_gets_its_own_gitignore(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
+    try:
+        assert preview_app.main(_start_args(repo, 0) + ["--review-capture", "my capture"]) == 0
+        ignore = repo / "my capture" / ".gitignore"
+        assert ignore.read_text(encoding="utf-8").splitlines()[-1] == "*"
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_port_zero_picks_a_free_port(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
+    try:
+        assert preview_app.main(_start_args(repo, 0) + ["--json"]) == 0
+        payload = _json_out(capsys)
+        port = payload["port"]
+        assert port > 0 and payload["url"] == f"http://127.0.0.1:{port}"
+        state = json.loads(
+            (repo / ".streamsnow/preview" / f"{SLUG}.json").read_text(encoding="utf-8")
+        )
+        assert state["port"] == port
+        assert preview_app.probe_health(port)
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_port_zero_retries_once_when_the_free_port_is_taken(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    _fake_launcher(tmp_path, FAKE_PORT_RACE, monkeypatch)
+    try:
+        assert preview_app.main(_start_args(repo, 0) + ["--json"]) == 0
+        assert _json_out(capsys)["status"] == "ready"
+        assert (tmp_path / "raced").exists()
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_a_fixed_port_is_not_retried(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    _fake_launcher(tmp_path, FAKE_PORT_RACE, monkeypatch)
+    try:
+        assert preview_app.main(_start_args(repo, _free_port())) == 1
+        assert "port_in_use" in capsys.readouterr().out
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_running_preview_with_other_capture_is_a_mismatch(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
+    try:
+        assert preview_app.main(_start_args(repo, 0)) == 0
+        capsys.readouterr()
+        rc = preview_app.main(_start_args(repo, 0) + ["--review-capture", "cap", "--json"])
+        payload = _json_out(capsys)
+        assert rc == 1 and payload["status"] == "capture_mismatch"
+        assert payload["review_capture"] is None
+        assert "preview stop" in payload["message"]
+        # The same (absent) capture setting is the normal already-running report.
+        assert preview_app.main(_start_args(repo, 0) + ["--json"]) == 0
+        assert _json_out(capsys)["status"] == "already_running"
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+@pytest.mark.parametrize("port", ["-1", "65536"])
+def test_port_out_of_range_is_a_tool_error(tmp_path, capsys, port):
+    repo = _repo(tmp_path)
+    args = _start_args(repo, 0)
+    args[args.index("--port") + 1] = port
+    assert preview_app.main(args) == 2
+    assert "0-65535" in capsys.readouterr().out
+
+
+def test_launch_passes_an_all_str_environment(monkeypatch, tmp_path):
+    """Windows' CreateProcess refuses a non-str env value; POSIX would not notice."""
+    seen = {}
+
+    class Done:
+        pid = 1
+
+    def fake_popen(cmd, **kwargs):
+        seen.update(kwargs)
+        return Done()
+
+    monkeypatch.setattr(preview_app.subprocess, "Popen", fake_popen)
+    env = preview_app._child_env(tmp_path / "capture")
+    with (tmp_path / "log").open("wb") as log_fh:
+        preview_app._launch_detached([sys.executable, "-c", "pass"], log_fh, tmp_path, env)
+    assert seen["env"]["STREAMSNOW_REVIEW_CAPTURE"] == str(tmp_path / "capture")
+    assert all(isinstance(k, str) and isinstance(v, str) for k, v in seen["env"].items())

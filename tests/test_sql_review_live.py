@@ -571,6 +571,89 @@ def test_log_writes_the_fixed_sections_and_a_blank_sign_off(
     assert sr.main(["check", SLUG, "--dir", str(repo)]) == 0
 
 
+def _compare_json(repo: Path, run_id: str, statuses: dict[str, str]) -> Path:
+    """A compare.json as `sql-review compare` writes it, for the current run files."""
+    run_dir = repo / live.RUNS_DIR / SLUG / run_id
+    data = {
+        "verb": "compare",
+        "run_id": run_id,
+        "run_digests": {pg: live.run_digest(run_dir / f"run-{pg}.json") for pg in ("01", "02")},
+        "results": [
+            {
+                "id": f"compare:{ref}",
+                "page": ref[:2],
+                "n": int(ref[3:]),
+                "status": status,
+                "diffs": ["REVENUE: screen 7777777.77 vs run 12345.67 (tolerance 61.73)"],
+            }
+            for ref, status in statuses.items()
+        ],
+    }
+    path = run_dir / "compare.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def test_log_fills_screen_match_from_compare_with_status_words_only(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    run_id = _full_run(repo, capsys)
+    _compare_json(repo, run_id, {"01#1": "mismatch", "01#2": "unsupported", "02#1": "match"})
+    found = _findings_file(tmp_path, [GOOD])
+    assert (
+        _live(repo, FakeSnow(), "log", "--run", run_id, "--findings", str(found), "--dry-run") == 0
+    )
+    out = _out(capsys)
+    log = out["log"]
+    assert "| 1 `total_revenue` | pass | 1 | REVENUE = 12345.67 | mismatch | — |" in log
+    assert "| 2 `revenue_trend` | pass | 30 | REVENUE = 9999.00 | unsupported | — |" in log
+    assert "| withheld (4 rows: a small-group breakdown) | match | F1 |" in log
+    assert "displayed rounding" in log
+    assert "7777777" not in log  # a comparison's numbers stay in the local evidence
+    # A mismatch is a candidate finding, not a finding: log names it, never logs it.
+    assert out["screen_mismatches_uncited"] == ["compare:01#1"]
+    assert "### Blocker\n\nNone." in log
+
+
+def test_log_marks_a_compare_stale_after_a_page_rerun(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    run_id = _full_run(repo, capsys)
+    _compare_json(repo, run_id, {"01#1": "match", "02#1": "mismatch"})
+    _live(repo, FakeSnow(), "run", "--run", run_id, "--page", "02")
+    run_file = repo / live.RUNS_DIR / SLUG / run_id / "run-02.json"
+    run_file.write_text(run_file.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    capsys.readouterr()
+    found = _findings_file(tmp_path, [])
+    assert (
+        _live(repo, FakeSnow(), "log", "--run", run_id, "--findings", str(found), "--dry-run") == 0
+    )
+    out = _out(capsys)
+    log = out["log"]
+    assert "| REVENUE = 12345.67 | match | — |" in log
+    assert "| stale | — |" in log
+    # A stale mismatch is no longer a fact about this run: nothing to cite.
+    assert out["screen_mismatches_uncited"] == []
+
+
+def test_log_cites_compare_ids_as_evidence(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    run_id = _full_run(repo, capsys)
+    _compare_json(repo, run_id, {"01#1": "mismatch"})
+    finding = {
+        **GOOD,
+        "page": "01",
+        "metric": "total_revenue",
+        "evidence": ["compare:01#1", "run:01#1"],
+    }
+    found = _findings_file(tmp_path, [finding])
+    assert (
+        _live(repo, FakeSnow(), "log", "--run", run_id, "--findings", str(found), "--dry-run") == 0
+    )
+    assert _out(capsys)["screen_mismatches_uncited"] == []
+
+
 @pytest.mark.parametrize(
     ("change", "problem"),
     [

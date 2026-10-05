@@ -28,7 +28,7 @@ it and refuses the whole file when one finding is wrong, naming the finding and 
 | `metric` | The metric key on that page, or `null`. |
 | `object` | `DATABASE.SCHEMA.OBJECT` for an object finding, else `null`. |
 | `claim` | One or two sentences a person can check. No row-level values. |
-| `evidence` | At least one result `id` from this run's JSON (`probe:01#1`, `probe:DB.SCHEMA.OBJ`, `run:01#1`, `bench:01#1:after`). |
+| `evidence` | At least one result `id` from this run's JSON (`probe:01#1`, `probe:DB.SCHEMA.OBJ`, `run:01#1`, `bench:01#1:after`, `compare:01#1`). Never anything from `screen.json`: the browser walk is a cross-check, not evidence. |
 | `suggested_fix` | One line, or a short diff summary. Optional. |
 
 ## Severity

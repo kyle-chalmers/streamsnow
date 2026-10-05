@@ -55,3 +55,56 @@ with a no-code Playwright cross-check.
   reviewers. `--no-screen` skips it.
 - Docs and CHANGELOG; version bump in the four files.
 - Done when CI is green and a manual run on a real app shows matches in the log.
+
+## As built (deviations from this plan)
+
+Recorded when phase 3 landed. The plan was checked by two sub-agents first (one against the spec,
+the phase plans and the phase-2 code, one adversarial on correctness, privacy, Windows and the
+test rules), and their findings are folded in below.
+
+- **Version:** no bump in the feature PR; the maintainer releases separately.
+- **Playwright CLI, not the MCP:** the walk is a review variant of
+  `skills/_shared/playwright-walkthrough.md`, with its DOM snippet in `skills/sql-review/screen.md`.
+  Without the CLI the user opens each page once; the capture alone still drives `compare`.
+- **The capture is the evidence; the walk a cross-check.** `compare` writes `compare.json` with
+  `compare:NN#n` ids (citable through `_RESULT_FILE_RE`). `screen.json` is agent-written:
+  `compare` keeps only its counts and displayed numbers, records whether they agree, and never
+  lets them change a status, reach the log, or become evidence.
+- **Capture location and identity:** `<run_dir>/capture/` by default (`--capture DIR`). Files are
+  `<stem>__<key>.json`, the page found as the innermost app file on the call stack (`check`
+  requires the call in the page file), so any `st.Page` path works; `compare` matches by page
+  path, then stem, then a key-only file only when the key is unique in the app.
+- **Privacy:** captures hold a row count, sha256-hashed column names (a pivoted frame's columns
+  can be data values) and column totals; text is kept only when it is a displayed number. The
+  walk's snippet reduces everything to counts in the browser and the walk folder is deleted.
+- **Safety in Streamlit:** `review.py` classifies values by type, never by attribute lookups
+  (a Snowpark DataFrame's `__getattr__` and Snowpark pandas' `.shape` can run queries), has no
+  annotations (the warehouse runtime allows Python 3.9), and swallows and logs its own errors.
+- **Matching:** scalars only against a one-row single total or a row count (anything else is
+  `unsupported`); integers exact give or take the displayed rounding; `%` as a ratio, and as
+  points only when the run value is above 1; frame totals by hashed name, then by value, with a
+  `values-ambiguous` rule when a value pairing could go two ways; a null total equals a zero.
+- **Log:** the Screen match column shows status words only, or `stale` when a page's
+  `run-NN.json` changed after the comparison; `log` lists uncited screen mismatches but never
+  logs them.
+- **Preview:** `--port 0` retries once on a fresh port if the free port is taken before
+  Streamlit binds it; a preview running with another capture setting is `capture_mismatch`.
+- **No users before 1.0:** the maintainer confirmed there are no users yet, so there is no path
+  to refresh `review.py` in existing apps; the policy is now written in `CONTRIBUTING.md` and
+  `docs/versioning.md`.
+- **Real check (2026-10-05, Streamlit 1.59.2, Playwright CLI at the pinned version):** a freshly
+  scaffolded Acme app on `SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS` with four marked visuals (a KPI
+  frame, a formatted `$34.46B` text metric, a 5-row dataframe with lower-cased columns, a 13-bar
+  Vega chart). Preview on `--port 0` with capture, a walk, `compare` against a live `run`: 4 of 4
+  `match`, helper `current`, the walk agreeing on all three visuals it can judge. It confirmed
+  that `aria-rowcount` counts the header row (6 for 5 rows), and found two things the recipe
+  now handles: Vega axes are `graphics-symbol`s too (the snippet counts only bars and points),
+  and the `Data as of:` caption renders before the data, so the walk also waits for
+  `data-test-script-state=notRunning`. Slicing the 5-row table to 3 rows in the page made
+  `compare` exit 1 with a row-count mismatch, as it should.
+- **Code review before the PR** (a fresh sub-agent on the full diff) found, and this PR fixes:
+  column names that collide once normalised (`Orders`, `Orders %`) overwrote a total, so repeats
+  are now numbered and marked `collided` and pair by value only; the display-number regex
+  backtracked on long whitespace, so text is stripped and capped at 40 characters and the
+  pattern has no adjacent `\s*`; a NaN on screen matched a zero; malformed captures crashed
+  `compare`; a re-run page left the log `stale` with no prompt to compare again.

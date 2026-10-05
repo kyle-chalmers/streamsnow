@@ -59,7 +59,7 @@ last two if they are missing).
 | Command | What it does |
 |---|---|
 | `streamsnow new <domain> <function>` | Scaffolds `apps/<domain>-<function>/`. `--force` overwrites. |
-| `streamsnow preview start <slug>` | Runs the app locally against live Snowflake in the background and polls its health endpoint. `--port`, `--timeout` (seconds, default 60). A bare `streamsnow preview <slug>` means `start`. |
+| `streamsnow preview start <slug>` | Runs the app locally against live Snowflake in the background and polls its health endpoint. `--port` (`0` picks any free port), `--timeout` (seconds, default 60), `--review-capture DIR` (review preview mode for `/sql-review`: `review_value` records what each visual received, aggregates only, in DIR). A bare `streamsnow preview <slug>` means `start`. |
 | `streamsnow preview status <slug>` | Is it running, and where. |
 | `streamsnow preview logs <slug>` | The last lines of its log (`--lines`). |
 | `streamsnow preview stop <slug>` | Stops it. |
@@ -137,6 +137,7 @@ The live review (the `/sql-review` skill drives these; each needs a `snow` conne
 | `streamsnow sql-review probe <slug>` | Checks every object the index names exists, has a direct grant to the review role, and (for views in `app_specific_reporting_objects/`) matches the live definition; compiles every section and reports its columns. Starts a run and prints its `run_id`. |
 | `streamsnow sql-review run <slug>` | Runs every section wrapped in an aggregate: row count, a total per numeric column, an order-insensitive hash, timing. Never fetches rows. `--page NN`, `--slow-s N` (default 10). |
 | `streamsnow sql-review bench <slug> --metric NN#n` | Times one section with the result cache off (median of `--runs`, default 3): elapsed time, bytes and partitions scanned. `--sql-file F` benchmarks a candidate rewrite of the query against it and reports `equivalent`. |
+| `streamsnow sql-review compare <slug>` | Holds what each visual received in review preview mode (`preview start --review-capture`) to its `run` result: `match`, `mismatch`, `not_captured` or `unsupported` per metric, within 0.5% or the displayed rounding, integers exactly. Reads the run's `capture/` (`--capture DIR`) and, when present, its `screen.json` from a browser walk (`--screen F`, a cross-check only). Needs no connection. |
 | `streamsnow sql-review log <slug> --findings F` | Writes `sql_review/review_log/YYYY-MM-DD_<sha>.md` from verified findings and links it from the README; refuses a finding whose evidence is not a result in the run. `--dry-run` validates and writes nothing. |
 
 `probe`, `run` and `bench` share `--run <id>|latest` (default: a new run), `--connection`

@@ -6,7 +6,8 @@ covers, how things are retired, and what has to be true before 1.0.0.
 **Before 1.0.0 (today, 0.x):** the surface below is already treated as stable in spirit, but
 the deprecation policy does not apply yet. A breaking change can land in any minor release
 (0.7 → 0.8) without a deprecation period, always with a CHANGELOG entry that says what changed
-and what to do.
+and what to do. Until then StreamSnow also assumes it has no users: a change to generated files
+ships without migration code or a refresh step for apps an older release generated.
 
 **From 1.0.0:** anything on the stable surface changes incompatibly only in a major release
 (1.x → 2.0), after the deprecation window below.

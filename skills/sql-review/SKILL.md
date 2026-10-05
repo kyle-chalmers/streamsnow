@@ -1,7 +1,7 @@
 ---
 name: sql-review
 description: Prove an app's numbers against live Snowflake and leave a record a person signs. Builds or repairs the app's sql_review/ page files, checks objects, grants and DDL drift, runs every section as aggregates, has reviewer agents judge the logic, drops findings the evidence does not support, and writes the committed review log. Use when the user says "review the SQL", "are these numbers right", "trace the data", "audit the lineage", before a release or deploy, or from /review-app --sql. It spends warehouse credits, so run it when asked, not on your own initiative.
-argument-hint: "<slug> [--page NN] [--offline] [--optimize] [--role ROLE] [--connection NAME]"
+argument-hint: "<slug> [--page NN] [--offline] [--optimize] [--no-screen] [--role ROLE] [--connection NAME]"
 allowed-tools: [Bash, Read, Edit, Write, Glob, Grep, Task]
 ---
 
@@ -34,33 +34,37 @@ fails a ship. Run it on request and before a release or deploy.
    an order-insensitive hash and timing per section, computed in Snowflake.
 6. Read these outputs, never result rows. Do not run sections yourself, and never call `snow sql`
    directly: the commands guard every statement before it is sent.
+7. **Screen** (skip with `--no-screen`): preview in review mode, open every page at its default
+   filters, stop the preview, then `streamsnow sql-review compare <slug> --run <run_id>`, per
+   [screen.md](screen.md). Its mismatches go to the page reviewers, never straight to the log.
 
 ## Judgment
 
-7. **In parallel** (Claude Code: one message, several Task calls): agent
+8. **In parallel** (Claude Code: one message, several Task calls): agent
    `streamsnow:sql-review-page` once per page, and `streamsnow:sql-review-object` once per object
    in `sql_review/app_specific_reporting_objects/`. Without subagents, follow
    [reviewers/page.md](reviewers/page.md) and [reviewers/object.md](reviewers/object.md) yourself,
    one brief at a time. Each brief names its inputs, the one file it writes, and its result.
-8. **Optimizer** ([reviewers/optimizer.md](reviewers/optimizer.md)) for each section `run` marked
+9. **Optimizer** ([reviewers/optimizer.md](reviewers/optimizer.md)) for each section `run` marked
    `slow` (over 10 s), or for all with `--optimize`. Every rewrite it proposes is backed by
    `streamsnow sql-review bench <slug> --run <run_id> --metric NN#n --sql-file <candidate>` with
    `equivalent: true`. It proposes diffs, never applies them, never suggests a bigger warehouse.
-9. **Verifier** ([reviewers/verifier.md](reviewers/verifier.md)), a fresh agent per page batch: it
+10. **Verifier** ([reviewers/verifier.md](reviewers/verifier.md)), a fresh agent per page batch: it
    re-reads every cited result, tries to refute each finding, and keeps or drops it with a reason.
 
 ## Log
 
-10. Merge the kept findings into `findings.json` in the run directory, shaped per
+11. If a reviewer re-ran a page, run `compare` again (offline) so its rows are not `stale`. Merge
+    the kept findings into `findings.json` in the run directory, shaped per
     [findings.md](findings.md). Validate with `streamsnow sql-review log <slug> --run <run_id>
     --findings <file> --dry-run`; a refusal names the finding and why. Fix the citation or drop
     the finding; never invent evidence.
-11. Write it: the same command without `--dry-run`. It writes
+12. Write it: the same command without `--dry-run`. It writes
     `sql_review/review_log/YYYY-MM-DD_<shortsha>.md` and updates the README's latest review.
-12. `streamsnow sql-review check <slug>`, then commit the log and `sql_review/README.md` alone:
+13. `streamsnow sql-review check <slug>`, then commit the log and `sql_review/README.md` alone:
     `chore(sql-review): <slug> review <YYYY-MM-DD>`. Fixes come later, in their own commits,
     after the user agrees to each.
-13. **Report:** the log path, blocker / major / minor counts and the top findings. Tell the user
+14. **Report:** the log path, blocker / major / minor counts and the top findings. Tell the user
     the sign-off block (Reviewer, Date, Decision) is theirs to fill in. Never fill it in.
 
 ## Rules
@@ -75,5 +79,6 @@ fails a ship. Run it on request and before a release or deploy.
 
 ## Done when
 
-The log is committed with every finding cited and verified, check is clean, and the user knows
-the sign-off is theirs. With `--offline`: check is clean or its gaps are reported.
+The log is committed with every finding cited and verified, every screen mismatch either cited or
+dropped by the verifier (or `--no-screen`), check is clean, and the user knows the sign-off is
+theirs. With `--offline`: check is clean or its gaps are reported.

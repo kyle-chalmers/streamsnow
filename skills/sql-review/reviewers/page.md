@@ -11,6 +11,10 @@ number on that page wrong. You judge; the `streamsnow sql-review` commands alrea
   and the app's `queries/*.sql` behind them.
 - `.streamsnow/sql-review/<slug>/<run_id>/probe.json` and `run-NN.json`: per section, its columns
   (`probe:NN#n`) and its row count, totals, hash and timing (`run:NN#n`).
+- `compare.json` in the same folder, when the screen was compared: per visual, what it received
+  in review preview mode held to its `run` result (`compare:NN#n`: `match`, `mismatch`,
+  `not_captured` or `unsupported`, the rule that matched, the differing aggregates).
+  `screen.json` beside it holds the browser walk's readings: notes for you, never evidence.
 - The app's `AGENTS.md` Data notes and `REQUIREMENTS.md` (what each visual should mean).
 
 ## Check
@@ -27,6 +31,12 @@ number on that page wrong. You judge; the `streamsnow sql-review` commands alrea
    sample tokens that do not match the page's default filters.
 6. **Comments:** each CTE's comment says why, not what; roughly one comment per 5 to 10 lines;
    none restates the SQL.
+7. **Screen:** each `mismatch` in `compare.json` for this page is a candidate finding. Decide why
+   the page and the SQL differ: the SQL, the page's own transformation (a slice, a rename, a
+   division), default filters that no longer match the index's tokens and window, or the local
+   preview's role (it is not the CI role). A `values-ambiguous` rule or `"helper": "modified"`
+   needs extra care. Cite `compare:NN#n` with the `run:NN#n` it is held to. A `not_captured`
+   visual is not a finding on its own.
 
 You may re-run this page's facts with `streamsnow sql-review run <slug> --run <run_id> --page NN`.
 Nothing else touches Snowflake: never `snow sql`, never a query of your own.
@@ -38,8 +48,8 @@ Write only `.streamsnow/sql-review/<slug>/<run_id>/findings-page-NN.json`. Edit 
 ## Result
 
 `{"findings": [...]}` in the shape of the sql-review skill's `findings.md`: ids `P<NN>-<n>`,
-`page: "NN"`, the metric key, a claim a person can check, and evidence that cites `probe:NN#n` or
-`run:NN#n` ids from this run. No row-level values, no small-group totals. No finding is a valid
+`page: "NN"`, the metric key, a claim a person can check, and evidence that cites `probe:NN#n`,
+`run:NN#n` or `compare:NN#n` ids from this run. No row-level values, no small-group totals. No finding is a valid
 result: return an empty list rather than a weak finding.
 
 ## Verify
