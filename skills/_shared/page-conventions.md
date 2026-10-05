@@ -44,24 +44,41 @@ nothing at import time (the container runtime shares one process across viewers)
 from typing import NamedTuple
 import streamlit as st
 
+
 class Metric(NamedTuple):
-    key: str; label: str; definition: str; formula: str
+    key: str
+    label: str
+    definition: str
+    formula: str
+
 
 _DEFINITIONS = (
-    Metric("promise_kept_rate", "Promise-kept rate",
-           "Share of payment promises honoured by their due date.",
-           "SUM(kept_promises) ÷ SUM(promises_due)"),
+    Metric(
+        "promise_kept_rate",
+        "Promise-kept rate",
+        "Share of payment promises honoured by their due date.",
+        "SUM(kept_promises) ÷ SUM(promises_due)",
+    ),
 )
 _BY_KEY = {m.key: m for m in _DEFINITIONS}
 
-def metric_help(key):          # -> st.metric(..., help=metric_help("promise_kept_rate"))
-    m = _BY_KEY[key]; return f"{m.definition} Formula: {m.formula}"
-def column_help(*keys):        # -> st.column_config help= dicts for tables
+
+def metric_help(key):  # -> st.metric(..., help=metric_help("promise_kept_rate"))
+    m = _BY_KEY[key]
+    return f"{m.definition} Formula: {m.formula}"
+
+
+def column_help(*keys):  # -> st.column_config help= dicts for tables
     return {k: metric_help(k) for k in keys}
-def render_glossary(*keys):    # -> one expander per page listing what it shows
+
+
+def render_glossary(*keys):  # -> one expander per page listing what it shows
     with st.expander("Metric definitions"):
-        for k in keys or _BY_KEY: st.markdown(f"**{_BY_KEY[k].label}** — {metric_help(k)}")
-def hover_definition(key):     # -> %-escaped text for a Plotly hovertemplate
+        for k in keys or _BY_KEY:
+            st.markdown(f"**{_BY_KEY[k].label}** — {metric_help(k)}")
+
+
+def hover_definition(key):  # -> %-escaped text for a Plotly hovertemplate
     return metric_help(key).replace("%", "%%")
 ```
 

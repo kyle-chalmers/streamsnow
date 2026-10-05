@@ -104,10 +104,11 @@ example row from the README.
 ```python
 # container
 conn = st.connection("snowflake")
-return conn.query(sql, params=[start, end], ttl=0)   # ttl=0: outer cache is the source of truth
+return conn.query(sql, params=[start, end], ttl=0)  # ttl=0: outer cache is the source of truth
 
 # warehouse
 from snowflake.snowpark.context import get_active_session
+
 return get_active_session().sql(sql, params=[start, end]).to_pandas()
 ```
 
