@@ -33,10 +33,18 @@ def _app(tmp_path: Path) -> Path:
 
 
 def _pure_functions(path: Path, names: set[str]) -> dict:
-    """Load only the named top-level functions, without the module's imports
-    (branding.py imports plotly and streamlit, which the test env does not have)."""
+    """Load only the named top-level functions and constants, without the module's
+    imports (branding.py imports plotly and streamlit, which the test env lacks)."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    defs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
+
+    def wanted(node: ast.stmt) -> bool:
+        if isinstance(node, ast.FunctionDef):
+            return node.name in names
+        return isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id in names for t in node.targets
+        )
+
+    defs = [n for n in tree.body if wanted(n)]
     namespace: dict = {}
     exec(compile(ast.Module(body=defs, type_ignores=[]), str(path), "exec"), namespace)
     return namespace
@@ -96,13 +104,19 @@ def test_query_headers_reads_sources_from_the_query_files(tmp_path):
 
 
 def test_branding_formatters(tmp_path):
-    fns = _pure_functions(_app(tmp_path) / "branding.py", {"fmt_number", "fmt_currency", "fmt_pct"})
+    fns = _pure_functions(
+        _app(tmp_path) / "branding.py", {"_UNITS", "fmt_number", "fmt_currency", "fmt_pct"}
+    )
     fmt_number, fmt_currency, fmt_pct = fns["fmt_number"], fns["fmt_currency"], fns["fmt_pct"]
     assert fmt_number(23) == "23"  # counts stay integers, never "23.0"
     assert fmt_number(950.5) == "950.5"
     assert fmt_number(12_340) == "12.3k"
     assert fmt_number(4_500_000) == "4.5M"
     assert fmt_number(-1_200_000_000) == "-1.2B"
+    # The unit is chosen after rounding: no "1000.0k" or "1,000.0".
+    assert fmt_number(999_999) == "1.0M"
+    assert fmt_number(999.96) == "1.0k"
+    assert fmt_number(999.4) == "999.4"
     assert fmt_currency(48_600) == "$48.6k"
     assert fmt_currency(-1_200_000, symbol="€") == "-€1.2M"
     assert fmt_pct(0.345) == "34.5%"
@@ -128,3 +142,19 @@ def test_default_palette_keeps_status_hues_out():
     assert [c.upper() for c in example["brand"]["chart_sequence"]] == [
         c.upper() for c in _DEFAULT_CHART_SEQUENCE
     ]
+
+
+def test_metric_delta_is_colored_by_meaning(tmp_path):
+    names = {"BRAND_STATUS_COLORS", "_DELTA_COLORS", "_NEUTRAL_INK", "_delta_ink"}
+    ns = _pure_functions(_app(tmp_path) / "branding.py", names)
+    ink, good, bad = (
+        ns["_delta_ink"],
+        ns["BRAND_STATUS_COLORS"]["good"],
+        ns["BRAND_STATUS_COLORS"]["bad"],
+    )
+    grey = ns["_NEUTRAL_INK"]
+    assert ink("+5.3%") == good and ink("-5.3%") == bad and ink("\u22121.2k") == bad
+    assert ink("+5.3%", "inverse") == bad and ink("-5.3%", "inverse") == good  # e.g. cost
+    assert ink("+5.3%", "off") == grey
+    for unchanged in ("0%", "+0.0 pts", "0"):  # no change is neither good nor bad
+        assert ink(unchanged) == grey and ink(unchanged, "inverse") == grey

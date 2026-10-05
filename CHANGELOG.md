@@ -22,8 +22,10 @@ entry.
   share).
 - **`branding.py` 1.1.0:** `fmt_number`, `fmt_currency`, `fmt_pct`, `BRAND_STATUS_COLORS`, and
   `branded_metric(help=..., delta_color=...)` (tooltip definition; delta colored by meaning). Additive:
-  existing calls keep working. Copy the new `branding.py` into existing apps when a repo mixes
-  versions, or `check branding-parity` reports the older copies.
+  existing calls keep working; a zero delta ("0%") is grey, not green. Older apps on 1.0.0 next
+  to a new 1.1.0 app get a `check branding-parity` **note**, not a failure: a lag behind the
+  installed template within one major version is an upgrade, not a hand edit. Copy the new
+  `branding.py` into them when convenient.
 - **House design guide.** An optional, committed `.streamsnow/design.md` holds a repo's house
   style for pages; `/build-app` and `/review-app` read it before the shipped defaults.
 - `/build-app` specs record each page's **Question** (§4) and a **Style** line (§2).
@@ -63,9 +65,12 @@ entry.
   --scope project …` and `claude plugin install --scope project …`) in its `Next:` block,
   matching the README and Getting started. It printed the user-scope `/plugin` commands before.
 - **Default chart palette** no longer uses green, amber or red, which the visualization guide
-  reserves for status. New default: `#2A78D6, #EB6834, #1BAF7A, #4A3AA7, #E87BA4` (adjacent pairs
-  colorblind-separable on the light theme). Only apps scaffolded without a `brand.chart_sequence`
-  change.
+  reserves for status. New default: `#2A78D6, #EB6834, #1BAF7A, #4A3AA7, #E87BA4`. It is **five
+  colors, not six**: a chart with a sixth series repeats a color, so fold the tail into "Other" or
+  use small multiples. Adjacent pairs were checked for colorblind separation on the light theme
+  with an external palette validator (the check isn't part of this repo's tests); slots 3 and 5
+  sit below 3:1 contrast on white, so label those series directly. Only apps scaffolded without
+  a `brand.chart_sequence` change.
 
 ### Fixed
 
