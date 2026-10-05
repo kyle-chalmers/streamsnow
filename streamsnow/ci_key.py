@@ -193,3 +193,97 @@ def create(
         mismatched=mismatched,
         warnings=warnings,
     )
+
+
+@dataclasses.dataclass
+class PushResult:
+    repo: str
+    done: list[str]
+    failed: str | None = None
+    message: str = ""
+    not_attempted: list[str] = dataclasses.field(default_factory=list)
+
+
+def _redact(text: str, values: list[str]) -> str:
+    """Strip every line of every secret value out of ``text`` (gh's error output)."""
+    for value in values:
+        for line in value.splitlines():
+            line = line.strip()
+            if len(line) >= 4 and line in text:
+                text = text.replace(line, "<redacted>")
+    return text
+
+
+def push(
+    directory: Path,
+    *,
+    repo: str | None = None,
+    run=None,
+    which=None,
+) -> PushResult:
+    """Set the five deploy secrets on GitHub, each value going file -> gh's stdin.
+
+    Checks everything before setting anything: gh present and signed in, the
+    target repo resolvable, every secret file present and non-empty. Secrets go
+    in SECRET_NAMES order, so SNOWFLAKE_ACCOUNT (which switches the deploy job
+    on) is last, and a failure stops before it. No value is ever placed on argv
+    or returned in a message.
+    """
+    run = run or subprocess.run
+    which = which or shutil.which
+    if which("gh") is None:
+        raise CiKeyError(
+            "gh (the GitHub CLI) is not on PATH. Install it, then run `gh auth login`."
+        )
+    if run(["gh", "auth", "status"], capture_output=True, check=False).returncode != 0:
+        raise CiKeyError(
+            "gh is not signed in. Run `gh auth login`, then re-run `streamsnow ci-key push`."
+        )
+    repo_flag = ["--repo", repo] if repo else []
+    view = run(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner", *repo_flag],
+        capture_output=True,
+        check=False,
+    )
+    target = view.stdout.decode("utf-8", errors="replace").strip()
+    if view.returncode != 0 or not target:
+        raise CiKeyError(
+            "No GitHub repository found for this directory. Add a GitHub remote, or pass "
+            "--repo owner/name."
+        )
+
+    secrets = Path(directory).expanduser().absolute() / "secrets"
+    payloads: dict[str, bytes] = {}
+    for name in SECRET_NAMES:
+        path = secrets / name
+        if not path.exists():
+            raise CiKeyError(f"{path} is missing. Run `streamsnow ci-key create` first.")
+        data = path.read_bytes()
+        if name != PRIVATE_KEY_SECRET:
+            data = data.rstrip(b"\r\n")  # a hand-edited file may end in a newline
+        if not data.strip():
+            raise CiKeyError(
+                f"secrets/{name} is empty. Delete it and re-run `streamsnow ci-key create`."
+            )
+        payloads[name] = data
+    plain = [v.decode("utf-8", errors="replace") for v in payloads.values()]
+
+    done: list[str] = []
+    for i, name in enumerate(SECRET_NAMES):
+        proc = run(
+            ["gh", "secret", "set", name, *repo_flag],
+            input=payloads[name],
+            capture_output=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            raw = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
+            return PushResult(
+                repo=target,
+                done=done,
+                failed=name,
+                message=_redact(raw, plain) or f"gh exited {proc.returncode}",
+                not_attempted=list(SECRET_NAMES[i + 1 :]),
+            )
+        done.append(name)
+    return PushResult(repo=target, done=done)
