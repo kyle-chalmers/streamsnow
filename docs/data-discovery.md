@@ -33,18 +33,23 @@ doesn't appear, it's usually a role gap (see [below](#when-your-role-cant-see-a-
 
 ## How governance shapes what you can query
 
-StreamSnow enforces schema access as **executable guardrails**, not convention:
+StreamSnow enforces the schema **denylist** as an executable guardrail; the
+allowlist is the convention the scaffold and docs point at:
 
-- **`schema_allow`** — the only schemas your app code may reference.
 - **`schema_deny`** — schemas that are blocked outright (raw/landing/bridge
-  layers, ETL intermediates). `streamsnow check schema-refs` flags any reference
-  to them in committed `apps/**` SQL or Python, and it runs in pre-commit, in
-  `validate-app`, and in CI. Investigating a denied schema in Snowsight is fine;
-  shipping a query against one is not.
+  layers, ETL intermediates). This is the enforced part: `streamsnow check
+  schema-refs` flags any reference to them in committed `apps/**` SQL or Python,
+  and it runs in pre-commit, in `validate-app`, and in CI. Investigating a denied
+  schema in Snowsight is fine; shipping a query against one is not.
+- **`schema_allow`** — the schemas your apps are expected to read (the curated
+  marts). The scaffolded queries and these docs point at them, but the check does
+  not fail a reference to a schema that is merely absent from this list.
 - **`read_exceptions`** — specific fully-qualified objects (`DB.SCHEMA.OBJECT`)
-  sanctioned for direct reads even if their schema isn't broadly allowed.
+  sanctioned for direct reads even though their schema is on the deny list. The
+  match is exact: the rest of that schema stays blocked.
 
-A reference that violates the policy fails the gate before it can merge.
+A reference to a denied schema (other than an exact `read_exceptions` object)
+fails the gate before it can merge.
 
 ## Rules of thumb
 

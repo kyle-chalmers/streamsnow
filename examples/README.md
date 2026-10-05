@@ -34,7 +34,11 @@ apps/<slug>/
   streamlit_app.py         # st.navigation entrypoint, apply_branding()
   pages/overview.py        # starter placeholder: sample numbers, a Plotly chart, a cached loader
   queries/example_metric.sql   # starter placeholder: reads YOUR_TABLE
-  branding.py  sql_loader.py
+  sql_review/              # runnable SQL per page (streamsnow sql-review)
+    index.yaml             # the editing surface: pages, metrics, review window
+    01_overview.sql        # generated: one runnable section per metric
+    README.md  AGENTS.md  CLAUDE.md
+  branding.py  sql_loader.py  review.py (the review_value marker)
   .streamlit/config.toml   .streamlit/secrets.toml.example
   snowflake.yml            pyproject.toml (container) | environment.yml (warehouse)
   AGENTS.md
@@ -44,6 +48,6 @@ Generate and run one:
 
 ```bash
 uvx streamsnow init                # setup wizard + scaffold
-streamsnow validate-app <slug>     # PASS/FAIL gate
+streamsnow validate-app <slug>     # PASS/FAIL gate (FAILS until the placeholders are replaced)
 streamsnow preview <slug>          # run locally vs Snowflake
 ```
