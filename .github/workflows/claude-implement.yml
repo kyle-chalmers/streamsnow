@@ -37,7 +37,7 @@ jobs:
 
       - name: Mark the issue as in progress
         if: env.HAS_TOKEN == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -47,14 +47,14 @@ jobs:
             }
             await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['status:agent-working'] });
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.HAS_TOKEN == 'true'
         with:
           fetch-depth: 0
 
       - name: Install uv
         if: env.HAS_TOKEN == 'true'
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
 
       - name: Sync project
         if: env.HAS_TOKEN == 'true'
@@ -110,7 +110,7 @@ jobs:
 
       - name: Report a failed run on the issue
         if: failure() && env.HAS_TOKEN == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const { owner, repo } = context.repo;

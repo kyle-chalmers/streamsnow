@@ -756,10 +756,10 @@ def init(
         raise typer.Exit(2) from exc
 
     written = repo_written + app_written
-    # Render the starter app's audit trail so the sql_review pattern is live
-    # from commit 1 (static manifest — deterministic, no app imports).
+    # Render the starter app's sql_review page file so the pattern is live from
+    # commit 1 (from sql_review/index.yaml: deterministic, no app imports).
     if app_written and _sql_review_main(["generate", app_slug, "--dir", str(target)]) != 0:
-        console.print("[yellow]∘[/] sql_review companion generation failed — see error above")
+        console.print("[yellow]∘[/] sql_review generation failed; see the error above")
     # soft_wrap: commands in these blocks must stay copy-pasteable on one line.
     console.print(f"[green]✓[/] scaffolded {len(written)} files into {target}", soft_wrap=True)
     console.print(_init_next_steps(cfg, target, app_slug or None), soft_wrap=True)
@@ -791,7 +791,7 @@ def _init_next_steps(cfg: Config, target: Path, app_slug: str | None) -> str:
     install = local_install_command(target / "apps" / app_slug)
     lines += [
         f"  4. Replace the starter placeholders in apps/{app_slug}: queries/example_metric.sql",
-        "     and the window in sql_review/manifests/example_metric.json read YOUR_TABLE, and",
+        "     and the review window in sql_review/index.yaml read YOUR_TABLE, and",
         "     pages/overview.py shows sample numbers. validate-app FAILS until they are gone.",
         f"  5. streamsnow validate-app {app_slug}   (PASS once step 4 is done)",
         f"  6. {install}",
@@ -820,7 +820,7 @@ def new(
         _err(str(exc))
         raise typer.Exit(2) from exc
     if _sql_review_main(["generate", slug, "--dir", str(Path.cwd())]) != 0:
-        console.print("[yellow]∘[/] sql_review companion generation failed — see error above")
+        console.print("[yellow]∘[/] sql_review generation failed; see the error above")
     console.print(f"[green]✓[/] created app {slug} ({len(written)} files)")
     # `new` writes app files only. A repo set up with `configure` alone (the
     # pre-0.7.1 plugin setup path) has no .gitignore, hooks or CI: warn loudly,
@@ -836,10 +836,10 @@ def new(
             "missing files)"
         )
     console.print(
-        "The starter files are placeholders: queries/example_metric.sql, its sql_review "
-        "manifest and pages/overview.py (sample numbers). Replace them with your real pages "
-        "and queries (/build-app does this in its build phase); validate-app FAILS while any "
-        "file still reads YOUR_TABLE."
+        "The starter files are placeholders: queries/example_metric.sql, its entry in "
+        "sql_review/index.yaml and pages/overview.py (sample numbers). Replace them with your "
+        "real pages and queries (/build-app does this in its build phase); validate-app FAILS "
+        "while any file still reads YOUR_TABLE."
     )
     # The runtime-matched install, so the first local preview works. markup off:
     # pip extras in brackets (pkg[extra]) are not Rich markup.
@@ -1476,11 +1476,12 @@ def review_gate_cmd(ctx: typer.Context) -> None:
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def sql_review_cmd(ctx: typer.Context) -> None:
-    """Human-runnable audit trail per app (discover | generate | check | index).
+    """Runnable SQL per app page, from sql_review/index.yaml (generate | check).
 
-    Every UI-feeding query gets a fully-rendered, paste-and-runnable review
-    file under apps/<slug>/sql_review/ so a person can trace each visual back
-    to the data. `check` is the import-free freshness + coverage gate."""
+    Each page of an app gets apps/<slug>/sql_review/NN_<page>.sql with one
+    runnable section per metric, so a person can trace each visual back to the
+    data. `check` is the import-free gate: provenance, review_value markers,
+    the DDL folder, sqlfluff lint and comment rules, coverage."""
     raise typer.Exit(code=_sql_review_main(list(ctx.args)))
 
 

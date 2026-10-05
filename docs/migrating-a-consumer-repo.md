@@ -25,7 +25,7 @@ starting MIGRATION.md.
 | `review-app` | **`/review-app`** | Same five dimensions |
 | `apply-review` | `/review-app --fix` | Same A/B/C bucketing, atomic commits |
 | `auto-review-app` | `/review-app --auto` | Same convergence loop |
-| `sql-review` | `/review-app --sql` | Same paste-and-runnable companions + lineage README |
+| `sql-review` | `/review-app --sql` | Runnable SQL per page, one section per metric, from `sql_review/index.yaml` |
 | `deep-dive-data` | **`/audit-lineage`** | Renamed; same bounded read-only tracing. Warehouse-specific rules (e.g. an environment-specific schema helper, an intermediate-layer deploy note) stay local |
 | `feedback-app` | **`/feedback-app`** | Upstreamed in v0.3 — classification buckets, per-item commits, follow-up review |
 | `preview-app` | **`/preview-app`** | Unchanged surface |
@@ -61,7 +61,7 @@ at the verb:
 | manifest/artifacts populater | `streamsnow check artifacts --fix` | Repairs `snowflake.yml` `artifacts:` from disk as a minimal edit |
 | `review_gate.py` | `streamsnow review-gate` | classify / baseline / stamp / stop-hook; the plugin's Stop hook runs the same file |
 | `review_loop.py` | `streamsnow review-loop` | parse / dedup / resolutions / exit-condition / merge |
-| a sql-review generator + manifests dir | `streamsnow sql-review` | discover / generate / check / index; manifests move into `apps/<slug>/sql_review/manifests/` |
+| a sql-review generator + manifests dir | `streamsnow sql-review` | generate / check; one `apps/<slug>/sql_review/index.yaml` per app replaces per-feature manifests |
 | an entrypoint/nav extractor | `streamsnow nav <slug>` | AST-based; JSONL or `--json-array` |
 | a background preview launcher | `streamsnow preview start\|status\|stop\|logs` | State under `.streamsnow/` (gitignored) |
 | migrate-app detection scripts | `streamsnow migrate <verb>` | preflight / scan-hardfails / translate-deps / graft-plan / scan-imports / scan-conformance / scan-inline-sql |
@@ -123,8 +123,10 @@ Three findings from a real fleet's adoption attempt became config, not waivers:
   `artifacts:`. Code is never excludable.
 - **`**Phase notes:**`** — progress narrative in §11 goes on its own line; `**Current phase:**`
   stays the exact value the skills resume on.
-- **`sql_review: {coverage: warn | fail}`** — start on `warn` while the audit-trail backfill runs;
-  drift and hand edits fail either way. Flip to `fail` when coverage is where you want it.
+- **`sql_review: {coverage: warn | fail}`** — start on `warn` while the `sql_review/index.yaml`
+  backfill runs; drift and hand edits fail either way. Flip to `fail` when coverage is where you
+  want it. An app with no `index.yaml` yet is reported as uncovered and nothing more (no lint, no
+  marker check) until it adopts the format.
 
 `tests/fixtures/fleet/` in the StreamSnow repo is a three-app repo shaped like a real fleet; if
 `validate-app` fails a well-run app of yours for a reason not covered there, that is a plugin

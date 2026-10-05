@@ -1,0 +1,25 @@
+# SQL review index for {{ app_title }}: the one file to edit for sql_review/.
+# Change it (or queries/*.sql), then run:
+#   streamsnow sql-review generate {{ app_slug }}
+# Page numbers follow the app's navigation (streamlit_app.py); metric numbers
+# follow the order under metrics: (keep it the on-screen order). AGENTS.md in
+# this folder has the full format.
+schema_version: 2
+app: {{ app_slug }}
+# Every section gets its own params CTE with these values. Anchor the window to
+# the data's latest date, so a section returns rows even when the data stops in
+# the past (a window ending at CURRENT_DATE returns nothing on stale data).
+review_window:
+  start_date: "(SELECT DATEADD('year', -1, MAX(metric_date)) FROM {{ gov_database }}.{{ schema_allow[0] }}.YOUR_TABLE)::DATE"
+  end_date: "(SELECT MAX(metric_date) FROM {{ gov_database }}.{{ schema_allow[0] }}.YOUR_TABLE)::DATE"
+pages:
+  - path: pages/overview.py
+    metrics:
+      - key: example_metric
+        query: queries/example_metric.sql
+        binds: {"1": params.start_date, "2": params.end_date}
+        notes: "Starter metric. Repoint YOUR_TABLE here and in queries/example_metric.sql."
+        reads: [{{ gov_database }}.{{ schema_allow[0] }}.YOUR_TABLE]
+# Objects created to make this app work (views, dynamic tables); each needs a
+# DDL file in app_specific_reporting_objects/ named <DATABASE>.<SCHEMA>.<OBJECT>.sql.
+objects: []

@@ -62,15 +62,15 @@ is actually true today, so a team can decide with open eyes.
 - **Maintainer model.** One maintainer, releases cut from `main` by tag
   ([RELEASING.md](../RELEASING.md)). Co-maintainers are welcome; the
   [contributing guide](../CONTRIBUTING.md) says how.
-- **Release pinning.** Generated CI installs `streamsnow>=0.7,<0.8` (the deploy
-  workflow `>=0.7.2,<0.8`), so a repo never takes a major silently. Stricter
-  shops pin exact (`streamsnow==0.7.0`) and bump on purpose.
+- **Release pinning.** Generated CI and deploy workflows install
+  `streamsnow>=0.8,<0.9`, so a repo never takes a major silently. Stricter
+  shops pin exact (`streamsnow==0.8.0`) and bump on purpose.
 - **Rollback.** `uv tool install streamsnow==<previous>` and
   `streamsnow update --apply` re-render the governance files from that
   version's templates. Nothing StreamSnow writes is opaque.
 - **What a repo keeps if it stops.** Every generated file — `AGENTS.md`, the
   scaffolded apps, `streamsnow.config.yaml`, the CI and deploy workflows,
-  `.streamsnow/overlays/`, the `sql_review/` audit trails — is a plain file the
+  `.streamsnow/overlays/`, the `sql_review/` review SQL — is a plain file the
   repo owns and can edit. The only dependency is the `streamsnow check …` /
   `validate-app` / `sql-review` commands the pre-commit and CI configs call.
 - **What does not exist yet.** A `--vendor` mode that writes those check tools

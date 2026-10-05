@@ -42,15 +42,28 @@ artifacts and the config loader rejects them.
 ("pages 3/5", "QC pending") goes on a `**Phase notes:**` line under it — never appended to the
 phase, which `/build-app` resumes on.
 
-**placeholders.** An app file (query, page or `sql_review` manifest) still contains the scaffold's
-`YOUR_TABLE`, or `pages/overview.py` still shows the starter's hard-coded sample metric and chart
-(the block marked `STREAMSNOW_STARTER_PLACEHOLDER`): the starter trio from `streamsnow new`
-(`queries/example_metric.sql`, its manifest, and `pages/overview.py`) was never replaced. The
-sample values never read the query, so repointing `YOUR_TABLE` alone does not clear the page.
-Replace the trio the way [build-app's build phase](../build-app/pages.md#replace-the-starter-trio)
-does, or repoint the query and manifest window at a real table and render the query's results in
-place of the sample block. Never rename the token or delete only the marker to dodge the check:
+**placeholders.** An app file (query, page or `sql_review/index.yaml`) still contains the
+scaffold's `YOUR_TABLE`, or `pages/overview.py` still shows the starter's hard-coded sample metric
+and chart (the block marked `STREAMSNOW_STARTER_PLACEHOLDER`): the starter trio from
+`streamsnow new` (`queries/example_metric.sql`, its `index.yaml` entry and review window, and
+`pages/overview.py`) was never replaced. The sample values never read the query, so repointing
+`YOUR_TABLE` alone does not clear the page. Replace the trio the way
+[build-app's build phase](../build-app/pages.md#replace-the-starter-trio) does, or repoint the query
+and the `index.yaml` review window at a real table and render the query's results in place of the
+sample block (keep its `review_value("example_metric", …)` wrapper). Never rename the token or delete only the marker to dodge the check:
 CI deploys every app under `apps/`, and this is what stops a placeholder app shipping.
+
+**sql-review.** Each finding names its `kind`; fix the source, then
+`streamsnow sql-review generate <slug>`, never the generated page file:
+`index` (fix `sql_review/index.yaml` as the message says), `provenance` (regenerate; a hand edit
+or a stale README table reads here too), `marker` (make the page's `review_value("<key>", …)`
+calls and the page's metrics in `index.yaml` match, one call per metric), `objects` (the DDL file
+header, its `objects:` entry, and the metrics' `reads:` must agree), `lint` (a sqlfluff finding in
+`queries/*.sql`, rule code first; `sqlfluff fix` handles most layout ones, and the repo's
+`.sqlfluff` tunes the rules), `comments` (a CTE without a one-line comment directly above its
+name, or a comment line over 100 characters), `readonly` / `bind` (a section that would write or
+does not run). `coverage` (a page or query `index.yaml` does not cover) fails only under
+`sql_review.coverage: fail`; `advisory` never fails.
 
 **sql-tokens.** A `{TOKEN}` placeholder appears inside a SQL comment. `render_sql` substitutes
 tokens with comment-unaware `str.replace`, so the token's full SQL expansion lands inside the

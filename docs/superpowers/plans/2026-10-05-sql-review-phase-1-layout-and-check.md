@@ -120,7 +120,9 @@ reported by `check` as orphan.
 
   ```python
   import os
+
   _CAPTURE = os.environ.get("STREAMSNOW_REVIEW_CAPTURE")  # read once at import
+
 
   def review_value(key, value):
       """Marks a visual for SQL review. No-op unless review preview mode is on."""

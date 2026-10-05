@@ -386,11 +386,12 @@ def validate_artifact_exclude(value: str, field_name: str) -> str:
 
 @dataclass(frozen=True)
 class SqlReviewCfg:
-    """The ``sql_review:`` block. ``coverage`` decides whether an uncovered
-    ``queries/*.sql`` fails the gate (``fail``) or is reported as a warning
-    (``warn``, the default so an adopting fleet can backfill). Drift, hand
-    edits, unbound binds and write statements are correctness failures and are
-    never downgraded by this policy."""
+    """The ``sql_review:`` block. ``coverage`` decides whether a page or
+    ``queries/*.sql`` file that ``sql_review/index.yaml`` does not account for
+    fails the gate (``fail``) or is reported as a warning (``warn``, the default
+    so an adopting fleet can backfill). Drift, hand edits, marker mismatches,
+    lint and write statements are correctness failures and are never
+    downgraded by this policy."""
 
     coverage: str = "warn"
 

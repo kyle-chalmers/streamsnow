@@ -29,8 +29,19 @@ ends to the date picker's `value=`, and bound its `min_value` / `max_value` by t
 `date.today()` as a default makes every page over data that ends in the past (a historical
 extract, a sample dataset, a feed that stopped loading) open empty, which reads as a broken
 query. Show the anchor in the `Data as of:` footer, so a stale feed is visible rather than
-silent. The page's `sql_review` manifest anchors its `set_block` to the same `MAX(<date_col>)`,
-so the audit trail reviews the range the page shows by default.
+silent. The app's `sql_review/index.yaml` anchors its `review_window` to the same
+`MAX(<date_col>)`, so the review SQL covers the range the page shows by default.
+
+## Mark every visual for SQL review
+
+Wrap the value each data visual shows in `review_value("<metric_key>", value)` from the app's
+`review.py` (`from review import review_value`):
+`st.metric("Revenue", review_value("total_revenue", total))`,
+`st.dataframe(review_value("orders_by_region", df))`. It returns its input and does nothing else
+at runtime (no query, no file, no import), in Streamlit in Snowflake too. The key is the metric's
+key in `sql_review/index.yaml` (snake_case, five words or fewer); one call per metric, with a
+string literal key, because `streamsnow sql-review check` reads the calls without running the page
+and fails on a visual the index does not list or a metric no visual marks.
 
 ## Single-source metric definitions (the glossary module)
 
@@ -44,24 +55,41 @@ nothing at import time (the container runtime shares one process across viewers)
 from typing import NamedTuple
 import streamlit as st
 
+
 class Metric(NamedTuple):
-    key: str; label: str; definition: str; formula: str
+    key: str
+    label: str
+    definition: str
+    formula: str
+
 
 _DEFINITIONS = (
-    Metric("promise_kept_rate", "Promise-kept rate",
-           "Share of payment promises honoured by their due date.",
-           "SUM(kept_promises) ÷ SUM(promises_due)"),
+    Metric(
+        "promise_kept_rate",
+        "Promise-kept rate",
+        "Share of payment promises honoured by their due date.",
+        "SUM(kept_promises) ÷ SUM(promises_due)",
+    ),
 )
 _BY_KEY = {m.key: m for m in _DEFINITIONS}
 
-def metric_help(key):          # -> st.metric(..., help=metric_help("promise_kept_rate"))
-    m = _BY_KEY[key]; return f"{m.definition} Formula: {m.formula}"
-def column_help(*keys):        # -> st.column_config help= dicts for tables
+
+def metric_help(key):  # -> st.metric(..., help=metric_help("promise_kept_rate"))
+    m = _BY_KEY[key]
+    return f"{m.definition} Formula: {m.formula}"
+
+
+def column_help(*keys):  # -> st.column_config help= dicts for tables
     return {k: metric_help(k) for k in keys}
-def render_glossary(*keys):    # -> one expander per page listing what it shows
+
+
+def render_glossary(*keys):  # -> one expander per page listing what it shows
     with st.expander("Metric definitions"):
-        for k in keys or _BY_KEY: st.markdown(f"**{_BY_KEY[k].label}** — {metric_help(k)}")
-def hover_definition(key):     # -> %-escaped text for a Plotly hovertemplate
+        for k in keys or _BY_KEY:
+            st.markdown(f"**{_BY_KEY[k].label}** — {metric_help(k)}")
+
+
+def hover_definition(key):  # -> %-escaped text for a Plotly hovertemplate
     return metric_help(key).replace("%", "%%")
 ```
 

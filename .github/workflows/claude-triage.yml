@@ -46,7 +46,7 @@ jobs:
         if: env.HAS_TOKEN != 'true'
         run: echo "::notice::CLAUDE_CODE_OAUTH_TOKEN is not set; triage skipped."
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.HAS_TOKEN == 'true'
 
       - name: Classify
@@ -107,13 +107,13 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: .github/labels.yml
           sparse-checkout-cone-mode: false
 
       - name: Apply labels and canned comments
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           RESULT: ${{ needs.classify.outputs.result }}
         with:

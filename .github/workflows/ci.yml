@@ -25,10 +25,10 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
 
       - name: Sync project (creates .venv with dev extras)
         run: uv sync --extra dev --python ${{ matrix.python-version }}
@@ -49,8 +49,8 @@ jobs:
     # into the OSS tree (the automated half; human review in RELEASING.md).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
       - run: uv run --python 3.11 python -m streamsnow.tools.check_export_clean .
 
   wheel-smoke:
@@ -59,9 +59,9 @@ jobs:
     # rather than shipping a broken install.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
       - name: Build wheel
         run: uv build --wheel
       - name: Install wheel into a clean venv
@@ -111,7 +111,7 @@ jobs:
   plugin-validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # Pinned deliberately: this step executes the package, and its lifecycle scripts,
       # inside CI. An unpinned "npm install -g" lets an upstream release change what runs
       # here without review. Bump this together with the version check below.
