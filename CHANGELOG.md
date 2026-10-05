@@ -115,6 +115,10 @@ entry.
 
 ### Fixed
 
+- **`sql-review probe` credits grants to `PUBLIC`.** Every role inherits `PUBLIC`, so an object
+  granted to it (shared data such as `SNOWFLAKE_SAMPLE_DATA` usually is) no longer reports a
+  missing grant for the review role. Found in the first live run of `/sql-review`.
+
 - **Docs follow the new `/build-app` phases.** The skills diagram shows spec, discover and
   design (with the new CP1b wireframe checkpoint), the foundation scaffold, the parallel page
   build, preview and verify, then validate, review and ship. The Getting started and examples

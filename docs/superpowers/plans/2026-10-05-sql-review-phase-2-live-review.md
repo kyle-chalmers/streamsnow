@@ -137,3 +137,12 @@ and read-only probes of a real Snowflake account.
   session (no Snowflake CLI access there); the maintainer waived it for the merge and does it
   after. Every SQL shape the verbs emit was validated against Snowflake through a read-only
   connection instead.
+- **Live run (2026-10-05, Snowflake CLI 3.27.0):** done on a scaffolded Acme app reading
+  `SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS` (four metrics: a KPI row, a scalar, 5 rows and 13
+  rows). `probe`, `run`, `bench` (with and without `--sql-file`) and `log --dry-run` all
+  completed. Confirmed: `snow sql --stdin --format json` prints one array per statement,
+  `ALTER SESSION` and `USE` included, as `sf_exec` assumes; `QUERY_HISTORY_BY_USER` showed every
+  query id at once (no lag observed); `GET_QUERY_OPERATOR_STATS` reported partitions;
+  `USE SECONDARY ROLES NONE` held (`CURRENT_SECONDARY_ROLES()` empty). One fix: `probe` reported
+  a missing grant on objects readable through `PUBLIC` (shared sample data is granted that way),
+  because a grant to `PUBLIC` was not credited to the review role.
