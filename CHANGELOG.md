@@ -39,6 +39,17 @@ entry.
   Claude Code to Snowflake demo.
 - **`docs/superpowers/README.md`** indexes the internal design specs and plans.
 
+- **`/build-app` orchestrates subagents.** New phases between spec and scaffold: **discover**
+  (a data-scout profiles grain, date range, size and filter values into §3) and **design** (an
+  app-designer plans every page's forms, copy, glossary and shared data, shown as a text
+  wireframe at the new CHECKPOINT 1b). The scaffold builds the shared layer once; one
+  page-builder per page then builds in parallel, owning only its page and its queries, while the
+  orchestrator merges navigation, `sql_review/index.yaml` and the glossary and runs
+  `sql-review generate` once. A verify phase runs perf, visual and cold-reader reviewers with at
+  most two fix rounds before the click-through. Briefs live in `skills/build-app/briefs/`; hosts
+  without subagents follow them one at a time. `check requirements` accepts the `discover` and
+  `design` phases.
+
 ### Changed
 
 - **A redesigned README.** It now has a logo with light and dark variants, a nav row, a demo
