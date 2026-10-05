@@ -27,13 +27,57 @@ entry.
 - **House design guide.** An optional, committed `.streamsnow/design.md` holds a repo's house
   style for pages; `/build-app` and `/review-app` read it before the shipped defaults.
 - `/build-app` specs record each page's **Question** (§4) and a **Style** line (§2).
+- **[docs/cli-reference.md](docs/cli-reference.md):** every command, flag and check, with exit
+  codes, JSON keys, and the steps `validate-app` runs. Several flags were documented nowhere
+  before (`check dependency-vulns --allowlist`, `check session-fallback --all`,
+  `check tombstones --registry/--apps-dir`, `verify-deploy --attempts/--delay`,
+  `agent-skills --dry-run`).
+- **`scripts/readme_media/`:** reproducible generators for the README's demo GIF, terminal
+  recording, social preview image and diagram PNGs, plus a runbook for recording the full
+  Claude Code to Snowflake demo.
+- **`docs/superpowers/README.md`** indexes the internal design specs and plans.
 
 ### Changed
 
+- **A redesigned README.** It now has a logo with light and dark variants, a nav row, a demo
+  GIF, a quick-start callout near the top, a "Without / with StreamSnow" table that pairs real
+  production incidents with the check that prevents each, a new "How the repos fit together"
+  diagram, an updated skills diagram, and a star-history chart. Long reference sections fold
+  into `<details>`. "This is for you if" gains three lines, and a one-line Prerequisites
+  statement replaces "Who can use this" and the "Where it fits next to a BI tool" paragraph.
+  Images use absolute URLs, so they also render on PyPI.
+- **The principles moved to [docs/principles.md](docs/principles.md)**, with the same nine
+  rules and numbers, plus where each one shows up. The README links to them.
+- **`streamsnow init` prints the project-scope plugin install** (`claude plugin marketplace add
+  --scope project …` and `claude plugin install --scope project …`) in its `Next:` block,
+  matching the README and Getting started. It printed the user-scope `/plugin` commands before.
 - **Default chart palette** no longer uses green, amber or red, which the visualization guide
   reserves for status. New default: `#2A78D6, #EB6834, #1BAF7A, #4A3AA7, #E87BA4` (adjacent pairs
   colorblind-separable on the light theme). Only apps scaffolded without a `brand.chart_sequence`
   change.
+
+### Fixed
+
+- **Docs that disagreed with the code:**
+  - `verify-deploy` does not flag a renamed or removed app's old object; only
+    `check tombstones` catches it, at PR time (deploying, troubleshooting #14, production
+    lessons).
+  - A fresh scaffold fails `validate-app` on its placeholders until you replace them; the
+    README said it passed.
+  - Only `schema_deny` is enforced; `schema_allow` is a convention (data discovery).
+  - `/onboard` is not a removed alias (migrating a consumer repo).
+  - `streamsnow update` re-renders files; it does not vendor tools or bump the plugin.
+  - The README hooks table now says the deploy guard watches PowerShell too.
+  - Getting started on Windows: preview and the guards work natively; the bash SessionStart
+    hook is what keeps WSL the supported route.
+- **Docs that were missing things:**
+  - The config reference documents `cache_ttl`, `deploy.git_origin`,
+    `snowflake.objects.runtime_name`/`container_python`, the `brand` keys, `review_gate`
+    and `github_auth_mode: public`; the same keys are in the example config.
+  - Scaffold file lists now include `CLAUDE.md`, `.sqlfluff` and `osv_allowlist.json`.
+  - `validate-app` step names are listed correctly.
+  - The examples app tree includes `review.py` and `sql_review/`.
+  - The deploy-secret push order is spelled out.
 
 ## [0.8.0] - 2026-10-05
 
@@ -77,6 +121,10 @@ entry.
 
 ### Added
 
+- **Three shared design guides for app-touching skills:**
+  `skills/_shared/streamlit-performance.md`, `visualization-guide.md` and `explainability.md`.
+  They are defaults with their reasons, linked from `page-conventions.md`. `/review-app`'s UI
+  dimension judges pages against them, as advisory findings.
 - **`review_value("<key>", value)` markers.** A new scaffolded `review.py`
   (listed in `snowflake.yml` artifacts) ties each visual in page code to its
   metric in `index.yaml`; `check` reads the calls by AST, never by import, and

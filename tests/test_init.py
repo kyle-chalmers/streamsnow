@@ -793,7 +793,10 @@ def test_init_next_block_puts_the_plugin_first(tmp_path):
     )
     assert result.exit_code == 0, result.output
     out = result.output
-    assert out.index("/plugin marketplace add") < out.index("snow connection add")
+    assert out.index("claude plugin marketplace add --scope project") < out.index(
+        "snow connection add"
+    )
+    assert "claude plugin install --scope project streamsnow@streamsnow" in out
     # B8: the starter query is a placeholder until repointed.
     assert "YOUR_TABLE" in out
 
