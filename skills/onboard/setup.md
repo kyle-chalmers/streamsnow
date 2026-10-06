@@ -22,7 +22,8 @@ Run everything yourself except the few steps that need the user's own identity o
 Hand those over with a one-line reason:
 - browser sign-ins (approving `snow connection test` or `gh auth login` in the browser): only
   they can sign in as themselves;
-- `/reload-plugins`: a slash command only the user can type;
+- `/reload-plugins`: a slash command only the user can type (needed only if the plugin's skills
+  aren't showing in the session);
 - the Snowflake admin SQL from `streamsnow deploy-setup --admin` (§2d): it needs admin rights,
   and you never run it;
 - anything that asks for their computer password (`sudo` on Linux/WSL): your shell cannot answer

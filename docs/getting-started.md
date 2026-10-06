@@ -105,13 +105,14 @@ claude plugin marketplace add --scope project kyle-chalmers/streamsnow
 claude plugin install --scope project streamsnow@streamsnow
 ```
 
-Then, in a Claude Code session in that directory (an already-open one is fine;
-`/reload-plugins` loads the plugin without a restart), run:
+Then, in a Claude Code session in that directory (an already-open one is fine; the
+skills are normally available straight away), run:
 
 ```
-/reload-plugins
 /onboard
 ```
+
+If `/onboard` isn't listed, run `/reload-plugins` (no restart needed) and try again.
 
 `/onboard` works in four stages and says what it is doing, and why, at every step.
 
@@ -370,8 +371,9 @@ claude plugin marketplace add --scope project kyle-chalmers/streamsnow
 claude plugin install --scope project streamsnow@streamsnow
 ```
 
-If Claude Code is already open in the repo, run `/reload-plugins` there to load
-the plugin without restarting.
+If Claude Code is already open in the repo, the skills normally appear straight
+away; if `/build-app` isn't listed, run `/reload-plugins` there to load the plugin
+without restarting.
 
 This adds the skills that wrap the CLI — `/build-app` (the front door),
 `/preview-app`, `/validate-app`, `/review-app`, `/ship-app`, and more — plus the
@@ -393,7 +395,7 @@ have; the SessionStart line shows it too.
 
 ```bash
 claude plugin uninstall --scope project streamsnow@streamsnow
-claude plugin install --scope project streamsnow@streamsnow    # then /reload-plugins in Claude Code
+claude plugin install --scope project streamsnow@streamsnow    # then /reload-plugins in Claude Code if the new skills don't appear
 ```
 
 ```bash
