@@ -169,3 +169,14 @@ def test_onboard_asks_which_roles_get_the_viewer_role():
     ask = section.index("Which of your roles get access")
     admin_file = section.index("**The admin file.**")
     assert ask < admin_file  # asked before the script is written, so it carries the grants
+
+
+def test_delete_branch_on_merge_is_read_then_offered_never_assumed():
+    section = _flat(SETUP.split("## 2e ·")[1].split("## 3 ·")[0])
+    read = section.index("--jq .delete_branch_on_merge")
+    change = section.index("gh repo edit <owner>/<repo> --delete-branch-on-merge")
+    assert read < change  # check the current value before offering to change it
+    assert "Never change it without that yes" in section
+    assert "only a repo admin" in section  # no admin rights: say so and move on
+    stage4 = _flat(SKILL.split("## Stage 4")[1].split("## Done when")[0])
+    assert "deletes merged branches" in stage4 and "setup.md §2e" in stage4

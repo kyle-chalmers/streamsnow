@@ -480,6 +480,22 @@ Setting `SNOWFLAKE_ACCOUNT` switches the deploy job on, so tell the user the nex
 `main` will deploy. If it stops partway, it names what failed and leaves `SNOWFLAKE_ACCOUNT`
 unset; fix the cause and run it again.
 
+**Delete merged branches on GitHub.** Skip this when there is no GitHub remote yet or `gh` is
+not signed in; it does not wait on §2d. Find the repo with
+`gh repo view --json nameWithOwner --jq .nameWithOwner`, then read the setting first:
+`gh api repos/<owner>/<repo> --jq .delete_branch_on_merge`.
+- `true`: already on. Say so in one line and move on.
+- `false`: ask one yes/no question: "Turn on GitHub's automatic deletion of merged branches for
+  this repo? It changes a repo setting: once a pull request merges, GitHub deletes its branch, so
+  nobody reuses a branch whose work was squash-merged, which can silently undo changes
+  ([_shared/sync-with-main.md](../_shared/sync-with-main.md))." On yes, run
+  `gh repo edit <owner>/<repo> --delete-branch-on-merge` and re-read the setting to confirm it
+  reads `true`. On no, mark it skipped. Never change it without that yes.
+- Empty output (GitHub returns the setting only to repo admins), or `gh repo edit` is refused:
+  only a repo admin can change it. Say so in one line, name where an admin turns it on (the
+  repo's Settings, General, "Automatically delete head branches"), and move on. Nothing else
+  depends on it.
+
 ## 3 · Connection (one store, owned by the user)
 
 **A non-default connection needs one more step.** `snowflake.connection_name` may name a
@@ -553,5 +569,5 @@ Just want to run one locally?      → /preview-app <slug>
 ```
 
 Onboarding never fills in or reads credentials or keys, never edits existing CI or deploy config
-(`init` only writes repo files that are missing), and installs nothing without a one-line
-explanation and the user's yes.
+(`init` only writes repo files that are missing), and installs nothing and changes no GitHub
+setting without a one-line explanation and the user's yes.

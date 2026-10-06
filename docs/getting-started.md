@@ -143,7 +143,9 @@ If `/onboard` isn't listed, run `/reload-plugins` (no restart needed) and try ag
 4. **Finish.** It runs `streamsnow ci-key create` (save a copy of the private key
    somewhere safe, such as a password manager), prepares the Snowflake admin
    script in `.internal/admin-setup.sql`, and once your admin has run it, sets the
-   deploy workflow's GitHub secrets with `streamsnow ci-key push`.
+   deploy workflow's GitHub secrets with `streamsnow ci-key push`. If the repo is on
+   GitHub, it checks whether GitHub deletes a branch once its pull request merges and,
+   if not, asks before turning that repo setting on.
 
 It ends at "ready to build and preview" (next: `/build-app`) or "ready to deploy".
 Re-run `/onboard` any time to check.
