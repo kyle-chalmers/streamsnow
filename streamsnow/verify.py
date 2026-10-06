@@ -52,8 +52,7 @@ from pathlib import Path
 
 from .config import Config
 from .deploy import _safe_sha, stage_path, streamlit_fqn
-from .stage_bundle import app_artifact_entries, excluded_reason
-from .tools.check_artifacts import _covers, _deployable_files
+from .stage_bundle import app_artifact_entries, excluded_reason, select_app_files
 
 RunQuery = Callable[[str], list[dict]]
 
@@ -305,21 +304,21 @@ def _list_stage_files(cfg: Config, slug: str, sha: str, run_query: RunQuery) -> 
 def check_stage_files(listed: list[str], app_dir: Path, stage_dir: str) -> dict:
     """Warn-only: compare the files on the stage with what the deploy bundle ships.
 
-    Two drifts are reported. A ``snowflake.yml`` artifacts entry (or, with no
-    artifacts list, a deployable file on disk) with no file on the stage means
-    the deployed app will fail to import or read it. A staged file that
+    Two drifts are reported. Each file ``stage-bundle`` would ship for this
+    app (computed from the local app, nothing written) must be on the stage;
+    one missing means the deployed app cannot import or read it. The
+    comparison is per file: checking that each artifacts entry matched some
+    staged file let one staged page satisfy all of ``pages/``. A staged file that
     ``stage-bundle`` would leave out (AGENTS.md, sql_review/, ...) means the
     workflow still uploads the whole ``apps/`` tree, so internal docs sit on
     the stage at every commit. Warn-level so a repo on the old workflow is
     told, not failed.
     """
     entries = app_artifact_entries(app_dir)
-    findings: list[str] = []
-    if entries is None:
-        missing = [f for f in _deployable_files(app_dir) if f not in listed]
-    else:
-        missing = [e for e in entries if not any(_covers(e, f) for f in listed)]
-    findings += [
+    expected, _ = select_app_files(app_dir)
+    on_stage = set(listed)
+    missing = [rel for rel in sorted(expected) if rel not in on_stage]
+    findings: list[str] = [
         f"{m} is not on the stage at {stage_dir}: the deployed app cannot load it" for m in missing
     ]
     for rel in listed:

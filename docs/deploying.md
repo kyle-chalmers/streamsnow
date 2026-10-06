@@ -39,9 +39,9 @@ On merge to `main`, the workflow:
    (`PASS: store-sales (3 passed; 1 skipped: service-logs)`). Skips never fail
    the run; the container service-log scan is best-effort and often skips.
    With the **stage-copy** source, `verify-deploy` also lists the staged files
-   for the commit (`stage-files`): it warns when an `artifacts:` entry has no
-   file on the stage, or when the stage holds a file the deploy bundle leaves
-   out (see [What the stage-copy upload ships](#what-the-stage-copy-upload-ships)).
+   for the commit (`stage-files`): it warns for each file `stage-bundle` would
+   ship for the app that is missing from the stage, and for each staged file
+   the deploy bundle leaves out (see [What the stage-copy upload ships](#what-the-stage-copy-upload-ships)).
    It is warn-only: it prints `! stage-files (warning)` and counts
    `1 warned: stage-files` in the summary, and the run still passes.
 
@@ -84,7 +84,10 @@ leaves out:
 - `.env` and `.env.*` files anywhere in the app, even when declared, because
   Streamlit in Snowflake never reads one and a committed one usually holds
   credentials;
-- symlinks that point outside the app.
+- symlinks that point outside the app, and symlinks whose target inside the
+  app is itself left out (a `runtime.txt` link to `.env` stays out with
+  `.env`). Directory symlinks that stay inside the app are followed, so
+  `.streamlit -> config/` still ships `.streamlit/config.toml`.
 
 `streamsnow stage-bundle --out <empty dir>` prints each file it left out and
 why, so you can run it locally to see what a deploy will upload. A repo whose

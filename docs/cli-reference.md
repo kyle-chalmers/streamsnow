@@ -198,10 +198,10 @@ JSON for the skill to act on.
 |---|---|
 | `streamsnow deploy-setup` | Prints the one-time Snowflake DDL for your deploy source; review it, then run it. Never runs anything itself. |
 | `streamsnow deploy-sql <slug>` | Prints the `CREATE OR REPLACE STREAMLIT` SQL for one app (`--sha`, `--config`). The deploy job runs it. |
-| `streamsnow verify-deploy <slug>` | Checks that a deployed app actually serves: the object exists, a live version is set, the version source matches `--sha`, and container logs show no crash loop. A check that cannot run is reported as skipped, never as a pass. With stage-copy and `--sha`, the warn-only `stage-files` check also compares the staged files with the app's artifacts and the bundle rules. |
+| `streamsnow verify-deploy <slug>` | Checks that a deployed app actually serves: the object exists, a live version is set, the version source matches `--sha`, and container logs show no crash loop. A check that cannot run is reported as skipped, never as a pass. With stage-copy and `--sha`, the warn-only `stage-files` check also compares the staged files, file by file, with what `stage-bundle` would ship for the app. |
 | `streamsnow config-get <key>` | Prints one config value by dotted path, e.g. `deploy.git_repository_fqn`. |
 | `streamsnow stage-path` | Prints the stage-copy base path, `@DB.SCHEMA.STAGE`. |
-| `streamsnow stage-bundle --out <dir> [<slug>...]` | Copies each app (default: every app under `apps/`) into `<dir>/<slug>/` without root-level docs an `artifacts:` entry does not declare, `sql_review/`, tooling dot-directories, anything in `.streamlit/` but `config.toml`, `.env` files, and symlinks that leave the app. The stage-copy deploy job uploads this bundle. |
+| `streamsnow stage-bundle --out <dir> [<slug>...]` | Copies each app (default: every app under `apps/`) into `<dir>/<slug>/` without root-level docs an `artifacts:` entry does not declare, `sql_review/`, tooling dot-directories, anything in `.streamlit/` but `config.toml`, `.env` files, symlinks that leave the app, and symlinks to any of those. The stage-copy deploy job uploads this bundle. |
 
 `deploy-setup` flags: `--admin` (the full bootstrap a first deploy needs, in
 `USE ROLE` sections, to hand a Snowflake admin), `--public-key-file <pem>` (with

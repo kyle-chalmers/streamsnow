@@ -563,6 +563,34 @@ def test_stage_files_warns_on_a_missing_artifact_but_does_not_fail(tmp_path):
     )
 
 
+def test_stage_files_warns_per_missing_file_under_a_directory_entry(tmp_path):
+    """Codex P2: one staged file under `pages/` used to satisfy the whole entry,
+    so a missing pages/overview.py passed while pages/_glossary.py was staged."""
+    app_dir = _scaffold_my_app(tmp_path)
+    listing = [
+        r for r in _bundle_listing(app_dir, tmp_path) if not r["name"].endswith("/overview.py")
+    ]
+    assert any(r["name"].endswith("pages/_glossary.py") for r in listing)
+    result = _verify_with_stage(_cfg(), app_dir, listing)
+    check = _by_name(result)["stage-files"]
+    assert check["status"] == "fail" and check["level"] == "warn"
+    assert [f for f in check["findings"] if "pages/overview.py" in f], check["findings"]
+    assert result["ok"]
+
+
+def test_stage_files_expects_what_a_followed_directory_symlink_ships(tmp_path):
+    app_dir = _scaffold_my_app(tmp_path)
+    (app_dir / "helpers").mkdir()
+    (app_dir / "helpers" / "real.py").write_text("X = 1\n", encoding="utf-8")
+    try:
+        (app_dir / "lib").symlink_to(app_dir / "helpers", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable on this platform")
+    listing = [r for r in _bundle_listing(app_dir, tmp_path) if "lib/real.py" not in r["name"]]
+    check = _by_name(_verify_with_stage(_cfg(), app_dir, listing))["stage-files"]
+    assert [f for f in check["findings"] if f.startswith("lib/real.py")], check["findings"]
+
+
 def test_stage_files_is_skipped_for_a_git_repository_source(tmp_path):
     app_dir = _scaffold_my_app(tmp_path)
     result = verify_app(
