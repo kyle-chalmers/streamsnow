@@ -273,18 +273,32 @@ def test_ship_app_cleans_up_after_merge_and_checks_merged_before_deleting():
     steps = _flat((ship / "after-merge.md").read_text(encoding="utf-8"))
     order = [
         "git status --short",  # clean tree first
-        "gh pr view <num> --json state",
+        "gh pr view <num> --json state,headRefOid",
         "must read `MERGED`",
+        "git rev-parse <branch>",  # tip check, before anything is asked or deleted
+        "git ls-remote --heads origin <branch>",
+        "git log --oneline <headRefOid>..<branch>",
         "Ask the user once",
         "git switch main",
         "git pull --ff-only",
         "git branch -D <branch>",
-        "git ls-remote --heads origin <branch>",
         "git push origin --delete <branch>",
         "git fetch --prune",
     ]
     positions = [steps.index(token) for token in order]
     assert positions == sorted(positions), "after-merge steps are out of order"
+    # A branch with commits made after the merge must survive: both tips are compared to the
+    # PR's merged head, and the mismatch path deletes nothing.
+    tip_check = steps[
+        steps.index("Check the branch holds nothing newer") : steps.index("Ask the user once")
+    ]
+    assert tip_check.count("headRefOid") >= 2
+    assert "On any mismatch, stop and delete nothing" in tip_check
+    assert "unmerged work" in tip_check
+    assert steps.index("headRefOid") < steps.index("git branch -D <branch>")
+    assert steps.index("git ls-remote --heads origin <branch>") < steps.index(
+        "git push origin --delete <branch>"
+    )
     assert "a squash merge" in steps and "`git branch -d` refuses" in steps
     # Both triggers are named, and the PR-open outcome says what "done" means.
     assert "step 4" in steps and "watch" in steps

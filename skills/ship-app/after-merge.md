@@ -12,21 +12,31 @@ Two things start it:
 
 1. **Require a clean working tree** (`git status --short` prints nothing). Anything else: stop and
    say why. Uncommitted work on a spent branch is the user's to place first.
-2. **Confirm the PR is merged:** `gh pr view <num> --json state` must read `MERGED`. Anything
-   else: stop, nothing below runs.
-3. **Ask the user once**, naming both the local branch and the remote branch it will remove.
+2. **Confirm the PR is merged:** `gh pr view <num> --json state,headRefOid` must read `MERGED`.
+   Anything else: stop, nothing below runs. Keep `headRefOid`, the commit the PR merged.
+3. **Check the branch holds nothing newer than the merge.** A later run can find commits made
+   after the PR merged, and `-D` would destroy them. Both tips must equal `headRefOid`:
+   - the local tip, `git rev-parse <branch>`;
+   - the remote tip, from `git ls-remote --heads origin <branch>` (no line means the remote
+     branch is already gone, which is fine).
+
+   On any mismatch, stop and delete nothing. Name the extra commits with
+   `git log --oneline <headRefOid>..<branch>` (or against `origin/<branch>` for the remote tip)
+   and tell the user the branch has unmerged work.
+4. **Ask the user once**, naming both the local branch and the remote branch it will remove.
    Declined: stop and leave both in place.
-4. **Update `main`:** `git switch main`, then `git pull --ff-only`. A fast-forward that cannot
+5. **Update `main`:** `git switch main`, then `git pull --ff-only`. A fast-forward that cannot
    happen means local `main` has commits of its own: stop and report it.
-5. **Delete the local branch:** `git branch -D <branch>`. The `MERGED` state from step 2 is the
-   evidence that makes `-D` safe: a squash merge leaves the branch's commits unreachable from
-   `main`, so `git branch -d` refuses even though the work shipped.
-6. **Delete the remote branch only if it is still there:** run
-   `git ls-remote --heads origin <branch>`; when it lists the branch, run
-   `git push origin --delete <branch>`. The repo's auto-delete-on-merge setting may already have
-   removed it, and deleting a missing ref is an error, not a no-op.
-7. **Tidy remote-tracking refs:** `git fetch --prune`.
-8. **Report** what was deleted (local, remote or both) and that the checkout is on `main`.
+6. **Delete the local branch:** `git branch -D <branch>`. The `MERGED` state from step 2 and the
+   matching tip from step 3 are the evidence that make `-D` safe: a squash merge leaves the
+   branch's commits unreachable from `main`, so `git branch -d` refuses even though the work
+   shipped.
+7. **Delete the remote branch only if it is still there:** when step 3's
+   `git ls-remote --heads origin <branch>` listed it, run `git push origin --delete <branch>`.
+   The repo's auto-delete-on-merge setting may already have removed it, and deleting a missing
+   ref is an error, not a no-op.
+8. **Tidy remote-tracking refs:** `git fetch --prune`.
+9. **Report** what was deleted (local, remote or both) and that the checkout is on `main`.
 
 Never run this for an open or closed-unmerged PR, and never widen it to other branches: sweeping
 many merged branches is a separate job.
