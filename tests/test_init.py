@@ -1148,3 +1148,39 @@ def test_generated_gitignore_ignores_internal_notes(tmp_path):
         ["git", "check-ignore", "-q", ".internal/notes.md"], cwd=tmp_path, check=False
     )
     assert proc.returncode == 0  # ignored
+
+
+def test_every_filename_precommit_hook_runs_serially(tmp_path):
+    """Without require_serial, pre-commit splits the staged files into parallel batches and
+    each clean batch prints its own "clean" line, so a single BLOCK looked like a pass."""
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    parsed = yaml.safe_load((tmp_path / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
+    hooks = [
+        h
+        for repo in parsed["repos"]
+        for h in repo["hooks"]
+        if h["id"].startswith("streamsnow-") and h.get("pass_filenames")
+    ]
+    assert len(hooks) == 10
+    assert [h["id"] for h in hooks if h.get("require_serial") is not True] == []
+
+
+def test_sqlfluff_comment_points_at_sql_review_check_not_the_placeholder_templater(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    text = (tmp_path / ".sqlfluff").read_text(encoding="utf-8")
+    assert "streamsnow sql-review check <slug>" in text
+    assert "{TOKEN}" in text  # says why a bare sqlfluff run cannot parse the query files
+    assert "sqlfluff lint apps/<slug>/queries --templater placeholder" not in text
+
+
+def test_deploy_workflows_log_that_secrets_were_found_when_they_deploy(tmp_path):
+    """Actions echoes the whole run: script in the step header, so the skip text appears on
+    runs that deploy too. A line only the deploy branch prints tells the two apart."""
+    for name, workflow in _render_deploy_workflows(tmp_path).items():
+        gate = next(s["run"] for s in workflow["jobs"]["deploy"]["steps"] if s.get("id") == "gate")
+        skip, _, deploy = gate.partition("else")
+        assert "Deploy secrets not set" in skip, name
+        assert "Deploy secrets found: deploying" not in skip, name
+        assert "Deploy secrets found: deploying" in deploy, name
