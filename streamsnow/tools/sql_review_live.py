@@ -579,7 +579,9 @@ def measure_sql(
     gets its count of distinct non-null values. ``compare`` trusts a page that
     groups this result only when the grouping keeps every one of them: a head
     or filtered slice whose dropped rows sum to zero keeps the totals but
-    loses keys.
+    loses keys. The distinct counts add warehouse time to every measured
+    section, so ``run`` retries a failed measure without them before it gives
+    up on totals.
     """
     ordered = sorted(columns, key=lambda c: (c.name, c.position))
     parts = ['COUNT(*) AS "__ROWS"']
@@ -1033,17 +1035,26 @@ def measure_sections(
         got = got_all.get(ref)
         section = next(s for s in sections if s.ref == ref)
         overflow = False
-        if isinstance(got, sx.SnowError):
-            # A SUM can overflow NUMBER(38); retry once without totals.
+        # A failed measure steps down a ladder instead of giving up. First drop
+        # the distinct counts: they add warehouse time that can push a section
+        # over its timeout, and COUNT(DISTINCT) rejects some column types. That
+        # is the query `run` used before distinct counts existed, so totals stay
+        # and only the aggregated rule loses its key check. If that fails too, a
+        # SUM overflowed NUMBER(38): retry once more without totals.
+        for sums in (True, False):
+            if not isinstance(got, sx.SnowError):
+                break
             try:
                 got = ex.run(
-                    [measure_sql(section.sql, columns[ref], sums=False), _LAST_QID_SQL],
+                    [measure_sql(section.sql, columns[ref], sums=sums), _LAST_QID_SQL],
                     result_cache=False,
                 )
-                overflow = True
+                overflow = not sums
             except sx.SnowError as exc:
-                out[ref] = {"status": "fail", "detail": str(exc)}
-                continue
+                got = exc
+        if isinstance(got, sx.SnowError):
+            out[ref] = {"status": "fail", "detail": str(got)}
+            continue
         row = sx.first_row(got[0])
         qids[ref] = str(sx.first_row(got[1]).get("QUERY_ID") or "") or None
         entry = {"status": "pass", **parse_measure(row, columns[ref])}

@@ -932,6 +932,35 @@ def test_a_sum_overflow_keeps_the_count_and_says_totals_are_missing(
     assert "not computed" in live.headline(entry)
 
 
+class DistinctRefused(FakeSnow):
+    """Only the distinct-count measure fails: a timeout the extra aggregates
+    pushed over, or a column type COUNT(DISTINCT) rejects."""
+
+    def __call__(self, argv: list[str], stdin: str, timeout: float) -> tuple[int, str, str]:
+        if "COUNT(DISTINCT" in stdin and "REGION_ROLLUP" in stdin:
+            self.calls.append((argv, stdin))
+            return 1, "", "000630 (57014): Statement reached its statement or warehouse timeout"
+        return super().__call__(argv, stdin, timeout)
+
+
+def test_a_failed_distinct_measure_keeps_the_totals(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    fake = DistinctRefused()
+    assert _live(repo, fake, "run") == 0
+    entry = {r["id"]: r for r in _out(capsys)["results"]}["run:02#1"]
+    assert entry["status"] == "pass"
+    assert entry["rows"] == 4 and entry["totals"], entry
+    assert "totals_detail" not in entry
+    assert "distinct" not in entry
+    retries = [
+        c[1]
+        for c in fake.calls
+        if '"__ROWS"' in c[1] and "REGION_ROLLUP" in c[1] and "COUNT(DISTINCT" not in c[1]
+    ]
+    assert len(retries) == 1 and "SUM($2)" in retries[0]  # the pre-distinct query
+
+
 def test_agent_written_files_cannot_mint_evidence(
     repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
