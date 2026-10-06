@@ -225,8 +225,9 @@ caught it. Runtime-specific facts link to the official page in
   pick up hook or skill changes on their own. The SessionStart line prints the
   installed version.
 - **Fix:** `claude plugin uninstall --scope project streamsnow@streamsnow`,
-  `claude plugin install --scope project streamsnow@streamsnow`, then run
-  `/reload-plugins` in Claude Code (no restart needed).
+  `claude plugin install --scope project streamsnow@streamsnow`, then, if the
+  skills don't refresh in an open session, run `/reload-plugins` in Claude Code
+  (no restart needed).
 
 ### 20. "Playwright CLI unavailable, so the UI walkthrough was skipped"
 

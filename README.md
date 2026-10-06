@@ -41,7 +41,8 @@
 > **Quick start.** In the folder for your Snowflake apps, run
 > `claude plugin marketplace add --scope project kyle-chalmers/streamsnow` and
 > `claude plugin install --scope project streamsnow@streamsnow`, then type
-> `/reload-plugins` and `/onboard` in Claude Code. No Claude Code? `uvx streamsnow init`.
+> `/onboard` in Claude Code (run `/reload-plugins` first only if `/onboard` isn't listed).
+> No Claude Code? `uvx streamsnow init`.
 > Using another agent? [Install with your coding agent](#install-with-your-coding-agent).
 
 > **Status: beta, functional.** The CLI and the Claude Code plugin are CI-green for
@@ -145,8 +146,8 @@ setup question yourself and wait for my answer; never answer one for me.
    `claude plugin marketplace add --scope project kyle-chalmers/streamsnow` and then
    `claude plugin install --scope project streamsnow@streamsnow`. Both record the
    plugin in this repo's .claude/settings.json, not my user settings. Tell me to
-   type `/reload-plugins` (no restart needed) and then `/onboard`. Stop
-   there; that skill does the rest.
+   type `/onboard` (and `/reload-plugins` first, no restart needed, only if `/onboard`
+   isn't listed). Stop there; that skill does the rest.
 
 3. Any other agent: make sure `uv` is installed, then run `uv tool install streamsnow`
    and confirm `streamsnow --version` answers (the CLI is a command on my PATH; the
@@ -264,16 +265,15 @@ claude plugin marketplace add --scope project kyle-chalmers/streamsnow
 claude plugin install --scope project streamsnow@streamsnow
 ```
 
-Then, in a Claude Code session in that repo, load it without restarting and
-start setup:
+Then, in a Claude Code session in that repo, start setup:
 
 ```
-/reload-plugins
 /onboard
 ```
 
-`/reload-plugins` picks up the plugin's skills and hooks in the running session.
-StreamSnow's one-line session-start message first appears in your next session.
+The plugin's skills are normally available straight away, even in a session that was
+already open. If `/onboard` isn't listed, run `/reload-plugins` (no restart needed) and
+try again. StreamSnow's one-line session-start message first appears in your next session.
 
 `/onboard` gets your machine, repo and Snowflake account ready, in four stages,
 and says what it is doing at every step:
@@ -340,7 +340,7 @@ was installed at until you reinstall it.
 ```bash
 claude plugin list                                              # installed plugin version
 claude plugin uninstall --scope project streamsnow@streamsnow
-claude plugin install --scope project streamsnow@streamsnow    # then /reload-plugins in Claude Code
+claude plugin install --scope project streamsnow@streamsnow    # then /reload-plugins in Claude Code if the new skills don't appear
 ```
 
 ```bash

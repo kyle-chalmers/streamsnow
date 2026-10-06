@@ -17,6 +17,9 @@ entry.
 
 ### Changed
 
+- **Install docs: `/reload-plugins` is a fallback.** A project-scope install normally shows the
+  skills straight away, so the README, getting-started and `init`'s `Next:` block now say to run
+  `/onboard` and only reload plugins if it isn't listed.
 - `/onboard` now explains and asks each setup answer individually, explains the defaults and the
   Snowflake admin script in bullets before asking, and no longer treats a detected value as
   confirmation or adds its own commentary about the admin file. Other agents ask in chat when they
