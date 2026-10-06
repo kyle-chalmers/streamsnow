@@ -166,6 +166,20 @@ def test_excluded_reason_never_ships_an_env_file(rel):
     assert reason == "environment file (may hold secrets)"
 
 
+@pytest.mark.parametrize(
+    ("rel", "reason"),
+    [
+        (".ENV", "environment file (may hold secrets)"),
+        ("pages/.Env.Local", "environment file (may hold secrets)"),
+        ("Secrets.toml", "Streamlit secrets file (never deployed)"),
+        ("config/SECRETS.TOML", "Streamlit secrets file (never deployed)"),
+    ],
+)
+def test_excluded_reason_matches_secret_names_in_any_case(rel, reason):
+    """A case-insensitive filesystem (macOS, Windows) reads `.ENV` as `.env`."""
+    assert excluded_reason(rel, [rel, "pages/", "config/"]) == reason
+
+
 @pytest.mark.parametrize("rel", ["environment.yml", "pages/env_helpers.py", ".envrc_notes.py"])
 def test_excluded_reason_keeps_files_that_only_look_like_env(rel):
     assert excluded_reason(rel, None) is None

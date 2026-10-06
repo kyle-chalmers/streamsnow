@@ -87,9 +87,11 @@ def excluded_reason(rel: str, entries: list[str] | None) -> str | None:
         reason = _dir_reason(name)
         if reason:
             return reason
-    if parts[-1] == ".env" or parts[-1].startswith(".env."):
+    # Case-insensitive: macOS and Windows checkouts read `.ENV` as `.env`.
+    base = parts[-1].casefold()
+    if base == ".env" or base.startswith(".env."):
         return _ENV_REASON
-    if parts[-1] == "secrets.toml":
+    if base == "secrets.toml":
         return _SECRETS_REASON
     if _STREAMLIT_DIR in parts[:-1] and rel != _STREAMLIT_CONFIG:
         return "only .streamlit/config.toml ships from .streamlit/ (secrets stay local)"
