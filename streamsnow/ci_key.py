@@ -96,6 +96,16 @@ def _ensure_private_dir(path: Path, warnings: list[str]) -> None:
         warnings.append(f"{path} is readable by other users; consider `chmod 700` on it.")
 
 
+def config_values(*, account: str, user: str, warehouse: str, role: str) -> dict[str, str]:
+    """The four plain-text secrets a config implies, keyed by secret name."""
+    return {
+        "SNOWFLAKE_ACCOUNT": account,
+        "SNOWFLAKE_USER": user,
+        "SNOWFLAKE_WAREHOUSE": warehouse,
+        "SNOWFLAKE_ROLE": role,
+    }
+
+
 def create(
     directory: Path,
     *,
@@ -152,12 +162,7 @@ def create(
             "regenerate the public key from the private key."
         )
 
-    values = {
-        "SNOWFLAKE_ACCOUNT": account,
-        "SNOWFLAKE_USER": user,
-        "SNOWFLAKE_WAREHOUSE": warehouse,
-        "SNOWFLAKE_ROLE": role,
-    }
+    values = config_values(account=account, user=user, warehouse=warehouse, role=role)
     written: list[str] = []
     kept: list[str] = []
     mismatched: list[str] = []
@@ -220,10 +225,33 @@ def _redact(text: str, values: list[str]) -> str:
     return re.sub(r"\x00\d+\x00", "<redacted>", text)
 
 
+def mismatched_secrets(directory: Path, expected: dict[str, str]) -> list[str]:
+    """Names of existing secret files whose value differs from ``expected``.
+
+    Compared stripped, the way ``create`` compares and ``push`` sends. A file
+    that does not exist or cannot be read is skipped here: ``push`` reports it
+    on its own. Only names are returned, never a value.
+    """
+    secrets = Path(directory).expanduser().absolute() / "secrets"
+    out: list[str] = []
+    for name in SECRET_NAMES:
+        if name not in expected:
+            continue
+        path = secrets / name
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if text.strip() != expected[name]:
+            out.append(name)
+    return out
+
+
 def push(
     directory: Path,
     *,
     repo: str | None = None,
+    expected: dict[str, str] | None = None,
     run=None,
     which=None,
 ) -> PushResult:
@@ -234,7 +262,20 @@ def push(
     in SECRET_NAMES order, so SNOWFLAKE_ACCOUNT (which switches the deploy job
     on) is last, and a failure stops before it. No value is ever placed on argv
     or returned in a message.
+
+    ``expected`` (the values a config implies, see ``config_values``) guards the
+    case where ``create`` kept an old secret file: the files are compared by
+    name before any ``gh`` call, and a difference refuses the push, so a stale
+    warehouse or role never reaches GitHub and fails the first deploy.
     """
+    if expected:
+        stale = mismatched_secrets(directory, expected)
+        if stale:
+            raise CiKeyError(
+                "These secret files differ from the config, so nothing was pushed: "
+                f"{', '.join(stale)}. Delete the named files under secrets/ and re-run "
+                "`streamsnow ci-key create`, or fix the config."
+            )
     run = run or subprocess.run
     which = which or shutil.which
     if which("gh") is None:

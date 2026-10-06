@@ -207,7 +207,7 @@ verified again; `check tombstones` is what catches it, at PR time.
 | Command | What it does |
 |---|---|
 | `streamsnow ci-key create` | Creates (or reuses) the CI user's key pair and the five deploy secret files under `--dir` (default `~/.streamsnow-ci`, outside any repo). Never overwrites a key and never prints a secret. `--account`, `--config`. |
-| `streamsnow ci-key push` | Sets the five GitHub secrets from those files via `gh secret set` on stdin, `SNOWFLAKE_ACCOUNT` last. `--dir`, `--repo owner/name`. |
+| `streamsnow ci-key push` | Sets the five GitHub secrets from those files via `gh secret set` on stdin, `SNOWFLAKE_ACCOUNT` last. `--dir`, `--repo owner/name`. With `--config` (and `--account` if you overrode it in `create`), it first checks that the user, warehouse, role and account files match the config and refuses, by name, before any `gh` call. |
 
 How the key moves, and what Claude can and cannot see:
 [README](../README.md#what-claude-can-and-cant-see) and [Deploy setup](deploy-setup.md).

@@ -171,3 +171,18 @@ def test_kept_secret_files_are_tightened_to_600(tmp_path):
     role.chmod(0o644)
     assert _create(tmp_path).exit_code == 0
     assert _mode(role) == 0o600
+
+
+def test_rerun_with_matching_files_says_all_match(tmp_path):
+    _create(tmp_path)
+    second = _create(tmp_path)
+    assert second.exit_code == 0, second.output
+    assert "Kept existing secrets/ (all match this config)" in second.output
+    assert "differs" not in second.output
+
+
+def test_rerun_with_a_differing_file_does_not_claim_a_match(tmp_path):
+    _create(tmp_path)
+    second = _create(tmp_path, "--account", "other-acct")
+    assert "all match this config" not in second.output
+    assert "secrets/SNOWFLAKE_ACCOUNT differs" in second.output

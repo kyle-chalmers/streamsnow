@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -224,3 +225,93 @@ def test_create_next_block_points_at_push(tmp_path):
     assert "streamsnow ci-key push" in res.output
     assert "for s in" not in res.output
     assert "password manager" in res.output
+
+
+# `push --config`: the files must still match the config before anything is set.
+CONFIG_VALUES = {
+    "SNOWFLAKE_USER": "STREAMSNOW_DEPLOY_USER",
+    "SNOWFLAKE_WAREHOUSE": "STREAMSNOW_WH",
+    "SNOWFLAKE_ROLE": "STREAMSNOW_DEPLOY_ROLE",
+    "SNOWFLAKE_ACCOUNT": "ab12345.us-east-1",
+}
+EXAMPLE = Path(__file__).resolve().parent.parent / "streamsnow.config.example.yaml"
+
+
+def test_expected_values_that_match_push_normally(tmp_path):
+    gh = FakeGh()
+    result = ci_key.push(_secrets_dir(tmp_path), run=gh, which=_which, expected=dict(CONFIG_VALUES))
+    assert result.done == list(ci_key.SECRET_NAMES)
+
+
+def test_expected_value_mismatch_refuses_before_any_gh_call(tmp_path):
+    gh = FakeGh()
+    d = _secrets_dir(tmp_path, SNOWFLAKE_WAREHOUSE="OLD_WH", SNOWFLAKE_ROLE="OLD_ROLE")
+    with pytest.raises(ci_key.CiKeyError) as err:
+        ci_key.push(d, run=gh, which=_which, expected=dict(CONFIG_VALUES))
+    assert gh.calls == []
+    msg = str(err.value)
+    assert "SNOWFLAKE_WAREHOUSE" in msg and "SNOWFLAKE_ROLE" in msg
+    assert "SNOWFLAKE_USER" not in msg
+    for value in ("OLD_WH", "OLD_ROLE", "STREAMSNOW_WH", "STREAMSNOW_DEPLOY_ROLE"):
+        assert value not in msg
+
+
+def test_expected_comparison_ignores_surrounding_whitespace(tmp_path):
+    gh = FakeGh()
+    d = _secrets_dir(tmp_path, SNOWFLAKE_ROLE="STREAMSNOW_DEPLOY_ROLE\n")
+    result = ci_key.push(d, run=gh, which=_which, expected=dict(CONFIG_VALUES))
+    assert result.failed is None
+
+
+def test_push_without_expected_does_not_compare(tmp_path):
+    gh = FakeGh()
+    d = _secrets_dir(tmp_path, SNOWFLAKE_ROLE="ANYTHING")
+    assert ci_key.push(d, run=gh, which=_which).failed is None
+
+
+def test_cli_push_config_mismatch_exits_2_names_only(tmp_path, monkeypatch):
+    gh = FakeGh()
+    monkeypatch.setattr(ci_key.subprocess, "run", gh)
+    monkeypatch.setattr(ci_key.shutil, "which", _which)
+    d = _secrets_dir(tmp_path, SNOWFLAKE_ROLE="OLD_ROLE")
+    res = _cli("ci-key", "push", "--config", str(EXAMPLE), "--dir", str(d))
+    assert res.exit_code == 2, res.output
+    assert "SNOWFLAKE_ROLE" in res.output
+    assert "OLD_ROLE" not in res.output and "STREAMSNOW_DEPLOY_ROLE" not in res.output
+    assert gh.calls == []
+
+
+def test_cli_push_config_match_says_so_and_pushes(tmp_path, monkeypatch):
+    gh = FakeGh()
+    monkeypatch.setattr(ci_key.subprocess, "run", gh)
+    monkeypatch.setattr(ci_key.shutil, "which", _which)
+    res = _cli("ci-key", "push", "--config", str(EXAMPLE), "--dir", str(_secrets_dir(tmp_path)))
+    assert res.exit_code == 0, res.output
+    assert "match this config" in res.output
+    assert len(gh.secret_calls()) == len(ci_key.SECRET_NAMES)
+    for value in CONFIG_VALUES.values():
+        assert value not in res.output
+
+
+def test_cli_push_account_override_is_compared_not_the_configs(tmp_path, monkeypatch):
+    gh = FakeGh()
+    monkeypatch.setattr(ci_key.subprocess, "run", gh)
+    monkeypatch.setattr(ci_key.shutil, "which", _which)
+    d = _secrets_dir(tmp_path, SNOWFLAKE_ACCOUNT="other-acct")
+    res = _cli(
+        "ci-key", "push", "--config", str(EXAMPLE), "--account", "other-acct", "--dir", str(d)
+    )
+    assert res.exit_code == 0, res.output
+
+
+def test_create_next_step_separates_mkdir_from_the_redirect(tmp_path):
+    if shutil.which("openssl") is None:
+        pytest.skip("needs openssl")
+    res = _cli("ci-key", "create", "--config", str(EXAMPLE), "--dir", str(tmp_path / "ci"))
+    assert res.exit_code == 0, res.output
+    lines = [ln.strip() for ln in res.output.splitlines()]
+    assert "mkdir -p .internal" in lines
+    deploy = [ln for ln in lines if ln.startswith("streamsnow deploy-setup --admin")]
+    assert len(deploy) == 1 and deploy[0].endswith("> .internal/admin-setup.sql")
+    # The CI key guard denies a command naming ~/.streamsnow-ci that is chained.
+    assert "&&" not in deploy[0] and ";" not in deploy[0] and "|" not in deploy[0]

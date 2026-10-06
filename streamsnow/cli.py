@@ -1045,7 +1045,9 @@ def ci_key_create(
     print(f"  fingerprint {result.fingerprint}  (DESC USER shows it as RSA_PUBLIC_KEY_FP)")
     if result.written:
         print(f"Wrote secrets/: {', '.join(result.written)}")
-    if result.kept:
+    if result.kept and not result.mismatched:
+        print("Kept existing secrets/ (all match this config)")
+    elif result.kept:
         print(f"Kept existing secrets/: {', '.join(result.kept)}")
     for warning in result.warnings:
         console.print(f"[yellow]warning:[/] {warning}")
@@ -1056,16 +1058,18 @@ def ci_key_create(
         )
     print("")
     print("Next:")
+    print("  1. Make the folder for the admin script (a command of its own):")
+    print("       mkdir -p .internal")
+    print("  2. Write the admin script (review it, then run it as ACCOUNTADMIN):")
     print(
-        "  1. streamsnow deploy-setup --admin --public-key-file "
-        f"{result.public_key} > admin-setup.sql"
+        "       streamsnow deploy-setup --admin --public-key-file "
+        f"{result.public_key} > .internal/admin-setup.sql"
     )
-    print("     (review, then run it as ACCOUNTADMIN)")
-    print("  2. Once your admin has run it: streamsnow ci-key push")
+    print("  3. Once your admin has run it: streamsnow ci-key push")
     print("     (sets the five GitHub secrets from these files, SNOWFLAKE_ACCOUNT last;")
     print("      no value is ever printed)")
-    print(f"  3. Save a copy of {result.private_key} somewhere safe,")
-    print("     such as a password manager. If it is lost, make a new pair and re-run step 1.")
+    print(f"  4. Save a copy of {result.private_key} somewhere safe,")
+    print("     such as a password manager. If it is lost, make a new pair and re-run step 2.")
 
 
 @ci_key_app.command(name="push")
@@ -1076,18 +1080,42 @@ def ci_key_push(
     repo: str = typer.Option(
         None, "--repo", help="owner/name, when the checkout has several GitHub remotes."
     ),
+    config: Path = typer.Option(
+        None,
+        "--config",
+        help="Path to streamsnow.config.yaml. When given, the user, warehouse, role and "
+        "account files must match it (compared by name; refuses before any gh call).",
+    ),
+    account: str = typer.Option(
+        None,
+        "--account",
+        help="With --config: the account locator you gave `ci-key create` (default: the config's).",
+    ),
 ) -> None:
     """Set the five deploy secrets on GitHub from the files `ci-key create` wrote.
 
     Each value goes from its file straight to `gh secret set` on stdin, never on
     the command line, and is never printed. SNOWFLAKE_ACCOUNT goes last because
-    it switches the deploy job on; a failure stops before it.
+    it switches the deploy job on; a failure stops before it. With --config, a
+    file that no longer matches the config (an old warehouse or role kept by
+    `ci-key create`) stops the push before anything is set.
     """
     try:
-        result = _ci_key.push(directory, repo=repo)
-    except _ci_key.CiKeyError as exc:
+        expected = None
+        if config is not None:
+            cfg = load_config(Path(config))
+            expected = _ci_key.config_values(
+                account=normalize_account(account) if account else cfg.snowflake.account,
+                user=ci_user_name(cfg.snowflake.roles.ci_role),
+                warehouse=cfg.snowflake.objects.default_warehouse,
+                role=cfg.snowflake.roles.ci_role,
+            )
+        result = _ci_key.push(directory, repo=repo, expected=expected)
+    except (ConfigError, _ci_key.CiKeyError) as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
+    if expected:
+        print("Checked the user, warehouse, role and account files: all match this config.")
     print(f"Setting the deploy secrets on {result.repo} (SNOWFLAKE_ACCOUNT last):")
     for name in result.done:
         print(f"  {name}: set")

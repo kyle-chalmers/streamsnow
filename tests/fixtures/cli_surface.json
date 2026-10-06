@@ -138,6 +138,8 @@
     },
     "ci-key push": {
       "options": [
+        "--account",
+        "--config",
         "--dir",
         "--repo"
       ],
