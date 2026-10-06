@@ -18,12 +18,14 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
 
 1. **Resolve the slug**; `git status --short apps/<slug>` must show changes to ship — zero changes
    ahead of `main` → nothing to PR; stop and say so.
-2. **Preflight 0 — review gate (asks, never blocks):**
-   `streamsnow review-gate classify <slug> --format json`. Reviewed/trivial/skip-marker → proceed.
-   `.apps[0].needs_review == true` → offer the choice: review first (`/review-app <slug> --auto`) or **ship
-   as-is** — always available (ships can be time-critical; /validate-app + CI are the real publish
-   gates), but note "shipped unreviewed" in the PR body so the approver sees it. If the app's SQL
-   changed, recommend `/sql-review <slug>` before merge (never required). Never auto-run either.
+2. **Preflight 0: review gate (asks, never blocks).** Run
+   `streamsnow review-gate classify <slug> --format json` and gate on `.apps[0].needs_review`
+   (`verdict` is only review depth). False (reviewed, trivial or skip marker) → proceed. True → offer
+   the choice: review first (`/review-app <slug> --auto`) or **ship as-is**, always available (ships
+   can be time-critical; /validate-app + CI are the real publish gates), noting "shipped unreviewed"
+   in the PR body so the approver sees it. If the app's SQL changed, recommend `/sql-review <slug>`
+   before merge (never required). Never auto-run either. Save `.apps[0].commits_since_review` and
+   `reviewed_head_status` now (the step 7 rebase rewrites SHAs), plus the JSON from `streamsnow review-loop open-findings apps/<slug>/.review`.
 3. **Hard gate:** run /validate-app. Any FAIL → stop; report and do not stage, commit, or push.
    /validate-app is the fix-it path — don't auto-fix here.
 4. **Branch hygiene.** On `main` → `git switch -c ship/<slug>-<desc>` first. **Never reuse a
@@ -42,7 +44,8 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
    `git push --force-with-lease`. A rebase conflict stops with manual instructions — don't guess a
    resolution.
 8. **Push** (`git push -u origin HEAD` if the sync didn't already) — refuse to push to `main`.
-9. **Open the PR** (title/body: what changed, validation passed). Print the number and URL.
+9. **Open the PR** (title/body: what changed, validation passed, then `Open critical: N` and the
+   commits since review from step 2, per [these rules](../review-app/report-and-stamp.md#in-the-ship-app-pr-body)). Print the number and URL.
 10. **Note the deploy path:** merging to `main` triggers CI, which deploys — no local deploy step.
 11. **Watch checks to a terminal state** (`gh pr checks <num> --watch` in the background;
     `gh pr view <num> --json state,mergeStateStatus`) and report once on exit. A host that forbids
@@ -59,16 +62,14 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
 
 ## After merge
 
-Runs when the watch sees `MERGED`, or step 4 finds the branch already squash-merged. Follow
-[after-merge.md](after-merge.md): it confirms `MERGED` and asks once before any `-D` or remote delete.
+When the watch sees `MERGED` or step 4 finds a squash-merged branch, follow [after-merge.md](after-merge.md).
 
 ## Gotchas
 
 - **Squash-merged branch reuse is the highest-severity trap** — it fails silently: CI passes, the
   deploy ships the wrong code. The step 4 check is non-negotiable.
 - **Commit message must match the diff.** A claimed change with no matching hunk means a fix was
-  lost (often in manual conflict resolution) — re-read the diff and correct one or the other before
-  opening the PR.
+  lost (often in manual conflict resolution): re-read the diff and correct one or the other first.
 - Most deploy-run failures resolve to one-time, admin-applied DDL emitted by
   `streamsnow deploy-setup --admin`: surface the named fix; never run DDL from here.
 - **Push rejected** (stale `--force-with-lease`) → re-fetch, rebase, push, never plain `--force`. PR
@@ -83,5 +84,4 @@ local checkout on updated `main`, spent branch removed.
 
 ## System-evolution retro (always, even on a clean ship)
 
-Before closing, ask whether anything went wrong or got re-done this ship, and which layer was
-insufficient (config, a skill, a check or the deploy path). Fix that layer, not the instance: [retro.md](retro.md).
+Before closing, ask what went wrong or got re-done and which layer fell short (config, a skill, a check or the deploy path). Fix that layer, not the instance: [retro.md](retro.md).

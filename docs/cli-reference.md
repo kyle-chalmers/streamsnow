@@ -155,11 +155,27 @@ See [Auditing a visual](auditing-a-visual.md) for the file format and the live r
 
 | Command | What it does |
 |---|---|
-| `streamsnow review-gate classify [<slug>]` | Does this change need a review before shipping? Classifies each changed app's diff as trivial or needing the review loop (no slug: every changed app). `--base-ref`, `--format md\|json`. `/ship-app` runs it. |
+| `streamsnow review-gate classify [<slug>]` | Does this change need a review before shipping? Classifies each changed app's diff as trivial or needing the review loop (no slug: every changed app). `--base-ref`, `--format md\|json`. `/ship-app` runs it. See "Reading `classify`" below. |
 | `streamsnow review-gate baseline <slug>` | Prints the app's current baseline digest. |
-| `streamsnow review-gate stamp <artifact> --slug <slug>` | Writes or refreshes the `Reviewed-baseline` and `Reviewed-files` lines in a review artifact (`--base-ref`). |
+| `streamsnow review-gate stamp <artifact> --slug <slug>` | Writes or refreshes the `Reviewed-baseline`, `Reviewed-files` and `Reviewed-head` lines in a review artifact (`--base-ref`). `--expect-baseline <digest>`: the `baseline` captured when the review was dispatched; if the app has changed since, it exits 2 ("app changed since dispatch") and writes nothing. |
 | `streamsnow review-gate stop-hook` | The plugin's warn-only Stop-hook nudge (`--payload both\|system-only`). |
 | `streamsnow review-loop <verb>` | Deterministic bookkeeping for `/review-app --auto`: `parse-findings`, `dedup-findings`, `merge-findings`, `write-resolutions`, `exit-condition`. Called by the skill, not by hand. |
+| `streamsnow review-loop open-findings <dir>` | Counts the findings a review left open in the newest report under `<dir>` (`--report <file>` picks one), after subtracting those recorded as applied. Prints `counts` per severity, the open BLOCK list and `parsed`; a report it cannot parse gives `parsed: false` and null counts, never 0. Exits 2 when there is no report. `/ship-app` writes the open BLOCK count into the PR body. |
+
+**Reading `classify`.** `needs_review` is the decision: true means a substantive change has no
+review covering its current content and no skip marker. `verdict` is review depth only: `loop`
+means the diff is substantive enough for the full review loop, and it stays `loop` after a review
+covers it. Gate on `needs_review`, never on `verdict`.
+
+Each app in the JSON also carries `reviewed_head` (the commit the newest stamp recorded),
+`reviewed_head_status` (`none` when no stamp recorded one, `ancestor` when it is in the current
+history, `not-ancestor` after a rebase or amend) and `commits_since_review` (`[{sha, subject}]`,
+oldest first, for commits that touched the app after that head; empty unless the status is
+`ancestor`, so check the status before reading an empty list as "none").
+
+The default `/review-app` pass stamps its report with `--expect-baseline`, and `--auto` stamps once
+at the end of its loop. A stamp means the code was reviewed, not that it is clean: it is written
+even when critical findings are open.
 
 ## Migrate
 
