@@ -434,9 +434,9 @@ warehouse, the CI and viewer roles, a CI service user and the grants that tie th
    `~/.streamsnow-ci`, prints only file names and a fingerprint, and never overwrites a key. Tell
    the user, in one line, to save a copy of the `.p8` somewhere safe such as a password manager
    themselves (you never open it; a lost key means rotating).
-4. **The admin file.** Run these as three separate commands, in this order, never chained with
-   `&&`, `;` or `|`: the key guard denies any command that names `~/.streamsnow-ci` and starts
-   with anything other than `streamsnow`, or chains another command.
+4. **The admin file.** Run these as three separate commands, in this order, with no chaining,
+   piping or grouping: the key guard denies any command that names `~/.streamsnow-ci` unless it
+   starts with `streamsnow ci-key` or `streamsnow deploy-setup` and has nothing else attached.
    1. `mkdir -p .internal`
    2. `streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > .internal/admin-setup.sql`
       on a line of its own, adding `--viewer-role <ROLE>` once for each role chosen in step 2.

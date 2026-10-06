@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
 
@@ -171,10 +172,21 @@ def test_onboard_asks_which_roles_get_the_viewer_role():
     assert ask < admin_file  # asked before the script is written, so it carries the grants
 
 
+def _secret_guard():
+    spec = importlib.util.spec_from_file_location(
+        "secret_guard", REPO_ROOT / "hooks" / "secret_guard.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def test_admin_file_commands_run_one_at_a_time_so_the_key_guard_allows_them():
-    """The CI key guard denies any command naming ~/.streamsnow-ci that does not start
-    with `streamsnow` or that chains with `&&`, `;` or `|`. So `mkdir` and the
-    gitignore check cannot share a command with the deploy-setup line."""
+    """The CI key guard denies any command naming ~/.streamsnow-ci unless it starts with
+    `streamsnow ci-key` or `streamsnow deploy-setup` and has no chaining. So `mkdir` and the
+    gitignore check cannot share a command with the deploy-setup line. The guard itself
+    judges the documented line, so a guard or doc change cannot drift apart silently."""
+    guard = _secret_guard()
     step = SETUP.split("4. **The admin file.**")[1].split("5. **Hand it off.**")[0]
     commands = re.findall(r"^ +\d\. `([^`]+)`", step, flags=re.M)
     assert commands[0] == "mkdir -p .internal"
@@ -182,11 +194,13 @@ def test_admin_file_commands_run_one_at_a_time_so_the_key_guard_allows_them():
         "streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/"
     )
     assert commands[2].startswith("git check-ignore -q .internal/admin-setup.sql")
+    assert guard.allowed_command(commands[1]), commands[1]
+    assert guard.allowed_command(commands[1] + " --viewer-role ANALYST_ROLE")
     for command in commands:
-        assert not re.search(r"&&|;|\|", command), command
-    for command in commands:
-        if "streamsnow-ci" in command:
-            assert command.startswith("streamsnow "), command
+        assert not guard._CHAINING.search(command), command
+    # The shapes the doc forbids really are denied by the guard.
+    assert not guard.allowed_command("mkdir -p .internal && " + commands[1])
+    assert not guard.allowed_command("(" + commands[1] + ")")
     flat = _flat(step)
-    assert "never chained with `&&`, `;` or `|`" in flat
+    assert "with no chaining, piping or grouping" in flat
     assert "make `.internal/` first" not in flat

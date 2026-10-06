@@ -80,7 +80,8 @@ returns their inputs instead of editing shared files.
    is unambiguous. One nav group → add to it; several → ask which.
 6. **Run the checks on the new files** — `streamsnow check schema-refs apps/<slug>`, then
    `streamsnow check caching apps/<slug>`, then `streamsnow check bind-predicates apps/<slug>`,
-   then `streamsnow check sql-tokens apps/<slug>` (four invocations, not a pipeline) — and fix anything flagged while it's cheap.
+   then `streamsnow check sql-tokens apps/<slug>` (four invocations, not a pipeline), and fix
+   anything flagged while it's cheap.
 7. **Log it:** append a §11 session line (`page <name> scaffolded — queries TODO. Next: fill stubs,
    then /preview-app <slug>`). Don't commit yet — the page is a reviewable stub; the commit happens
    in step 8, once the real SQL lands.

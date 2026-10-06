@@ -60,8 +60,7 @@ first script run finishes; data errors surface in the browser and in `logs`, not
   not a code bug — see [_shared/runtime-decision.md](../_shared/runtime-decision.md); point at the
   app's commented local-parity fallback (revert before the PR) or verify in Snowsight.
 - **A SQL edit that "has no effect":** hot-reload picks up `.py` changes but can serve cached
-  results of the old SQL text — `streamsnow preview stop <slug>` then `start` before concluding a
-  query change failed.
+  results of the old SQL text; `streamsnow preview stop <slug>` then `start` before concluding it failed.
 - **Don't run deploys locally** — `deploy-setup` / `deploy-sql` feed the CI workflow; preview is the
   only local-run path. `.streamsnow/` (preview state + logs) belongs in `.gitignore`.
 
@@ -75,12 +74,13 @@ first script run finishes; data errors surface in the browser and in `logs`, not
 
 ## Optional smoke walkthrough
 
-For a hands-off pass, list the pages with `streamsnow nav <slug>` (one JSON object per page, or
-`--json-array`; never guess URLs from filenames) and drive Playwright across each per
-[_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md): advisory, silent skip without the CLI.
+For a hands-off pass, enumerate the pages with `streamsnow nav <slug>` (one JSON object per page:
+title, path, group; `--json-array` for one payload) and drive Playwright across each per
+[_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md): advisory, silent skip
+without the CLI. The nav list is the loop input; never guess page URLs from filenames.
 
 ## Done when
 
 The app serves at the reported root URL with live data, queried as a role whose data reads match
-the CI role's, with no startup errors — next step /validate-app, then /ship-app. On "stop the
+the CI role's, with no startup errors. Next step: /validate-app, then /ship-app. On "stop the
 preview", run `streamsnow preview stop <slug>` and confirm.
