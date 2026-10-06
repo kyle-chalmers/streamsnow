@@ -343,6 +343,7 @@
       "arguments": [
         "--apps-dir",
         "--base-ref",
+        "--expect-baseline",
         "--format",
         "--payload",
         "--slug",
@@ -355,6 +356,7 @@
         "dedup-findings",
         "exit-condition",
         "merge-findings",
+        "open-findings",
         "parse-findings",
         "write-resolutions"
       ],
@@ -370,6 +372,7 @@
         "--max-walk-reentries",
         "--new",
         "--out-of-scope",
+        "--report",
         "--walk-findings-new",
         "--walk-not-clean",
         "--walk-reentries",

@@ -44,6 +44,18 @@ it already resolved. Subcommands:
         agent, mark ``(also flagged by X)`` when ≥2 agents flagged the same
         tuple. Output: a single combined merged report on stdout.
 
+    open-findings <session-dir> [--report=<report.md>]
+        Count what a review left open: the newest report's findings (or
+        ``--report``) minus every finding an ``### Applied`` block recorded as
+        fixed, in that report or another in <session-dir>. Output JSON
+        ``{report, parsed, counts, open_block, applied}``. `/ship-app` writes
+        ``counts.BLOCK`` into the PR body, because a review stamps the gate
+        even with critical findings open (reviewed means reviewed, not clean)
+        and the approver needs to see that number. A report with no
+        ``## <Dimension>`` / ``### BLOCK|FLAG|NICE-TO-HAVE`` structure gives
+        ``parsed: false`` with null counts, never 0: a heading drift must not
+        read as a clean review. No report at all exits 2.
+
 All output is JSON unless explicitly noted. Exit code 2 = tool error.
 
 Design notes:
@@ -300,6 +312,34 @@ def _is_review_report(path: Path) -> bool:
     return name.endswith(".md") and name.startswith(("review-", "loop-"))
 
 
+def report_is_parseable(text: str) -> bool:
+    """True when the report has at least one severity bucket under a dimension.
+
+    ``parse_findings`` returns [] both for a clean report and for one written in
+    a heading format it does not know. Only the first is a real zero.
+    """
+    return any(
+        _BUCKET_RE.search(body)
+        for title, body in _split_sections(text).items()
+        if title.lower() != "resolutions"
+    )
+
+
+def newest_review_report(session_dir: Path) -> Path | None:
+    """Most recently modified review report in session_dir (name breaks ties)."""
+    if not session_dir.is_dir():
+        return None
+    found: list[tuple[float, str, Path]] = []
+    for path in session_dir.iterdir():
+        if not path.is_file() or not _is_review_report(path):
+            continue
+        try:
+            found.append((path.stat().st_mtime, path.name, path))
+        except OSError:
+            continue
+    return max(found)[2] if found else None
+
+
 def collect_resolution_tuples(
     session_dir: Path,
     window_days: int = 7,
@@ -371,6 +411,51 @@ def cmd_dedup_findings(args: argparse.Namespace) -> int:
         )
     else:
         print(json.dumps([asdict(f) for f in kept], indent=2))
+    return 0
+
+
+def cmd_open_findings(args: argparse.Namespace) -> int:
+    """Open findings per severity in the newest (or given) review report."""
+    session_dir = Path(args.session_dir)
+    report = Path(args.report) if args.report else newest_review_report(session_dir)
+    result: dict[str, Any] = {
+        "report": str(report) if report else None,
+        "parsed": False,
+        "counts": None,
+        "open_block": None,
+        "applied": None,
+    }
+    if report is None or not report.is_file():
+        result["error"] = (
+            f"no review report in {session_dir}" if report is None else f"not a file: {report}"
+        )
+        print(json.dumps(result, indent=2))
+        return 2
+    text = report.read_text(encoding="utf-8")
+    if not report_is_parseable(text):
+        result["reason"] = (
+            "no '## <Dimension>' section with a '### BLOCK|FLAG|NICE-TO-HAVE' heading; "
+            "open findings unknown"
+        )
+        print(json.dumps(result, indent=2))
+        return 0
+    # The report's own Applied blocks always count, even outside the
+    # freshness window that bounds the rest of the session directory.
+    applied = collect_applied_tuples(session_dir) | parse_applied_tuples(text)
+    findings = parse_findings(text)
+    open_findings = [
+        f for f in findings if (f.citation, normalize_summary(f.summary)) not in applied
+    ]
+    counts = {s.value: 0 for s in Severity}
+    for f in open_findings:
+        counts[f.severity] = counts.get(f.severity, 0) + 1
+    result.update(
+        parsed=True,
+        counts=counts,
+        open_block=[asdict(f) for f in open_findings if f.severity == Severity.BLOCK.value],
+        applied=len(findings) - len(open_findings),
+    )
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -678,6 +763,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Comma-separated agent:path pairs (e.g. claude:a.md,other:b.md)",
     )
 
+    p = sub.add_parser("open-findings", help="Open findings per severity after applied fixes.")
+    p.add_argument("session_dir", help="Directory of review reports (apps/<slug>/.review/)")
+    p.add_argument("--report", default=None, help="Report to count (default: the newest)")
+
     return parser
 
 
@@ -690,6 +779,7 @@ def main(argv: list[str] | None = None) -> int:
         "write-resolutions": cmd_write_resolutions,
         "exit-condition": cmd_exit_condition,
         "merge-findings": cmd_merge_findings,
+        "open-findings": cmd_open_findings,
     }
     return dispatch[args.cmd](args)
 

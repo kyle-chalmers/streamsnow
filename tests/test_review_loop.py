@@ -326,3 +326,99 @@ def test_dedup_with_repeats_surfaces_no_convergence(
     # The deferred (Bucket B) finding is deduped but NOT a repeat-of-applied.
     assert "apps/acme-sales-dashboard/pages/overview.py:40" not in repeat_cites
     assert "apps/acme-sales-dashboard/queries/revenue_daily.sql:12" not in kept_cites
+
+
+# ---------------------------------------------------------------------------
+# open-findings
+# ---------------------------------------------------------------------------
+
+
+def _open(capsys: pytest.CaptureFixture, *argv: str) -> tuple[int, dict]:
+    code = rl.main(["open-findings", *argv])
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_open_findings_subtracts_applied(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    session = tmp_path / ".review"
+    session.mkdir()
+    _write_report_with_resolutions(session / "review-20260830-090000.md")
+    code, out = _open(capsys, str(session))
+    assert code == 0
+    assert out["parsed"] is True
+    # The SQL BLOCK was applied; the deferred FLAG is still open.
+    assert out["counts"] == {"BLOCK": 0, "FLAG": 2, "NICE-TO-HAVE": 1}
+    assert out["open_block"] == []
+    assert out["applied"] == 1
+
+
+def test_open_findings_subtracts_applied_from_another_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    session = tmp_path / ".review"
+    session.mkdir()
+    _write_report_with_resolutions(session / "review-20260830-090000.md")
+    report = session / "review-20260831-090000.md"
+    report.write_text(REPORT, encoding="utf-8")
+    code, out = _open(capsys, str(session), "--report", str(report))
+    assert code == 0
+    assert out["counts"]["BLOCK"] == 0
+
+
+def test_open_findings_lists_open_block(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    session = tmp_path / ".review"
+    session.mkdir()
+    (session / "review-20260831-090000.md").write_text(REPORT, encoding="utf-8")
+    code, out = _open(capsys, str(session))
+    assert code == 0
+    assert out["counts"] == {"BLOCK": 1, "FLAG": 2, "NICE-TO-HAVE": 1}
+    assert [f["citation"] for f in out["open_block"]] == [
+        "apps/acme-sales-dashboard/queries/revenue_daily.sql:12"
+    ]
+    assert out["report"].endswith("review-20260831-090000.md")
+
+
+def test_open_findings_picks_newest_report(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    import os
+    import time
+
+    session = tmp_path / ".review"
+    session.mkdir()
+    old = session / "review-old.md"
+    old.write_text(REPORT, encoding="utf-8")
+    past = time.time() - 3600
+    os.utime(old, (past, past))
+    (session / "review-new.md").write_text(
+        "# Review\n\n## SQL\n\n### BLOCK\n- _none_\n\n### FLAG\n- _none_\n", encoding="utf-8"
+    )
+    code, out = _open(capsys, str(session))
+    assert code == 0
+    assert out["report"].endswith("review-new.md")
+    assert out["parsed"] is True
+    assert out["counts"] == {"BLOCK": 0, "FLAG": 0, "NICE-TO-HAVE": 0}
+
+
+def test_open_findings_unparsed_report_is_not_zero(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    session = tmp_path / ".review"
+    session.mkdir()
+    (session / "review-20260831-090000.md").write_text(
+        "# Review\n\n**Critical**\n- SELECT * over a wide view\n", encoding="utf-8"
+    )
+    code, out = _open(capsys, str(session))
+    assert code == 0
+    assert out["parsed"] is False
+    # Unknown, never zero: a report the parser can't read must not read as clean.
+    assert out["counts"] is None
+    assert out["open_block"] is None
+
+
+def test_open_findings_without_a_report_errors(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    session = tmp_path / ".review"
+    session.mkdir()
+    code, out = _open(capsys, str(session))
+    assert code == 2
+    assert out["parsed"] is False
+    assert out["counts"] is None
