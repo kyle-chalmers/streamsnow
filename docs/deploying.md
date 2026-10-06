@@ -87,10 +87,19 @@ leaves out:
 - any file named `secrets.toml`, at any depth and under any link, because
   Streamlit in Snowflake does not read it and a local copy holds connection
   credentials;
-- symlinks that point outside the app, and symlinks whose target inside the
-  app is itself left out (a `runtime.txt` link to `.env` stays out with
-  `.env`). Directory symlinks that stay inside the app are followed, so
-  `.streamlit -> config/` still ships `.streamlit/config.toml`.
+- symlinks whose target is itself left out, judged at the path the target has
+  in the repo (a `runtime.txt` link to `../../shared/.env` stays out with
+  `.env`).
+
+Symlinks that resolve anywhere inside the repo are followed, as
+`snow stage copy apps/ --recursive` did. An app can share a helper with
+`apps/acme/helpers.py -> ../../shared/helpers.py`, or a theme with a link to a
+shared `.streamlit/config.toml`, and `.streamlit -> config/` still ships
+`.streamlit/config.toml`. A symlink that resolves outside the repo fails the
+bundle with exit 2 and a message naming the link, before anything is written,
+so the deploy stops before the upload instead of shipping an app that is
+missing a file. Move the target into the repo or replace the link with a copy.
+The repo is the `--dir` folder (default: the current directory).
 
 `streamsnow stage-bundle --out <empty dir>` prints each file it left out and
 why, so you can run it locally to see what a deploy will upload. A repo whose

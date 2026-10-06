@@ -52,7 +52,12 @@ from pathlib import Path
 
 from .config import Config
 from .deploy import _safe_sha, stage_path, streamlit_fqn
-from .stage_bundle import app_artifact_entries, excluded_reason, select_app_files
+from .stage_bundle import (
+    BundleError,
+    app_artifact_entries,
+    excluded_reason,
+    select_app_files,
+)
 
 RunQuery = Callable[[str], list[dict]]
 
@@ -312,10 +317,14 @@ def check_stage_files(listed: list[str], app_dir: Path, stage_dir: str) -> dict:
     ``stage-bundle`` would leave out (AGENTS.md, sql_review/, ...) means the
     workflow still uploads the whole ``apps/`` tree, so internal docs sit on
     the stage at every commit. Warn-level so a repo on the old workflow is
-    told, not failed.
+    told, not failed. An app holding a symlink that resolves outside the repo
+    is reported too: ``stage-bundle`` refuses it, so the next deploy fails.
     """
     entries = app_artifact_entries(app_dir)
-    expected, _ = select_app_files(app_dir)
+    try:
+        expected, _ = select_app_files(app_dir)
+    except BundleError as exc:
+        return _check("stage-files", FAIL, [f"stage-bundle refuses this app: {exc}"], level=WARN)
     on_stage = set(listed)
     missing = [rel for rel in sorted(expected) if rel not in on_stage]
     findings: list[str] = [

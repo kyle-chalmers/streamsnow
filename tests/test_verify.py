@@ -602,6 +602,37 @@ def test_stage_files_expects_what_a_followed_directory_symlink_ships(tmp_path):
     assert [f for f in check["findings"] if f.startswith("lib/real.py")], check["findings"]
 
 
+def test_stage_files_expects_a_shared_helper_linked_from_the_repo(tmp_path):
+    app_dir = _scaffold_my_app(tmp_path)
+    (tmp_path / "shared").mkdir()
+    (tmp_path / "shared" / "helpers.py").write_text("X = 1\n", encoding="utf-8")
+    try:
+        (app_dir / "helpers.py").symlink_to(tmp_path / "shared" / "helpers.py")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable on this platform")
+    listing = [r for r in _bundle_listing(app_dir, tmp_path) if "helpers.py" not in r["name"]]
+    check = _by_name(_verify_with_stage(_cfg(), app_dir, listing))["stage-files"]
+    assert [f for f in check["findings"] if f.startswith("helpers.py")], check["findings"]
+
+
+def test_stage_files_warns_when_a_symlink_escapes_the_repo(tmp_path):
+    """The bundle refuses such an app; the warn-only check says so instead of crashing."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    app_dir = _scaffold_my_app(repo)
+    listing = _bundle_listing(app_dir, tmp_path)
+    (tmp_path / "outside.py").write_text("X = 1\n", encoding="utf-8")
+    try:
+        (app_dir / "leak.py").symlink_to(tmp_path / "outside.py")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable on this platform")
+    result = _verify_with_stage(_cfg(), app_dir, listing)
+    check = _by_name(result)["stage-files"]
+    assert check["status"] == "fail" and check["level"] == "warn"
+    assert result["ok"]
+    assert any("leak.py" in f and "outside the repo" in f for f in check["findings"])
+
+
 def test_stage_files_is_skipped_for_a_git_repository_source(tmp_path):
     app_dir = _scaffold_my_app(tmp_path)
     result = verify_app(

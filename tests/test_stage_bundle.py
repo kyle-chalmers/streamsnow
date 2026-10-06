@@ -214,7 +214,9 @@ def test_bundle_skips_tooling_dirs(tmp_path):
     assert not any("__pycache__" in p or ".pytest_cache" in p for p in shipped)
 
 
-def test_bundle_skips_a_symlink_that_escapes_the_app(tmp_path):
+def test_bundle_refuses_a_file_symlink_that_escapes_the_repo(tmp_path):
+    """A link out of the repo used to be dropped with exit 0, so the deploy
+    shipped an app missing the file. It now fails the bundle before any write."""
     repo = _repo(tmp_path)
     app_dir = repo / "apps" / SLUG
     outside = _write(tmp_path / "outside" / "private_notes.py", "TOKEN = 'acme'\n")
@@ -227,13 +229,92 @@ def test_bundle_skips_a_symlink_that_escapes_the_app(tmp_path):
         pytest.skip("symlinks unavailable on this platform")
     out = tmp_path / "bundle"
 
+    with pytest.raises(BundleError, match=f"apps/{SLUG}/leak.py"):
+        build_bundle(repo, out)
+    assert not out.exists()
+
+    res = _invoke("--out", str(out), "--dir", str(repo))
+    assert res.exit_code == 2, res.output
+    assert "leak.py" in res.output
+    assert not out.exists()
+
+
+def test_bundle_ships_a_file_symlink_to_a_shared_helper_in_the_repo(tmp_path):
+    """`apps/acme/helpers.py -> ../../shared/helpers.py`: the old
+    `snow stage copy apps/ --recursive` followed it, so the bundle must too."""
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    _write(repo / "shared" / "helpers.py", "def greet():\n    return 'hi'\n")
+    link = app_dir / "helpers.py"
+    try:
+        link.symlink_to(Path("..") / ".." / "shared" / "helpers.py")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable on this platform")
+    out = tmp_path / "bundle"
+
+    result = build_bundle(repo, out)
+
+    assert "helpers.py" in _shipped(out)
+    assert (out / SLUG / "helpers.py").read_text(encoding="utf-8").startswith("def greet")
+    assert "helpers.py" in result["apps"][0]["files"]
+
+
+def test_bundle_ships_a_shared_streamlit_config_linked_from_the_repo(tmp_path):
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    shared = _write(repo / "shared" / ".streamlit" / "config.toml", "[theme]\nbase = 'dark'\n")
+    (app_dir / ".streamlit" / "config.toml").unlink()
+    _link(app_dir / ".streamlit" / "config.toml", shared)
+    out = tmp_path / "bundle"
+
+    build_bundle(repo, out)
+
+    shipped = out / SLUG / ".streamlit" / "config.toml"
+    assert shipped.read_text(encoding="utf-8") == "[theme]\nbase = 'dark'\n"
+
+
+@pytest.mark.parametrize(
+    ("target", "reason"),
+    [
+        ("shared/.env", "environment file (may hold secrets)"),
+        ("shared/.env.local", "environment file (may hold secrets)"),
+        ("config/secrets.toml", "Streamlit secrets file (never deployed)"),
+        ("README.md", "root-level doc"),
+        ("apps/acme-ops/AGENTS.md", "root-level doc"),
+        ("apps/acme-ops/sql_review/index.yaml", "sql_review/"),
+        (".git/config", "tooling dot-directory"),
+        ("shared/.streamlit/secrets.toml", "Streamlit secrets file"),
+    ],
+)
+def test_bundle_excludes_an_in_repo_link_to_an_excluded_file(tmp_path, target, reason):
+    """Both the link's own path and the path it resolves to in the repo are
+    judged, so `runtime.txt -> ../../shared/.env` never uploads the .env."""
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    real = _write(repo / target, "SNOWFLAKE_PASSWORD=acme-not-real\n")
+    _link(app_dir / "runtime.txt", real)
+    out = tmp_path / "bundle"
+
+    result = build_bundle(repo, out, [SLUG])
+
+    assert "runtime.txt" not in _shipped(out)
+    assert reason in _reasons(result)["runtime.txt"]
+
+
+def test_bundle_follows_a_directory_symlink_into_the_repo(tmp_path):
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    _write(repo / "shared" / "lib" / "fmt.py", "X = 1\n")
+    _write(repo / "shared" / "lib" / ".env", "SNOWFLAKE_PASSWORD=acme-not-real\n")
+    _link(app_dir / "lib", repo / "shared" / "lib")
+    out = tmp_path / "bundle"
+
     result = build_bundle(repo, out)
 
     shipped = _shipped(out)
-    assert "leak.py" not in shipped
-    assert "shared_helpers.py" in shipped  # a link inside the app ships its content
-    reasons = {e["path"]: e["reason"] for e in result["apps"][0]["excluded"]}
-    assert "escapes" in reasons["leak.py"]
+    assert "lib/fmt.py" in shipped
+    assert "lib/.env" not in shipped
+    assert _reasons(result)["lib/.env"] == "environment file (may hold secrets)"
 
 
 def _link(link: Path, target: Path) -> None:
@@ -364,17 +445,16 @@ def test_bundle_survives_a_directory_symlink_cycle(tmp_path):
     assert "cycle" in _reasons(result)["pages/loop/"]
 
 
-def test_bundle_excludes_a_directory_symlink_that_escapes_the_app(tmp_path):
+def test_bundle_refuses_a_directory_symlink_that_escapes_the_repo(tmp_path):
     repo = _repo(tmp_path)
     app_dir = repo / "apps" / SLUG
     _write(tmp_path / "outside" / "vendor.py", "TOKEN = 'acme'\n")
     _link(app_dir / "vendor", tmp_path / "outside")
     out = tmp_path / "bundle"
 
-    result = build_bundle(repo, out)
-
-    assert not any(p.startswith("vendor/") for p in _shipped(out))
-    assert "escapes" in _reasons(result)["vendor/"]
+    with pytest.raises(BundleError, match=f"apps/{SLUG}/vendor"):
+        build_bundle(repo, out)
+    assert not out.exists()
 
 
 def test_select_app_files_matches_what_the_bundle_writes(tmp_path):
