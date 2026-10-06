@@ -24,7 +24,9 @@ The workflow uploads the bundle instead of ``apps/``. What is excluded:
   Streamlit in Snowflake never reads one, and a committed one usually holds
   credentials;
 - symlinks that point outside the app, which would otherwise copy a file from
-  elsewhere on the runner into the stage.
+  elsewhere on the runner into the stage, and symlinks inside the app whose
+  target is excluded (a ``runtime.txt`` link to ``.env`` would upload ``.env``).
+  Directory symlinks that stay inside the app are followed.
 
 The same rules back the warn-only ``stage-files`` check in ``verify-deploy``,
 so a repo still on the old workflow sees which files its stage holds that the
@@ -36,7 +38,6 @@ use the bundle; see docs/git-repository.md.
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
@@ -102,8 +103,80 @@ def app_artifact_entries(app_dir: Path) -> list[str] | None:
     return _artifact_entries(manifest) if isinstance(manifest, dict) else None
 
 
-def _escapes(path: Path, root: Path) -> bool:
-    return not path.resolve().is_relative_to(root)
+def _inside(path: Path, root: Path) -> str | None:
+    """``path`` resolved, as a POSIX path relative to ``root``; None if it escapes."""
+    resolved = path.resolve()
+    if not resolved.is_relative_to(root):
+        return None
+    return resolved.relative_to(root).as_posix()
+
+
+def select_app_files(app_dir: Path) -> tuple[dict[str, Path], list[dict]]:
+    """Decide what the bundle ships for one app, without writing anything.
+
+    Returns ``(selected, excluded)``: ``selected`` maps each shipped app-relative
+    POSIX path to the file to copy, and ``excluded`` lists ``{"path", "reason"}``
+    for what was left out (a pruned directory is reported once, with a trailing
+    ``/``). ``bundle_app`` copies the selection and ``verify-deploy``'s
+    ``stage-files`` check compares the stage with it, so both agree on what a
+    deploy should hold.
+
+    Symlinks are judged twice: by the path they appear at and by the path they
+    resolve to inside the app. A link named ``runtime.txt`` that points at
+    ``.env`` is therefore left out with the ``.env`` reason, because copying
+    follows the link and would upload the target. A directory link that stays
+    inside the app is followed (``.streamlit -> config/`` must still ship
+    ``.streamlit/config.toml``); one that loops back to a directory already
+    being walked is reported as a cycle, and one that escapes the app is
+    reported and never read.
+    """
+    root = app_dir.resolve()
+    entries = app_artifact_entries(app_dir)
+    selected: dict[str, Path] = {}
+    excluded: list[dict] = []
+
+    def skip(rel: str, reason: str) -> None:
+        excluded.append({"path": rel, "reason": reason})
+
+    def reason_for(rel: str, real_rel: str) -> str | None:
+        reason = excluded_reason(rel, entries)
+        if reason is None and real_rel != rel:
+            reason = excluded_reason(real_rel, entries)
+        return reason
+
+    def walk(here: Path, prefix: str, active: frozenset[Path]) -> None:
+        for child in sorted(here.iterdir(), key=lambda p: p.name):
+            rel = prefix + child.name
+            linked = child.is_symlink()
+            if linked and not child.exists():
+                skip(rel, "broken symlink")
+                continue
+            real_rel = _inside(child, root)
+            is_dir = child.is_dir()
+            if real_rel is None:
+                skip(rel + "/" if is_dir else rel, "symlink escapes the app")
+                continue
+            if is_dir:
+                reason = _dir_reason(child.name)
+                if reason is None and linked and real_rel != ".":
+                    # A link into a pruned directory (`tools -> .git`) is pruned too.
+                    reason = next((r for r in map(_dir_reason, real_rel.split("/")) if r), None)
+                real = child.resolve()
+                if reason is None and real in active:
+                    reason = "symlink cycle: points back at a directory already being walked"
+                if reason:
+                    skip(rel + "/", reason)
+                    continue
+                walk(child, rel + "/", active | {real})
+                continue
+            reason = reason_for(rel, real_rel)
+            if reason:
+                skip(rel, reason)
+                continue
+            selected[rel] = child
+
+    walk(app_dir, "", frozenset({root}))
+    return selected, excluded
 
 
 def bundle_app(app_dir: Path, dest: Path) -> dict:
@@ -112,50 +185,12 @@ def bundle_app(app_dir: Path, dest: Path) -> dict:
     Returns ``{"slug", "files", "excluded"}``; ``excluded`` items are
     ``{"path", "reason"}``. Paths are app-relative POSIX on every OS.
     """
-    root = app_dir.resolve()
-    entries = app_artifact_entries(app_dir)
-    files: list[str] = []
-    excluded: list[dict] = []
-
-    def skip(rel: str, reason: str) -> None:
-        excluded.append({"path": rel, "reason": reason})
-
-    for current, dirnames, filenames in os.walk(app_dir, followlinks=False):
-        here = Path(current)
-        rel_here = here.relative_to(app_dir)
-        dirnames.sort()
-        for name in list(dirnames):
-            sub = here / name
-            rel = (rel_here / name).as_posix()
-            reason = _dir_reason(name)
-            if sub.is_symlink():
-                reason = (
-                    "symlink escapes the app"
-                    if _escapes(sub, root)
-                    else "symlinked directory is not followed; move the files into the app"
-                )
-            if reason:
-                dirnames.remove(name)
-                skip(rel + "/", reason)
-        for name in sorted(filenames):
-            src = here / name
-            rel = (rel_here / name).as_posix()
-            if src.is_symlink():
-                if not src.exists():
-                    skip(rel, "broken symlink")
-                    continue
-                if _escapes(src, root):
-                    skip(rel, "symlink escapes the app")
-                    continue
-            reason = excluded_reason(rel, entries)
-            if reason:
-                skip(rel, reason)
-                continue
-            target = dest / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, target)
-            files.append(rel)
-    return {"slug": app_dir.name, "files": sorted(files), "excluded": excluded}
+    selected, excluded = select_app_files(app_dir)
+    for rel, src in selected.items():
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, target)
+    return {"slug": app_dir.name, "files": sorted(selected), "excluded": excluded}
 
 
 def _app_slugs(apps: Path) -> list[str]:

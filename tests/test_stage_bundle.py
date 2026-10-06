@@ -20,7 +20,7 @@ from typer.testing import CliRunner
 from streamsnow.cli import app as cli_app
 from streamsnow.config import Config
 from streamsnow.scaffolder import scaffold
-from streamsnow.stage_bundle import BundleError, build_bundle, excluded_reason
+from streamsnow.stage_bundle import BundleError, build_bundle, excluded_reason, select_app_files
 from streamsnow.tools.check_artifacts import _deployable_files
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -234,6 +234,125 @@ def test_bundle_skips_a_symlink_that_escapes_the_app(tmp_path):
     assert "shared_helpers.py" in shipped  # a link inside the app ships its content
     reasons = {e["path"]: e["reason"] for e in result["apps"][0]["excluded"]}
     assert "escapes" in reasons["leak.py"]
+
+
+def _link(link: Path, target: Path) -> None:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable on this platform")
+
+
+def _reasons(result: dict) -> dict[str, str]:
+    return {e["path"]: e["reason"] for e in result["apps"][0]["excluded"]}
+
+
+@pytest.mark.parametrize(
+    ("target", "alias"),
+    [
+        (".env", "runtime.txt"),
+        ("AGENTS.md", "notes.txt"),
+        ("sql_review/index.yaml", "review.yaml"),
+        (".streamlit/secrets.toml", "pages/settings.toml"),
+    ],
+)
+def test_bundle_excludes_a_symlink_alias_of_an_excluded_file(tmp_path, target, alias):
+    """Codex P1: the link's own name passed the rules, then copyfile followed it."""
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    if not (app_dir / target).exists():
+        _write(app_dir / target, "SNOWFLAKE_PASSWORD=acme-not-real\n")
+    _link(app_dir / alias, app_dir / target)
+    out = tmp_path / "bundle"
+
+    result = build_bundle(repo, out)
+
+    assert alias not in _shipped(out)
+    assert _reasons(result)[alias] == excluded_reason(target, ["streamlit_app.py"])
+
+
+def test_bundle_excludes_files_reached_through_a_link_to_an_excluded_dir(tmp_path):
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    _link(app_dir / "review_copy", app_dir / "sql_review")
+    out = tmp_path / "bundle"
+
+    build_bundle(repo, out)
+
+    assert not any(p.startswith("review_copy/") for p in _shipped(out))
+
+
+def test_bundle_follows_a_directory_symlink_inside_the_app(tmp_path):
+    """Codex P2: `.streamlit -> config/` shipped config/config.toml but not
+    .streamlit/config.toml, so the deployed app lost its theme."""
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    shutil.rmtree(app_dir / ".streamlit")
+    _write(app_dir / "config" / "config.toml", "[theme]\nbase = 'light'\n")
+    _link(app_dir / ".streamlit", app_dir / "config")
+    _write(app_dir / "helpers" / "real.py", "X = 1\n")
+    _link(app_dir / "lib", app_dir / "helpers")
+    out = tmp_path / "bundle"
+
+    build_bundle(repo, out)
+
+    shipped = _shipped(out)
+    assert ".streamlit/config.toml" in shipped
+    assert "lib/real.py" in shipped and "helpers/real.py" in shipped
+
+
+def test_bundle_link_path_rules_apply_inside_a_followed_directory(tmp_path):
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    shutil.rmtree(app_dir / ".streamlit")
+    _write(app_dir / "settings" / "config.toml", "[theme]\nbase = 'light'\n")
+    _write(app_dir / "settings" / ".env", "SNOWFLAKE_PASSWORD=acme-not-real\n")
+    _link(app_dir / ".streamlit", app_dir / "settings")
+    out = tmp_path / "bundle"
+
+    result = build_bundle(repo, out)
+
+    shipped = _shipped(out)
+    assert ".streamlit/config.toml" in shipped
+    assert ".streamlit/.env" not in shipped and "settings/.env" not in shipped
+    assert ".streamlit/.env" in _reasons(result)
+
+
+def test_bundle_survives_a_directory_symlink_cycle(tmp_path):
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    _link(app_dir / "pages" / "loop", app_dir)
+    out = tmp_path / "bundle"
+
+    result = build_bundle(repo, out)
+
+    shipped = _shipped(out)
+    assert "pages/overview.py" in shipped
+    assert not any(p.startswith("pages/loop/") for p in shipped)
+    assert "cycle" in _reasons(result)["pages/loop/"]
+
+
+def test_bundle_excludes_a_directory_symlink_that_escapes_the_app(tmp_path):
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    _write(tmp_path / "outside" / "vendor.py", "TOKEN = 'acme'\n")
+    _link(app_dir / "vendor", tmp_path / "outside")
+    out = tmp_path / "bundle"
+
+    result = build_bundle(repo, out)
+
+    assert not any(p.startswith("vendor/") for p in _shipped(out))
+    assert "escapes" in _reasons(result)["vendor/"]
+
+
+def test_select_app_files_matches_what_the_bundle_writes(tmp_path):
+    repo = _repo(tmp_path)
+    out = tmp_path / "bundle"
+    result = build_bundle(repo, out)
+    selected, excluded = select_app_files(repo / "apps" / SLUG)
+    assert sorted(selected) == result["apps"][0]["files"] == sorted(_shipped(out))
+    assert excluded == result["apps"][0]["excluded"]
 
 
 def test_bundle_refuses_a_non_empty_out(tmp_path):
