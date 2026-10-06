@@ -946,6 +946,12 @@ def deploy_setup(
         help="With --admin: also grant the viewer role to this user (repeatable). The user "
         "running the script always gets it.",
     ),
+    viewer_roles: list[str] = typer.Option(
+        None,
+        "--viewer-role",
+        help="With --admin: also grant the viewer role to this existing role (repeatable), so "
+        "everyone with it can open the apps. PUBLIC and system roles are refused.",
+    ),
     teardown: bool = typer.Option(
         False,
         "--teardown",
@@ -965,8 +971,8 @@ def deploy_setup(
     if teardown and admin:
         _err("--teardown and --admin are separate scripts: pass one of them.")
         raise typer.Exit(2)
-    if (public_key_file or viewer_users) and not admin:
-        _err("--public-key-file and --viewer-user only apply to --admin.")
+    if (public_key_file or viewer_users or viewer_roles) and not admin:
+        _err("--public-key-file, --viewer-user and --viewer-role only apply to --admin.")
         raise typer.Exit(2)
     try:
         cfg = load_config(Path(config) if config else None)
@@ -981,7 +987,12 @@ def deploy_setup(
             sql = generate_teardown_sql(cfg)
         elif admin:
             key = read_public_key(public_key_file) if public_key_file else None
-            sql = generate_admin_sql(cfg, public_key=key, viewer_users=viewer_users or ())
+            sql = generate_admin_sql(
+                cfg,
+                public_key=key,
+                viewer_users=viewer_users or (),
+                viewer_roles=viewer_roles or (),
+            )
         else:
             sql = generate_setup_sql(cfg)
     except ConfigError as exc:

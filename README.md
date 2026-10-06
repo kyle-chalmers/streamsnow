@@ -135,8 +135,8 @@ yourself:
 ```text
 Install StreamSnow (https://github.com/kyle-chalmers/streamsnow) for me at the
 project level: enable the plugin and install the skills for this repo only,
-never at the user level. Confirm with me before installing anything, and stop at
-each question you cannot answer on my behalf.
+never at the user level. Confirm with me before installing anything, and ask me each
+setup question yourself and wait for my answer; never answer one for me.
 
 1. Work in the git repo for my Snowflake apps. Ask me which folder if unsure; if it
    is new, create it and run `git init`. Run every command below from its root.
@@ -160,8 +160,8 @@ each question you cannot answer on my behalf.
    follow that instead of scaffolding. Otherwise set up with `streamsnow init --no-starter-app`.
    Its wizard asks five questions. Answer what you can first with read-only SHOW queries
    over whatever Snowflake access I already have (my default snow connection, a Snowflake
-   MCP server, a dbt profile), ask me only what you could not settle, then pass the
-   confirmed answers as flags (see `streamsnow init --help`). If you cannot, hand the
+   MCP server, a dbt profile), explain each setting and ask me each question with what you
+   found as the recommended answer, then pass the confirmed answers as flags (see `streamsnow init --help`). If you cannot, hand the
    wizard to me.
 
 5. Run `streamsnow agent-skills install --agent codex` (repo scope, the default; never
@@ -282,9 +282,11 @@ and says what it is doing at every step:
    Snowflake account with read-only queries over whatever access you have (a
    `snow` connection, a Snowflake MCP server, a dbt profile), and installs any
    missing tools after one approval.
-2. **One round of questions.** Clickable choices for what it could not work
-   out: the five setup answers, your git name if it is missing, and who runs
-   the Snowflake admin script.
+2. **One round of questions.** Clickable choices, each explained first: the
+   five setup answers (and the schemas apps may not query), the defaults the
+   wizard does not ask about, your git name if it is missing, and who runs the
+   Snowflake admin script, which it describes before asking, plus which of
+   your Snowflake roles can open the apps.
 3. **Build.** The config and the governed repo files (`AGENTS.md`, `CLAUDE.md`,
    pre-commit hooks, CI, `.gitignore`, README), only after you confirm.
 4. **Finish.** The CI key, the admin script (copied for you to run in

@@ -161,7 +161,8 @@ The wizard asks **at most 5 questions**: runtime, Snowflake account, the databas
 allowed schemas, and the deploy source. Everything else (project name, roles, warehouse, schema
 names, container objects) is written as a sensible default with an inline comment saying when to
 change it; the file is the editing surface. Don't make the user answer those questions cold:
-investigate, propose, confirm, then pass the confirmed answers as flags.
+investigate, explain each setting, ask each one with your proposal as the recommended option, then
+pass the confirmed answers as flags.
 
 **The user decides; everything below is a proposal.** Before probing, say in one line what you
 will read and from which connection, so the user can redirect it or decline. The user can:
@@ -310,16 +311,19 @@ pass `--account` with the locator the user gives.
 
 ### 2c · Propose, confirm, run
 
-Ask only what the investigation could not settle. Show one table of all five answers, each with a
-one-line reason and the source it came from, and mark each row **found** (one clear answer from
-the evidence) or **needs you** (two plausible candidates, nothing visible, or a judgment call).
-Ask the **needs you** rows as direct questions; one "yes" confirms every **found** row, and the
-user can still change any of them inline ("schemas: MARTS only" is enough). The allowed-schema
-list is always shown, even when found, because it is the data boundary. Explain the schema lists when you
-show them: `deploy-setup --admin` grants the CI role SELECT on exactly the allowed schemas, and
-deployed apps run with their owner's rights (the CI role), so the allowed list is the data
-boundary for every viewer; the denied list is what `streamsnow check schema-refs` blocks in app
-code. Then write the config with the confirmed answers:
+Ask every answer, one question each, even when the investigation found a clear one (the
+question rule in [SKILL.md](SKILL.md) Stage 2). Before each question, explain the setting in two
+or three plain lines: what it is, what it controls, and what changing it later costs. Then ask,
+with the detected value as the recommended first option, its reason and source in one line, and
+the other candidates after it. Where nothing was found or two candidates are plausible, say so
+and ask with no recommendation. Order: runtime, database, allowed schemas, denied schemas, deploy
+source, plus the connection when §2a has not already confirmed it. The explanations come from the
+facts above (runtime, deploy source and deny list), and for the schema lists: `deploy-setup
+--admin` grants the CI role SELECT on exactly the allowed schemas, and deployed apps run with
+their owner's rights (the CI role), so the allowed list is the data boundary for every viewer; the
+denied list is what `streamsnow check schema-refs` blocks in app code. Ask the allowed and denied
+lists as two questions, because they are two different boundaries. Then write the config with
+the confirmed answers:
 
 ```
 streamsnow configure --runtime container --connection <name> \
@@ -327,10 +331,33 @@ streamsnow configure --runtime container --connection <name> \
   --deploy-source stage-copy
 ```
 
-With all five answers passed, no prompt fires. Before writing the repo files, show the defaults
-the wizard did not ask about (project name, app database and schema, warehouse, CI and viewer
-roles, compute pool) in a short list and ask whether any should change: a team may already have
-its own warehouse, roles or naming. Change the values the user asks for in
+With all five answers passed, no prompt fires. Before writing the repo files, explain the
+defaults the wizard did not ask about, as a bulleted list with one bullet per thing that applies,
+then ask one question: keep them, or change some. Each bullet gives the proposed value, what it
+is, what uses it, whether the admin script creates it, and when a team would change it (a team
+may already have its own warehouse, roles or naming). Cover these, and only the ones that apply:
+
+- **Project name**: derived from the folder; labels the config and generated files, and is not
+  created in Snowflake.
+- **App database and schema** (`STREAMSNOW_APPS.DASHBOARDS` by default): where the deployed
+  Streamlit apps live; the admin script creates them.
+- **Stage database and schema**: where `stage-copy` deploys put the app code; they default to the
+  app database and schema.
+- **Warehouse** (`STREAMSNOW_WH` by default): the compute apps query with; the admin script
+  creates a small one that suspends after 60 seconds. Reuse an existing warehouse if your team has
+  one.
+- **CI role and viewer role** (`STREAMSNOW_DEPLOY_ROLE`, `STREAMSNOW_VIEWER_ROLE`): the first
+  deploys from CI and owns the apps, the second is what people viewing an app and local preview
+  use; the admin script creates both.
+- **Compute pool and external access integration** (container runtime only;
+  `SYSTEM_COMPUTE_POOL_CPU` and `PYPI_ACCESS_INTEGRATION` by default): the pool Snowflake
+  pre-provisions to run the app, and the permission that lets the build install packages from
+  PyPI.
+- **Git repository, API integration and secret names** (only when the deploy source is
+  `git-repository`): placeholders to confirm before the first deploy.
+
+The question's "change some" option takes the names to change; values changed after `init` need
+`streamsnow update --apply` to re-render the files. Change the values the user asks for in
 `streamsnow.config.yaml`, keeping its keys and comments. Nothing needs changing for a first run;
 each value carries a comment saying when to. Then run `streamsnow init --no-starter-app`: it
 reuses that config and renders `AGENTS.md`, CI and the rest from the final values. (Editing
@@ -361,26 +388,62 @@ to the repository the probe found.
 
 The first deploy needs objects most people cannot create: the app database and schema, a
 warehouse, the CI and viewer roles, a CI service user and the grants that tie them together.
-[docs/deploy-setup.md](../../docs/deploy-setup.md) §0 lists them; do not restate it, link it.
+[docs/deploy-setup.md](../../docs/deploy-setup.md) §0 has the full table.
 
 1. **Check, read-only** (Stage 1). Through the user's own connection, run
    `SHOW DATABASES LIKE '<objects.app_database>'` and `SHOW ROLES LIKE '<roles.ci_role>'`, with
    names from the config, or from the proposed answers when there is no config yet. Both found:
    **confirmed**, skip to §2e. Anything else is **not confirmed, never "missing"**: a
-   low-privilege role may not see these objects even when they exist. Ask in Stage 2: "Has your
-   Snowflake admin run the StreamSnow setup script? If not, who runs it: you, or someone else?"
-2. **Explain** in two lines what the script creates and why it needs admin rights.
+   low-privilege role may not see these objects even when they exist.
+2. **Explain, then ask** (Stage 2). Before asking, show what the admin setup script is for, as
+   bullets with the real names from the config:
+   - **What it is**: one SQL script, written from `streamsnow.config.yaml`, that an admin runs
+     once per Snowflake account. Snowflake only lets admin roles create these objects, which is
+     why StreamSnow cannot do it with the user's everyday role.
+   - **App database and schema**: where deployed apps live.
+   - **Warehouse**: the compute apps query with.
+   - **CI role**: what the deploy workflow runs as; it owns the apps.
+   - **Viewer role**: what people viewing an app, and local preview, run as.
+   - **CI service user**: the account the deploy workflow signs in as, with a key pair and no
+     password.
+   - **Grants**: the CI role gets SELECT on exactly the allowed schemas, which is what makes the
+     allowed list the data boundary.
+   - **Container runtime only**: the PyPI access integration and the compute pool permission.
+   - **Safe to re-run**, and Claude never runs it. `streamsnow deploy-setup --teardown` prints
+     a start-fresh cleanup the admin must review line by line before running.
+
+   Then ask: "Has your Snowflake admin run the StreamSnow setup script? If not, who runs it: you,
+   or someone else?"
+
+   **Which of your roles get access.** Unless step 1 confirmed the setup, ask this too. The
+   script gives the viewer role only to whoever runs it, and the admin who runs it is often a
+   different login from the one building the apps, so the user's own connection (and you) would
+   otherwise see none of the new objects and step 1 could never confirm them. List the roles the
+   user's connection can use, read-only: `SELECT CURRENT_AVAILABLE_ROLES()` and
+   `SELECT CURRENT_ROLE()`. Explain in one line that each chosen role gets the viewer role, so
+   everyone holding it can open the apps and see the app database and warehouse, and none of them
+   gets the data or deploy rights. Ask which roles get it (multiple choice), recommending the
+   connection's current role. Leave out `PUBLIC`, the system roles (`ACCOUNTADMIN`,
+   `SECURITYADMIN`, `SYSADMIN`, `USERADMIN`, `ORGADMIN`) and StreamSnow's own two roles: the CLI
+   refuses them. Also leave out a role whose name is not all capital letters, digits, `_` or `$`
+   (the CLI writes names unquoted). Recommend the current role only when it is not one of those;
+   otherwise recommend none. "None" is a valid answer.
 3. **CI key.** Run `streamsnow ci-key create`. It writes the key pair and one file per secret to
    `~/.streamsnow-ci`, prints only file names and a fingerprint, and never overwrites a key. Tell
    the user, in one line, to save a copy of the `.p8` somewhere safe such as a password manager
    themselves (you never open it; a lost key means rotating).
 4. **The admin file.** Run
-   `streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > .internal/admin-setup.sql`
+   `streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > .internal/admin-setup.sql`,
+   adding `--viewer-role <ROLE>` once for each role chosen in step 2
    (make `.internal/` first). Repos set up on 0.7.1 or later gitignore `.internal/`; check with
    `git check-ignore -q .internal/admin-setup.sql` and add `.internal/` to `.gitignore` if it is
    not, so the file is never committed. It runs unedited
-   and is safe to re-run; `streamsnow deploy-setup --teardown` prints the start-fresh reverse.
-5. **Hand it off.** You never run the admin SQL, whoever the user is.
+   and is safe to re-run; `streamsnow deploy-setup --teardown` prints a start-fresh cleanup to review.
+5. **Hand it off.** You never run the admin SQL, whoever the user is. Give the explanation from
+   step 2 and the steps below, nothing more: do not open or quote the admin file, and do not add
+   your own warnings about its contents (line numbers, statement types, object names). The
+   script is documented, and extra commentary about it only worries the person about a script
+   they are meant to run unedited.
    - **The user is the admin:** copy it for Snowsight: `pbcopy < .internal/admin-setup.sql` on
      macOS; `wl-copy < .internal/admin-setup.sql` or
      `xclip -selection clipboard < .internal/admin-setup.sql` on Linux when present; otherwise

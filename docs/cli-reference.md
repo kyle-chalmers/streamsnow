@@ -188,7 +188,8 @@ JSON for the skill to act on.
 `deploy-setup` flags: `--admin` (the full bootstrap a first deploy needs, in
 `USE ROLE` sections, to hand a Snowflake admin), `--public-key-file <pem>` (with
 `--admin`: the CI user's public key), `--viewer-user <user>` (with `--admin`,
-repeatable), `--teardown` (print the reverse of `--admin`; keeps the governance
+repeatable), `--viewer-role <role>` (with `--admin`, repeatable: an existing role
+that gets the viewer role), `--teardown` (print the reverse of `--admin`; keeps the governance
 database), `--source stage-copy|git-repository` (preview the other source),
 `--git-origin <url>`, `--github-auth pat|github-app|public`, `--config`. See
 [Deploy setup](deploy-setup.md).
