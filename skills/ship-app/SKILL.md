@@ -21,18 +21,18 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
 2. **Preflight 0: review gate (asks, never blocks).** Run
    `streamsnow review-gate classify <slug> --format json` and gate on `.apps[0].needs_review`
    (`verdict` is only review depth). False (reviewed, trivial or skip marker) → proceed. True → offer
-   the choice: review first (`/review-app <slug> --auto`) or **ship as-is**, always available (ships
-   can be time-critical; /validate-app + CI are the real publish gates), noting "shipped unreviewed"
-   in the PR body so the approver sees it. If the app's SQL changed, recommend `/sql-review <slug>`
-   before merge (never required). Never auto-run either. Save `.apps[0].commits_since_review` and
-   `reviewed_head_status` now (the step 7 rebase rewrites SHAs), plus the JSON from `streamsnow review-loop open-findings apps/<slug>/.review`.
+   review first (`/review-app <slug> --auto`) or **ship as-is**, always available (ships can be
+   time-critical; /validate-app + CI are the real publish gates), noting "shipped unreviewed" in the
+   PR body. SQL changed → recommend `/sql-review <slug>` before merge (never required). Never
+   auto-run either. Save `.apps[0].commits_since_review`, `reviewed_head_status` and the JSON from `streamsnow review-loop open-findings apps/<slug>/.review`
+   now (the step 7 rebase rewrites SHAs); after a review-first pass, re-run these saves.
 3. **Hard gate:** run /validate-app. Any FAIL → stop; report and do not stage, commit, or push.
    /validate-app is the fix-it path — don't auto-fix here.
 4. **Branch hygiene.** On `main` → `git switch -c ship/<slug>-<desc>` first. **Never reuse a
-   squash-merged branch** — Git's three-way merge can silently revert your own deletions. Check:
-   `gh pr list --search "head:$(git branch --show-current) is:merged" --json number` — non-empty
-   means the branch is spent; start fresh off `main` and re-apply (cherry-pick or copy edits, never
-   `git merge` from the old branch). Its PR `MERGED` → offer [After merge](#after-merge).
+   squash-merged branch**: a three-way merge can silently revert your own deletions. Check
+   `gh pr list --search "head:$(git branch --show-current) is:merged" --json number`; non-empty =
+   spent: start fresh off `main`, re-apply (cherry-pick or copy, never `git merge` the old branch),
+   and after step 6 clean it up per [After merge](#after-merge). A stop there never ends the ship.
 5. **Stage only the app:** `git add apps/<slug>` (plus the repo README only if its app-index row
    changed). Show `git diff --cached --stat`; unstage anything else — don't widen scope to "fix one
    more thing".
@@ -58,11 +58,11 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
   differ by runtime — see [_shared/runtime-decision.md](../_shared/runtime-decision.md)); stop.
 - **Green but unmerged** → it's waiting on a teammate's approval (you can't approve your own PR) —
   say so plainly rather than looping on the checks. /ship-app never merges; it stops here.
-- **Merged** → confirm, report the deploy run's outcome, then offer [After merge](#after-merge).
+- **Merged** → confirm, report the deploy run's outcome, then run [After merge](#after-merge).
 
 ## After merge
 
-When the watch sees `MERGED` or step 4 finds a squash-merged branch, follow [after-merge.md](after-merge.md).
+When the watch sees `MERGED` or step 4 finds a squash-merged branch, follow [after-merge.md](after-merge.md): it asks once only when the user did not approve the merge in this run.
 
 ## Gotchas
 

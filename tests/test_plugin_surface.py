@@ -306,6 +306,44 @@ def test_ship_app_cleans_up_after_merge_and_checks_merged_before_deleting():
     assert "spent branch removed" in _flat(skill)
 
 
+def test_ship_app_asks_before_cleanup_only_without_a_merge_approval_in_this_run():
+    """A merge the user approved in this run already says the branch is done, so
+    the cleanup runs and is reported; with no approval it asks once. The clean
+    tree, MERGED and tip checks precede `-D` on both paths."""
+    ship = SKILLS_DIR / "ship-app"
+    steps = _flat((ship / "after-merge.md").read_text(encoding="utf-8"))
+    assert "Ask the user once, only when there was no approval in this run" in steps
+    assert "approved the PR merging" in steps and "merged it themselves and said so" in steps
+    assert "Restore branch" in steps and "reflog" in steps  # why skipping the question is safe
+    assert "Cleaned up: deleted `<branch>` locally" in steps
+    shared = steps.index("Steps 1 to 3 run on both paths")
+    assert shared < steps.index("git branch -D <branch>")
+    for check in ("git status --short", "must read `MERGED`", "git rev-parse <branch>"):
+        assert steps.index(check) < steps.index("Ask the user once")
+    assert "never merges" in steps
+
+
+def test_ship_app_cleans_up_a_spent_branch_after_the_work_moved():
+    """Step 1 needs app changes, so the step-4 trigger always found a dirty tree
+    or a moved tip and could never finish. The cleanup waits until the work is
+    committed on the fresh branch, and a stop in it does not end the ship."""
+    ship = SKILLS_DIR / "ship-app"
+    skill = _flat((ship / "SKILL.md").read_text(encoding="utf-8"))
+    steps = _flat((ship / "after-merge.md").read_text(encoding="utf-8"))
+    step4 = skill[skill.index("**Branch hygiene.**") : skill.index("**Stage only the app:**")]
+    assert "after step 6" in step4 and "never ends the ship" in step4
+    assert "after `/ship-app` step 6 has committed the work" in steps
+    assert "continue the ship at `/ship-app` step 7" in steps
+    assert "stays on the new branch" in steps
+
+
+def test_ship_app_resaves_review_state_after_a_review_first_pass():
+    skill = _flat((SKILLS_DIR / "ship-app" / "SKILL.md").read_text(encoding="utf-8"))
+    gate = skill[skill.index("**Preflight 0") : skill.index("**Hard gate:**")]
+    assert "review first" in gate
+    assert "re-run these saves" in gate
+
+
 def test_ship_app_has_a_fallback_when_the_host_forbids_polling_ci():
     skill = _flat((SKILLS_DIR / "ship-app" / "SKILL.md").read_text(encoding="utf-8"))
     assert "forbids polling CI" in skill
