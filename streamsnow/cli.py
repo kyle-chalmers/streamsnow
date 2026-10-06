@@ -1160,9 +1160,9 @@ def ci_key_verify(
     policy is doing its job. Run it once, after the admin setup has run.
 
     Exit codes: 0 every probe passed, 1 a probe failed, 2 a tool error with no probe
-    results printed: refused before signing in (a missing or unreadable secret file,
-    a file that differs from the config, a bad config or --object, no `snow`), or a
-    `snow` call that could not start, timed out or printed unreadable output.
+    results printed: a missing or unreadable secret file, a file that differs from the
+    config, a bad config or --object, no `snow`, or a `snow` call that could not start,
+    timed out or printed unreadable output.
     """
     if output_format not in ("md", "json"):
         _err(f"--format must be md or json, not {output_format!r}")

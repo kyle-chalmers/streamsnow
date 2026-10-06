@@ -504,8 +504,9 @@ yet). It prints each check by object name and never the key, account or user. Ex
 what failed: a missing grant goes back to the admin as one line naming the grant; a sign-in
 failure usually means the admin registered a different public key, so compare the fingerprint
 from `ci-key create` with `RSA_PUBLIC_KEY_FP` in `DESC USER`. Exit 2 is a tool error with no
-results: a missing or unreadable secret file, a file that differs from the config, no `snow`,
-or a `snow` call that could not start, timed out or printed unreadable output. On a no,
+results printed: a missing or unreadable secret file, a file that differs from the config, a
+bad config or `--object`, no `snow`, or a `snow` call that could not start, timed out or
+printed unreadable output. On a no,
 skip it: the first deploy checks the same things.
 
 ## 3 · Connection (one store, owned by the user)

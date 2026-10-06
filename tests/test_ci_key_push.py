@@ -324,3 +324,12 @@ def test_a_non_utf8_secret_file_is_refused_before_any_secret_is_set(tmp_path):
     with pytest.raises(ci_key.CiKeyError, match="SNOWFLAKE_ROLE is not UTF-8"):
         ci_key.push(d, run=gh, which=lambda name: "/usr/bin/gh")
     assert gh.secret_calls() == []
+
+
+def test_a_secret_file_with_a_nul_byte_is_refused_before_any_secret_is_set(tmp_path):
+    d = _secrets_dir(tmp_path)
+    (d / "secrets" / "SNOWFLAKE_USER").write_bytes(b"STREAMSNOW\x00_DEPLOY_USER")
+    gh = FakeGh()
+    with pytest.raises(ci_key.CiKeyError, match="SNOWFLAKE_USER contains a NUL byte"):
+        ci_key.push(d, run=gh, which=lambda name: "/usr/bin/gh")
+    assert gh.secret_calls() == []

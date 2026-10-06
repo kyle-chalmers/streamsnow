@@ -564,3 +564,53 @@ def test_a_clean_error_is_kept(tmp_path):
     err = "002003 (02000): SQL compilation error: Warehouse 'STREAMSNOW_WH' does not exist."
     detail = _detail_for(tmp_path, err)
     assert "does not exist" in detail and "STREAMSNOW_WH" in detail
+
+
+# --- fix round 2: truncation, NUL bytes, OSError text ------------------------------
+
+
+def test_a_wrapped_account_before_the_600_char_cut_is_withheld(tmp_path):
+    # _error_detail keeps the last 600 characters; the wrap point sits just
+    # before that cut, so only a fragment of the account would survive it.
+    err = (
+        "│ 250001: Could not connect to acme_org-acme_account_na │\n"
+        "│ me_for_tests.snowflakecomputing.com │\n" + "│ " + "x" * 560 + " │\n"
+    )
+    detail = _detail_for(tmp_path, err)
+    assert detail == ci_key.WITHHELD
+    assert "for_tests" not in detail and "me_for" not in detail
+
+
+@pytest.mark.parametrize("name", [*VALUES, ci_key.PRIVATE_KEY_SECRET])
+def test_a_secret_file_with_a_nul_byte_exits_2(tmp_path, monkeypatch, name):
+    fake = FakeSnow(_cfg())
+    d = _secrets_dir(tmp_path)
+    original = (d / "secrets" / name).read_bytes()
+    (d / "secrets" / name).write_bytes(original[:4] + b"\x00" + original[4:])
+    r = _cli(monkeypatch, fake, "--dir", str(d))
+    assert r.exit_code == 2, r.output
+    assert "NUL" in r.output and name in r.output
+    assert "Traceback" not in r.output
+    assert fake.calls == []
+    _no_secret(r.output)
+
+
+def test_a_value_error_from_the_subprocess_exits_2(tmp_path, monkeypatch):
+    def nul(argv, **kwargs):
+        raise ValueError(f"embedded null byte in {ACCOUNT}")
+
+    r = _cli(monkeypatch, nul, "--dir", str(_secrets_dir(tmp_path)))
+    assert r.exit_code == 2, r.output
+    assert "could not be started (ValueError)" in r.output
+    _no_secret(r.output)
+
+
+def test_an_os_error_without_strerror_shows_its_class_name(tmp_path, monkeypatch):
+    def broken(argv, **kwargs):
+        raise OSError(f"cannot exec with {ACCOUNT}")
+
+    r = _cli(monkeypatch, broken, "--dir", str(_secrets_dir(tmp_path)))
+    assert r.exit_code == 2, r.output
+    assert "could not be started (OSError)" in r.output
+    assert "None" not in r.output
+    _no_secret(r.output)

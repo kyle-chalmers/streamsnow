@@ -287,6 +287,12 @@ def _read_secret_payloads(directory: Path) -> dict[str, bytes]:
                 f"secrets/{name} is not UTF-8 text. Delete it and re-run "
                 "`streamsnow ci-key create`."
             ) from None
+        if b"\x00" in data:
+            # No environment variable can hold a NUL, and no real value has one.
+            raise CiKeyError(
+                f"secrets/{name} contains a NUL byte. Delete it and re-run "
+                "`streamsnow ci-key create`."
+            )
         payloads[name] = data
     return payloads
 
@@ -473,18 +479,20 @@ def _safe_detail(detail: str, payloads: dict[str, bytes]) -> str:
     a panel's lines, re-cased, or spelled with ``-`` for ``_``. It fails closed,
     so a false match costs an error message and never leaks a value.
     """
-    squashed = _squash(detail)
+    return WITHHELD if _names_a_secret(detail, payloads) else detail
+
+
+def _names_a_secret(text: str, payloads: dict[str, bytes]) -> bool:
+    """True when any key line, the account, its locator or the user is in ``text``,
+    compared squashed (see :func:`_squash`), so line wraps and re-casing still match."""
+    squashed = _squash(text)
     needles: list[str] = []
     for name in (PRIVATE_KEY_SECRET, "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER"):
-        text = payloads[name].decode("utf-8", errors="replace")
-        needles += [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("-----")]
+        value = payloads[name].decode("utf-8", errors="replace")
+        needles += [ln for ln in value.splitlines() if ln.strip() and not ln.startswith("-----")]
     account = payloads["SNOWFLAKE_ACCOUNT"].decode("utf-8", errors="replace")
     needles.append(account.split(".")[0])
-    for needle in needles:
-        squashed_needle = _squash(needle)
-        if squashed_needle and squashed_needle in squashed:
-            return WITHHELD
-    return detail
+    return any(_squash(n) and _squash(n) in squashed for n in needles)
 
 
 def _select_probe_sql(cfg: Config, obj: str) -> str:
@@ -538,9 +546,9 @@ def verify(
     policy that only admits the CI runners refuses it.
 
     Everything that can be refused is refused before the first sign-in: a
-    missing, empty or non-UTF-8 secret file, a user, warehouse or role file that no longer
-    matches the config, an ``obj`` outside the governance allowlist, no
-    ``snow`` on PATH. Then each probe is its own ``snow sql`` call, with the SQL
+    missing, empty, non-UTF-8 or NUL-containing secret file, a user, warehouse
+    or role file that no longer matches the config, an ``obj`` outside the
+    governance allowlist, no ``snow`` on PATH. Then each probe is its own ``snow sql`` call, with the SQL
     on stdin and the secrets only in ``env=``:
 
     1. ``role``: ``CURRENT_ROLE()`` is the CI role;
@@ -613,12 +621,20 @@ def verify(
         except subprocess.TimeoutExpired:
             raise CiKeyError(f"`snow sql` did not finish within {timeout}s.") from None
         except OSError as exc:  # found but not launchable (permissions, a bad binary)
-            raise CiKeyError(f"`snow` could not be started ({exc.strerror}).") from None
+            # strerror comes from the OS and never holds an env value; without
+            # one, only the class name is shown, never str(exc).
+            reason = exc.strerror or type(exc).__name__
+            raise CiKeyError(f"`snow` could not be started ({reason}).") from None
+        except ValueError as exc:  # e.g. an embedded NUL; the message is not shown
+            raise CiKeyError(f"`snow` could not be started ({type(exc).__name__}).") from None
         if proc.returncode != 0:
-            # Redact before and after: _error_detail keeps only the last 600
-            # characters, which could otherwise cut a value and leave part of it.
             err = _redact(proc.stderr or "", secret_text)
             out = _redact(proc.stdout or "", secret_text)
+            # Checked on the FULL text: _error_detail keeps only the last 600
+            # characters, and a wrapped value cut there would leave a fragment
+            # that no longer matches as a whole.
+            if _names_a_secret(f"{err}\n{out}", payloads):
+                return None, WITHHELD
             detail = _redact(_error_detail(err, out), secret_text)
             return None, _safe_detail(detail, payloads)
         try:
