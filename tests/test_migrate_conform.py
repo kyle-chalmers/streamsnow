@@ -196,8 +196,20 @@ def test_lift_then_conform_scanners_and_gates_agree(tmp_path, monkeypatch):
     assert scan_hardfails(a, policy)[1]["blocks"] is False
     report = _validate()
     assert report["exit"] == 0, report
-    # starter-text is the warn-only reminder to rewrite AGENTS.md and the README Apps row;
-    # every other check must carry no warning.
+    # The lift copies the scaffold's starter AGENTS.md and the README Apps table still says
+    # `_(none yet)_`: those are real findings, so starter-text carries exactly these four
+    # warnings (and only warns). Every other check carries none.
+    starter = next(c for c in report["checks"] if c["name"] == "starter-text")
+    assert starter["ok"] and not starter["findings"]
+    assert [(w["file"], w["detail"].split(":")[0]) for w in starter["warnings"]] == [
+        ("AGENTS.md", "scaffold text, still describes the starter page (Pages section)"),
+        (
+            "AGENTS.md",
+            "scaffold text, still describes the placeholder example_metric.sql (Queries section)",
+        ),
+        ("AGENTS.md", "scaffold text, Data notes still say none recorded"),
+        ("README.md", "README.md Apps table still says _(none yet)_"),
+    ]
     assert not [
         w for c in report["checks"] if c["name"] != "starter-text" for w in c.get("warnings", [])
     ]

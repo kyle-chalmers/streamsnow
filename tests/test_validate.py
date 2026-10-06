@@ -1782,7 +1782,7 @@ def test_starter_text_warns_on_scaffold_agents_md_but_the_app_passes(tmp_path):
 
 
 def test_starter_text_is_quiet_once_agents_md_is_rewritten(tmp_path):
-    res, app = _validate_scaffold(tmp_path)
+    _, app = _validate_scaffold(tmp_path)
     text = (app / "AGENTS.md").read_text(encoding="utf-8")
     for marker in _STARTER_AGENTS_MARKERS:
         text = text.replace(marker, "Real content.")
@@ -1793,7 +1793,7 @@ def test_starter_text_is_quiet_once_agents_md_is_rewritten(tmp_path):
 
 
 def test_starter_text_warns_when_readme_apps_table_says_none_yet(tmp_path):
-    res, app = _validate_scaffold(tmp_path)
+    _, app = _validate_scaffold(tmp_path)
     _write(
         tmp_path / "README.md",
         "# Acme\n\n## Apps\n\n| App | Path |\n|-----|------|\n"
@@ -1807,7 +1807,7 @@ def test_starter_text_warns_when_readme_apps_table_says_none_yet(tmp_path):
 
 
 def test_starter_text_warns_when_readme_apps_table_lacks_the_slug(tmp_path):
-    res, app = _validate_scaffold(tmp_path)
+    _, app = _validate_scaffold(tmp_path)
     _write(
         tmp_path / "README.md",
         "# Acme\n\n## Apps\n\n| App | Path |\n|-----|------|\n| Other | `apps/acme-other/` |\n",
@@ -1820,7 +1820,7 @@ def test_starter_text_warns_when_readme_apps_table_lacks_the_slug(tmp_path):
 
 
 def test_starter_text_readme_row_for_the_slug_is_quiet(tmp_path):
-    res, app = _validate_scaffold(tmp_path)
+    _, app = _validate_scaffold(tmp_path)
     _write(
         tmp_path / "README.md",
         "# Acme\n\n## Apps\n\n| App | Path |\n|-----|------|\n"
@@ -1832,7 +1832,7 @@ def test_starter_text_readme_row_for_the_slug_is_quiet(tmp_path):
 
 
 def test_starter_text_readme_row_outside_the_apps_section_does_not_count(tmp_path):
-    res, app = _validate_scaffold(tmp_path)
+    _, app = _validate_scaffold(tmp_path)
     _write(
         tmp_path / "README.md",
         "# Acme\n\n## Apps\n\n| App | Path |\n|-----|------|\n\n"
@@ -1844,7 +1844,7 @@ def test_starter_text_readme_row_outside_the_apps_section_does_not_count(tmp_pat
 
 
 def test_starter_text_silent_without_a_readme_or_an_apps_heading(tmp_path):
-    res, app = _validate_scaffold(tmp_path)
+    _, app = _validate_scaffold(tmp_path)
     cfg = _cfg()
     (tmp_path / "README.md").unlink()  # scaffold() wrote one; this repo has none
     res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
@@ -1875,5 +1875,4 @@ def test_starter_text_adds_no_failure_to_fleet_apps(slug):
     cfg = _fleet_cfg()
     res = validate_app(FLEET / "apps" / slug, SchemaPolicy.from_governance(cfg.governance), cfg)
     chk = _starter_text(res)
-    assert chk["ok"] and not chk["findings"]
-    assert not [w for w in chk["warnings"] if w["file"] == "README.md"]
+    assert res["ok"] and chk["ok"] and not chk["findings"]

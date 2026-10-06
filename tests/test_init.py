@@ -958,17 +958,50 @@ def test_build_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
     assert sql_review.main(["generate", "sales-trends", "--dir", str(tmp_path)]) == 0
     assert not (a / "sql_review/01_overview.sql").exists()  # generate removed the stale page
     assert (a / "sql_review/01_sales_trend.sql").is_file()
-    result = runner.invoke(app, ["validate-app", "sales-trends", "--format", "json"])
-    assert result.exit_code == 0, result.output
-    # starter-text is the warn-only reminder to rewrite AGENTS.md and the README Apps row
-    # (this test leaves both as scaffolded); every other check must carry no warning.
-    checks = _json.loads(result.output)["checks"]
-    assert not [w for c in checks if c["name"] != "starter-text" for w in c.get("warnings", [])]
-
     # pages.md's documented check for this end state is validate-app. It once said
     # `grep -rn YOUR_TABLE apps/<slug>` must print nothing, but the app's own AGENTS.md
     # names the token in its instructions, so this correct app failed that check.
-    assert "YOUR_TABLE" in (a / "AGENTS.md").read_text(encoding="utf-8")
+    agents = (a / "AGENTS.md").read_text(encoding="utf-8")
+    assert "YOUR_TABLE" in agents
+
+    # The documented end state also rewrites the app AGENTS.md's starter lines and adds the
+    # app's row to the repo README's Apps table. Until then starter-text warns (and only warns).
+    warned = runner.invoke(app, ["validate-app", "sales-trends", "--format", "json"])
+    assert warned.exit_code == 0, warned.output
+    starter = next(c for c in _json.loads(warned.output)["checks"] if c["name"] == "starter-text")
+    assert {w["file"] for w in starter["warnings"]} == {"AGENTS.md", "README.md"}
+
+    agents = agents.replace(
+        "- **Overview** (`pages/overview.py`): starter page with sample numbers; "
+        "replace it with your real pages.",
+        "- **Sales trend** (`pages/sales_trend.py`): daily net paid sales.",
+    )
+    agents, n = re.subn(
+        r"- `queries/example_metric\.sql`: placeholder;.*?reads `YOUR_TABLE`\.\n",
+        "- `queries/daily_sales.sql`: net paid per sold date, feeds the Sales trend page.\n",
+        agents,
+        flags=re.S,
+    )
+    assert n == 1
+    agents = agents.replace(
+        "- _None recorded yet._",
+        "- `net_paid` is the sum of net paid per sold date; the source loads nightly.",
+    )
+    (a / "AGENTS.md").write_text(agents, encoding="utf-8")
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8").replace(
+            "| _(none yet)_ | `streamsnow new <domain> <function>` adds one |",
+            "| Sales Trends | `apps/sales-trends/` |",
+        ),
+        encoding="utf-8",
+    )
+    assert "apps/sales-trends/" in readme.read_text(encoding="utf-8")
+
+    result = runner.invoke(app, ["validate-app", "sales-trends", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    assert not [w for c in _json.loads(result.output)["checks"] for w in c.get("warnings", [])]
+
     pages = (REPO_ROOT / "skills/build-app/pages.md").read_text(encoding="utf-8")
     assert "grep -rn YOUR_TABLE" not in pages
     assert "Then `streamsnow validate-app <slug>` must PASS" in pages
