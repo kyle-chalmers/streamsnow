@@ -73,4 +73,5 @@ confirmation, because the user is checking your reading of *their* words.
 
 Every confirmed item is an atomic commit (or an explicit deferral), §11 records the round, the
 follow-up review ran or was deliberately skipped, and the user knows the next command
-(`/preview-app <slug>` to look, `/ship-app <slug>` to open the PR).
+(`/preview-app <slug>` to look; to open the PR, ask the user to type `/ship-app <slug>`, since the
+agent cannot start it).

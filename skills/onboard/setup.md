@@ -404,7 +404,8 @@ warehouse, the CI and viewer roles, a CI service user and the grants that tie th
    - **App database and schema**: where deployed apps live.
    - **Warehouse**: the compute apps query with.
    - **CI role**: what the deploy workflow runs as; it owns the apps.
-   - **Viewer role**: what people viewing an app, and local preview, run as.
+   - **Viewer role**: what people viewing an app run as. It gets no data grants unless the admin
+     uncomments them, so local preview uses a role whose data reads match the CI role's.
    - **CI service user**: the account the deploy workflow signs in as, with a key pair and no
      password.
    - **Grants**: the CI role gets SELECT on exactly the allowed schemas, which is what makes the
@@ -433,13 +434,18 @@ warehouse, the CI and viewer roles, a CI service user and the grants that tie th
    `~/.streamsnow-ci`, prints only file names and a fingerprint, and never overwrites a key. Tell
    the user, in one line, to save a copy of the `.p8` somewhere safe such as a password manager
    themselves (you never open it; a lost key means rotating).
-4. **The admin file.** Run
-   `streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > .internal/admin-setup.sql`,
-   adding `--viewer-role <ROLE>` once for each role chosen in step 2
-   (make `.internal/` first). Repos set up on 0.7.1 or later gitignore `.internal/`; check with
-   `git check-ignore -q .internal/admin-setup.sql` and add `.internal/` to `.gitignore` if it is
-   not, so the file is never committed. It runs unedited
-   and is safe to re-run; `streamsnow deploy-setup --teardown` prints a start-fresh cleanup to review.
+4. **The admin file.** Run these as three separate commands, in this order, never chained with
+   `&&`, `;` or `|`: the key guard denies any command that names `~/.streamsnow-ci` and starts
+   with anything other than `streamsnow`, or chains another command.
+   1. `mkdir -p .internal`
+   2. `streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > .internal/admin-setup.sql`
+      on a line of its own, adding `--viewer-role <ROLE>` once for each role chosen in step 2.
+   3. `git check-ignore -q .internal/admin-setup.sql`. Repos set up on 0.7.1 or later already
+      ignore `.internal/`; if this check fails, add `.internal/` to `.gitignore` so the file is
+      never committed.
+
+   The file runs unedited and is safe to re-run; `streamsnow deploy-setup --teardown` prints a
+   start-fresh cleanup to review.
 5. **Hand it off.** You never run the admin SQL, whoever the user is. Give the explanation from
    step 2 and the steps below, nothing more: do not open or quote the admin file, and do not add
    your own warnings about its contents (line numbers, statement types, object names). The

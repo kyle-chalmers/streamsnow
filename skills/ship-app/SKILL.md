@@ -30,7 +30,7 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
    squash-merged branch** — Git's three-way merge can silently revert your own deletions. Check:
    `gh pr list --search "head:$(git branch --show-current) is:merged" --json number` — non-empty
    means the branch is spent; start fresh off `main` and re-apply (cherry-pick or copy edits, never
-   `git merge` from the old branch).
+   `git merge` from the old branch). Its PR `MERGED` → offer [After merge](#after-merge).
 5. **Stage only the app:** `git add apps/<slug>` (plus the repo README only if its app-index row
    changed). Show `git diff --cached --stat`; unstage anything else — don't widen scope to "fix one
    more thing".
@@ -45,7 +45,8 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
 9. **Open the PR** (title/body: what changed, validation passed). Print the number and URL.
 10. **Note the deploy path:** merging to `main` triggers CI, which deploys — no local deploy step.
 11. **Watch checks to a terminal state** (`gh pr checks <num> --watch` in the background;
-    `gh pr view <num> --json state,mergeStateStatus`) and report once on exit.
+    `gh pr view <num> --json state,mergeStateStatus`) and report once on exit. A host that forbids
+    polling CI: hand the user `gh pr checks <num> --watch` and end at "PR open, checks pending".
 
 ## Reporting the outcome
 
@@ -53,8 +54,13 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
   [_shared/deploy-error-translator.md](../_shared/deploy-error-translator.md) (failure signatures
   differ by runtime — see [_shared/runtime-decision.md](../_shared/runtime-decision.md)); stop.
 - **Green but unmerged** → it's waiting on a teammate's approval (you can't approve your own PR) —
-  say so plainly rather than looping on the checks.
-- **Merged** → confirm, then report the deploy run's outcome.
+  say so plainly rather than looping on the checks. /ship-app never merges; it stops here.
+- **Merged** → confirm, report the deploy run's outcome, then offer [After merge](#after-merge).
+
+## After merge
+
+Runs when the watch sees `MERGED`, or step 4 finds the branch already squash-merged. Follow
+[after-merge.md](after-merge.md): it confirms `MERGED` and asks once before any `-D` or remote delete.
 
 ## Gotchas
 
@@ -65,23 +71,17 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
   opening the PR.
 - Most deploy-run failures resolve to one-time, admin-applied DDL emitted by
   `streamsnow deploy-setup --admin`: surface the named fix; never run DDL from here.
-
-## Troubleshooting
-
-Push rejected (stale `--force-with-lease`) → re-fetch, rebase, push — never plain `--force`. PR
-opens "behind" → `main` moved; re-run the sync step and let checks re-run.
+- **Push rejected** (stale `--force-with-lease`) → re-fetch, rebase, push, never plain `--force`. PR
+  opens "behind" → `main` moved; re-run the sync step and let checks re-run.
 
 ## Done when
 
 The PR is open, validation passed before staging, the branch is rebased on current `origin/main`,
 and checks reached a terminal state with the outcome reported: a named failed check, "awaiting
-approval," or merged + the deploy result.
+approval," or merged + the deploy result. Polling not allowed: "PR open, checks pending". Merged:
+local checkout on updated `main`, spent branch removed.
 
 ## System-evolution retro (always, even on a clean ship)
 
-One question before closing: did anything go wrong or get re-done this ship? If so, **which
-layer was insufficient** — the config (`streamsnow.config.yaml` / governance rules), a skill,
-a check (`streamsnow validate-app` / CI), or the deploy path? Propose the concrete fix to
-*that* artifact. If the gap is in StreamSnow itself, file it against the plugin repo (issue or
-a note the user can act on) rather than patching around it locally. Fixing the layer, not the
-instance, is what compounds. (Ported from ticketwright's /ship Phase C.)
+Before closing, ask whether anything went wrong or got re-done this ship, and which layer was
+insufficient (config, a skill, a check or the deploy path). Fix that layer, not the instance: [retro.md](retro.md).

@@ -14,6 +14,11 @@ Judgment-tier review of `apps/<slug>` — it surfaces what a senior reviewer wou
 is `streamsnow validate-app` (/validate-app), run first so reviewers spend judgment on what the gate
 can't catch.
 
+This is the pre-ship pass. Inside /build-app, the perf-reviewer, viz-critic and cold-reader
+([verify.md](../build-app/verify.md)) already ran as the build loop, with their findings routed to
+the page-builders before checkpoint 2; they do not replace this pass. Outside /build-app, run
+/review-app only.
+
 ## Modes
 
 - **Default** — one review pass. Report only; offer `--fix` next.

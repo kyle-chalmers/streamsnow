@@ -17,7 +17,7 @@ The orchestrator builds every §4 page at once and owns every file pages share; 
    `glossary_entries` to `pages/_glossary.py`; resolve `data_requests` by adding the loader to
    `pages/_data.py` and re-dispatching the pages that asked.
 4. **Generate once:** `streamsnow sql-review generate <slug>`, then `streamsnow sql-review check
-   <slug>` and the four `check` commands from step 6 below. Fix shared files yourself; send page
+   <slug>` and the page-builder brief's five `check` commands. Fix shared files yourself; send page
    findings back to that page's builder in `fix` mode.
 5. **Commit the round** (pages, their queries, `index.yaml`, the generated review files, the
    shared files you changed) and log it in §11 (`Next: verify`).
@@ -55,7 +55,7 @@ returns their inputs instead of editing shared files.
    -- Feeds: <Page title> (<sections>)
    -- Schemas: <TODO: fill from §3 — must be on governance.schema_allow>
    -- Params: <TODO: :1 start_date … — or omit>
-   -- Tokens: <TODO — or omit>
+   -- Tokens: TOKEN_NAME (what it filters), no braces; omit the line when there are none
    SELECT 1 AS placeholder;
    ```
    The header is what the checks parse; the placeholder keeps the page rendering during preview.
@@ -79,8 +79,8 @@ returns their inputs instead of editing shared files.
    `streamlit_app.py`. Show the diff before applying and use multi-line `Edit` context so the match
    is unambiguous. One nav group → add to it; several → ask which.
 6. **Run the checks on the new files** — `streamsnow check schema-refs apps/<slug>`, then
-   `streamsnow check caching apps/<slug>`, then `streamsnow check bind-predicates apps/<slug>`
-   (three invocations, not a pipeline) — and fix anything flagged while it's cheap.
+   `streamsnow check caching apps/<slug>`, then `streamsnow check bind-predicates apps/<slug>`,
+   then `streamsnow check sql-tokens apps/<slug>` (four invocations, not a pipeline) — and fix anything flagged while it's cheap.
 7. **Log it:** append a §11 session line (`page <name> scaffolded — queries TODO. Next: fill stubs,
    then /preview-app <slug>`). Don't commit yet — the page is a reviewable stub; the commit happens
    in step 8, once the real SQL lands.
@@ -92,11 +92,14 @@ returns their inputs instead of editing shared files.
       words or fewer, and name the value shown. It is a no-op at runtime.
    2. **List the page in `apps/<slug>/sql_review/index.yaml`.** Add the page's `path` (as in its
       `st.Page(...)`) with one entry under `metrics:` per marked visual, in on-screen order: `key`,
-      `query` (`queries/<name>.sql`), `tokens` (a real sample value for every `{TOKEN}` the page
-      renders, e.g. `REGION_FILTER: "AND region = 'West'"`), `binds` (every `:1`/`:name`, usually
+      `query` (`queries/<name>.sql`), `tokens` (a sample value for every `{TOKEN}` the page
+      renders, mirroring the page's default filter state: an optional "All" is `""`, so
+      `REGION_FILTER: ""` when the page opens on All regions), `binds` (every `:1`/`:name`, usually
       `params.start_date`), `reads` (the objects it reads), and `notes` when a definition needs
       one. Keep `review_window` anchored to the data's latest date, never today:
-      `end_date: "(SELECT MAX(<date_col>) FROM <db>.<schema>.<table>)::DATE"`. A view or table you
+      `end_date: "(SELECT MAX(<date_col>) FROM <db>.<schema>.<table>)::DATE"`. Leave
+      `review_window` out entirely when no metric binds a `params.*` value: an unused window
+      is dead weight in every generated section. A view or table you
       built for this app goes under `objects:` with its DDL in
       `sql_review/app_specific_reporting_objects/` (see that folder's rules in
       `sql_review/AGENTS.md`).
@@ -113,7 +116,12 @@ returns their inputs instead of editing shared files.
 9. **End of the build phase** (all §4 pages built): `streamsnow sql-review check <slug>` reports no
    `coverage` warning, so every page in the nav is in `index.yaml`. A warning for a helper query that
    shows no value on screen (a date-bounds or filter-options loader in `pages/_data.py`) is expected:
-   leave it, and never invent a metric to clear it.
+   leave it, and never invent a metric to clear it. Then finish the app's own documents:
+   - **App `AGENTS.md`:** rewrite the Pages and Queries sections to list the real pages and
+     queries (the scaffold's text names `pages/overview.py` and `queries/example_metric.sql` and
+     tells the reader to replace them), and fill the Data notes the design recorded.
+   - **Repo `README.md`:** add the app's row to the Apps table (title and `apps/<slug>/`),
+     replacing the `_(none yet)_` row when it is still there.
 
 ## Replace the starter trio
 
@@ -142,6 +150,10 @@ page or `index.yaml` still carries `YOUR_TABLE` or the starter page's sample blo
 app folder for the token instead: the app's own `AGENTS.md` names `YOUR_TABLE` in its
 instructions, so a correct app still matches.
 
+The starter's text lives in one more place. The app `AGENTS.md` Pages and Queries sections still
+describe the starter page and `example_metric.sql`: rewrite them in the same commit as the first
+page (the end-of-build step below finishes them for every page).
+
 ## Connection pattern by runtime
 
 (Per [_shared/runtime-decision.md](../_shared/runtime-decision.md); match what sibling pages do.)
@@ -167,6 +179,10 @@ return get_active_session().sql(sql, params=[start, end]).to_pandas()
   page's own directory on `sys.path`, then `ModuleNotFoundError`s on every page deployed, where only
   the app root is. A local boot and a full click-through both pass — `streamsnow check page-imports`
   is the only thing that catches it. Don't name the helper after an app-root module either.
+- **`st.navigation` runs before any data call.** A loader above it (a date-bounds query in
+  `streamlit_app.py`, say) leaves Streamlit's fallback menu of every `pages/*.py` helper on screen
+  for the whole first run, because the real navigation does not exist until the loader returns.
+  Build the `st.navigation(...)` call first, then load data.
 - **Cast COUNT-style metrics to int** before formatting (`f"{int(n):,}"`) so a card reads `23`, not `23.0`.
 - **Don't auto-set `default=True`** on the new page; if it should be the landing page, the user
   flips the existing default in a one-line manual edit.
