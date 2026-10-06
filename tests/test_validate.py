@@ -1876,3 +1876,47 @@ def test_starter_text_adds_no_failure_to_fleet_apps(slug):
     res = validate_app(FLEET / "apps" / slug, SchemaPolicy.from_governance(cfg.governance), cfg)
     chk = _starter_text(res)
     assert res["ok"] and chk["ok"] and not chk["findings"]
+
+
+def _readme_warnings(tmp_path: Path, app: Path, readme: str) -> list[dict]:
+    _write(tmp_path / "README.md", readme)
+    cfg = _cfg()
+    res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+    return [w for w in _starter_text(res)["warnings"] if w["file"] == "README.md"]
+
+
+def test_starter_text_prose_mention_of_the_slug_is_not_a_table_row(tmp_path):
+    """The Apps section holds another app's row plus a prose line naming this app's path.
+    Only a table row counts, so the missing row still warns."""
+    _, app = _validate_scaffold(tmp_path)
+    found = _readme_warnings(
+        tmp_path,
+        app,
+        "# Acme\n\n## Apps\n\n| App | Path |\n|-----|------|\n| Other | `apps/acme-other/` |\n\n"
+        "Register apps/acme-sales/ here before release.\n",
+    )
+    assert len(found) == 1 and "no row" in found[0]["detail"]
+
+
+def test_starter_text_none_yet_in_a_later_subsection_is_ignored(tmp_path):
+    """A valid row for the app, then a `### Retired apps` subsection that says `_(none yet)_`.
+    The marker is outside the Apps table, so there is nothing to warn about."""
+    _, app = _validate_scaffold(tmp_path)
+    found = _readme_warnings(
+        tmp_path,
+        app,
+        "# Acme\n\n## Apps\n\n| App | Path |\n|-----|------|\n| Sales | `apps/acme-sales/` |\n\n"
+        "### Retired apps\n\n| App | Path |\n|-----|------|\n| _(none yet)_ | |\n",
+    )
+    assert found == []
+
+
+def test_starter_text_only_the_first_apps_table_counts(tmp_path):
+    _, app = _validate_scaffold(tmp_path)
+    found = _readme_warnings(
+        tmp_path,
+        app,
+        "# Acme\n\n## Apps\n\n| App | Path |\n|-----|------|\n| Other | `apps/acme-other/` |\n\n"
+        "| Notes | Path |\n|-----|------|\n| Sales | `apps/acme-sales/` |\n",
+    )
+    assert len(found) == 1 and "no row" in found[0]["detail"]

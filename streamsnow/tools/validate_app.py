@@ -114,7 +114,7 @@ _STARTER_AGENTS_MARKERS = (
 )
 _README_NONE_YET = "_(none yet)_"
 _APPS_HEADING_RE = re.compile(r"^##[ \t]+Apps[ \t]*$", re.MULTILINE)
-_NEXT_HEADING_RE = re.compile(r"^#{1,2}[ \t]+\S", re.MULTILINE)
+_NEXT_HEADING_RE = re.compile(r"^#{1,6}[ \t]+\S", re.MULTILINE)
 
 # Container-runtime fields that must be ABSENT in warehouse mode.
 _CONTAINER_ONLY = ("runtime_name", "compute_pool", "external_access_integrations")
@@ -438,6 +438,22 @@ def _check_placeholders(app_dir: Path) -> list[dict]:
     return found
 
 
+def _first_table(section: str) -> str:
+    """The first markdown table in ``section`` (consecutive lines starting with ``|``).
+
+    The README checks read only table rows: a prose line that names ``apps/<slug>/`` is not
+    a row, and a ``_(none yet)_`` in a later table or note is not the Apps table.
+    """
+    rows: list[str] = []
+    for raw in section.splitlines():
+        text = raw.strip()
+        if text.startswith("|"):
+            rows.append(text)
+        elif rows:
+            break  # a blank line or prose ends the table
+    return "\n".join(rows)
+
+
 def _check_starter_text(app_dir: Path, repo_root: Path) -> list[dict]:
     """Warnings for starter prose the placeholders gate does not scan (warn-only).
 
@@ -480,9 +496,10 @@ def _check_starter_text(app_dir: Path, repo_root: Path) -> list[dict]:
             rest = body[heading.end() :]
             nxt = _NEXT_HEADING_RE.search(rest)
             section = rest[: nxt.start()] if nxt else rest
+            table = _first_table(section)
             line = body.count("\n", 0, heading.start()) + 1
-            slug_row = re.search(rf"apps/{re.escape(app_dir.name)}(?![\w-])", section)
-            if _README_NONE_YET in section:
+            slug_row = re.search(rf"apps/{re.escape(app_dir.name)}(?![\w-])", table)
+            if _README_NONE_YET in table:
                 detail = (
                     f"README.md Apps table still says {_README_NONE_YET}: "
                     f"add a row for `apps/{app_dir.name}/`"
