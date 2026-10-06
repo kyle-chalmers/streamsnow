@@ -8,11 +8,22 @@ entry.
 
 ## [Unreleased]
 
+### Added
+
+- **`streamsnow deploy-setup --admin --viewer-role ROLE`** (repeatable) grants the viewer role to a
+  role you already use, so an analyst or agent role can open the apps and see the app database and
+  warehouse when an admin login ran the script. `PUBLIC`, system roles and StreamSnow's own roles
+  are refused. `/onboard` lists your connection's roles and asks which ones get it.
+
 ### Changed
 
 - **Install docs: `/reload-plugins` is a fallback.** A project-scope install normally shows the
   skills straight away, so the README, getting-started and `init`'s `Next:` block now say to run
   `/onboard` and only reload plugins if it isn't listed.
+- `/onboard` now explains and asks each setup answer individually, explains the defaults and the
+  Snowflake admin script in bullets before asking, and no longer treats a detected value as
+  confirmation or adds its own commentary about the admin file. Other agents ask in chat when they
+  have no question tool.
 
 ## [0.9.1] - 2026-10-05
 

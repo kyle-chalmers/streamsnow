@@ -15,6 +15,9 @@ with these translations:
   which checkpoint, what is finished and what is still pending, and the command that resumes
   (`$build-app <slug>` reads §11). When a later prompt from the user answers that checkpoint, record
   the answer in §11 and continue from there without asking it again.
+  `/onboard`'s setup questions follow the same rule: explain each setting, ask it separately in
+  chat, and wait; a detected value is a recommendation, never an answer
+  ([onboard SKILL.md](../onboard/SKILL.md) Stage 2).
 - **Subagents and briefs.** Where a step says "Task", "subagents" or "dispatch" with a brief
   (`/review-app`'s reviewers, `/build-app`'s `briefs/`), use your agent's own subagents if it has
   them. Otherwise run each brief yourself, one after another, each against only its own inputs and

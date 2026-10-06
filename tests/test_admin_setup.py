@@ -249,7 +249,49 @@ def test_viewer_user_is_validated_as_an_identifier():
         generate_admin_sql(_cfg(), viewer_users=["x; DROP DATABASE y"])
 
 
-@pytest.mark.parametrize("flag", [["--public-key-file", "x.pub"], ["--viewer-user", "A"]])
+def test_viewer_role_flag_grants_the_viewer_role_to_existing_roles(tmp_path):
+    cfg = tmp_path / "streamsnow.config.yaml"
+    cfg.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+    res = _cli(
+        "deploy-setup", "--admin", "--config", str(cfg),
+        "--viewer-role", "ANALYST_ROLE", "--viewer-role", "AI_AGENT",
+    )  # fmt: skip
+    assert res.exit_code == 0, res.output
+    stmts = _statements(res.output)
+    # Last, under SECURITYADMIN, so a role name that does not resolve stops nothing else.
+    assert stmts[-3:] == [
+        "USE ROLE SECURITYADMIN;",
+        "GRANT ROLE STREAMSNOW_VIEWER_ROLE TO ROLE ANALYST_ROLE;",
+        "GRANT ROLE STREAMSNOW_VIEWER_ROLE TO ROLE AI_AGENT;",
+    ]
+
+
+def test_viewer_role_grants_are_safe_to_rerun():
+    stmts = _statements(generate_admin_sql(_cfg(), viewer_roles=["ANALYST_ROLE"]))
+    for stmt in stmts:
+        assert any(p.match(stmt) for p in _RERUN_SAFE), f"not re-run safe:\n{stmt}"
+
+
+def test_viewer_role_is_validated_as_an_identifier():
+    with pytest.raises(ConfigError):
+        generate_admin_sql(_cfg(), viewer_roles=["x; DROP DATABASE y"])
+
+
+@pytest.mark.parametrize(
+    "role", ["PUBLIC", "public", "ACCOUNTADMIN", "STREAMSNOW_VIEWER_ROLE", "STREAMSNOW_DEPLOY_ROLE"]
+)
+def test_viewer_role_refuses_system_and_streamsnow_roles(role):
+    """PUBLIC would open every app to every user; a system role or StreamSnow's own roles
+    would make a grant cycle or widen an admin role."""
+    with pytest.raises(ConfigError) as exc:
+        generate_admin_sql(_cfg(), viewer_roles=[role])
+    assert "--viewer-role" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [["--public-key-file", "x.pub"], ["--viewer-user", "A"], ["--viewer-role", "A"]],
+)
 def test_admin_only_flags_need_admin(flag):
     res = _cli("deploy-setup", "--config", str(EXAMPLE), *flag)
     assert res.exit_code == 2

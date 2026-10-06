@@ -309,6 +309,7 @@ def generate_admin_sql(
     *,
     public_key: str | None = None,
     viewer_users: Sequence[str] = (),
+    viewer_roles: Sequence[str] = (),
 ) -> str:
     """The full, reviewable one-time admin bootstrap for a first deploy.
 
@@ -327,7 +328,14 @@ def generate_admin_sql(
     ``public_key`` (the base64 body from :func:`read_public_key`) fills the CI
     user's ``RSA_PUBLIC_KEY``; without it the placeholder stays for a human to
     paste. The viewer role is granted to whoever runs the script, plus each
-    name in ``viewer_users``.
+    name in ``viewer_users`` and each existing role in ``viewer_roles``.
+
+    ``viewer_roles`` exists because the admin who runs this is usually not the
+    person (or agent) building the apps: their everyday role (an analyst or
+    agent role) otherwise cannot see the app database, warehouse or apps, so
+    nothing confirms the setup worked. PUBLIC, the system roles and
+    StreamSnow's own two roles are refused: PUBLIC would open every app to
+    every user, and the others would widen an admin role or make a cycle.
     """
     o = cfg.snowflake.objects
     ci = cfg.snowflake.roles.ci_role
@@ -340,6 +348,13 @@ def generate_admin_sql(
     schemas = list(dict.fromkeys([app_schema, stage_schema]))
     ci_user = ci_user_name(ci)
     viewer_users = [validate_identifier(u, "--viewer-user") for u in viewer_users]
+    viewer_roles = [validate_identifier(r, "--viewer-role") for r in viewer_roles]
+    for r in viewer_roles:
+        if r.upper() in _SYSTEM_ROLES or r.upper() in (ci.upper(), viewer.upper()):
+            raise ConfigError(
+                f"--viewer-role {r!r} is a Snowflake system role or one of StreamSnow's own "
+                "roles: grant the viewer role to a role people or agents use day to day."
+            )
     shared_gov = gov.database.upper() in _SHARED_DATABASES
 
     out: list[str] = [
@@ -519,6 +534,14 @@ def generate_admin_sql(
         out += _stage_objects(cfg)
     else:
         out += _git_secret_and_repo(cfg)
+    if viewer_roles:
+        # Last, so a role name that does not resolve stops nothing above it.
+        out += [
+            "",
+            "-- 6. Roles you already use, so they can open the apps and see these objects ----",
+            "USE ROLE SECURITYADMIN;",
+        ]
+        out += [f"GRANT ROLE {viewer} TO ROLE {r};" for r in viewer_roles]
     return "\n".join(out)
 
 

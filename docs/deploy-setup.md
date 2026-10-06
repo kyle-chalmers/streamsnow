@@ -20,7 +20,7 @@ that can:
 |---|---|
 | `SYSADMIN` | app database + schema (and the stage schema if different), an `XSMALL` warehouse (`AUTO_SUSPEND = 60`, `INITIALLY_SUSPENDED`) |
 | `USERADMIN` | `ci_role`, `viewer_role`, and a `TYPE = SERVICE` CI user with key-pair auth, no password (`RSA_PUBLIC_KEY` from `--public-key-file`, else a placeholder to paste) |
-| `SECURITYADMIN` | both roles to `SYSADMIN`; the viewer role to **you** (whoever runs the script, via `CURRENT_USER()`) and to each `--viewer-user`; `USAGE` on the database, schema and warehouse to both roles; `CREATE STREAMLIT` + `CREATE STAGE` on the schema to `ci_role`; `USAGE` + `SELECT` on each allowed governance schema |
+| `SECURITYADMIN` | both roles to `SYSADMIN`; the viewer role to **you** (whoever runs the script, via `CURRENT_USER()`) and to each `--viewer-user`; each existing `--viewer-role` gets it in a last section of its own; `USAGE` on the database, schema and warehouse to both roles; `CREATE STREAMLIT` + `CREATE STAGE` on the schema to `ci_role`; `USAGE` + `SELECT` on each allowed governance schema |
 | `ACCOUNTADMIN` | container runtime: the PyPI external access integration (Snowflake's managed `snowflake.external_access.pypi_rule`) and `USAGE` on it and on the compute pool to `ci_role`; `CREATE COMPUTE POOL` only when your pool is not `SYSTEM_COMPUTE_POOL_CPU`, which Snowflake pre-provisions in every account; git-repository: the API integration |
 | `ci_role` | the deploy-source objects it will own: the stage, or the secret + git repository |
 
@@ -34,7 +34,10 @@ snow sql -f admin-setup.sql -c <admin-connection>   # or run it in a Snowsight w
 With `--public-key-file` the script needs no edits (stage-copy source; a private
 git repository still needs its GitHub token pasted in). Without it, paste the
 public key over the `<paste public key>` placeholder. `--viewer-user NAME`
-(repeatable) grants the viewer role to more people.
+(repeatable) grants the viewer role to more people, and `--viewer-role ROLE`
+(repeatable) grants it to a role you already use (an analyst or agent role), so
+everyone holding that role can open the apps even when an admin login ran the
+script. `PUBLIC`, the system roles and StreamSnow's own roles are refused.
 
 With Claude Code, `/onboard` prepares this file for you (it runs `ci-key create` and
 `deploy-setup --admin --public-key-file`, writing to `.internal/admin-setup.sql`, which git

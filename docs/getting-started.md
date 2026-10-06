@@ -126,11 +126,15 @@ If `/onboard` isn't listed, run `/reload-plugins` (no restart needed) and try ag
    and screenshots each page. It downloads that tool and its browser now, creates
    the repo's Python environment (`.venv`), and saves the plugin into the repo's
    Claude settings so teammates are offered it.
-2. **One round of questions.** Clickable choices for what it could not settle:
-   whether to set up your Snowflake connection for you or guide you through it,
-   the five setup answers (runtime, account, the database apps query, allowed
-   schemas, deploy source), your git name and email if they are missing, and who
-   runs the Snowflake admin script.
+2. **One round of questions.** Clickable choices, each explained first so you
+   learn what is being set up. Whether to set up your Snowflake connection for
+   you or guide you through it, then one question each for the five setup answers
+   (runtime, the database apps query, allowed schemas, schemas apps may not
+   query, deploy source), a bulleted explanation of the defaults it does not ask
+   about followed by one keep-or-change question, your git name and email if
+   they are missing, and who runs the Snowflake admin script, which it describes
+   before asking, plus which of your Snowflake roles can open the apps. What it detects is the recommended answer, never a substitute
+   for the question.
 3. **Build.** After you confirm, `streamsnow init --no-starter-app` writes
    `streamsnow.config.yaml` and the governed repo files (`AGENTS.md`, `CLAUDE.md`,
    pre-commit hooks, CI and deploy workflows, `.sqlfluff`, `.gitignore`, `README.md`,
@@ -167,8 +171,9 @@ Your session's first line tells you if your clone still needs it.
 ### Repos that already have Streamlit apps
 
 If the directory already has Streamlit apps but no `streamsnow.config.yaml`,
-`/onboard` switches to **adopt mode**: it inventories what exists, pre-answers
-the configure questions from your deploy scripts and CI, and writes a
+`/onboard` switches to **adopt mode**: it inventories what exists, suggests
+answers to the configure questions from your deploy scripts and CI (it still asks you
+each one), and writes a
 `MIGRATION.md` checklist instead of scaffolding over anything.
 
 You will see the plugin's SessionStart line the next time you open Claude Code

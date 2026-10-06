@@ -19,8 +19,8 @@ The trust rules at the top of [setup.md](setup.md) apply throughout.
 - Open each stage with one line: what it does, and whether it will ask anything.
 - Before each action, one line of what and why; after it, one line with the result. Actions
   that need no approval are narrated too.
-- Every question says what it decides and what each answer changes. Ask with
-  `AskUserQuestion`, batched.
+- Every question says what it decides and what each answer changes. Setup questions follow the
+  question rule in Stage 2.
 - Close each stage with what got done and what is next. Plain words, no walls of text.
 
 ## Stage 1 · Detect and prepare (no questions except one install approval)
@@ -41,12 +41,18 @@ Nothing in Stage 1 writes `streamsnow.config.yaml` or the governed repo files.
 
 ## Stage 2 · One round of questions
 
-Only what Stage 1 could not settle:
+**The question rule.** Explain each setting immediately before its separate question. Use the
+host agent's question interface when it has one (Claude Code: `AskUserQuestion`, up to 4 per
+call); otherwise ask in chat and wait for an explicit answer. Detection never counts as
+confirmation: what Stage 1 found is the recommended first option. With a config already present
+nothing is being decided, so skip the setup questions (setup.md §2c). In order:
 - no Snowflake connection: set it up for them, or guide them (setup.md §2a); then redo Stage 1 step 3;
-- the five wizard answers marked found or needs you, and the defaults it does not ask (setup.md §2c);
+- one question each: runtime, database, allowed schemas, denied schemas, deploy source, and the
+  connection when §2a has not confirmed it (setup.md §2c);
+- the defaults it does not ask: bullets explaining each, then one keep or change question (§2c);
 - git name and email, only if missing;
 - apps but no config: confirm the adopt plan ([adopt.md](adopt.md));
-- admin setup not confirmed: who runs it, the user or someone else (setup.md §2d).
+- admin setup not confirmed: explain the script, then ask who runs it (setup.md §2d).
 
 ## Stage 3 · Build (after the user confirms)
 
