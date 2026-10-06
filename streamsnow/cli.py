@@ -125,6 +125,9 @@ app = typer.Typer(
     help="Build, govern, and ship Streamlit-in-Snowflake apps with Claude Code.",
     no_args_is_help=True,
     add_completion=False,
+    # A traceback's locals could include the CI key and account (ci-key verify
+    # holds them in `env` and `payloads`); never print them.
+    pretty_exceptions_show_locals=False,
 )
 check_app = typer.Typer(help="Run a governance check (config-driven).", no_args_is_help=True)
 app.add_typer(check_app, name="check")
@@ -1153,11 +1156,13 @@ def ci_key_verify(
     is created or changed, and the key, account and user are never printed.
 
     Know before you run it: the sign-in shows in the CI user's login history, and a
-    network policy that only admits the CI runners will refuse it (that is the
-    policy working, not a broken key). Run it once, after the admin setup has run.
+    network policy that only admits the CI runners will refuse it, which means the
+    policy is doing its job. Run it once, after the admin setup has run.
 
-    Exit codes: 0 every probe passed, 1 a probe failed, 2 nothing could be checked
-    (a missing secret file, a bad config or --object, or no `snow`).
+    Exit codes: 0 every probe passed, 1 a probe failed, 2 a tool error with no probe
+    results printed: refused before signing in (a missing or unreadable secret file,
+    a file that differs from the config, a bad config or --object, no `snow`), or a
+    `snow` call that could not start, timed out or printed unreadable output.
     """
     if output_format not in ("md", "json"):
         _err(f"--format must be md or json, not {output_format!r}")

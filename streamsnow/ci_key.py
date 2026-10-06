@@ -278,6 +278,15 @@ def _read_secret_payloads(directory: Path) -> dict[str, bytes]:
             raise CiKeyError(
                 f"secrets/{name} is empty. Delete it and re-run `streamsnow ci-key create`."
             )
+        try:
+            # Every consumer needs text: GitHub stores secrets as UTF-8 and
+            # verify passes them as environment variables.
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise CiKeyError(
+                f"secrets/{name} is not UTF-8 text. Delete it and re-run "
+                "`streamsnow ci-key create`."
+            ) from None
         payloads[name] = data
     return payloads
 
@@ -369,16 +378,6 @@ def push(
 
 
 # --- ci-key verify ----------------------------------------------------------------
-#
-# Why this exists: until now the first proof that the CI key, user, role, warehouse
-# and grants line up was the first deploy after a merge, and a failure there is a
-# red X on main with a CI log to dig through. `verify` signs in exactly the way the
-# deploy job does (deploy.yml.j2: the five secrets as SNOWFLAKE_* env vars,
-# SNOWFLAKE_AUTHENTICATOR=SNOWFLAKE_JWT, `snow ... --temporary-connection`) and
-# runs only read-only probes, so onboarding can show what CI will see before any
-# merge. The trade-off, accepted on purpose: this is the production CI credential
-# used from a laptop, so the sign-in shows in the CI user's login history, and a
-# network policy that only admits the CI runners refuses it.
 
 _SNOW_ARGS = (
     "sql",
@@ -392,6 +391,8 @@ _SNOW_ARGS = (
 _SNOW_MISSING = (
     "the Snowflake CLI (`snow`) is not on PATH; install it with `uv tool install snowflake-cli`."
 )
+WITHHELD = "snow failed; its message named the account, user or key and was withheld"
+_BOX_AND_SPACE_RE = re.compile(r"[\s│╭╮╰╯─]+")
 
 
 @dataclasses.dataclass
@@ -434,6 +435,9 @@ def ci_env(payloads: dict[str, bytes], environ=None) -> dict[str, str]:
     for name in SECRET_NAMES:
         env[name] = payloads[name].decode("utf-8")
     env["SNOWFLAKE_AUTHENTICATOR"] = "SNOWFLAKE_JWT"
+    # Wide enough that snow's Rich error panel never wraps a value across lines,
+    # where exact-text redaction could not find it. Sign-in ignores it.
+    env["COLUMNS"] = "1000"
     return env
 
 
@@ -441,14 +445,46 @@ def _mask_variants(payloads: dict[str, bytes]) -> list[str]:
     """Every form of the key, account and user an error message might echo.
 
     ``_redact`` matches exact text, and Snowflake errors print the account in
-    lower case inside a hostname, sometimes as the locator without its region.
+    lower case inside a hostname, with ``_`` as ``-``, and sometimes as the
+    locator without its region.
     """
     values: list[str] = []
+    account = payloads["SNOWFLAKE_ACCOUNT"].decode("utf-8", errors="replace")
+    for value in (
+        payloads[PRIVATE_KEY_SECRET].decode("utf-8", errors="replace"),
+        payloads["SNOWFLAKE_USER"].decode("utf-8", errors="replace"),
+        account,
+        account.split(".")[0],
+    ):
+        for form in (value, value.replace("_", "-")):
+            values += [form, form.lower(), form.upper()]
+    return values
+
+
+def _squash(text: str) -> str:
+    """Lower-cased, without whitespace or box-drawing, with ``-`` and ``_`` the same."""
+    return _BOX_AND_SPACE_RE.sub("", text).lower().replace("-", "_")
+
+
+def _safe_detail(detail: str, payloads: dict[str, bytes]) -> str:
+    """``detail`` unchanged, or :data:`WITHHELD` when any secret survived redaction.
+
+    The backstop for what exact-text redaction misses: a value wrapped across
+    a panel's lines, re-cased, or spelled with ``-`` for ``_``. It fails closed,
+    so a false match costs an error message and never leaks a value.
+    """
+    squashed = _squash(detail)
+    needles: list[str] = []
     for name in (PRIVATE_KEY_SECRET, "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER"):
-        value = payloads[name].decode("utf-8", errors="replace")
-        values += [value, value.lower(), value.upper()]
-    locator = payloads["SNOWFLAKE_ACCOUNT"].decode("utf-8", errors="replace").split(".")[0]
-    return values + [locator, locator.lower(), locator.upper()]
+        text = payloads[name].decode("utf-8", errors="replace")
+        needles += [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("-----")]
+    account = payloads["SNOWFLAKE_ACCOUNT"].decode("utf-8", errors="replace")
+    needles.append(account.split(".")[0])
+    for needle in needles:
+        squashed_needle = _squash(needle)
+        if squashed_needle and squashed_needle in squashed:
+            return WITHHELD
+    return detail
 
 
 def _select_probe_sql(cfg: Config, obj: str) -> str:
@@ -490,8 +526,19 @@ def verify(
 ) -> VerifyResult:
     """Sign in as the CI service user with the CI key and check, read-only, what CI sees.
 
+    Why this exists: without it, the first proof that the CI key, user, role,
+    warehouse and grants line up is the first deploy after a merge, and a
+    failure there is a red X on main with a CI log to dig through. This signs
+    in exactly the way the deploy job does (``deploy.yml.j2``: the five secrets
+    as ``SNOWFLAKE_*`` variables, ``SNOWFLAKE_AUTHENTICATOR=SNOWFLAKE_JWT``,
+    ``snow ... --temporary-connection``) and runs only read-only probes, so
+    onboarding can show what CI will see before any merge. The trade-off,
+    accepted on purpose: this is the production CI credential used from a
+    laptop, so the sign-in shows in the CI user's login history, and a network
+    policy that only admits the CI runners refuses it.
+
     Everything that can be refused is refused before the first sign-in: a
-    missing or empty secret file, a user, warehouse or role file that no longer
+    missing, empty or non-UTF-8 secret file, a user, warehouse or role file that no longer
     matches the config, an ``obj`` outside the governance allowlist, no
     ``snow`` on PATH. Then each probe is its own ``snow sql`` call, with the SQL
     on stdin and the secrets only in ``env=``:
@@ -506,7 +553,10 @@ def verify(
     A failed first probe means the sign-in itself failed, so the rest are
     skipped instead of signing in four more times. Error text goes through
     ``sf_exec._error_detail`` (frame stripped, quoted values masked) and
-    ``_redact`` (key, account and user removed) before it is returned.
+    ``_redact`` (key, account and user removed), then :func:`_safe_detail`
+    withholds it whole if any of them is still recognizable. A ``snow`` call
+    that cannot start, times out or prints unreadable output raises
+    :class:`CiKeyError` (exit 2, no probe results), at any probe.
     """
     from .sf_exec import (  # noqa: PLC0415
         _LOGIN_ALLOWANCE_S,
@@ -562,16 +612,19 @@ def verify(
             raise CiKeyError(_SNOW_MISSING) from None
         except subprocess.TimeoutExpired:
             raise CiKeyError(f"`snow sql` did not finish within {timeout}s.") from None
+        except OSError as exc:  # found but not launchable (permissions, a bad binary)
+            raise CiKeyError(f"`snow` could not be started ({exc.strerror}).") from None
         if proc.returncode != 0:
             # Redact before and after: _error_detail keeps only the last 600
             # characters, which could otherwise cut a value and leave part of it.
             err = _redact(proc.stderr or "", secret_text)
             out = _redact(proc.stdout or "", secret_text)
-            return None, _redact(_error_detail(err, out), secret_text)
+            detail = _redact(_error_detail(err, out), secret_text)
+            return None, _safe_detail(detail, payloads)
         try:
             return parse_output(proc.stdout or "", 1)[0], ""
         except SnowError as exc:
-            raise CiKeyError(_redact(str(exc), secret_text)) from None
+            raise CiKeyError(_safe_detail(_redact(str(exc), secret_text), payloads)) from None
 
     schemas = [(o.app_database, o.app_schema)]
     if cfg.deploy.source == "stage-copy":

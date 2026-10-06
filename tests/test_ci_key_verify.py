@@ -79,9 +79,10 @@ def _grant_rows(cfg, *, drop: tuple[str, ...] = ()) -> list[dict]:
 class FakeSnow:
     """A subprocess.run stand-in for `snow sql`; fails probes whose SQL matches fail_on."""
 
-    def __init__(self, cfg, *, fail_on: tuple[str, ...] = (), **answers):
+    def __init__(self, cfg, *, fail_on: tuple[str, ...] = (), err: str | None = None, **answers):
         self.calls: list[dict] = []
         self.fail_on = fail_on
+        self.err = err
         self.answers = {
             "CURRENT_ROLE": [{"ROLE": ROLE}],
             "USE WAREHOUSE": [{"status": "Statement executed successfully."}],
@@ -103,7 +104,7 @@ class FakeSnow:
                     f"│ as user {USER}: JWT token is invalid ({KEY_BODY}) │\n"
                     "╰─────────────────────────────────────╯\n"
                 )
-                return subprocess.CompletedProcess(argv, 1, "", err)
+                return subprocess.CompletedProcess(argv, 1, "", self.err or err)
         for needle, rows in self.answers.items():
             if needle in sql:
                 return subprocess.CompletedProcess(argv, 0, json.dumps(rows), "")
@@ -474,3 +475,92 @@ def test_expected_ci_grants_follow_a_new_admin_grant(monkeypatch):
     monkeypatch.setattr(deploy, "generate_admin_sql", extended)
     grants = deploy.expected_ci_grants(cfg)
     assert ("MONITOR", "WAREHOUSE", "X_WH") in {(g.privilege, g.granted_on, g.name) for g in grants}
+
+
+# --- fix round 1: exit contract and fail-closed redaction ---------------------------
+
+
+@pytest.mark.parametrize("name", [*VALUES, ci_key.PRIVATE_KEY_SECRET])
+def test_a_non_utf8_secret_file_exits_2(tmp_path, monkeypatch, name):
+    fake = FakeSnow(_cfg())
+    d = _secrets_dir(tmp_path)
+    (d / "secrets" / name).write_bytes(b"\xff\xfe not text")
+    r = _cli(monkeypatch, fake, "--dir", str(d))
+    assert r.exit_code == 2, r.output
+    assert "UTF-8" in r.output and name in r.output
+    assert "Traceback" not in r.output
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("exc", [PermissionError(13, "Permission denied"), OSError(8, "Exec")])
+def test_snow_that_cannot_start_exits_2(tmp_path, monkeypatch, exc):
+    def broken(argv, **kwargs):
+        raise exc
+
+    r = _cli(monkeypatch, broken, "--dir", str(_secrets_dir(tmp_path)))
+    assert r.exit_code == 2, r.output
+    assert "could not be started" in r.output
+    assert "Traceback" not in r.output
+    _no_secret(r.output)
+
+
+def test_the_cli_never_prints_traceback_locals():
+    from streamsnow.cli import app
+
+    assert app.pretty_exceptions_show_locals is False
+
+
+def test_env_sets_wide_columns_so_rich_does_not_wrap(tmp_path):
+    cfg = _cfg()
+    fake = FakeSnow(cfg)
+    ci_key.verify(_secrets_dir(tmp_path), cfg=cfg, run=fake, which=_which)
+    assert all(c["env"]["COLUMNS"] == "1000" for c in fake.calls)
+
+
+LONG_ACCOUNT = "acme_org-acme_account_name_for_tests"
+
+
+def _detail_for(tmp_path, err: str, account: str = LONG_ACCOUNT) -> str:
+    cfg = _cfg()
+    fake = FakeSnow(cfg, fail_on=("USE WAREHOUSE",), err=err)
+    result = ci_key.verify(
+        _secrets_dir(tmp_path, SNOWFLAKE_ACCOUNT=account), cfg=cfg, run=fake, which=_which
+    )
+    return next(p for p in result.probes if p.probe == "warehouse").detail
+
+
+def _squashed(text: str) -> str:
+    return re.sub(r"[\s│╭╮╰╯─]+", "", text).lower().replace("-", "_")
+
+
+def test_an_account_wrapped_across_panel_lines_is_withheld(tmp_path):
+    err = (
+        "╭─ Error ──────────────────────────────────────────╮\n"
+        "│ 250001: Could not connect to acme_org-acme_account_na │\n"
+        "│ me_for_tests.snowflakecomputing.com: timed out     │\n"
+        "╰──────────────────────────────────────────────────╯\n"
+    )
+    detail = _detail_for(tmp_path, err)
+    assert detail == ci_key.WITHHELD
+    assert _squashed(LONG_ACCOUNT) not in _squashed(detail)
+
+
+def test_a_hyphenated_hostname_account_never_reaches_the_detail(tmp_path):
+    err = "250001: Could not connect to acme-org-acme-account-name-for-tests.snowflakecomputing.com"
+    detail = _detail_for(tmp_path, err)
+    assert _squashed(LONG_ACCOUNT) not in _squashed(detail)
+    assert "acme" not in detail.lower()
+
+
+def test_a_wrapped_user_or_key_line_is_withheld(tmp_path):
+    for err in (
+        f"│ JWT token is invalid for user {USER[:9]} │\n│ {USER[9:]} │",
+        f"│ bad key {KEY_BODY[:20]} │\n│ {KEY_BODY[20:]} │",
+    ):
+        assert _detail_for(tmp_path / str(len(err)), err) == ci_key.WITHHELD
+
+
+def test_a_clean_error_is_kept(tmp_path):
+    err = "002003 (02000): SQL compilation error: Warehouse 'STREAMSNOW_WH' does not exist."
+    detail = _detail_for(tmp_path, err)
+    assert "does not exist" in detail and "STREAMSNOW_WH" in detail

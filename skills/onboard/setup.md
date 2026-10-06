@@ -29,7 +29,8 @@ Hand those over with a one-line reason:
 - anything that asks for their computer password (`sudo` on Linux/WSL): your shell cannot answer
   that prompt, so give them the command; prefer installs that need no password (uv, nvm).
 
-The CI key is handled only by `streamsnow ci-key create` and `streamsnow ci-key push` (§2d, §2e).
+The CI key is handled only by `streamsnow ci-key create`, `streamsnow ci-key push` and
+`streamsnow ci-key verify` (§2d, §2e).
 The plugin's key guard blocks every other tool call that names `~/.streamsnow-ci`, so a blocked
 call there is expected: never try another way to read a key or secret file.
 
@@ -494,7 +495,7 @@ and ask:
 - it signs in from this machine with the production CI key;
 - the sign-in shows in the CI user's login history in Snowflake;
 - if the account has a network policy that only admits the CI runners, it will be refused,
-  which means the policy works, not that the key is broken;
+  which means the policy is doing its job and the deploy job will still sign in from CI;
 - it is meant to run once, right after the admin setup.
 
 On a yes, run `streamsnow ci-key verify --object <DB.SCHEMA.TABLE>` with a table or view in an
@@ -502,8 +503,9 @@ allowed governance schema that the first app will read (leave `--object` off if 
 yet). It prints each check by object name and never the key, account or user. Exit 1 names
 what failed: a missing grant goes back to the admin as one line naming the grant; a sign-in
 failure usually means the admin registered a different public key, so compare the fingerprint
-from `ci-key create` with `RSA_PUBLIC_KEY_FP` in `DESC USER`. Exit 2 means nothing was
-checked (a missing secret file, a file that differs from the config, or no `snow`). On a no,
+from `ci-key create` with `RSA_PUBLIC_KEY_FP` in `DESC USER`. Exit 2 is a tool error with no
+results: a missing or unreadable secret file, a file that differs from the config, no `snow`,
+or a `snow` call that could not start, timed out or printed unreadable output. On a no,
 skip it: the first deploy checks the same things.
 
 ## 3 · Connection (one store, owned by the user)

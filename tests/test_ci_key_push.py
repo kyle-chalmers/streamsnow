@@ -315,3 +315,12 @@ def test_create_next_step_separates_mkdir_from_the_redirect(tmp_path):
     assert len(deploy) == 1 and deploy[0].endswith("> .internal/admin-setup.sql")
     # The CI key guard denies a command naming ~/.streamsnow-ci that is chained.
     assert "&&" not in deploy[0] and ";" not in deploy[0] and "|" not in deploy[0]
+
+
+def test_a_non_utf8_secret_file_is_refused_before_any_secret_is_set(tmp_path):
+    d = _secrets_dir(tmp_path)
+    (d / "secrets" / "SNOWFLAKE_ROLE").write_bytes(b"\xff\xfe")
+    gh = FakeGh()
+    with pytest.raises(ci_key.CiKeyError, match="SNOWFLAKE_ROLE is not UTF-8"):
+        ci_key.push(d, run=gh, which=lambda name: "/usr/bin/gh")
+    assert gh.secret_calls() == []
