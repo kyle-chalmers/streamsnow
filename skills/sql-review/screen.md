@@ -27,7 +27,10 @@ Below, `<run_dir>` is `.streamsnow/sql-review/<slug>/<run_id>`.
    and, when present, `<run_dir>/screen.json`, and writes `compare.json` with one `compare:NN#n`
    id per metric. Exit `1` means at least one `mismatch`: hand them to the page reviewers as
    candidate findings, never log them yourself. Exit `2` with "nothing was captured" means no
-   page rendered, or the app's `review.py` predates capture.
+   page rendered, or the app's `review.py` predates capture. A page that shares one loader and
+   groups it shows fewer rows than the SQL: when every total it shows equals the SQL's and its
+   group keys are non-numeric columns of the result, that is a `match` with the rule `aggregated`
+   (`match (aggregated)` in the log). A head or filtered slice stays a `mismatch`.
 
 ## Reading a page (the walk)
 

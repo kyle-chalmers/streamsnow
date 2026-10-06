@@ -1465,7 +1465,9 @@ def _screen_cells(run_dir: Path) -> dict[str, str]:
 
     A page whose ``run-NN.json`` changed after the compare (a reviewer re-ran
     it) is ``stale``: its comparison no longer describes these results. The
-    browser walk never shows here; it is a cross-check, not evidence.
+    browser walk never shows here; it is a cross-check, not evidence. A match
+    on the ``aggregated`` rule reads ``match (aggregated)``, so a reader can
+    tell a page that grouped the SQL's rows from one that showed them as is.
     """
     data = _compare_results(run_dir)
     if data is None:
@@ -1477,7 +1479,10 @@ def _screen_cells(run_dir: Path) -> dict[str, str]:
         if digests.get(page) != run_digest(run_dir / f"run-{page}.json"):
             cells[str(r.get("id"))] = "stale"
         else:
-            cells[str(r.get("id"))] = _SCREEN_WORDS.get(str(r.get("status")), "n/a")
+            word = _SCREEN_WORDS.get(str(r.get("status")), "n/a")
+            if word == "match" and "aggregated" in str(r.get("rule") or "").split("+"):
+                word = "match (aggregated)"
+            cells[str(r.get("id"))] = word
     return cells
 
 

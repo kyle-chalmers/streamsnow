@@ -23,10 +23,21 @@ Matching
   ``revenue`` pair), then whatever is left pairs one-to-one by value. Totals
   left over on both sides are a mismatch; on one side only, a note (the page
   may show fewer or extra columns).
+- **Aggregated frames:** the /build-app brief has pages share one coarse
+  loader and group it per page in pandas, so a correct frame can show fewer
+  rows than ``rows``. That is a ``match`` with the rule ``aggregated`` only
+  when the screen has fewer rows (at least one), every screen total pairs by
+  name with its run total within tolerance, the screen's group keys are all
+  non-numeric columns of the SQL result (or the screen is one total row), and
+  at least one total is non-zero. A head or filtered slice changes the totals,
+  and a derived or numeric key cannot tell a grouping from a slice, so those
+  stay a ``mismatch``.
 - **Scalars and displayed numbers:** against the single numeric total of a
   one-row result, or against the row count when the result has no numeric
-  column. Anything else is ``unsupported``: the app derives the value, and the
-  reviewers judge it.
+  column. A multi-row result with exactly one numeric column whose non-zero
+  sum the number equals is a ``match`` with the rule ``aggregated`` (the page
+  shows ``df.REVENUE.sum()``). Anything else is ``unsupported``: the app
+  derives the value, and the reviewers judge it.
 - **Tolerance:** the looser of 0.5% of the run value or the displayed rounding
   (``$12.3K`` is anything from 12,250 to 12,350). Integers match exactly, give
   or take only the displayed rounding. ``FLOAT`` columns always get the relative
@@ -346,7 +357,8 @@ def _compare_number(run: dict, cap: dict) -> dict:
             return _result("unsupported", reason="the visual received a value that is not finite")
     expected, integer, rule, why = _scalar_expected(run)
     if why:
-        return _result("unsupported", reason=why)
+        summed = _aggregated_number(run, observed, observed_float, display)
+        return summed or _result("unsupported", reason=why)
     integer = integer and not observed_float and (display is not None or _integral(observed))
     ok, extra, tol = _match_number(expected, integer, observed, display)
     rule = "+".join(x for x in (rule, extra) if x)
@@ -363,9 +375,125 @@ def _compare_number(run: dict, cap: dict) -> dict:
     )
 
 
+def _aggregated_number(
+    run: dict, observed: Decimal | None, observed_float: bool, display: Display | None
+) -> dict | None:
+    """A metric that sums a multi-row result's only numeric column, or None.
+
+    A page that shares one coarse loader shows ``df.REVENUE.sum()`` from it. A
+    sum that does not agree stays ``unsupported`` (the page may compute
+    something else entirely), so nothing that passed before starts failing.
+    """
+    totals = run.get("totals")
+    rows = run.get("rows")
+    if type(rows) is not int or rows < 2 or not isinstance(totals, dict) or len(totals) != 1:
+        return None
+    name, value = next(iter(totals.items()))
+    expected = _decimal(value)
+    if not expected:  # a null or zero sum agrees with too much to prove a grouping
+        return None
+    floats = set(run.get("float_columns") or [])
+    integer = (
+        _integral(expected)
+        and name not in floats
+        and not observed_float
+        and (display is not None or _integral(observed))
+    )
+    ok, extra, _ = _match_number(expected, integer, observed, display)
+    if not ok:
+        return None
+    return _result(
+        "match",
+        rule="+".join(x for x in ("aggregated", extra) if x),
+        notes=[f"the sum of {name} over {rows} rows"],
+    )
+
+
+def _aggregated_frame(run: dict, cap: dict) -> dict | None:
+    """A frame that groups the reviewed result before showing it, or None.
+
+    The /build-app brief has pages share one coarse loader and slice it per
+    page in pandas, so a correct visual can show 6 rows of a 72-row query.
+    Compare exists to catch a frame cut to its first rows or filtered, so this
+    is deliberately narrow; every condition must hold:
+
+    - the screen has fewer rows than the run, and at least one;
+    - every screen total pairs by name with a run total, within tolerance;
+    - the screen's columns without a total (its group keys) are all
+      non-numeric columns of the SQL result, or the screen is one total row;
+    - at least one total is non-zero.
+
+    A head or filtered slice changes the totals. A derived key (a month name
+    built in pandas) or a numeric key (a year) is not trusted, since its
+    totals cannot tell a grouping from a slice. Anything else falls through
+    to the ordinary frame rules.
+    """
+    rows, shown_rows = run.get("rows"), cap.get("row_count")
+    if type(rows) is not int or type(shown_rows) is not int or not 1 <= shown_rows < rows:
+        return None
+    headline = cap.get("headline") or {}
+    cap_totals: dict = dict(headline.get("totals") or {})
+    if not run.get("totals") or not cap_totals:
+        return None
+    run_totals, run_collided = _digests(run["totals"])
+    unpairable = set(headline.get("collided") or []) | run_collided
+    run_floats = {name_digest(n) for n in run.get("float_columns") or []}
+    cap_floats = set(headline.get("float_columns") or [])
+    non_zero = False
+    for digest, shown in cap_totals.items():
+        if digest not in run_totals or digest in unpairable:
+            return None
+        expected, observed = _decimal(run_totals[digest][1]), _decimal(shown)
+        integer = (
+            _integral(expected)
+            and _integral(observed)
+            and digest not in run_floats
+            and digest not in cap_floats
+        )
+        if not _close(expected, observed, integer=integer)[0]:
+            return None
+        non_zero = non_zero or bool(observed)
+    if not non_zero:
+        return None
+    columns = cap.get("columns")
+    if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
+        return None
+    keys = [c for c in columns if c not in cap_totals]
+    if shown_rows > 1 and (not keys or not set(keys) <= _text_columns(run)):
+        return None
+    notes = [f"grouped: {shown_rows} screen rows from {rows} run rows"]
+    hidden = [name for d, (name, _) in run_totals.items() if d not in cap_totals]
+    if hidden:
+        notes.append("not on screen: " + ", ".join(hidden))
+    return _result("match", rule="aggregated", notes=notes)
+
+
+def _text_columns(run: dict) -> set[str]:
+    """Hashed names of the run's non-numeric columns: the only trusted group keys.
+
+    A name that is numeric anywhere in the result is left out, so a key that
+    collides with a numeric column once normalised is never trusted.
+    """
+    numeric: set[str] = set()
+    other: set[str] = set()
+    for c in run.get("columns") or []:
+        if not isinstance(c, dict) or not isinstance(c.get("name"), str):
+            continue
+        kind = c.get("type")
+        if not isinstance(kind, str) or not kind:
+            continue
+        column = live.Column(0, c["name"], kind)
+        (numeric if column.numeric else other).add(name_digest(c["name"]))
+    return other - numeric
+
+
 def _compare_frame(run: dict, cap: dict) -> dict:
     diffs: list[str] = []
     notes: list[str] = []
+    if cap.get("row_count") != run.get("rows") and run.get("totals") is not None:
+        grouped = _aggregated_frame(run, cap)
+        if grouped:
+            return grouped
     if cap.get("row_count") != run.get("rows"):
         diffs.append(f"rows: screen {cap.get('row_count')} vs run {run.get('rows')}")
     if run.get("totals") is None:
