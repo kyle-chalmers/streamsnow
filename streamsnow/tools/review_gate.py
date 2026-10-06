@@ -734,8 +734,8 @@ def stamp_artifact(
 
     if text.startswith("# "):
         # Put it directly under the title so it survives casual editing.
-        head, sep, rest = text.partition("\n")
-        text = f"{head}{sep}{block}{rest.lstrip(chr(10))}"
+        title, sep, rest = text.partition("\n")
+        text = f"{title}{sep}{block}{rest.lstrip(chr(10))}"
     else:
         text = f"{block}\n{text.lstrip(chr(10))}"
     path.write_text(text, encoding="utf-8")

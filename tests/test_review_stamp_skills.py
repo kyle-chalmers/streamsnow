@@ -68,3 +68,6 @@ def test_pr_body_rules_never_write_zero_for_unknown() -> None:
     assert "Open critical: unknown" in section
     assert "Never write 0 for an unknown" in section
     assert "not-ancestor" in section
+    # A report left over from an earlier ship must not supply the count.
+    assert "Open critical: not reviewed for this change" in section
+    assert "`stamped` is false" in section and "`needs_review: true`" in section

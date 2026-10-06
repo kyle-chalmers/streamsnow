@@ -46,9 +46,13 @@ it already resolved. Subcommands:
 
     open-findings <session-dir> [--report=<report.md>]
         Count what a review left open: the newest report's findings (or
-        ``--report``) minus every finding an ``### Applied`` block recorded as
-        fixed, in that report or another in <session-dir>. Output JSON
-        ``{report, parsed, counts, open_block, applied}``. `/ship-app` writes
+        ``--report``) minus those its own ``### Applied`` block records as
+        fixed. Applied blocks in other reports do not count: a finding a newer
+        report re-flags after an older fix is still open. Output JSON
+        ``{report, parsed, counts, open_block, applied, stamped}``, where
+        ``stamped`` says the report carries a ``Reviewed-baseline:`` line
+        (`.review/` outlives a ship, so an unstamped newest report may belong
+        to an earlier change). `/ship-app` writes
         ``counts.BLOCK`` into the PR body, because a review stamps the gate
         even with critical findings open (reviewed means reviewed, not clean)
         and the approver needs to see that number. A report with no
@@ -312,6 +316,10 @@ def _is_review_report(path: Path) -> bool:
     return name.endswith(".md") and name.startswith(("review-", "loop-"))
 
 
+#: The ``Reviewed-baseline:`` line `review-gate stamp` writes into a report.
+_STAMP_RE = re.compile(r"^Reviewed-baseline:[ \t]*[0-9a-f]+[ \t]*$", re.MULTILINE)
+
+
 def report_is_parseable(text: str) -> bool:
     """True when the report has at least one severity bucket under a dimension.
 
@@ -424,6 +432,7 @@ def cmd_open_findings(args: argparse.Namespace) -> int:
         "counts": None,
         "open_block": None,
         "applied": None,
+        "stamped": False,
     }
     if report is None or not report.is_file():
         result["error"] = (
@@ -432,6 +441,9 @@ def cmd_open_findings(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2))
         return 2
     text = report.read_text(encoding="utf-8")
+    # `.review/` outlives a ship, so the newest report may belong to an earlier
+    # change. /ship-app only trusts the count from the stamped report.
+    result["stamped"] = bool(_STAMP_RE.search(text))
     if not report_is_parseable(text):
         result["reason"] = (
             "no '## <Dimension>' section with a '### BLOCK|FLAG|NICE-TO-HAVE' heading; "
@@ -439,9 +451,11 @@ def cmd_open_findings(args: argparse.Namespace) -> int:
         )
         print(json.dumps(result, indent=2))
         return 0
-    # The report's own Applied blocks always count, even outside the
-    # freshness window that bounds the rest of the session directory.
-    applied = collect_applied_tuples(session_dir) | parse_applied_tuples(text)
+    # Only the counted report's own Applied block closes a finding. Writing
+    # Resolutions makes the report that recorded a fix the newest one, so the
+    # session union adds nothing legitimate, and it would close a critical a
+    # newer report re-flags after an older fix (the no-convergence case).
+    applied = parse_applied_tuples(text)
     findings = parse_findings(text)
     open_findings = [
         f for f in findings if (f.citation, normalize_summary(f.summary)) not in applied

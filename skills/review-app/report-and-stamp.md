@@ -70,10 +70,16 @@ that touched the app since the review (`commits_since_review`).
 `/ship-app` collects the review state at its step 2, before its step 7 rebase rewrites the commit
 SHAs, and writes it into the PR body at step 9:
 
-- **`Open critical: N`**, where N is `counts.BLOCK` from
-  `streamsnow review-loop open-findings apps/<slug>/.review` (findings recorded under
-  `### Applied` are already subtracted). Write `Open critical: unknown` when `parsed` is false or
-  the command exits 2 (no report). Never write 0 for an unknown.
+- **Open critical**, from `streamsnow review-loop open-findings apps/<slug>/.review`, which counts
+  the newest report and subtracts only what that report's own `### Applied` block records as
+  fixed (a finding a newer report re-flags after an older fix stays open). `.review/` outlives a
+  ship, so the newest report can belong to an earlier change. Pick the line in this order:
+  - classify said `needs_review: true`, the command exited 2 (no report), or `stamped` is false
+    (the counted report is not the stamped one): `Open critical: not reviewed for this change`;
+  - `parsed` is false: `Open critical: unknown`;
+  - otherwise `Open critical: N`, with N from `counts.BLOCK`.
+
+  Never write 0 for an unknown.
 - **Commits since review**, one `<short sha> <subject>` line per entry in
   `.apps[0].commits_since_review`, or `none` when the list is empty. When
   `.apps[0].reviewed_head_status` is not `ancestor`, write `unknown` instead: `not-ancestor` means

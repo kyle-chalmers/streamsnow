@@ -351,9 +351,11 @@ def test_open_findings_subtracts_applied(tmp_path: Path, capsys: pytest.CaptureF
     assert out["applied"] == 1
 
 
-def test_open_findings_subtracts_applied_from_another_report(
+def test_open_findings_counts_a_reflagged_block_despite_an_older_applied(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
+    """An older report's Applied block must not close a finding a newer report
+    re-flags: that is the no-convergence case, and the critical is still live."""
     session = tmp_path / ".review"
     session.mkdir()
     _write_report_with_resolutions(session / "review-20260830-090000.md")
@@ -361,7 +363,25 @@ def test_open_findings_subtracts_applied_from_another_report(
     report.write_text(REPORT, encoding="utf-8")
     code, out = _open(capsys, str(session), "--report", str(report))
     assert code == 0
-    assert out["counts"]["BLOCK"] == 0
+    assert out["counts"]["BLOCK"] == 1
+    assert out["applied"] == 0
+
+
+def test_open_findings_reports_whether_the_report_is_stamped(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    session = tmp_path / ".review"
+    session.mkdir()
+    report = session / "review-20260831-090000.md"
+    report.write_text(REPORT, encoding="utf-8")
+    _, out = _open(capsys, str(session))
+    assert out["stamped"] is False
+    report.write_text(
+        REPORT.replace("\n\n## SQL", "\nReviewed-baseline: 0123456789abcdef\n\n## SQL", 1),
+        encoding="utf-8",
+    )
+    _, out = _open(capsys, str(session))
+    assert out["stamped"] is True
 
 
 def test_open_findings_lists_open_block(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
