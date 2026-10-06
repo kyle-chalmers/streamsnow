@@ -302,6 +302,37 @@ def test_bundle_follows_a_directory_symlink_inside_the_app(tmp_path):
     assert "lib/real.py" in shipped and "helpers/real.py" in shipped
 
 
+@pytest.mark.parametrize(
+    "rel",
+    ["secrets.toml", "config/secrets.toml", ".streamlit/secrets.toml", "pages/x/secrets.toml"],
+)
+def test_excluded_reason_never_ships_a_secrets_toml_anywhere(rel):
+    assert excluded_reason(rel, [rel, "config/", "pages/"]) == (
+        "Streamlit secrets file (never deployed)"
+    )
+
+
+def test_bundle_ships_no_secrets_toml_through_a_streamlit_link(tmp_path):
+    """`.streamlit -> config/` with a real config/secrets.toml: neither the link
+    path nor the real path may ship the credentials."""
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    shutil.rmtree(app_dir / ".streamlit")
+    _write(app_dir / "config" / "config.toml", "[theme]\nbase = 'light'\n")
+    _write(app_dir / "config" / "secrets.toml", 'password = "acme-not-real"\n')
+    _link(app_dir / ".streamlit", app_dir / "config")
+    out = tmp_path / "bundle"
+
+    result = build_bundle(repo, out)
+
+    shipped = _shipped(out)
+    assert ".streamlit/config.toml" in shipped
+    assert not any(p.rsplit("/", 1)[-1] == "secrets.toml" for p in shipped), shipped
+    reasons = _reasons(result)
+    for rel in ("config/secrets.toml", ".streamlit/secrets.toml"):
+        assert reasons[rel] == "Streamlit secrets file (never deployed)"
+
+
 def test_bundle_link_path_rules_apply_inside_a_followed_directory(tmp_path):
     repo = _repo(tmp_path)
     app_dir = repo / "apps" / SLUG

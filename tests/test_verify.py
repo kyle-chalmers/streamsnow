@@ -539,6 +539,17 @@ def test_stage_files_warns_when_internal_docs_are_on_the_stage(tmp_path):
     assert "streamlit_app.py" not in text
 
 
+def test_stage_files_warns_when_a_secrets_toml_is_on_the_stage(tmp_path):
+    app_dir = _scaffold_my_app(tmp_path)
+    listing = _bundle_listing(app_dir, tmp_path) + _listing("config/secrets.toml")
+    result = _verify_with_stage(_cfg(), app_dir, listing)
+    check = _by_name(result)["stage-files"]
+    assert check["status"] == "fail" and check["level"] == "warn"
+    assert result["ok"]
+    hits = [f for f in check["findings"] if "Streamlit secrets file (never deployed)" in f]
+    assert len(hits) == 1 and hits[0].startswith("config/secrets.toml"), check["findings"]
+
+
 def test_stage_files_warns_when_an_env_file_is_on_the_stage(tmp_path):
     app_dir = _scaffold_my_app(tmp_path)
     listing = _bundle_listing(app_dir, tmp_path) + _listing(".env", "pages/.env.local")

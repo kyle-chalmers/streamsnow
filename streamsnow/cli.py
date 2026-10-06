@@ -1275,8 +1275,8 @@ def stage_bundle_cmd(
     """Copy each app minus internal docs into --out for the stage-copy upload (deploy job).
 
     Leaves out root-level *.md files an artifacts entry does not declare, sql_review/,
-    tooling dot-directories, everything in .streamlit/ except config.toml, .env files,
-    and symlinks that escape the app. Exit 2 on a bad slug or an --out that is not
+    tooling dot-directories, everything in .streamlit/ except config.toml, .env and
+    secrets.toml files, and symlinks that escape the app. Exit 2 on a bad slug or an --out that is not
     empty, is a broken symlink or sits inside apps/."""
     from .stage_bundle import BundleError, build_bundle, render_md
 

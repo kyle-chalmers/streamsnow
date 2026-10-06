@@ -23,6 +23,9 @@ The workflow uploads the bundle instead of ``apps/``. What is excluded:
 - ``.env`` and ``.env.*`` files anywhere in the app, even when declared:
   Streamlit in Snowflake never reads one, and a committed one usually holds
   credentials;
+- any file named ``secrets.toml``, at any depth: Streamlit in Snowflake does
+  not read it, and a local copy holds connection credentials. Matching by name
+  also covers a real ``config/secrets.toml`` behind ``.streamlit -> config/``;
 - symlinks that point outside the app, which would otherwise copy a file from
   elsewhere on the runner into the stage, and symlinks inside the app whose
   target is excluded (a ``runtime.txt`` link to ``.env`` would upload ``.env``).
@@ -54,6 +57,7 @@ class BundleError(ValueError):
 _STREAMLIT_DIR = ".streamlit"
 _STREAMLIT_CONFIG = ".streamlit/config.toml"
 _ENV_REASON = "environment file (may hold secrets)"
+_SECRETS_REASON = "Streamlit secrets file (never deployed)"
 
 
 def _dir_reason(name: str) -> str | None:
@@ -78,6 +82,8 @@ def excluded_reason(rel: str, entries: list[str] | None) -> str | None:
             return reason
     if parts[-1] == ".env" or parts[-1].startswith(".env."):
         return _ENV_REASON
+    if parts[-1] == "secrets.toml":
+        return _SECRETS_REASON
     if _STREAMLIT_DIR in parts[:-1] and rel != _STREAMLIT_CONFIG:
         return "only .streamlit/config.toml ships from .streamlit/ (secrets stay local)"
     if parts[0] == "sql_review":

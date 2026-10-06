@@ -84,6 +84,9 @@ leaves out:
 - `.env` and `.env.*` files anywhere in the app, even when declared, because
   Streamlit in Snowflake never reads one and a committed one usually holds
   credentials;
+- any file named `secrets.toml`, at any depth and under any link, because
+  Streamlit in Snowflake does not read it and a local copy holds connection
+  credentials;
 - symlinks that point outside the app, and symlinks whose target inside the
   app is itself left out (a `runtime.txt` link to `.env` stays out with
   `.env`). Directory symlinks that stay inside the app are followed, so
