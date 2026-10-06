@@ -59,6 +59,14 @@ exclude = [
   "/tests/plugin-validate-negative",
   # Anonymized fixture fleet for the faithfulness tests — apps must never ship in the sdist.
   "/tests/fixtures",
+  # Local-only files. Hatchling sweeps in untracked files, so a manual `uv build` from a dev
+  # checkout would otherwise ship them (settings.local.json carries an absolute home path, the
+  # denylist is itself a list of names-not-to-leak). Some are also gitignored, which hatchling
+  # honors, but the privacy of a release should not hinge on a .gitignore edit.
+  "/.claude/settings.local.json",
+  "/.claude/*.local.*",
+  "/.streamsnow/export-denylist.txt",
+  "/.internal",
 ]
 
 [tool.hatch.build.targets.wheel]
