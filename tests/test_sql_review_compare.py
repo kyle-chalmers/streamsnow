@@ -505,6 +505,39 @@ def test_head_slice_stays_a_mismatch(run_dir: Path, capsys: pytest.CaptureFixtur
     assert rc == 1
 
 
+@pytest.mark.parametrize("float_column", [False, True])
+def test_head_slice_with_a_small_tail_stays_a_mismatch(
+    run_dir: Path, capsys: pytest.CaptureFixture, float_column: bool
+) -> None:
+    """df.head(60) of 72 rows, 0.4% short: inside the display tolerance, but both
+    sides of a frame are full-precision sums, so it must not pass as grouped."""
+    floats = ["REVENUE"] if float_column else []
+    _coarse(run_dir, totals={"REVENUE": "9000.50"}, float_columns=floats)
+    frame = _frame(
+        60,
+        {"REVENUE": "8964.5" if float_column else "8964.50"},
+        floats=("REVENUE",) if float_column else (),
+        keys=("REGION",),
+    )
+    _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
+    rc, out = _compare(run_dir, capsys)
+    r = _by_id(out)["compare:02#1"]
+    assert r["status"] == "mismatch" and r["rule"] != "aggregated"
+    assert rc == 1
+
+
+def test_grouped_float_column_matches_despite_summation_drift(
+    run_dir: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """pandas float sums drift around 1e-12; a grouping still matches."""
+    _coarse(run_dir, totals={"REVENUE": "9000.50"}, float_columns=["REVENUE"])
+    frame = _frame(6, {"REVENUE": "9000.500000000002"}, floats=("REVENUE",), keys=("REGION",))
+    _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
+    _, out = _compare(run_dir, capsys)
+    r = _by_id(out)["compare:02#1"]
+    assert (r["status"], r["rule"]) == ("match", "aggregated")
+
+
 def test_filtered_slice_stays_a_mismatch(run_dir: Path, capsys: pytest.CaptureFixture) -> None:
     """df[df.REGION == "West"]: one total can agree by chance; every one must."""
     _coarse(run_dir)

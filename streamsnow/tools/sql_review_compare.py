@@ -27,7 +27,8 @@ Matching
   loader and group it per page in pandas, so a correct frame can show fewer
   rows than ``rows``. That is a ``match`` with the rule ``aggregated`` only
   when the screen has fewer rows (at least one), every screen total pairs by
-  name with its run total within tolerance, the screen's group keys are all
+  name with its run total exactly (``FLOAT`` within 1e-9, summation drift
+  only, never the display tolerance), the screen's group keys are all
   non-numeric columns of the SQL result (or the screen is one total row), and
   at least one total is non-zero. A head or filtered slice changes the totals,
   and a derived or numeric key cannot tell a grouping from a slice, so those
@@ -78,6 +79,8 @@ CAPTURE_DIR = "capture"
 #: (observed on Streamlit 1.59: a five-row frame reads 6).
 ARIA_HEADER_ROWS = 1
 RELATIVE_TOLERANCE = Decimal("0.005")
+#: An aggregated frame's FLOAT totals: summation-order drift only, never rounding.
+AGGREGATED_FLOAT_TOLERANCE = Decimal("1e-9")
 STATUSES = ("match", "mismatch", "not_captured", "unsupported")
 SCREEN_SOURCES = frozenset({"metric", "table", "dataframe", "vega", "plotly"})
 
@@ -418,7 +421,8 @@ def _aggregated_frame(run: dict, cap: dict) -> dict | None:
     is deliberately narrow; every condition must hold:
 
     - the screen has fewer rows than the run, and at least one;
-    - every screen total pairs by name with a run total, within tolerance;
+    - every screen total pairs by name with a run total, exactly (``FLOAT``
+      within 1e-9; see ``_same_sum``);
     - the screen's columns without a total (its group keys) are all
       non-numeric columns of the SQL result, or the screen is one total row;
     - at least one total is non-zero.
@@ -444,13 +448,8 @@ def _aggregated_frame(run: dict, cap: dict) -> dict | None:
         if digest not in run_totals or digest in unpairable:
             return None
         expected, observed = _decimal(run_totals[digest][1]), _decimal(shown)
-        integer = (
-            _integral(expected)
-            and _integral(observed)
-            and digest not in run_floats
-            and digest not in cap_floats
-        )
-        if not _close(expected, observed, integer=integer)[0]:
+        is_float = digest in run_floats or digest in cap_floats
+        if not _same_sum(expected, observed, is_float=is_float):
             return None
         non_zero = non_zero or bool(observed)
     if not non_zero:
@@ -466,6 +465,23 @@ def _aggregated_frame(run: dict, cap: dict) -> dict | None:
     if hidden:
         notes.append("not on screen: " + ", ".join(hidden))
     return _result("match", rule="aggregated", notes=notes)
+
+
+def _same_sum(expected: Decimal | None, observed: Decimal | None, *, is_float: bool) -> bool:
+    """Two full-precision sums of the same rows: exact, or within float drift.
+
+    ``_close`` allows 0.5% because a displayed number is rounded. A frame total
+    is not: ``NUMBER`` reaches pandas as ``Decimal`` and sums exactly, and a
+    float sum drifts only around 1e-12. The display tolerance would let a head
+    slice whose dropped rows hold less than 0.5% of the total pass as grouped.
+    """
+    if expected is None:  # SUM over no values: the page may well show 0
+        return observed is None or observed == 0
+    if observed is None:
+        return False
+    if not is_float:
+        return observed == expected
+    return abs(observed - expected) <= abs(expected) * AGGREGATED_FLOAT_TOLERANCE
 
 
 def _text_columns(run: dict) -> set[str]:

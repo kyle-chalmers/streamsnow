@@ -45,7 +45,8 @@ number on that page wrong. You judge; the `streamsnow sql-review` commands alrea
    preview's role (it is not the CI role). A `values-ambiguous` rule or `"helper": "modified"`
    needs extra care. An `aggregated` match proves the totals survive the page's grouping, not
    that the grouping is the one the visual claims: check the group keys against the
-   requirements. Cite `compare:NN#n` with the `run:NN#n` it is held to. A `not_captured`
+   requirements. An `aggregated` scalar match proves the total within display rounding, not the
+   row set (a metric summing 29 of 30 days can still match). Cite `compare:NN#n` with the `run:NN#n` it is held to. A `not_captured`
    visual is not a finding on its own.
 
 You may re-run this page's facts with `streamsnow sql-review run <slug> --run <run_id> --page NN`.
