@@ -256,6 +256,30 @@ def test_expected_value_mismatch_refuses_before_any_gh_call(tmp_path):
         assert value not in msg
 
 
+def test_expected_compare_sees_non_breaking_spaces_that_push_would_send(tmp_path):
+    # str.strip() removes U+00A0 but push sends bytes.strip(), which keeps it,
+    # so the compare must not call these files a match.
+    gh = FakeGh()
+    d = _secrets_dir(tmp_path, SNOWFLAKE_ROLE=" STREAMSNOW_DEPLOY_ROLE ")
+    with pytest.raises(ci_key.CiKeyError, match="SNOWFLAKE_ROLE"):
+        ci_key.push(d, run=gh, which=_which, expected=dict(CONFIG_VALUES))
+    assert gh.calls == []
+
+
+def test_expected_compare_refuses_an_undecodable_file_instead_of_skipping_it(tmp_path):
+    gh = FakeGh()
+    d = _secrets_dir(tmp_path)
+    (d / "secrets" / "SNOWFLAKE_ROLE").write_bytes("STREAMSNOW_DEPLOY_ROLE".encode("utf-16"))
+    with pytest.raises(ci_key.CiKeyError):
+        ci_key.push(d, run=gh, which=_which, expected=dict(CONFIG_VALUES))
+    assert gh.calls == []
+
+
+def test_mismatched_secrets_compares_the_bytes_push_sends(tmp_path):
+    d = _secrets_dir(tmp_path, SNOWFLAKE_USER=" STREAMSNOW_DEPLOY_USER")
+    assert ci_key.mismatched_secrets(d, dict(CONFIG_VALUES)) == ["SNOWFLAKE_USER"]
+
+
 def test_expected_comparison_ignores_surrounding_whitespace(tmp_path):
     gh = FakeGh()
     d = _secrets_dir(tmp_path, SNOWFLAKE_ROLE="STREAMSNOW_DEPLOY_ROLE\n")

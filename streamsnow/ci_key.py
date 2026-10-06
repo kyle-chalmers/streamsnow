@@ -189,7 +189,8 @@ def create(
             kept.append(name)
             if path.is_file() and not path.is_symlink() and path.stat().st_mode & 0o077:
                 path.chmod(0o600)  # a secret file never stays readable by others
-            if path.read_text(encoding="utf-8").strip() != values[name]:
+            # bytes.strip(), as push sends it: str.strip() would also drop U+00A0.
+            if path.read_bytes().strip() != values[name].encode("utf-8"):
                 mismatched.append(name)
         else:
             _write_private(path, values[name])
@@ -230,28 +231,6 @@ def _redact(text: str, values: list[str]) -> str:
     for i, line in enumerate(sorted(lines, key=len, reverse=True)):
         text = text.replace(line, f"\x00{i}\x00")
     return re.sub(r"\x00\d+\x00", "<redacted>", text)
-
-
-def mismatched_secrets(directory: Path, expected: dict[str, str]) -> list[str]:
-    """Names of existing secret files whose value differs from ``expected``.
-
-    Compared stripped, the way ``create`` compares and ``push`` sends. A file
-    that does not exist or cannot be read is skipped here: ``push`` reports it
-    on its own. Only names are returned, never a value.
-    """
-    secrets = Path(directory).expanduser().absolute() / "secrets"
-    out: list[str] = []
-    for name in SECRET_NAMES:
-        if name not in expected:
-            continue
-        path = secrets / name
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        if text.strip() != expected[name]:
-            out.append(name)
-    return out
 
 
 def _read_secret_payloads(directory: Path) -> dict[str, bytes]:
@@ -297,6 +276,27 @@ def _read_secret_payloads(directory: Path) -> dict[str, bytes]:
     return payloads
 
 
+def mismatched_secrets(
+    directory: Path, expected: dict[str, str], payloads: dict[str, bytes] | None = None
+) -> list[str]:
+    """Names of secret files whose value differs from ``expected``.
+
+    Compares exactly the values ``push`` and ``verify`` send, the output of
+    ``_read_secret_payloads``: bytes stripped of ASCII whitespace only, so a
+    value padded with non-breaking spaces, or a file that is not UTF-8, is
+    never called a match. An unreadable, missing, empty or non-UTF-8 file
+    raises ``CiKeyError`` (naming the file) instead of being skipped. Only
+    names are returned, never a value.
+    """
+    if payloads is None:
+        payloads = _read_secret_payloads(directory)
+    return [
+        name
+        for name in SECRET_NAMES
+        if name in expected and payloads[name].decode("utf-8") != expected[name]
+    ]
+
+
 def push(
     directory: Path,
     *,
@@ -318,8 +318,10 @@ def push(
     name before any ``gh`` call, and a difference refuses the push, so a stale
     warehouse or role never reaches GitHub and fails the first deploy.
     """
+    payloads: dict[str, bytes] | None = None
     if expected:
-        stale = mismatched_secrets(directory, expected)
+        payloads = _read_secret_payloads(directory)
+        stale = mismatched_secrets(directory, expected, payloads)
         if stale:
             raise CiKeyError(
                 "These secret files differ from the config, so nothing was pushed: "
@@ -358,7 +360,8 @@ def push(
             "--repo owner/name."
         )
 
-    payloads = _read_secret_payloads(directory)
+    if payloads is None:
+        payloads = _read_secret_payloads(directory)
     plain = [v.decode("utf-8", errors="replace") for v in payloads.values()]
 
     done: list[str] = []
@@ -586,6 +589,7 @@ def verify(
             "SNOWFLAKE_WAREHOUSE": o.default_warehouse,
             "SNOWFLAKE_ROLE": ci,
         },
+        payloads,
     )
     if stale:
         raise CiKeyError(
