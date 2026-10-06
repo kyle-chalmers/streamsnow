@@ -8,6 +8,13 @@ entry.
 
 ## [Unreleased]
 
+### Added
+
+- **`/onboard` offers to turn on GitHub's automatic deletion of merged branches.** In a repo
+  with a GitHub remote it reads `delete_branch_on_merge` first, and when it is off asks yes or no
+  before running `gh repo edit --delete-branch-on-merge`, so a squash-merged branch is not left
+  behind to be reused. Without admin rights on the repo it says so and moves on.
+
 ### Fixed
 
 - **`deploy-setup --admin` now grants read on dynamic tables** and every other object type an
