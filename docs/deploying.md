@@ -81,6 +81,9 @@ leaves out:
 - dot-directories other than `.streamlit`, and `__pycache__`;
 - everything in `.streamlit/` except `config.toml`, so a local `secrets.toml`
   never ships;
+- `.env` and `.env.*` files anywhere in the app, even when declared, because
+  Streamlit in Snowflake never reads one and a committed one usually holds
+  credentials;
 - symlinks that point outside the app.
 
 `streamsnow stage-bundle --out <empty dir>` prints each file it left out and

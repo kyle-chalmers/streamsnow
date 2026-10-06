@@ -478,7 +478,15 @@ def test_stage_copy_deploy_step_still_copies_when_an_app_exists(tmp_path):
     # The upload is the per-app bundle, not the whole apps/ tree (#22).
     assert not any(" apps/ " in f" {c} " for c in copies), calls
     assert any(f" {bundle.as_posix()}/ " in f" {c} " and "--recursive" in c for c in copies), calls
-    assert any("ss-bundle/acme-sales/.streamlit/config.toml" in c for c in copies), calls
+    cfg_copies = [c for c in copies if "ss-bundle/acme-sales/.streamlit/config.toml" in c]
+    assert cfg_copies, calls
+    # Pin the destination too: `stage copy --temporary-connection <src> <dest> ...`.
+    (cfg_copy,) = cfg_copies
+    dest = cfg_copy.split()[4]
+    assert "/apps/acme-sales/.streamlit/" in dest, cfg_copy
+    assert dest.endswith(
+        "/commits/0123456789abcdef0123456789abcdef01234567/apps/acme-sales/.streamlit/"
+    )
     # The bundle holds the app, never its agent docs or review trail.
     assert (bundle / "acme-sales" / "streamlit_app.py").is_file()
     assert not (bundle / "acme-sales" / "AGENTS.md").exists()

@@ -20,6 +20,9 @@ The workflow uploads the bundle instead of ``apps/``. What is excluded:
 - dot-directories other than ``.streamlit``, and ``__pycache__``;
 - everything in ``.streamlit/`` except ``config.toml``, so a local
   ``secrets.toml`` can never ship;
+- ``.env`` and ``.env.*`` files anywhere in the app, even when declared:
+  Streamlit in Snowflake never reads one, and a committed one usually holds
+  credentials;
 - symlinks that point outside the app, which would otherwise copy a file from
   elsewhere on the runner into the stage.
 
@@ -49,6 +52,7 @@ class BundleError(ValueError):
 
 _STREAMLIT_DIR = ".streamlit"
 _STREAMLIT_CONFIG = ".streamlit/config.toml"
+_ENV_REASON = "environment file (may hold secrets)"
 
 
 def _dir_reason(name: str) -> str | None:
@@ -71,6 +75,8 @@ def excluded_reason(rel: str, entries: list[str] | None) -> str | None:
         reason = _dir_reason(name)
         if reason:
             return reason
+    if parts[-1] == ".env" or parts[-1].startswith(".env."):
+        return _ENV_REASON
     if _STREAMLIT_DIR in parts[:-1] and rel != _STREAMLIT_CONFIG:
         return "only .streamlit/config.toml ships from .streamlit/ (secrets stay local)"
     if parts[0] == "sql_review":
@@ -170,6 +176,10 @@ def build_bundle(repo: Path, out: Path, slugs: list[str] | None = None) -> dict:
     apps_abs = apps.resolve()
     if out_abs == apps_abs or out_abs.is_relative_to(apps_abs):
         raise BundleError(f"--out {out.as_posix()} is inside apps/; pick a path outside it")
+    if out.is_symlink() and not out.exists():
+        raise BundleError(
+            f"--out {out.as_posix()} is a broken symlink; remove it or pick a new path"
+        )
     if out.exists() and (not out.is_dir() or any(out.iterdir())):
         raise BundleError(f"--out {out.as_posix()} is not empty; remove it or pick a new path")
     chosen = list(slugs) if slugs else _app_slugs(apps)

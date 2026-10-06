@@ -539,6 +539,17 @@ def test_stage_files_warns_when_internal_docs_are_on_the_stage(tmp_path):
     assert "streamlit_app.py" not in text
 
 
+def test_stage_files_warns_when_an_env_file_is_on_the_stage(tmp_path):
+    app_dir = _scaffold_my_app(tmp_path)
+    listing = _bundle_listing(app_dir, tmp_path) + _listing(".env", "pages/.env.local")
+    result = _verify_with_stage(_cfg(), app_dir, listing)
+    check = _by_name(result)["stage-files"]
+    assert check["status"] == "fail" and check["level"] == "warn"
+    assert result["ok"]
+    env = [f for f in check["findings"] if "environment file (may hold secrets)" in f]
+    assert len(env) == 2, check["findings"]
+
+
 def test_stage_files_warns_on_a_missing_artifact_but_does_not_fail(tmp_path):
     app_dir = _scaffold_my_app(tmp_path)
     listing = [r for r in _bundle_listing(app_dir, tmp_path) if "branding.py" not in r["name"]]

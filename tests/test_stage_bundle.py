@@ -160,6 +160,47 @@ def test_bundle_ships_config_toml_but_never_secrets(tmp_path):
     assert ".streamlit/secrets.toml.example" not in shipped
 
 
+@pytest.mark.parametrize("rel", [".env", ".env.local", "pages/.env", "queries/.env.production"])
+def test_excluded_reason_never_ships_an_env_file(rel):
+    reason = excluded_reason(rel, [rel, "pages/", "queries/"])  # even when declared
+    assert reason == "environment file (may hold secrets)"
+
+
+@pytest.mark.parametrize("rel", ["environment.yml", "pages/env_helpers.py", ".envrc_notes.py"])
+def test_excluded_reason_keeps_files_that_only_look_like_env(rel):
+    assert excluded_reason(rel, None) is None
+
+
+def test_bundle_never_ships_env_files_but_keeps_config_toml(tmp_path):
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    for rel in (".env", ".env.local", "pages/.env", "pages/.env.local"):
+        _write(app_dir / rel, "SNOWFLAKE_PASSWORD=acme-not-real\n")
+    out = tmp_path / "bundle"
+
+    result = build_bundle(repo, out)
+
+    shipped = _shipped(out)
+    assert not any(p.rsplit("/", 1)[-1].startswith(".env") for p in shipped), shipped
+    assert ".streamlit/config.toml" in shipped
+    reasons = {e["path"]: e["reason"] for e in result["apps"][0]["excluded"]}
+    for rel in (".env", ".env.local", "pages/.env", "pages/.env.local"):
+        assert reasons[rel] == "environment file (may hold secrets)"
+
+
+def test_bundle_refuses_a_dangling_symlink_out(tmp_path):
+    repo = _repo(tmp_path)
+    out = tmp_path / "bundle"
+    try:
+        out.symlink_to(tmp_path / "gone")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable on this platform")
+    with pytest.raises(BundleError, match="symlink"):
+        build_bundle(repo, out)
+    res = _invoke("--out", str(out), "--dir", str(repo))
+    assert res.exit_code == 2, res.output
+
+
 def test_bundle_skips_tooling_dirs(tmp_path):
     repo = _repo(tmp_path)
     app_dir = repo / "apps" / SLUG
