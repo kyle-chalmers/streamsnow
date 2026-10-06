@@ -37,3 +37,18 @@ def test_short_help_flag_reaches_the_verb_too(words, flag):
     res = CliRunner().invoke(app, [*words, "-h"])
     assert res.exit_code == 0, res.output
     assert flag in res.output
+
+
+@pytest.mark.parametrize("help_flag", ["--help", "-h"])
+def test_preview_shorthand_with_a_slug_shows_start_help(help_flag):
+    # `preview <slug> --help` worked before the passthrough change: it is the
+    # pre-0.6 shorthand for `preview start <slug> --help`.
+    res = CliRunner().invoke(app, ["preview", "example-app", help_flag])
+    assert res.exit_code == 0, res.output
+    assert "--review-capture" in res.output and "--port" in res.output
+
+
+@pytest.mark.parametrize("args", [["--help"], ["-h"], ["start", "--help"]])
+def test_preview_help_without_a_slug_still_works(args):
+    res = CliRunner().invoke(app, ["preview", *args])
+    assert res.exit_code == 0, res.output

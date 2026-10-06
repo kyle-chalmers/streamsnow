@@ -1618,11 +1618,13 @@ def preview(ctx: typer.Context) -> None:
     """
     argv = list(ctx.args)
     # The shorthand must also route flag-first invocations (`preview --port
-    # 8501 my-app`): when NO verb appears anywhere, this is the shorthand —
-    # unless the user is asking for help.
+    # 8501 my-app`): when NO verb appears anywhere, this is the shorthand. Bare
+    # `preview --help` (no slug) keeps the tool's top-level help; with a slug,
+    # `preview my-app --help` is `preview start my-app --help`.
     wants_help = any(a in ("-h", "--help") for a in argv)
     has_verb = any(a in _PREVIEW_VERBS for a in argv)
-    if argv and not has_verb and not wants_help:
+    has_positional = any(not a.startswith("-") for a in argv)
+    if argv and not has_verb and (has_positional or not wants_help):
         argv = ["start", *argv]
     raise typer.Exit(code=_preview_main(argv))
 
