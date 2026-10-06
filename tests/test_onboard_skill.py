@@ -104,3 +104,68 @@ def test_token_users_never_paste_the_token():
 def test_walkthrough_cd_runs_in_a_subshell():
     walk = _read("_shared", "playwright-walkthrough.md")
     assert "(cd D && " in walk and "`cd D &&" not in walk
+
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def test_every_setup_answer_is_asked_even_when_detected():
+    flat = _flat(SETUP)
+    assert "Ask every answer, one question each" in flat
+    assert 'one "yes" confirms every' not in flat
+    assert "marked **found**" not in flat and "**needs you**" not in flat
+    skill = _flat(SKILL)
+    assert "Detection never counts as confirmation" in skill
+    assert "marked found or needs you" not in skill
+
+
+def test_question_rule_works_without_a_question_tool():
+    skill = _flat(SKILL)
+    assert "otherwise ask in chat and wait for an explicit answer" in skill
+    assert "AskUserQuestion" in skill  # Claude Code's own tool is still named
+    assert "Ask with `AskUserQuestion`, batched" not in skill
+
+
+def test_defaults_are_explained_in_bullets_before_the_keep_or_change_question():
+    flat = _flat(SETUP)
+    explain = flat.index("explain the defaults the wizard did not ask about")
+    ask = flat.index("then ask one question: keep them, or change some")
+    assert explain < ask
+    for default in ("**Warehouse**", "**CI role and viewer role**", "**App database and schema**"):
+        assert default in SETUP, default
+
+
+def test_admin_script_is_explained_before_who_runs_it_is_asked():
+    section = SETUP.split("## 2d ·")[1].split("## 2e ·")[0]
+    flat = _flat(section)
+    explain = flat.index("Explain, then ask")
+    ask = flat.index("Has your Snowflake admin run the StreamSnow setup script")
+    assert explain < ask
+    for obj in ("**Warehouse**", "**CI role**", "**Viewer role**", "**CI service user**"):
+        assert obj in section, obj
+    assert "do not link it" not in flat and "do not restate it" not in flat
+
+
+def test_claude_adds_no_commentary_about_the_admin_file():
+    section = _flat(SETUP.split("## 2d ·")[1].split("## 2e ·")[0])
+    assert "do not open or quote the admin file" in section
+    assert "do not add your own warnings about its contents" in section
+    assert "CREATE OR REPLACE" not in SETUP
+
+
+def test_docs_do_not_promise_bulk_confirmation():
+    for path in (REPO_ROOT / "README.md", REPO_ROOT / "docs" / "getting-started.md"):
+        text = _flat(path.read_text(encoding="utf-8"))
+        assert "ask me only what you could not settle" not in text, path.name
+        assert "Clickable choices for what it could not" not in text, path.name
+        assert "pre-answers" not in text, path.name
+
+
+def test_onboard_asks_which_roles_get_the_viewer_role():
+    section = _flat(SETUP.split("## 2d ·")[1].split("## 2e ·")[0])
+    assert "CURRENT_AVAILABLE_ROLES()" in section
+    assert "--viewer-role <ROLE>" in section
+    ask = section.index("Which of your roles get access")
+    admin_file = section.index("**The admin file.**")
+    assert ask < admin_file  # asked before the script is written, so it carries the grants

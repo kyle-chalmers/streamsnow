@@ -10,7 +10,7 @@ over it, never demand a rewrite.**
 - **App layout:** find the app directories and how they're organized (one app per dir? a flat
   repo-is-the-app?). Infer the slug convention from directory names.
 - **Tools in use:** CI configs, deploy scripts, `snow` connections, existing secrets examples —
-  these pre-answer most of the `streamsnow configure` questions.
+  these supply the recommended answers to most of the `streamsnow configure` questions.
 - **Custom commands/skills:** list everything in `.claude/commands/`, `.claude/skills/` and
   `.agents/skills/` (except StreamSnow's own copies, listed in `.agents/skills/.streamsnow-skills.json`) and
   classify each against the plugin's skills: **shadows** (does what a plugin skill does), **extends**
@@ -20,9 +20,11 @@ over it, never demand a rewrite.**
 
 ## 2 · Configure from observed reality
 
-Run `streamsnow configure` with the inventory pre-answering its ≤5 questions (account and database
-names from existing deploy scripts/CI, runtime from how apps currently connect). Confirm inferences
-with the user in one round rather than re-asking what the repo already shows.
+Run `streamsnow configure` with the inventory supplying the recommended answer to each of its ≤5
+questions (account and database names from existing deploy scripts/CI, runtime from how apps
+currently connect). Each answer is still explained and asked under the question rule in
+[SKILL.md](SKILL.md) Stage 2: an inference from the repo is the recommended option, never a
+confirmation.
 
 ## 3 · Non-destructive scaffold
 
