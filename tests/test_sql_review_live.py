@@ -227,6 +227,17 @@ def test_run_reports_aggregates_with_stable_ids(repo: Path, capsys: pytest.Captu
     assert "USE_CACHED_RESULT = FALSE" in fake.calls[1][1]  # a cached rerun reads as instant
 
 
+def test_run_output_lists_every_file_it_wrote(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    assert _live(repo, FakeSnow(), "run") == 0
+    out = _out(capsys)
+    run_dir = _run_dir(repo)
+    assert out["files"] == [
+        (run_dir / "run-01.json").relative_to(repo).as_posix(),
+        (run_dir / "run-02.json").relative_to(repo).as_posix(),
+    ]
+    assert all((repo / f).is_file() for f in out["files"])
+
+
 def test_run_files_are_per_page_and_ignored_by_git(
     repo: Path, capsys: pytest.CaptureFixture
 ) -> None:
@@ -809,6 +820,43 @@ def test_a_role_the_user_does_not_hold_is_exit_2(repo: Path) -> None:
     with pytest.raises(live.ToolError, match="pass --role"):
         _live(repo, fake, "run")
     assert len(fake.calls) == 2  # the batch, then the session alone; never every section
+
+
+class WarehouseInvisible(FakeSnow):
+    """The session's ``USE WAREHOUSE`` fails the way a role that cannot see it does."""
+
+    def __call__(self, argv: list[str], stdin: str, timeout: float) -> tuple[int, str, str]:
+        self.calls.append((argv, stdin))
+        if "USE WAREHOUSE STREAMSNOW_WH" in stdin:
+            return (
+                1,
+                "",
+                "╭─ Error ─╮\n│ Error 002043 (02000): 01c00000-0000-0000-0000-000000000001: "
+                "SQL compilation error: Object does not exist, or operation cannot be "
+                "performed. │\n╰─╯",
+            )
+        return super().__call__(argv, stdin, timeout)
+
+
+@pytest.mark.parametrize("verb", ["probe", "run"])
+def test_a_session_setup_failure_names_the_statements_and_the_flags(repo: Path, verb: str) -> None:
+    fake = WarehouseInvisible()
+    with pytest.raises(live.ToolError) as err:
+        _live(repo, fake, verb, "--role", "ACME_AGENT")
+    msg = str(err.value)
+    assert "session setup failed" in msg
+    assert "USE ROLE ACME_AGENT" in msg and "USE WAREHOUSE STREAMSNOW_WH" in msg
+    assert "--role" in msg and "--warehouse" in msg
+    assert "002043" in msg  # the Snowflake detail is kept
+    assert len(fake.calls) == 2  # the batch, then the session alone; never every section
+
+
+def test_passing_a_visible_warehouse_clears_the_session_failure(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    fake = WarehouseInvisible()
+    assert _live(repo, fake, "run", "--warehouse", "ACME_AGENT_WH") == 0
+    assert "USE WAREHOUSE ACME_AGENT_WH" in fake.calls[0][1]
 
 
 class NoHistory(FakeSnow):

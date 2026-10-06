@@ -222,7 +222,10 @@ def run_batch(
         if session:
             # The session prefix (role, warehouse) runs before every item: if it
             # alone fails, every item would, so this too is "nothing ran".
-            out["__session"] = ex.run(session[0], result_cache=result_cache)
+            try:
+                out["__session"] = ex.run(session[0], result_cache=result_cache)
+            except sx.SnowError as setup:
+                raise sx.SnowError(_session_setup_message(ex, setup)) from setup
         if len(items) == 1:
             return {items[0][0]: exc}
         for key, stmts in items:
@@ -239,6 +242,22 @@ def run_batch(
         out[key] = results[i : i + len(stmts)]
         i += len(stmts)
     return out
+
+
+def _session_setup_message(ex: sx.SnowExec, exc: sx.SnowError) -> str:
+    """Name the session statements that just failed, and the flags that change them.
+
+    Snowflake reports a ``USE WAREHOUSE`` the role cannot see as a bare
+    ``002043 Object does not exist``, which reads like a problem with the
+    reviewed SQL. The statements come from validated config or flag values, so
+    quoting them is safe.
+    """
+    s = ex.session
+    stmts = [f"USE ROLE {s.role}"] if s.role else []
+    if s.warehouse:
+        stmts.append(f"USE WAREHOUSE {s.warehouse}")
+    ran = "; ".join(stmts) or "the connection's default role and warehouse"
+    return f"session setup failed ({ran}): {exc}; pass --role / --warehouse to change them"
 
 
 #: A Snowflake statement error carries its code and SQLSTATE: `002003 (42S02): ...`.
@@ -1022,6 +1041,7 @@ def cmd_run(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
         entry["slow"] = bool(ms is not None and ms > args.slow_s * 1000)
         by_page.setdefault(entry["page"], []).append(entry)
     all_results: list[dict] = []
+    files: list[str] = []
     for page, results in sorted(by_page.items()):
         data = {
             "verb": "run",
@@ -1031,7 +1051,9 @@ def cmd_run(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
             "results": results,
             "warnings": warnings,
         }
-        write_json(run_dir / f"run-{page}.json", data)
+        path = run_dir / f"run-{page}.json"
+        write_json(path, data)
+        files.append(path.relative_to(repo).as_posix())
         all_results += results
     print(
         json.dumps(
@@ -1041,6 +1063,7 @@ def cmd_run(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
                 "app": app.name,
                 "results": all_results,
                 "warnings": warnings,
+                "files": files,
             },
             indent=2,
         )
