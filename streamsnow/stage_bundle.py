@@ -87,7 +87,8 @@ def excluded_reason(rel: str, entries: list[str] | None) -> str | None:
     return None
 
 
-def _entries_for(app_dir: Path) -> list[str] | None:
+def app_artifact_entries(app_dir: Path) -> list[str] | None:
+    """The app's ``snowflake.yml`` artifacts entries, or None when it declares none."""
     try:
         manifest = yaml.safe_load((app_dir / "snowflake.yml").read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
@@ -106,7 +107,7 @@ def bundle_app(app_dir: Path, dest: Path) -> dict:
     ``{"path", "reason"}``. Paths are app-relative POSIX on every OS.
     """
     root = app_dir.resolve()
-    entries = _entries_for(app_dir)
+    entries = app_artifact_entries(app_dir)
     files: list[str] = []
     excluded: list[dict] = []
 

@@ -38,6 +38,12 @@ On merge to `main`, the workflow:
    reason, and the summary line counts it apart from the passes
    (`PASS: store-sales (3 passed; 1 skipped: service-logs)`). Skips never fail
    the run; the container service-log scan is best-effort and often skips.
+   With the **stage-copy** source, `verify-deploy` also lists the staged files
+   for the commit (`stage-files`): it warns when an `artifacts:` entry has no
+   file on the stage, or when the stage holds a file the deploy bundle leaves
+   out (see [What the stage-copy upload ships](#what-the-stage-copy-upload-ships)).
+   It is warn-only: it prints `! stage-files (warning)` and counts
+   `1 warned: stage-files` in the summary, and the run still passes.
 
 The scaffolded checks workflow runs `validate-app` on every PR, but nothing
 wires it to the deploy job: `checks.yml` and `deploy.yml` are independent
@@ -59,6 +65,34 @@ Before a release or a deploy that changes an app's SQL, run `/sql-review <slug>`
 it checks the app's objects, grants and sections against live Snowflake and
 commits a review log under `sql_review/review_log/` for a person to sign off.
 It is recommended, never required: nothing in the deploy path waits on it.
+
+## What the stage-copy upload ships
+
+The stage-copy workflow does not upload the `apps/` tree as it sits in the
+repo. It first runs `streamsnow stage-bundle --out "$RUNNER_TEMP/ss-bundle"`,
+which copies each app into a bundle without the files the running app never
+reads, then uploads the bundle to `@<stage>/commits/<sha>/apps/`. The bundle
+leaves out:
+
+- root-level `*.md` files (`AGENTS.md`, `CLAUDE.md`, `REQUIREMENTS.md`,
+  `README.md`), unless an `artifacts:` entry in the app's `snowflake.yml`
+  declares one, as an app that renders its own `help.md` would;
+- `sql_review/`, including `review_log/`;
+- dot-directories other than `.streamlit`, and `__pycache__`;
+- everything in `.streamlit/` except `config.toml`, so a local `secrets.toml`
+  never ships;
+- symlinks that point outside the app.
+
+`streamsnow stage-bundle --out <empty dir>` prints each file it left out and
+why, so you can run it locally to see what a deploy will upload. A repo whose
+`deploy.yml` predates the bundle still uploads all of `apps/`; the
+`stage-files` warning in `verify-deploy` names the files that should not be
+there, and `streamsnow update --apply` re-renders the workflow. Files already
+staged under earlier commits stay there until you clean the stage.
+
+The **git-repository** source cannot use the bundle: Snowflake builds each app
+from the committed repo folder, so committed docs are part of what it reads.
+See [Switching to the Git repository deploy source](git-repository.md#should-you-switch).
 
 ## Retiring or renaming an app
 
@@ -141,7 +175,8 @@ streamsnow deploy-sql <slug> --sha <sha>     # pin a specific commit (stage-copy
 ```
 
 `streamsnow stage-path` prints the stage base path (`@DB.SCHEMA.STAGE`) the
-stage-copy upload targets.
+stage-copy upload targets, and `streamsnow stage-bundle --out <dir>` builds the
+per-app bundle that upload copies.
 
 ## Runtime notes
 

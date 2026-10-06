@@ -52,6 +52,7 @@ from .config import (
     RUNTIMES,
     Config,
     ConfigError,
+    find_config,
     load_config,
     normalize_account,
     validate_github_origin,
@@ -1284,8 +1285,20 @@ def verify_deploy_cmd(
         _err(str(exc))
         raise typer.Exit(2) from exc
     run_query = partial(run_query_snow, temporary_connection=temporary_connection)
+    # The stage-files check compares the stage with the local apps/<slug>, found
+    # next to the config. No such directory: the check does not run.
+    cfg_path = Path(config) if config else find_config()
+    app_dir = cfg_path.resolve().parent / "apps" / slug if cfg_path else None
     try:
-        result = verify_app(cfg, slug, sha=sha, run_query=run_query, attempts=attempts, delay=delay)
+        result = verify_app(
+            cfg,
+            slug,
+            sha=sha,
+            run_query=run_query,
+            attempts=attempts,
+            delay=delay,
+            app_dir=app_dir if app_dir is not None and app_dir.is_dir() else None,
+        )
     except ValueError as exc:  # invalid slug
         _err(str(exc))
         raise typer.Exit(2) from exc
@@ -1294,10 +1307,15 @@ def verify_deploy_cmd(
     else:
         # A check that could not run gets its own mark and word: a check mark
         # beside "skipped" read as a pass in CI logs.
+        # A failed warn-level check gets "!" and "(warning)": it does not fail the run.
         marks = {"pass": "✓", "fail": "✗", "skipped": "○"}
         for c in result["checks"]:
-            label = f"{c['name']} (skipped)" if c["status"] == "skipped" else c["name"]
-            print(f"  {marks[c['status']]} {label}")
+            mark, label = marks[c["status"]], c["name"]
+            if c["status"] == "skipped":
+                label = f"{label} (skipped)"
+            elif c["status"] == "fail" and c.get("level") == "warn":
+                mark, label = "!", f"{label} (warning)"
+            print(f"  {mark} {label}")
             for f in c["findings"]:
                 print(f"      - {f}")
         print(f"\n{summary_line(result)}")

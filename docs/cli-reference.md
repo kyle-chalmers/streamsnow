@@ -181,9 +181,10 @@ JSON for the skill to act on.
 |---|---|
 | `streamsnow deploy-setup` | Prints the one-time Snowflake DDL for your deploy source; review it, then run it. Never runs anything itself. |
 | `streamsnow deploy-sql <slug>` | Prints the `CREATE OR REPLACE STREAMLIT` SQL for one app (`--sha`, `--config`). The deploy job runs it. |
-| `streamsnow verify-deploy <slug>` | Checks that a deployed app actually serves: the object exists, a live version is set, the version source matches `--sha`, and container logs show no crash loop. A check that cannot run is reported as skipped, never as a pass. |
+| `streamsnow verify-deploy <slug>` | Checks that a deployed app actually serves: the object exists, a live version is set, the version source matches `--sha`, and container logs show no crash loop. A check that cannot run is reported as skipped, never as a pass. With stage-copy and `--sha`, the warn-only `stage-files` check also compares the staged files with the app's artifacts and the bundle rules. |
 | `streamsnow config-get <key>` | Prints one config value by dotted path, e.g. `deploy.git_repository_fqn`. |
 | `streamsnow stage-path` | Prints the stage-copy base path, `@DB.SCHEMA.STAGE`. |
+| `streamsnow stage-bundle --out <dir> [<slug>...]` | Copies each app (default: every app under `apps/`) into `<dir>/<slug>/` without root-level docs an `artifacts:` entry does not declare, `sql_review/`, tooling dot-directories, anything in `.streamlit/` but `config.toml`, and symlinks that leave the app. The stage-copy deploy job uploads this bundle. |
 
 `deploy-setup` flags: `--admin` (the full bootstrap a first deploy needs, in
 `USE ROLE` sections, to hand a Snowflake admin), `--public-key-file <pem>` (with
@@ -197,6 +198,15 @@ database), `--source stage-copy|git-repository` (preview the other source),
 `verify-deploy` flags: `--sha`, `--attempts` (default 3) and `--delay` (seconds,
 default 20) to absorb a cold start, `--temporary-connection` (connect from
 `SNOWFLAKE_*` environment variables, as CI does), `--config`, `--format md|json`.
+
+`verify-deploy` runs `stage-files` only for a stage-copy source, a full commit
+`--sha` (40 or more characters), and an `apps/<slug>/` directory next to the config. Each check in the JSON
+output carries `level`: a failed `block` check fails the run, a failed `warn` check
+(`stage-files`) prints `!` and `(warning)` and the run still exits 0.
+
+`stage-bundle` flags: `--out <dir>` (required; must be empty or missing, and outside
+`apps/`), `--dir` (repo root, default `.`), `--format md|json`. It exits 2 on an
+invalid slug, an app directory that does not exist, or an unusable `--out`.
 
 `verify-deploy` checks only the app you name. The deploy workflow runs it for every
 directory under `apps/`, so an app whose directory was renamed or removed is never

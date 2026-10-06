@@ -208,8 +208,10 @@ def _run_query_factory(
     describe_rows: list[dict] | None = None,
     services: list[dict] | None = None,
     seen: list[str] | None = None,
+    listing: list[dict] | None = None,
 ):
-    """Return a run_query stub: SHOW STREAMLITS per attempt, then DESCRIBE."""
+    """Return a run_query stub: SHOW STREAMLITS per attempt, then DESCRIBE.
+    ``listing`` answers the stage-files check's LIST."""
     state = {"i": 0}
 
     def run_query(sql: str) -> list[dict]:
@@ -226,6 +228,8 @@ def _run_query_factory(
             return services or []
         if "GET_SERVICE_LOGS" in s:
             return [{"LOG": "You can now view your Streamlit app\n"}]
+        if s.startswith("LIST ") and listing is not None:
+            return listing
         raise AssertionError(f"unexpected query: {sql}")
 
     return run_query
@@ -472,6 +476,174 @@ def test_verify_app_service_log_fetch_failure_is_skipped_not_failed():
     assert result["ok"], result["checks"]
     logs = _by_name(result)["service-logs"]
     assert logs["status"] == "skipped" and logs["level"] == "warn"
+
+
+# ---- stage-files (warn-only) -------------------------------------------------
+# The stage-copy upload used to ship each app's AGENTS.md, REQUIREMENTS.md and
+# sql_review/ to the stage (#22). stage-files lists what the stage holds for
+# this commit and warns, never fails, so a repo still on the old workflow keeps
+# passing verify-deploy.
+
+
+def _scaffold_my_app(tmp_path: Path) -> Path:
+    from streamsnow.scaffolder import scaffold
+
+    scaffold(_cfg(), tmp_path, "my-app")
+    return tmp_path / "apps" / "my-app"
+
+
+def _listing(*rels: str, sha: str = SHA) -> list[dict]:
+    """LIST rows as Snowflake returns them: the stage name, lowercased, then the path."""
+    base = f"streamsnow_code_stage/commits/{sha}/apps/my-app/"
+    return [{"name": base + rel, "size": 10, "md5": "0" * 32} for rel in rels]
+
+
+def _bundle_listing(app_dir: Path, tmp_path: Path) -> list[dict]:
+    from streamsnow.stage_bundle import build_bundle
+
+    result = build_bundle(app_dir.parent.parent, tmp_path / "bundle", ["my-app"])
+    return _listing(*result["apps"][0]["files"])
+
+
+def _verify_with_stage(cfg, app_dir, listing, seen=None):
+    return verify_app(
+        cfg,
+        "my-app",
+        sha=SHA,
+        run_query=_run_query_factory([[_show_row()]], listing=listing, seen=seen),
+        sleep=lambda _: None,
+        app_dir=app_dir,
+    )
+
+
+def test_stage_files_passes_on_a_bundle_upload(tmp_path):
+    app_dir = _scaffold_my_app(tmp_path)
+    seen: list[str] = []
+    result = _verify_with_stage(_cfg(), app_dir, _bundle_listing(app_dir, tmp_path), seen)
+    check = _by_name(result)["stage-files"]
+    assert check["status"] == "pass", check
+    assert check["level"] == "warn"
+    assert result["ok"]
+    assert f"LIST '{STAGE}/commits/{SHA}/apps/my-app/'" in seen
+
+
+def test_stage_files_warns_when_internal_docs_are_on_the_stage(tmp_path):
+    app_dir = _scaffold_my_app(tmp_path)
+    old_upload = _bundle_listing(app_dir, tmp_path) + _listing("AGENTS.md", "sql_review/index.yaml")
+    result = _verify_with_stage(_cfg(), app_dir, old_upload)
+    check = _by_name(result)["stage-files"]
+    assert check["status"] == "fail" and check["level"] == "warn"
+    assert result["ok"], "a warn-level check must not fail verify-deploy"
+    text = " ".join(check["findings"])
+    assert "AGENTS.md" in text and "sql_review/index.yaml" in text
+    assert "streamlit_app.py" not in text
+
+
+def test_stage_files_warns_on_a_missing_artifact_but_does_not_fail(tmp_path):
+    app_dir = _scaffold_my_app(tmp_path)
+    listing = [r for r in _bundle_listing(app_dir, tmp_path) if "branding.py" not in r["name"]]
+    result = _verify_with_stage(_cfg(), app_dir, listing)
+    check = _by_name(result)["stage-files"]
+    assert check["status"] == "fail" and check["level"] == "warn"
+    assert any("branding.py" in f for f in check["findings"])
+    assert result["ok"]
+    assert summary_line(result) == (
+        "PASS: my-app (3 passed; 1 warned: stage-files; 1 skipped: service-logs)"
+    )
+
+
+def test_stage_files_is_skipped_for_a_git_repository_source(tmp_path):
+    app_dir = _scaffold_my_app(tmp_path)
+    result = verify_app(
+        Config.from_dict(_git_data()),
+        "my-app",
+        sha=SHA,
+        run_query=_run_query_factory([[_show_row()]], describe_rows=[_git_desc(SHA)]),
+        attempts=1,
+        sleep=lambda _: None,
+        app_dir=app_dir,
+    )
+    check = _by_name(result)["stage-files"]
+    assert check["status"] == "skipped"
+    assert "git-repository" in check["findings"][0]
+    assert result["ok"]
+
+
+def test_stage_files_list_error_is_skipped_not_failed(tmp_path):
+    app_dir = _scaffold_my_app(tmp_path)
+    healthy = _run_query_factory([[_show_row()]])
+
+    def run_query(sql: str) -> list[dict]:
+        if sql.upper().startswith("LIST "):
+            raise RuntimeError("no READ on the stage")
+        return healthy(sql)
+
+    result = verify_app(
+        _cfg(), "my-app", sha=SHA, run_query=run_query, sleep=lambda _: None, app_dir=app_dir
+    )
+    check = _by_name(result)["stage-files"]
+    assert check["status"] == "skipped" and "no READ on the stage" in check["findings"][0]
+    assert result["ok"]
+
+
+def test_stage_files_needs_the_full_sha(tmp_path):
+    app_dir = _scaffold_my_app(tmp_path)
+    result = verify_app(
+        _cfg(),
+        "my-app",
+        sha=SHA[:7],
+        run_query=_run_query_factory([[_show_row()]]),
+        sleep=lambda _: None,
+        app_dir=app_dir,
+    )
+    assert _by_name(result)["stage-files"]["status"] == "skipped"
+
+
+def test_stage_files_does_not_run_without_an_app_dir_or_sha(tmp_path):
+    app_dir = _scaffold_my_app(tmp_path)
+    no_dir = verify_app(
+        _cfg(),
+        "my-app",
+        sha=SHA,
+        run_query=_run_query_factory([[_show_row()]]),
+        sleep=lambda _: None,
+    )
+    no_sha = verify_app(
+        _cfg(),
+        "my-app",
+        run_query=_run_query_factory([[_show_row()]]),
+        sleep=lambda _: None,
+        app_dir=app_dir,
+    )
+    assert "stage-files" not in _by_name(no_dir)
+    assert "stage-files" not in _by_name(no_sha)
+
+
+def test_verify_deploy_cli_finds_the_app_dir_next_to_the_config(tmp_path, monkeypatch):
+    app_dir = _scaffold_my_app(tmp_path)
+    (app_dir / "REQUIREMENTS.md").write_text("# Requirements\n", encoding="utf-8")
+    rels = [p.relative_to(app_dir).as_posix() for p in app_dir.rglob("*") if p.is_file()]
+    calls: list[list[str]] = []
+    fake = _fake_snow(calls)
+
+    def run(argv, **kwargs):
+        if argv[3].upper().startswith("LIST "):
+            rows = _listing(*rels)
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(rows), stderr="")
+        return fake(argv, **kwargs)
+
+    monkeypatch.setattr(verify.subprocess, "run", run)
+    cfg_path = tmp_path / "streamsnow.config.yaml"
+    cfg_path.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+    argv = ["verify-deploy", "my-app", "--attempts", "1", "--sha", SHA]
+    explicit = CliRunner().invoke(app, [*argv, "--config", str(cfg_path)])
+    monkeypatch.chdir(app_dir / "pages")  # as CI runs it: config discovered from the cwd
+    discovered = CliRunner().invoke(app, argv)
+    for result in (explicit, discovered):
+        assert result.exit_code == 0, result.output
+        assert "  ! stage-files (warning)" in result.output
+        assert "REQUIREMENTS.md" in result.output
+        assert "1 warned: stage-files" in result.output
 
 
 # ---- summary line ------------------------------------------------------------
