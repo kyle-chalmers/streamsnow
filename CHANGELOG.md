@@ -25,6 +25,14 @@ entry.
   confirmation or adds its own commentary about the admin file. Other agents ask in chat when they
   have no question tool.
 
+### Fixed
+
+- **A local `uv build` no longer packs per-machine files into the sdist.** Hatchling sweeps in
+  untracked files, so `.claude/settings.local.json` (an absolute home path) could ship from a
+  developer checkout. It, `.claude/*.local.*`, `.streamsnow/export-denylist.txt` and `.internal/`
+  are now excluded from the sdist, and the settings file is gitignored. PyPI releases were
+  unaffected: they build from a fresh checkout.
+
 ## [0.9.1] - 2026-10-05
 
 ### Added
