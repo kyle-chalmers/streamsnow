@@ -145,6 +145,15 @@
       ],
       "arguments": []
     },
+    "ci-key verify": {
+      "options": [
+        "--config",
+        "--dir",
+        "--format",
+        "--object"
+      ],
+      "arguments": []
+    },
     "config-get": {
       "options": [
         "--config"
