@@ -215,3 +215,22 @@ def test_delete_branch_on_merge_is_read_then_offered_never_assumed():
     assert "only a repo admin" in section  # no admin rights: say so and move on
     stage4 = _flat(SKILL.split("## Stage 4")[1].split("## Done when")[0])
     assert "deletes merged branches" in stage4 and "setup.md §2e" in stage4
+
+
+def test_ci_key_verify_is_offered_before_the_push_turns_the_deploy_on():
+    """`ci-key push` sets SNOWFLAKE_ACCOUNT, which switches the deploy job on. A bad
+    CI identity found by `verify` after that has already cost a failed deploy."""
+    raw = SETUP.split("## 2e ·")[1].split("## 3 ·")[0]
+    section = _flat(raw)
+    verify = section.index("**Prove what CI will see")
+    push = section.index("**Deploy secrets on GitHub.**")
+    branches = section.index("**Delete merged branches on GitHub.**")
+    assert verify < push < branches
+    assert section.index("streamsnow ci-key verify --object") < section.index(
+        "Otherwise run `streamsnow ci-key push`"
+    )
+    assert "before `streamsnow ci-key push`" in section
+    assert "On a no,\nskip" not in raw  # one sentence, not split across a stray break
+    assert "On a no, skip it" in section
+    stage4 = _flat(SKILL.split("## Stage 4")[1].split("## Done when")[0])
+    assert stage4.index("ci-key verify") < stage4.index("ci-key push")

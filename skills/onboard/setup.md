@@ -472,23 +472,10 @@ everyone who opens this repo is offered the same tools automatically." Then run
 `claude plugin install --scope project streamsnow@streamsnow`, and offer to commit
 `.claude/settings.json`.
 
-**Deploy secrets on GitHub.** Doctor's `ci-secrets` row lists which are missing. Explain: "The
-deploy workflow signs in to Snowflake with these GitHub secrets; until they exist, merging
-deploys nothing." Skip this when the row says "not checked" because the user cannot list secrets
-(only someone with access to the repo's settings can set them), when there is no GitHub remote
-yet, or while §2d is not confirmed. Otherwise run `streamsnow ci-key push`. If it says the key
-files are missing (a teammate's machine, or the admin registered someone else's key), never run
-`ci-key create` on your own: a new key would not match the public key Snowflake holds, and every
-deploy would fail. Either push from the machine that made the key, or do §2d steps 3 to 5 so the
-admin registers the new `.pub`. When it runs, it sets
-`SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY_RAW`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE` and then
-`SNOWFLAKE_ACCOUNT`, each straight from its file to `gh` on stdin, and prints only names.
-Setting `SNOWFLAKE_ACCOUNT` switches the deploy job on, so tell the user the next merge to
-`main` will deploy. If it stops partway, it names what failed and leaves `SNOWFLAKE_ACCOUNT`
-unset; fix the cause and run it again.
-
-**Prove what CI will see (optional, ask first).** Once §2d is confirmed and the key files are
-on this machine, `streamsnow ci-key verify` signs in as the CI service user the way the deploy
+**Prove what CI will see (optional, ask first).** Offer this before `streamsnow ci-key push`
+below: the push switches the deploy job on, and this catches a bad CI identity before the first
+merge deploys. Skip it while §2d is not confirmed or the key files from `ci-key create` are not
+on this machine. `streamsnow ci-key verify` signs in as the CI service user the way the deploy
 job does and runs read-only checks: the CI role, the warehouse, the app schema, the grants the
 admin script gives the CI role, and one `LIMIT 0` read, each with secondary roles off so it
 proves the CI role alone (deployed apps query with that role's owner's rights). Before running
@@ -507,8 +494,22 @@ failure usually means the admin registered a different public key, so compare th
 from `ci-key create` with `RSA_PUBLIC_KEY_FP` in `DESC USER`. Exit 2 is a tool error with no
 results printed: a missing or unreadable secret file, a file that differs from the config, a
 bad config or `--object`, no `snow`, or a `snow` call that could not start, timed out or
-printed unreadable output. On a no,
-skip it: the first deploy checks the same things.
+printed unreadable output. On a no, skip it: the first deploy checks the same things.
+
+**Deploy secrets on GitHub.** Doctor's `ci-secrets` row lists which are missing. Explain: "The
+deploy workflow signs in to Snowflake with these GitHub secrets; until they exist, merging
+deploys nothing." Skip this when the row says "not checked" because the user cannot list secrets
+(only someone with access to the repo's settings can set them), when there is no GitHub remote
+yet, or while §2d is not confirmed. Otherwise run `streamsnow ci-key push`. If it says the key
+files are missing (a teammate's machine, or the admin registered someone else's key), never run
+`ci-key create` on your own: a new key would not match the public key Snowflake holds, and every
+deploy would fail. Either push from the machine that made the key, or do §2d steps 3 to 5 so the
+admin registers the new `.pub`. When it runs, it sets
+`SNOWFLAKE_USER`, `SNOWFLAKE_PRIVATE_KEY_RAW`, `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE` and then
+`SNOWFLAKE_ACCOUNT`, each straight from its file to `gh` on stdin, and prints only names.
+Setting `SNOWFLAKE_ACCOUNT` switches the deploy job on, so tell the user the next merge to
+`main` will deploy. If it stops partway, it names what failed and leaves `SNOWFLAKE_ACCOUNT`
+unset; fix the cause and run it again.
 
 **Delete merged branches on GitHub.** Skip this when there is no GitHub remote yet or `gh` is
 not signed in; it does not wait on §2d. Find the repo with
