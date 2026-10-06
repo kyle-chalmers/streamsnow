@@ -63,6 +63,12 @@ jobs:
       # an unmatched apps/*/ loops once over the literal pattern, so the deploy
       # and verify steps collect app directories with nullglob and stop cleanly
       # when there are none.
+      #
+      # The upload is a per-app bundle from `streamsnow stage-bundle`, not the
+      # whole apps/ tree: it leaves out each app's AGENTS.md, REQUIREMENTS.md and
+      # other root-level docs, sql_review/ and tooling folders, which the running
+      # app never reads. `--recursive` skips dot-directories, so the loop after
+      # the upload copies each bundled .streamlit/config.toml on its own.
       - name: Deploy changed apps (stage-copy)
         if: steps.gate.outputs.go == 'true'
         run: |
@@ -75,9 +81,12 @@ jobs:
           fi
           STAGE="$(streamsnow stage-path)"
           streamsnow deploy-setup > /tmp/ss-setup.sql && snow sql --temporary-connection -f /tmp/ss-setup.sql
-          snow stage copy --temporary-connection "apps/" "$STAGE/commits/$GITHUB_SHA/apps/" --recursive --overwrite
+          BUNDLE="${RUNNER_TEMP:-/tmp}/ss-bundle"
+          rm -rf "$BUNDLE"
+          streamsnow stage-bundle --out "$BUNDLE"
+          snow stage copy --temporary-connection "$BUNDLE/" "$STAGE/commits/$GITHUB_SHA/apps/" --recursive --overwrite
           for d in "${apps[@]}"; do
-            cfg="${d}.streamlit/config.toml"
+            cfg="$BUNDLE/$(basename "$d")/.streamlit/config.toml"
             [ -f "$cfg" ] && snow stage copy --temporary-connection "$cfg" "$STAGE/commits/$GITHUB_SHA/apps/$(basename "$d")/.streamlit/" --overwrite
           done
           for d in "${apps[@]}"; do

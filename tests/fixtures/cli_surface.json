@@ -234,6 +234,16 @@
         "function"
       ]
     },
+    "stage-bundle": {
+      "options": [
+        "--dir",
+        "--format",
+        "--out"
+      ],
+      "arguments": [
+        "slugs"
+      ]
+    },
     "stage-path": {
       "options": [
         "--config"

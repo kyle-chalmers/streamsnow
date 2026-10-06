@@ -416,6 +416,9 @@ def _run_with_stub_snow(
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "SNOW_LOG": str(log),
         "GITHUB_SHA": "0123456789abcdef0123456789abcdef01234567",
+        # The stage-copy step builds its bundle under $RUNNER_TEMP (GitHub sets it
+        # per job); keep each test's bundle in its own tmp dir.
+        "RUNNER_TEMP": str(bin_dir.parent),
     }
     proc = subprocess.run(
         ["bash", "-e", "-c", script],
@@ -471,8 +474,15 @@ def test_stage_copy_deploy_step_still_copies_when_an_app_exists(tmp_path):
     )
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
     copies = [c for c in calls.splitlines() if c.startswith("stage copy")]
-    assert any(" apps/ " in f" {c} " for c in copies), calls
-    assert any("apps/acme-sales/.streamlit/config.toml" in c for c in copies), calls
+    bundle = tmp_path / "ss-bundle"
+    # The upload is the per-app bundle, not the whole apps/ tree (#22).
+    assert not any(" apps/ " in f" {c} " for c in copies), calls
+    assert any(f" {bundle.as_posix()}/ " in f" {c} " and "--recursive" in c for c in copies), calls
+    assert any("ss-bundle/acme-sales/.streamlit/config.toml" in c for c in copies), calls
+    # The bundle holds the app, never its agent docs or review trail.
+    assert (bundle / "acme-sales" / "streamlit_app.py").is_file()
+    assert not (bundle / "acme-sales" / "AGENTS.md").exists()
+    assert not (bundle / "acme-sales" / "sql_review").exists()
     assert any(c.startswith("sql") and "/tmp/ss-acme-sales.sql" in c for c in calls.splitlines())
 
 

@@ -22,6 +22,7 @@ streamsnow ci-key create  Make the CI user's key pair + the deploy secret files
 streamsnow ci-key push    Set the five deploy secrets on GitHub from those files
 streamsnow config-get     Print one config value by dotted path (deploy job)
 streamsnow stage-path     Print the stage-copy base path @DB.SCHEMA.STAGE (deploy job)
+streamsnow stage-bundle   Copy each app minus internal docs for the stage-copy upload (deploy job)
 streamsnow update         Re-render the governance files (AGENTS.md, CLAUDE.md, pre-commit,
                           CI, deploy workflow) from the config; checks run from the package
 
@@ -1194,6 +1195,29 @@ def stage_path_cmd(
         _err(str(exc))
         raise typer.Exit(2) from exc
     print(stage_path(cfg))
+
+
+@app.command(name="stage-bundle")
+def stage_bundle_cmd(
+    slugs: list[str] = typer.Argument(None, help="App slugs to bundle (default: every app)."),
+    out: Path = typer.Option(..., "--out", help="Empty directory to write <slug>/ folders into."),
+    directory: Path = typer.Option(Path("."), "--dir", help="Repo root."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Copy each app minus internal docs into --out for the stage-copy upload (deploy job).
+
+    Leaves out root-level *.md files an artifacts entry does not declare, sql_review/,
+    tooling dot-directories, everything in .streamlit/ except config.toml, and symlinks
+    that escape the app. Exit 2 on a bad slug or an --out that is not empty or sits
+    inside apps/."""
+    from .stage_bundle import BundleError, build_bundle, render_md
+
+    try:
+        result = build_bundle(directory, out, list(slugs or []))
+    except BundleError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    print(json.dumps(result, indent=2) if output_format == "json" else render_md(result))
 
 
 @app.command(name="deploy-sql")
