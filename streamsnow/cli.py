@@ -1471,6 +1471,7 @@ _PREVIEW_VERBS = {"start", "status", "stop", "logs"}
 
 
 @app.command(
+    add_help_option=False,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def preview(ctx: typer.Context) -> None:
@@ -1494,6 +1495,7 @@ def preview(ctx: typer.Context) -> None:
 
 @app.command(
     name="review-gate",
+    add_help_option=False,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def review_gate_cmd(ctx: typer.Context) -> None:
@@ -1503,6 +1505,7 @@ def review_gate_cmd(ctx: typer.Context) -> None:
 
 @app.command(
     name="sql-review",
+    add_help_option=False,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def sql_review_cmd(ctx: typer.Context) -> None:
@@ -1519,6 +1522,7 @@ def sql_review_cmd(ctx: typer.Context) -> None:
 
 @app.command(
     name="review-loop",
+    add_help_option=False,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def review_loop_cmd(ctx: typer.Context) -> None:
@@ -1528,6 +1532,7 @@ def review_loop_cmd(ctx: typer.Context) -> None:
 
 
 @app.command(
+    add_help_option=False,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def migrate(ctx: typer.Context) -> None:
