@@ -462,7 +462,11 @@ def generate_admin_sql(
         f"-- Data the apps read: governance database {gov.database}, allowed schemas only",
         f"-- ({', '.join(gov.schema_allow)}). Only the CI role gets it: deployed apps run with",
         "-- their owner's rights, so viewers need USAGE on the app, not SELECT on the data.",
-        "-- A schema-level future grant overrides any database-level one for that type.",
+        "-- Schema-level future grants replace database-level ones of the same object type, for",
+        "-- every role: check SHOW FUTURE GRANTS IN DATABASE <db> first, and repeat at schema",
+        "-- level any database-level future grant another role relies on.",
+        "-- If Snowflake rejects a GRANT for an object type this account lacks, delete that line",
+        "-- and run the script again: every statement is safe to re-run.",
     ]
 
     def _data_grants(role: str) -> list[str]:

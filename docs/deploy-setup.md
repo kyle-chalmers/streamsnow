@@ -63,7 +63,10 @@ Two things to check before running it:
   tables included), views, dynamic tables, materialized views, semantic views,
   Iceberg tables and external tables. Each type needs its own grant; a grant on
   tables does not reach dynamic tables. Event tables, streams, functions and
-  procedures are left out on purpose. A **shared** database (a Marketplace or
+  procedures are left out on purpose. Schema-level future grants replace
+  database-level future grants of the same type for every role, so check
+  `SHOW FUTURE GRANTS IN DATABASE <db>` before applying and repeat at schema
+  level any that another role relies on. A **shared** database (a Marketplace or
   data-share import such as `SNOWFLAKE_SAMPLE_DATA`) does not take those
   grants; it needs `GRANT IMPORTED PRIVILEGES ON DATABASE ...` as
   `ACCOUNTADMIN`, which covers the whole share. The script emits that form
