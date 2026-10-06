@@ -18,9 +18,11 @@ Most entries below come from a first end-to-end run of the plugin (onboard throu
   behind to be reused. Without admin rights on the repo it says so and moves on.
 - **`streamsnow stage-bundle --out DIR [SLUG...]`** copies each app without the files a running
   app never reads: root-level docs (AGENTS.md, REQUIREMENTS.md, CLAUDE.md, README), `sql_review/`
-  and its review logs, tooling folders, `.env` files, any `secrets.toml`, `.streamlit/` files
-  other than `config.toml`, and symlinks that leave the app. A link is judged by its target too,
-  so a link to `.env` stays out. It lists every file it left out and why.
+  and its review logs, tooling folders, `.env` files and any `secrets.toml` (in any letter case),
+  and `.streamlit/` files other than `config.toml`. A symlink that resolves inside the repo ships,
+  so a shared helper or `.streamlit/config.toml` still deploys, and is judged by its target too,
+  so a link to `.env` stays out. A symlink that resolves outside the repo fails the bundle with
+  exit 2, naming the link, before anything is written. It lists every file it left out and why.
 - **`verify-deploy` gains a warn-only `stage-files` check** for stage-copy deploys. It compares
   the commit's staged files with what `stage-bundle` would ship and warns about a missing file or
   an excluded one that reached the stage. A warn-level check prints `!` and never fails the run.
@@ -62,7 +64,12 @@ Most entries below come from a first end-to-end run of the plugin (onboard throu
 - **`/ship-app` puts "Open critical: N" and the commits made since the review in the PR body**,
   hands the user `gh pr checks --watch` when the host forbids polling CI, and gains an After merge
   cleanup that deletes the spent branch only after checking the PR is `MERGED` and both branch
-  tips equal its merged head. `/ship-app` stays user-typed; `/build-app` now says so.
+  tips equal its merged head. When the user approved the merge in the same run, the cleanup runs
+  without a second question and is reported afterward; otherwise it asks once. A branch found
+  spent at step 4 is cleaned up after the work is committed on the fresh branch. `/ship-app`
+  never merges and stays user-typed; `/build-app` now says so.
+- **CLI tracebacks no longer print local variables** (`pretty_exceptions_show_locals=False`), so
+  a crash can't echo a secret held in a variable.
 - **`ci-key create`** says when every kept secret file matches the config, and its next steps
   run `mkdir -p .internal` as its own command so the CI key guard allows the `deploy-setup` line.
 - **`ci-key push`** refuses a secret file that is not UTF-8 text or contains a NUL byte, by name.
@@ -87,7 +94,6 @@ Most entries below come from a first end-to-end run of the plugin (onboard throu
   the generated entrypoint warns against data calls before `st.navigation`.
 - **Generated deploy workflows print "Deploy secrets found: deploying"** on the deploy path, so the
   skip text GitHub echoes in the step header no longer reads as a skipped deploy.
-- **`verify-deploy` without `--config`** found no app directory because of a missing import.
 - **`deploy-setup --admin` now grants read on dynamic tables** and every other object type an
   app can read (materialized views, semantic views, Iceberg and external tables), current and
   future, on each allowed schema (#80). Before, it granted tables and views only, so a dynamic
