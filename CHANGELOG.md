@@ -12,6 +12,10 @@ Most entries below come from a first end-to-end run of the plugin (onboard throu
 
 ### Added
 
+- **`/onboard` offers to turn on GitHub's automatic deletion of merged branches.** In a repo
+  with a GitHub remote it reads `delete_branch_on_merge` first, and when it is off asks yes or no
+  before running `gh repo edit --delete-branch-on-merge`, so a squash-merged branch is not left
+  behind to be reused. Without admin rights on the repo it says so and moves on.
 - **`streamsnow stage-bundle --out DIR [SLUG...]`** copies each app without the files a running
   app never reads: root-level docs (AGENTS.md, REQUIREMENTS.md, CLAUDE.md, README), `sql_review/`
   and its review logs, tooling folders, `.env` files, any `secrets.toml`, `.streamlit/` files
