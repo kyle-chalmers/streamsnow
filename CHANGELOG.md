@@ -8,6 +8,12 @@ entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **Install docs: `/reload-plugins` is a fallback.** A project-scope install normally shows the
+  skills straight away, so the README, getting-started and `init`'s `Next:` block now say to run
+  `/onboard` and only reload plugins if it isn't listed.
+
 ## [0.9.1] - 2026-10-05
 
 ### Added
