@@ -20,6 +20,7 @@ streamsnow deploy-sql     Emit the CREATE OR REPLACE STREAMLIT SQL for one app (
 streamsnow verify-deploy  Check that a deployed app actually serves
 streamsnow ci-key create  Make the CI user's key pair + the deploy secret files
 streamsnow ci-key push    Set the five deploy secrets on GitHub from those files
+streamsnow ci-key verify  Sign in as the CI user and check, read-only, what a deploy sees
 streamsnow config-get     Print one config value by dotted path (deploy job)
 streamsnow stage-path     Print the stage-copy base path @DB.SCHEMA.STAGE (deploy job)
 streamsnow stage-bundle   Copy each app minus internal docs for the stage-copy upload (deploy job)
@@ -1127,6 +1128,64 @@ def ci_key_push(
             print(f"  {name}: not set (stopped after the failure)")
         raise typer.Exit(1)
     print("Done. The next merge to main deploys.")
+
+
+@ci_key_app.command(name="verify")
+def ci_key_verify(
+    directory: Path = typer.Option(
+        _ci_key.DEFAULT_DIR, "--dir", help="The directory `ci-key create` wrote."
+    ),
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+    obj: str = typer.Option(
+        None,
+        "--object",
+        help="DB.SCHEMA.OBJECT in an allowed governance schema: a LIMIT 0 read proves the CI "
+        "role can query it. Without it the read probe is skipped.",
+    ),
+    output_format: str = typer.Option("md", "--format", help="md | json"),
+) -> None:
+    """Sign in as the CI service user with the CI key and check, read-only, what a deploy sees.
+
+    Signs in from this machine with the production CI key, exactly as the deploy job
+    does (the five secret files as SNOWFLAKE_* variables, key-pair auth, a temporary
+    connection), then checks the CI role, the warehouse, the app schema, the grants
+    the admin script gives the CI role, and with --object one LIMIT 0 read. Nothing
+    is created or changed, and the key, account and user are never printed.
+
+    Know before you run it: the sign-in shows in the CI user's login history, and a
+    network policy that only admits the CI runners will refuse it (that is the
+    policy working, not a broken key). Run it once, after the admin setup has run.
+
+    Exit codes: 0 every probe passed, 1 a probe failed, 2 nothing could be checked
+    (a missing secret file, a bad config or --object, or no `snow`).
+    """
+    if output_format not in ("md", "json"):
+        _err(f"--format must be md or json, not {output_format!r}")
+        raise typer.Exit(2)
+    try:
+        cfg = load_config(Path(config) if config else None)
+        result = _ci_key.verify(directory, cfg=cfg, obj=obj)
+    except (ConfigError, _ci_key.CiKeyError) as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    if output_format == "json":
+        print(json.dumps(result.to_json(), indent=2))
+    else:
+        marks = {"pass": "✓", "fail": "✗", "skipped": "○"}
+        print("Signed in as the CI service user (key-pair auth, read-only probes):")
+        for p in result.probes:
+            label = f"{p.probe} {p.object}".strip()
+            if p.status == "skipped":
+                label += " (skipped)"
+            print(f"  {marks[p.status]} {label}" + (f": {p.detail}" if p.detail else ""))
+        failed = sum(p.status == "fail" for p in result.probes)
+        print("")
+        print(
+            f"{failed} probe(s) failed: a deploy as the CI user would hit the same errors."
+            if failed
+            else "Every probe passed: CI can sign in and see what a deploy needs."
+        )
+    raise typer.Exit(code=0 if result.ok else 1)
 
 
 _SSH_GITHUB_RE = re.compile(
