@@ -326,19 +326,34 @@ _STAMP_RE = re.compile(r"^Reviewed-baseline:[ \t]*[0-9a-f]+[ \t]*$", re.MULTILIN
 _SEVERITY_WORD_RE = re.compile(r"BLOCK|FLAG|NICE[- ]?TO[- ]?HAVE", re.IGNORECASE)
 #: Item shapes the parser does not read: numbered (``1.`` / ``2)``) or ``+`` bullets.
 _UNREAD_ITEM_RE = re.compile(r"^(?:\d+[.)]|\+)\s+\S")
+#: Markup stripped before asking whether a line is nothing but a severity word.
+_LOOSE_MARKUP_RE = re.compile(r"[#*_:\s]+")
+_SEVERITY_WORDS = frozenset({"BLOCK", "FLAG", "NICE-TO-HAVE", "NICETOHAVE"})
+
+
+def _loose_severity_line(raw: str) -> bool:
+    """True for a line that is only a severity word (``**BLOCK**``, ``   ### BLOCK``,
+    ``Block:``) but not the exact ``### X`` heading the parser reads."""
+    word = _LOOSE_MARKUP_RE.sub("", raw).upper()
+    return word in _SEVERITY_WORDS and not _BUCKET_RE.match(raw)
 
 
 def report_parse_problems(text: str) -> list[str]:
     """Forms in a report that ``parse_findings`` would silently skip.
 
     ``parse_findings`` drops whatever it does not recognize, so a report that is
-    only partly in the expected shape (a ``### **BLOCK**`` heading, numbered
-    items under ``### BLOCK``) parses its valid buckets and loses the rest. A
+    only partly in the expected shape (a ``### **BLOCK**`` heading, an indented
+    ``   ### BLOCK``, a bare ``**BLOCK**`` line, numbered items under
+    ``### BLOCK``) parses its valid buckets and loses the rest. A
     lost critical finding then reads as zero open. Any problem here makes the
     report unparsed, which callers must render as unknown, never 0.
     """
     problems: list[str] = []
     sections = _split_sections(text)
+    first = _DIMENSION_RE.search(text)
+    for raw in text[: first.start() if first else len(text)].splitlines():
+        if _loose_severity_line(raw):
+            problems.append(f"severity line outside a '## <Dimension>' section: '{raw.strip()}'")
     if not any(
         _BUCKET_RE.search(body)
         for title, body in sections.items()
@@ -353,10 +368,15 @@ def report_parse_problems(text: str) -> list[str]:
         in_bucket = False
         for raw in body.splitlines():
             line = raw.strip()
-            if line.startswith("###"):
-                in_bucket = bool(_BUCKET_RE.match(line))
+            # Test the unstripped line: the parser's heading regex is anchored at
+            # column 0, so `   ### BLOCK` files its items under the previous bucket.
+            if raw.startswith("###"):
+                in_bucket = bool(_BUCKET_RE.match(raw))
                 if not in_bucket and _SEVERITY_WORD_RE.search(line):
                     problems.append(f"severity heading not in the exact form: '{line}'")
+                continue
+            if _loose_severity_line(raw):
+                problems.append(f"severity line not in the exact '### X' form: '{line}'")
                 continue
             if in_bucket and _UNREAD_ITEM_RE.match(line):
                 problems.append(f"item not written as a '- ' bullet: '{line[:60]}'")

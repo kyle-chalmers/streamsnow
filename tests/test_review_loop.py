@@ -504,3 +504,49 @@ def test_open_findings_still_parses_star_bullets_and_prose(
     _, out = _open(capsys, str(session))
     assert out["parsed"] is True
     assert out["counts"]["BLOCK"] == 1
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        pytest.param(
+            "# Review\n\n## SQL\n\n### BLOCK\n- _none_\n\n### FLAG\n- [a.py:1] slow query\n"
+            f"   ### BLOCK\n- {_CRITICAL}\n\n### NICE-TO-HAVE\n- _none_\n",
+            id="indented-heading-in-a-flag-bucket",
+        ),
+        pytest.param(
+            "# Review\n\n## SQL\n\n### FLAG\n- [a.py:1] slow query\n\n**BLOCK**\n"
+            f"- {_CRITICAL}\n\n### NICE-TO-HAVE\n- _none_\n",
+            id="bare-bold-line",
+        ),
+        pytest.param(
+            f"# Review\n\n## SQL\n\n### FLAG\n- _none_\n\nBlock:\n- {_CRITICAL}\n",
+            id="bare-colon-line",
+        ),
+        pytest.param(
+            f"# Review\n\n## SQL\n\n### FLAG\n- _none_\n\n__nice to have__\n- {_CRITICAL}\n",
+            id="bare-underscore-nice-to-have",
+        ),
+        pytest.param(
+            f"# Review\n\n**BLOCK**\n- {_CRITICAL}\n\n## SQL\n\n### FLAG\n- _none_\n",
+            id="bare-line-above-the-first-section",
+        ),
+    ],
+)
+def test_open_findings_fails_closed_on_a_loose_severity_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture, report: str
+) -> None:
+    """A BLOCK heading the exact regex skips used to file its items under the
+    previous bucket (or nowhere) and still read `parsed: true`, so the PR body
+    said "Open critical: 0"."""
+    session = tmp_path / ".review"
+    session.mkdir()
+    (session / "review-20260831-090000.md").write_text(report, encoding="utf-8")
+    _, out = _open(capsys, str(session))
+    assert out["parsed"] is False
+    assert out["counts"] is None
+
+
+def test_a_valid_report_still_parses_after_the_loose_severity_scan() -> None:
+    """The documented sample is pinned in test_review_stamp_skills.py."""
+    assert rl.report_parse_problems(REPORT) == []
