@@ -8,6 +8,11 @@ entry.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-06
+
+- Generated CI and deploy workflows pin `streamsnow>=0.10,<0.11`; run
+  `streamsnow update --apply` to move an existing repo's pin.
+
 ### Added
 
 - **`streamsnow deploy-setup --admin --viewer-role ROLE`** (repeatable) grants the viewer role to a
