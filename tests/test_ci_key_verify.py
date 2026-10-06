@@ -84,6 +84,7 @@ class FakeSnow:
         self.fail_on = fail_on
         self.err = err
         self.answers = {
+            "USE SECONDARY ROLES": [{"status": "Statement executed successfully."}],
             "CURRENT_ROLE": [{"ROLE": ROLE}],
             "USE WAREHOUSE": [{"status": "Statement executed successfully."}],
             "SHOW SCHEMAS": [{"name": "DASHBOARDS", "database_name": "STREAMSNOW_APPS"}],
@@ -105,10 +106,17 @@ class FakeSnow:
                     "╰─────────────────────────────────────╯\n"
                 )
                 return subprocess.CompletedProcess(argv, 1, "", self.err or err)
+        # Like `snow sql --format json`: one statement prints its rows, several
+        # print one row list per statement.
+        results = [self._rows(s) for s in sql.split(";\n") if s.strip()]
+        out = results[0] if len(results) == 1 else results
+        return subprocess.CompletedProcess(argv, 0, json.dumps(out), "")
+
+    def _rows(self, statement):
         for needle, rows in self.answers.items():
-            if needle in sql:
-                return subprocess.CompletedProcess(argv, 0, json.dumps(rows), "")
-        raise AssertionError(f"unexpected probe SQL: {sql!r}")
+            if needle in statement:
+                return rows
+        raise AssertionError(f"unexpected probe SQL: {statement!r}")
 
 
 def _which(name):
@@ -323,7 +331,9 @@ def test_the_read_probe_runs_a_guarded_limit_0_select(tmp_path):
         _secrets_dir(tmp_path), cfg=cfg, obj="analytics_db.reporting.daily", run=fake, which=_which
     )
     sql = [c["input"] for c in fake.calls if "LIMIT 0" in c["input"]]
-    assert sql == ["SELECT * FROM analytics_db.reporting.daily LIMIT 0;\n"]
+    assert sql == [
+        "USE SECONDARY ROLES NONE;\nSELECT * FROM analytics_db.reporting.daily LIMIT 0;\n"
+    ]
 
 
 # --- exit 2: refused before any sign-in --------------------------------------------
@@ -613,4 +623,64 @@ def test_an_os_error_without_strerror_shows_its_class_name(tmp_path, monkeypatch
     assert r.exit_code == 2, r.output
     assert "could not be started (OSError)" in r.output
     assert "None" not in r.output
+    _no_secret(r.output)
+
+
+# --- Codex fix round: secondary roles must not widen a probe ------------------------
+
+
+def test_every_probe_turns_secondary_roles_off_first(tmp_path):
+    cfg = _cfg()
+    fake = FakeSnow(cfg)
+    ci_key.verify(
+        _secrets_dir(tmp_path), cfg=cfg, obj="ANALYTICS_DB.ANALYTICS.ORDERS", run=fake, which=_which
+    )
+    assert fake.calls
+    for call in fake.calls:
+        statements = [s for s in call["input"].split(";\n") if s.strip()]
+        assert statements[0] == "USE SECONDARY ROLES NONE"
+        assert len(statements) == 2
+    read = next(c["input"] for c in fake.calls if "LIMIT 0" in c["input"])
+    assert read.index("USE SECONDARY ROLES NONE") < read.index("SELECT * FROM")
+
+
+def test_a_read_only_a_secondary_role_can_do_fails(tmp_path):
+    """The CI role lacks SELECT; another role granted to the CI user has it."""
+    cfg = _cfg()
+
+    class SecondaryRoleReads(FakeSnow):
+        def __call__(self, argv, **kwargs):
+            sql = kwargs.get("input") or ""
+            if "LIMIT 0" in sql and "USE SECONDARY ROLES NONE" in sql:
+                self.calls.append({"argv": list(argv), **kwargs})
+                err = "002003 (42S02): Object 'ANALYTICS_DB.ANALYTICS.ORDERS' does not exist"
+                return subprocess.CompletedProcess(argv, 1, "", err + " or not authorized.")
+            return super().__call__(argv, **kwargs)
+
+    fake = SecondaryRoleReads(cfg)
+    result = ci_key.verify(
+        _secrets_dir(tmp_path), cfg=cfg, obj="ANALYTICS_DB.ANALYTICS.ORDERS", run=fake, which=_which
+    )
+    read = next(p for p in result.probes if p.probe == "select")
+    assert read.status == "fail" and "not authorized" in read.detail
+    assert not result.ok
+
+
+def test_the_probe_result_is_read_from_its_own_statement(tmp_path):
+    """The USE statement's status row must never be read as the probe's rows."""
+    cfg = _cfg()
+    fake = FakeSnow(cfg)
+    result = ci_key.verify(_secrets_dir(tmp_path), cfg=cfg, run=fake, which=_which)
+    by = {p.probe: p for p in result.probes}
+    assert by["role"].status == "pass"  # CURRENT_ROLE came from the second result set
+    assert by["schema"].status == "pass"  # SHOW SCHEMAS rows, not the status row
+    assert all(p.status == "pass" for p in result.probes if p.probe == "grant")
+
+
+def test_a_batch_with_the_wrong_number_of_result_sets_exits_2(tmp_path, monkeypatch):
+    def one_result(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, json.dumps([[{"ROLE": ROLE}]]), "")
+
+    r = _cli(monkeypatch, one_result, "--dir", str(_secrets_dir(tmp_path)))
+    assert r.exit_code == 2, r.output
     _no_secret(r.output)

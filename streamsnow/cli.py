@@ -1152,8 +1152,11 @@ def ci_key_verify(
     Signs in from this machine with the production CI key, exactly as the deploy job
     does (the five secret files as SNOWFLAKE_* variables, key-pair auth, a temporary
     connection), then checks the CI role, the warehouse, the app schema, the grants
-    the admin script gives the CI role, and with --object one LIMIT 0 read. Nothing
-    is created or changed, and the key, account and user are never printed.
+    the admin script gives the CI role, and with --object one LIMIT 0 read. Every
+    check runs with secondary roles off, so it proves the CI role alone: the deploy
+    job leaves them at the CI user's default, but deployed apps query with the CI
+    role's owner's rights. Nothing is created or changed, and the key, account and
+    user are never printed.
 
     Know before you run it: the sign-in shows in the CI user's login history, and a
     network policy that only admits the CI runners will refuse it, which means the

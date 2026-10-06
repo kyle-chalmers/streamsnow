@@ -490,8 +490,9 @@ unset; fix the cause and run it again.
 **Prove what CI will see (optional, ask first).** Once §2d is confirmed and the key files are
 on this machine, `streamsnow ci-key verify` signs in as the CI service user the way the deploy
 job does and runs read-only checks: the CI role, the warehouse, the app schema, the grants the
-admin script gives the CI role, and one `LIMIT 0` read. Before running it, tell the user plainly
-and ask:
+admin script gives the CI role, and one `LIMIT 0` read, each with secondary roles off so it
+proves the CI role alone (deployed apps query with that role's owner's rights). Before running
+it, tell the user plainly and ask:
 - it signs in from this machine with the production CI key;
 - the sign-in shows in the CI user's login history in Snowflake;
 - if the account has a network policy that only admits the CI runners, it will be refused,

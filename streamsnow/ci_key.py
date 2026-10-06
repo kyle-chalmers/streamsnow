@@ -400,6 +400,11 @@ _SNOW_ARGS = (
 _SNOW_MISSING = (
     "the Snowflake CLI (`snow`) is not on PATH; install it with `uv tool install snowflake-cli`."
 )
+# Sent before every probe, in the same session. Secondary roles authorize reads
+# too, so without this a role the CI user also holds could pass a probe the CI
+# role alone would fail. Deployed apps query with the owner's rights of the CI
+# role, so the CI role alone is what verify must prove.
+_SECONDARY_ROLES_OFF = "USE SECONDARY ROLES NONE"
 WITHHELD = "snow failed; its message named the account, user or key and was withheld"
 _BOX_AND_SPACE_RE = re.compile(r"[\s│╭╮╰╯─]+")
 
@@ -551,8 +556,10 @@ def verify(
     Everything that can be refused is refused before the first sign-in: a
     missing, empty, non-UTF-8 or NUL-containing secret file, a user, warehouse
     or role file that no longer matches the config, an ``obj`` outside the
-    governance allowlist, no ``snow`` on PATH. Then each probe is its own ``snow sql`` call, with the SQL
-    on stdin and the secrets only in ``env=``:
+    governance allowlist, no ``snow`` on PATH. Then each probe is its own
+    ``snow sql`` call, with the SQL on stdin after ``USE SECONDARY ROLES NONE``
+    (so another role the CI user holds cannot make a probe pass) and the
+    secrets only in ``env=``:
 
     1. ``role``: ``CURRENT_ROLE()`` is the CI role;
     2. ``warehouse``: ``USE WAREHOUSE`` works;
@@ -607,11 +614,15 @@ def verify(
     timeout = DEFAULT_TIMEOUT_S + _LOGIN_ALLOWANCE_S
 
     def snow(sql: str) -> tuple[list[dict] | None, str]:
-        """(rows, "") on success, (None, masked error) when ``snow`` exits non-zero."""
+        """(rows, "") on success, (None, masked error) when ``snow`` exits non-zero.
+
+        ``sql`` runs after ``USE SECONDARY ROLES NONE`` in the same session, and
+        the rows returned are ``sql``'s own (the second result set).
+        """
         try:
             proc = run(
                 ["snow", *_SNOW_ARGS],
-                input=sql + ";\n",
+                input=f"{_SECONDARY_ROLES_OFF};\n{sql};\n",
                 env=env,
                 capture_output=True,
                 text=True,
@@ -642,7 +653,7 @@ def verify(
             detail = _redact(_error_detail(err, out), secret_text)
             return None, _safe_detail(detail, payloads)
         try:
-            return parse_output(proc.stdout or "", 1)[0], ""
+            return parse_output(proc.stdout or "", 2)[1], ""
         except SnowError as exc:
             raise CiKeyError(_safe_detail(_redact(str(exc), secret_text), payloads)) from None
 
