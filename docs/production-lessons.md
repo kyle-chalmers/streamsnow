@@ -26,9 +26,10 @@ Rules:
 
 - Before shipping a page that touches a new table/view, verify the **ci_role**
   can `SELECT` it — not your role, not the viewer role.
-- Prefer standing **future grants** so new objects are zero-touch:
-  `GRANT SELECT ON FUTURE TABLES IN SCHEMA <db>.<schema> TO ROLE <ci_role>;`
-  (and the same for `VIEWS`, and `DYNAMIC TABLES` if you use them).
+- Prefer standing **future grants** so new objects are zero-touch. Each object
+  type needs its own (`TABLES`, `VIEWS`, `DYNAMIC TABLES`, ...); a grant on
+  tables does not reach dynamic tables. `streamsnow deploy-setup --admin`
+  emits the full set for every allowed schema.
 - When a source moves schemas, re-verify: the future grant lives on the schema,
   not the object.
 

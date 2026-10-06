@@ -394,7 +394,12 @@ def test_scan_conformance_required_grants_split(tmp_path):
     # ANALYTICS_DB.ANALYTICS is governance.database × schema_allow → default grant.
     assert grants[("ANALYTICS_DB", "ANALYTICS")]["granted_by_default"] is True
     assert grants[("VENDOR_DB", "EXTERNAL")]["granted_by_default"] is False
-    assert "GRANT" in grants[("VENDOR_DB", "EXTERNAL")]["reason"]
+    reason = grants[("VENDOR_DB", "EXTERNAL")]["reason"]
+    assert "GRANT" in reason
+    # The guidance must name every readable object type, not tables only (#80).
+    assert "DYNAMIC TABLES" in reason
+    assert "FUTURE" in reason
+    assert "\u2014" not in reason
     # Default-granted pairs sort first.
     assert res["required_grants"][0]["granted_by_default"] is True
 
