@@ -149,7 +149,7 @@ def test_default_output_changes_only_where_intended():
         "  ENABLED = TRUE;"
     )
     assert removed == ["CREATE" + body]
-    # 0.9.2 (#80): every readable object type beyond TABLES and VIEWS, CI role only.
+    # Unreleased (#80): every readable object type beyond TABLES and VIEWS, CI role only.
     new_kinds = [k for k in READ_OBJECT_TYPES if k not in ("TABLES", "VIEWS")]
     read_grants = [
         f"GRANT SELECT ON {scope} {kind} IN SCHEMA ANALYTICS_DB.{schema} "

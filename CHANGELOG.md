@@ -8,6 +8,14 @@ entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`deploy-setup --admin` now grants read on dynamic tables** and every other object type an
+  app can read (materialized views, semantic views, Iceberg and external tables), current and
+  future, on each allowed schema (#80). Before, it granted tables and views only, so a dynamic
+  table was invisible to the CI role and the deployed app failed on it while local preview
+  worked. Re-run `streamsnow deploy-setup --admin` and apply it to pick up the new grants.
+
 ## [0.10.0] - 2026-10-06
 
 - Generated CI and deploy workflows pin `streamsnow>=0.10,<0.11`; run
