@@ -8,8 +8,82 @@ entry.
 
 ## [Unreleased]
 
+Most entries below come from a first end-to-end run of the plugin (onboard through ship).
+
+### Added
+
+- **`streamsnow stage-bundle --out DIR [SLUG...]`** copies each app without the files a running
+  app never reads: root-level docs (AGENTS.md, REQUIREMENTS.md, CLAUDE.md, README), `sql_review/`
+  and its review logs, tooling folders, `.env` files, any `secrets.toml`, `.streamlit/` files
+  other than `config.toml`, and symlinks that leave the app. A link is judged by its target too,
+  so a link to `.env` stays out. It lists every file it left out and why.
+- **`verify-deploy` gains a warn-only `stage-files` check** for stage-copy deploys. It compares
+  the commit's staged files with what `stage-bundle` would ship and warns about a missing file or
+  an excluded one that reached the stage. A warn-level check prints `!` and never fails the run.
+- **`streamsnow ci-key verify`** signs in as the CI service user with the CI key, the way the
+  deploy job does, and checks read-only that the role, warehouse, app schema, the admin script's
+  grants and (with `--object`) one allowed read work, with secondary roles off so the CI role is
+  proven alone. The key, account and user never reach argv or output. It uses the production CI
+  key from your machine, so the sign-in shows in the CI user's login history, and a runner-only
+  network policy refuses it. `/onboard` offers it once after admin setup and asks first.
+- **`ci-key push --config`** (with `--account`) refuses, by file name, when a user, warehouse,
+  role or account secret file no longer matches the config, before anything reaches GitHub.
+- **`review-gate stamp --expect-baseline <digest>`** refuses to stamp (exit 2) when the app
+  changed after the review was dispatched, so an older report can't mark newer code reviewed.
+  Stamps also record `Reviewed-head:`, and `classify` JSON adds `reviewed_head`,
+  `reviewed_head_status` and `commits_since_review`.
+- **`review-loop open-findings <dir>`** counts the findings the newest review left open, against
+  that report's own Applied block. A report it can't fully read returns `parsed: false`, never 0.
+- **`validate-app` gains a warn-only `starter-text` check** for an app `AGENTS.md` that still has
+  the scaffold's starter lines and a README Apps table with no row for the app. It never changes
+  the exit code.
+- **`sql-review compare` matches aggregated pages.** A page that groups a shared loader in pandas
+  reads `match` with rule `aggregated` when every total it shows equals the SQL's exactly and its
+  group keys are unique and complete. Head and filtered slices stay `mismatch`. `sql-review run`
+  records distinct counts for text, date, time and boolean columns, and the scaffolded
+  `review.py` records key counts (never values) to support this; refresh `review.py` with
+  `streamsnow update --apply` or grouped visuals keep reading `mismatch`.
+- **`sql-review run` output lists the `run-NN.json` files it wrote** in a new `files` key.
+
+### Changed
+
+- **The generated stage-copy deploy uploads the `stage-bundle` output** instead of the whole
+  `apps/` tree, so internal docs and review logs no longer land on the stage. Run
+  `streamsnow update --apply` to pick it up. The workflow calls a command added in this release,
+  so it needs the release that ships `stage-bundle`. Git-repository deploys read the committed
+  folder and can't exclude docs; see `docs/git-repository.md`.
+- **`/review-app` stamps the review gate after every default pass** (with `--expect-baseline`),
+  even when findings stay open; `--fix` never stamps. Before, only `--auto` stamped, so a full
+  review still read `needs_review: true` at ship time.
+- **`/ship-app` puts "Open critical: N" and the commits made since the review in the PR body**,
+  hands the user `gh pr checks --watch` when the host forbids polling CI, and gains an After merge
+  cleanup that deletes the spent branch only after checking the PR is `MERGED` and both branch
+  tips equal its merged head. `/ship-app` stays user-typed; `/build-app` now says so.
+- **`ci-key create`** says when every kept secret file matches the config, and its next steps
+  run `mkdir -p .internal` as its own command so the CI key guard allows the `deploy-setup` line.
+- **`ci-key push`** refuses a secret file that is not UTF-8 text or contains a NUL byte, by name.
+- **Skill text:** query headers name tokens without braces, the page-builder runs
+  `check sql-tokens`, sample tokens mirror the page's default filters, an unused `review_window`
+  is omitted, preview uses a role whose reads match the CI role, the `st.form` rule applies only
+  when a rerun is expensive, `/build-app` rewrites the app `AGENTS.md` and README Apps row, and
+  `/build-app` and `/review-app` explain how their reviewer sets relate. `/sql-review` documents
+  `--warehouse`, and `review-gate` docs say `verdict` is review depth while `needs_review` is the
+  decision.
+
 ### Fixed
 
+- **`streamsnow <group> <verb> --help`** shows the verb's own flags for `sql-review`,
+  `review-gate`, `review-loop`, `migrate` and `preview` (it printed the group's text before).
+- **A failing sql-review session setup** (`USE ROLE` / `USE WAREHOUSE`) names the statements and
+  points at `--role` / `--warehouse`, instead of a bare 002043 error.
+- **Generated pre-commit hooks run with `require_serial: true`**, so a BLOCK line is no longer
+  followed by a parallel batch's "clean" line.
+- **The generated glossary's `hover_definition`** no longer doubles `%` (plotly.js doesn't
+  unescape `%%`), the generated `.sqlfluff` comment points at `streamsnow sql-review check`, and
+  the generated entrypoint warns against data calls before `st.navigation`.
+- **Generated deploy workflows print "Deploy secrets found: deploying"** on the deploy path, so the
+  skip text GitHub echoes in the step header no longer reads as a skipped deploy.
+- **`verify-deploy` without `--config`** found no app directory because of a missing import.
 - **`deploy-setup --admin` now grants read on dynamic tables** and every other object type an
   app can read (materialized views, semantic views, Iceberg and external tables), current and
   future, on each allowed schema (#80). Before, it granted tables and views only, so a dynamic
