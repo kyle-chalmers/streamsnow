@@ -486,6 +486,26 @@ Setting `SNOWFLAKE_ACCOUNT` switches the deploy job on, so tell the user the nex
 `main` will deploy. If it stops partway, it names what failed and leaves `SNOWFLAKE_ACCOUNT`
 unset; fix the cause and run it again.
 
+**Prove what CI will see (optional, ask first).** Once §2d is confirmed and the key files are
+on this machine, `streamsnow ci-key verify` signs in as the CI service user the way the deploy
+job does and runs read-only checks: the CI role, the warehouse, the app schema, the grants the
+admin script gives the CI role, and one `LIMIT 0` read. Before running it, tell the user plainly
+and ask:
+- it signs in from this machine with the production CI key;
+- the sign-in shows in the CI user's login history in Snowflake;
+- if the account has a network policy that only admits the CI runners, it will be refused,
+  which means the policy works, not that the key is broken;
+- it is meant to run once, right after the admin setup.
+
+On a yes, run `streamsnow ci-key verify --object <DB.SCHEMA.TABLE>` with a table or view in an
+allowed governance schema that the first app will read (leave `--object` off if there is none
+yet). It prints each check by object name and never the key, account or user. Exit 1 names
+what failed: a missing grant goes back to the admin as one line naming the grant; a sign-in
+failure usually means the admin registered a different public key, so compare the fingerprint
+from `ci-key create` with `RSA_PUBLIC_KEY_FP` in `DESC USER`. Exit 2 means nothing was
+checked (a missing secret file, a file that differs from the config, or no `snow`). On a no,
+skip it: the first deploy checks the same things.
+
 ## 3 · Connection (one store, owned by the user)
 
 **A non-default connection needs one more step.** `snowflake.connection_name` may name a
