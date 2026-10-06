@@ -169,3 +169,24 @@ def test_onboard_asks_which_roles_get_the_viewer_role():
     ask = section.index("Which of your roles get access")
     admin_file = section.index("**The admin file.**")
     assert ask < admin_file  # asked before the script is written, so it carries the grants
+
+
+def test_admin_file_commands_run_one_at_a_time_so_the_key_guard_allows_them():
+    """The CI key guard denies any command naming ~/.streamsnow-ci that does not start
+    with `streamsnow` or that chains with `&&`, `;` or `|`. So `mkdir` and the
+    gitignore check cannot share a command with the deploy-setup line."""
+    step = SETUP.split("4. **The admin file.**")[1].split("5. **Hand it off.**")[0]
+    commands = re.findall(r"^ +\d\. `([^`]+)`", step, flags=re.M)
+    assert commands[0] == "mkdir -p .internal"
+    assert commands[1].startswith(
+        "streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/"
+    )
+    assert commands[2].startswith("git check-ignore -q .internal/admin-setup.sql")
+    for command in commands:
+        assert not re.search(r"&&|;|\|", command), command
+    for command in commands:
+        if "streamsnow-ci" in command:
+            assert command.startswith("streamsnow "), command
+    flat = _flat(step)
+    assert "never chained with `&&`, `;` or `|`" in flat
+    assert "make `.internal/` first" not in flat

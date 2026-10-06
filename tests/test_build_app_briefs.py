@@ -65,3 +65,35 @@ def test_skill_dispatches_every_brief():
     text = "".join(p.read_text(encoding="utf-8") for p in skill_dir.glob("*.md"))
     for role in ROLES:
         assert f"briefs/{role}.md" in text, f"no phase dispatches {role}"
+
+
+def test_page_builder_runs_and_returns_the_sql_tokens_check():
+    """`sql-tokens` flags a {TOKEN} inside a SQL comment, and a query header is a comment."""
+    sections = _sections("page-builder")
+    assert "streamsnow check sql-tokens apps/<slug>" in sections["Steps"]
+    block = re.search(r"```json\n(.*?)```", sections["Returns"], flags=re.DOTALL)
+    assert "sql-tokens" in json.loads(block.group(1))["checks"]
+    assert "five checks" in sections["Verify"]
+
+
+def test_query_header_template_names_tokens_without_braces():
+    pages = (BRIEFS.parent / "pages.md").read_text(encoding="utf-8")
+    header = [line for line in pages.splitlines() if line.strip().startswith("-- Tokens:")]
+    assert header, "pages.md has no query header template"
+    for line in header:
+        assert "{" not in line and "TOKEN_NAME" in line, line
+
+
+def test_form_rule_is_conditional_everywhere_it_is_stated():
+    """An `st.form` costs the reader an Apply click; over cached data it buys nothing."""
+    skills = BRIEFS.parents[1]
+    perf = " ".join(
+        (skills / "_shared" / "streamlit-performance.md").read_text(encoding="utf-8").split()
+    )
+    dims = " ".join((skills / "review-app" / "dimensions.md").read_text(encoding="utf-8").split())
+    brief = " ".join(_sections("perf-reviewer")["Steps"].split())
+    assert "only when each rerun is expensive" in perf
+    assert "only when each rerun is expensive" in dims
+    assert "when each rerun is expensive" in brief
+    for text in (perf, dims, brief):
+        assert "plain widgets are fine" in text and "nice-to-have" in text

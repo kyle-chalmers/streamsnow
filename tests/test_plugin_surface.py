@@ -236,3 +236,65 @@ def test_plugin_agents_are_the_sql_review_briefs_word_for_word():
         assert body.lstrip("\n") == brief.read_text(encoding="utf-8"), agent.name
         # No relative links: the agents/ copy has no neighbours to point at.
         assert not _LINK_RE.search(body), agent.name
+
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def test_build_app_checkpoint_3_has_the_user_type_ship_app():
+    """/ship-app is human-only (disable-model-invocation), so a skill that says
+    "run /ship-app" sends the agent at a command it cannot start."""
+    skill = _flat((SKILLS_DIR / "build-app" / "SKILL.md").read_text(encoding="utf-8"))
+    cp3 = skill[skill.index("**CP3:**") :]
+    assert "ask the user to type `/ship-app <slug>`" in cp3
+    assert "the agent cannot start it" in cp3
+    feedback = _flat((SKILLS_DIR / "build-app" / "feedback.md").read_text(encoding="utf-8"))
+    assert "ask the user to type `/ship-app <slug>`" in feedback
+    assert "cannot start it" in feedback
+
+
+def test_preview_app_pins_the_ci_roles_data_reads_not_the_deployed_viewer_role():
+    """The viewer role has no data grants by default, so "preview as the deployed
+    viewer role" yields empty pages. Every doc names the CI role's data reads."""
+    text = _flat((SKILLS_DIR / "preview-app" / "SKILL.md").read_text(encoding="utf-8"))
+    assert "deployed viewer role" not in text
+    assert text.count("data reads match the CI role's") >= 2  # step 4 and "Done when"
+    setup = _flat((SKILLS_DIR / "onboard" / "setup.md").read_text(encoding="utf-8"))
+    assert "deployed viewer role" not in setup
+    assert "what people viewing an app, and local preview, run as" not in setup
+
+
+def test_ship_app_cleans_up_after_merge_and_checks_merged_before_deleting():
+    ship = SKILLS_DIR / "ship-app"
+    skill = (ship / "SKILL.md").read_text(encoding="utf-8")
+    assert "## After merge" in skill
+    assert "(after-merge.md)" in skill
+    steps = _flat((ship / "after-merge.md").read_text(encoding="utf-8"))
+    order = [
+        "git status --short",  # clean tree first
+        "gh pr view <num> --json state",
+        "must read `MERGED`",
+        "Ask the user once",
+        "git switch main",
+        "git pull --ff-only",
+        "git branch -D <branch>",
+        "git ls-remote --heads origin <branch>",
+        "git push origin --delete <branch>",
+        "git fetch --prune",
+    ]
+    positions = [steps.index(token) for token in order]
+    assert positions == sorted(positions), "after-merge steps are out of order"
+    assert "a squash merge" in steps and "`git branch -d` refuses" in steps
+    # Both triggers are named, and the PR-open outcome says what "done" means.
+    assert "step 4" in steps and "watch" in steps
+    assert "never merges" in _flat(skill)
+    assert "spent branch removed" in _flat(skill)
+
+
+def test_ship_app_has_a_fallback_when_the_host_forbids_polling_ci():
+    skill = _flat((SKILLS_DIR / "ship-app" / "SKILL.md").read_text(encoding="utf-8"))
+    assert "forbids polling CI" in skill
+    assert "gh pr checks <num> --watch" in skill
+    assert "PR open, checks pending" in skill
+    assert skill.count("PR open, checks pending") >= 2  # the step and "Done when"
