@@ -9,6 +9,7 @@ import yaml
 
 from streamsnow.config import Config, ConfigError
 from streamsnow.deploy import (
+    READ_OBJECT_TYPES,
     generate_admin_sql,
     generate_create_sql,
     generate_setup_sql,
@@ -253,6 +254,59 @@ def test_admin_sql_creates_every_object_a_first_deploy_needs():
     # The stage itself is created by the CI role that will own it.
     ci = _stmts(sec["STREAMSNOW_DEPLOY_ROLE"])
     assert "CREATE STAGE IF NOT EXISTS STREAMSNOW_APPS.DASHBOARDS.STREAMSNOW_CODE_STAGE" in ci
+
+
+def test_read_object_types_are_pinned():
+    # A new type is a deliberate change: Snowflake grants on TABLE do not reach
+    # DYNAMIC TABLE (issue #80), so every readable type must be listed by name.
+    assert READ_OBJECT_TYPES == (
+        "TABLES",
+        "VIEWS",
+        "DYNAMIC TABLES",
+        "MATERIALIZED VIEWS",
+        "SEMANTIC VIEWS",
+        "ICEBERG TABLES",
+        "EXTERNAL TABLES",
+    )
+
+
+def test_admin_sql_grants_every_read_type_on_each_allowed_schema():
+    stmts = _stmts(generate_admin_sql(_cfg()))
+    for schema in ("ANALYTICS_DB.ANALYTICS", "ANALYTICS_DB.REPORTING"):
+        for scope in ("ALL", "FUTURE"):
+            for kind in READ_OBJECT_TYPES:
+                grant = (
+                    f"GRANT SELECT ON {scope} {kind} IN SCHEMA {schema} "
+                    "TO ROLE STREAMSNOW_DEPLOY_ROLE;"
+                )
+                assert grant in stmts, grant
+    # Denied schemas get no grant of any type.
+    for denied in ("RAW", "STAGING", "BRIDGE"):
+        assert f"ANALYTICS_DB.{denied}" not in stmts
+
+
+def test_admin_sql_viewer_read_grants_are_commented_for_every_type():
+    sql = generate_admin_sql(_cfg())
+    for kind in READ_OBJECT_TYPES:
+        line = (
+            f"--   GRANT SELECT ON FUTURE {kind} IN SCHEMA ANALYTICS_DB.REPORTING "
+            "TO ROLE STREAMSNOW_VIEWER_ROLE;"
+        )
+        assert line in sql, line
+    for ln in _stmts(sql).splitlines():
+        if "STREAMSNOW_VIEWER_ROLE" in ln:
+            assert "SELECT" not in ln, ln
+
+
+def test_admin_sql_shared_database_gets_no_per_type_grants():
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
+    data["governance"]["database"] = "SNOWFLAKE_SAMPLE_DATA"
+    stmts = _stmts(generate_admin_sql(Config.from_dict(data)))
+    assert "SELECT ON" not in stmts
+    assert (
+        "GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE_SAMPLE_DATA "
+        "TO ROLE STREAMSNOW_DEPLOY_ROLE;" in stmts
+    )
 
 
 def test_admin_sql_container_objects_custom_pool():

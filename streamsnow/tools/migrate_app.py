@@ -90,6 +90,7 @@ import yaml
 from packaging.requirements import InvalidRequirement, Requirement
 
 from ..config import Config, ConfigError, load_config
+from ..deploy import READ_OBJECT_TYPES
 from ..policy import SchemaPolicy
 
 # The denied-schema detection itself lives in check_schema_refs — one
@@ -1262,9 +1263,10 @@ def _detect_required_grants(app_dir: Path, cfg: Config) -> list[dict[str, Any]]:
             f"({gov.database}.{{{', '.join(gov.schema_allow)}}})"
             if default
             else (
-                f"not covered by {ci_role} default grants — a DBA must GRANT "
-                "USAGE on the database + schema and GRANT SELECT on ALL TABLES "
-                "+ FUTURE TABLES in the schema"
+                f"not covered by {ci_role} default grants: a DBA must GRANT "
+                "USAGE on the database + schema and GRANT SELECT on ALL and FUTURE "
+                f"{', '.join(READ_OBJECT_TYPES)} in the schema (or add it to "
+                "governance.schema_allow and re-run deploy-setup --admin)"
             )
         )
         out.append(

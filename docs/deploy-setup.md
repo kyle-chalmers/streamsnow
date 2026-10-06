@@ -57,13 +57,21 @@ the integration by hand are reset on each run, so manage it through this script.
 
 Two things to check before running it:
 
-- **Governance database grants.** The script grants `USAGE` + `SELECT` (current
-  and future tables and views) on each `governance.schema_allow` schema, never
-  on a denied one. A **shared** database (a Marketplace or data-share import
-  such as `SNOWFLAKE_SAMPLE_DATA`) does not take those grants; it needs
-  `GRANT IMPORTED PRIVILEGES ON DATABASE ...` as `ACCOUNTADMIN`, which covers
-  the whole share. The script emits that form automatically for
-  `SNOWFLAKE_SAMPLE_DATA` and as a commented alternative otherwise.
+- **Governance database grants.** The script grants `USAGE` plus `SELECT` on
+  every object type an app can read, current and future, on each
+  `governance.schema_allow` schema and never on a denied one: tables (hybrid
+  tables included), views, dynamic tables, materialized views, semantic views,
+  Iceberg tables and external tables. Each type needs its own grant; a grant on
+  tables does not reach dynamic tables. Event tables, streams, functions and
+  procedures are left out on purpose. Schema-level future grants replace
+  database-level future grants of the same type for every role, so check
+  `SHOW FUTURE GRANTS IN DATABASE <db>` before applying and repeat at schema
+  level any that another role relies on. A **shared** database (a Marketplace or
+  data-share import such as `SNOWFLAKE_SAMPLE_DATA`) does not take those
+  grants; it needs `GRANT IMPORTED PRIVILEGES ON DATABASE ...` as
+  `ACCOUNTADMIN`, which covers the whole share. The script emits that form
+  automatically for `SNOWFLAKE_SAMPLE_DATA` and `SNOWFLAKE`, and as a commented
+  alternative otherwise.
 - **Viewer-role data grants are opt-in.** Deployed apps run with owner's rights
   (the CI role), so viewers only need `USAGE` on each app, and the script grants
   the viewer role no data access by default. The same data grants for the viewer

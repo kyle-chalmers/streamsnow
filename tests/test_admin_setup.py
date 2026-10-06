@@ -15,6 +15,7 @@ import yaml
 
 from streamsnow.config import Config, ConfigError
 from streamsnow.deploy import (
+    READ_OBJECT_TYPES,
     SYSTEM_POOL,
     generate_admin_sql,
     generate_teardown_sql,
@@ -137,7 +138,7 @@ def test_every_admin_statement_is_safe_to_rerun(cfg, key):
 
 
 def test_default_output_changes_only_where_intended():
-    """Without the new flags, only the viewer grant and EAI hunks change vs 0.7.5."""
+    """Without the new flags, only the viewer grant, EAI and read-type hunks change vs 0.7.5."""
     old = _statements(BASELINE.read_text(encoding="utf-8"))
     new = _statements(generate_admin_sql(_cfg()))
     removed = [s for s in old if s not in new]
@@ -148,9 +149,19 @@ def test_default_output_changes_only_where_intended():
         "  ENABLED = TRUE;"
     )
     assert removed == ["CREATE" + body]
+    # Unreleased (#80): every readable object type beyond TABLES and VIEWS, CI role only.
+    new_kinds = [k for k in READ_OBJECT_TYPES if k not in ("TABLES", "VIEWS")]
+    read_grants = [
+        f"GRANT SELECT ON {scope} {kind} IN SCHEMA ANALYTICS_DB.{schema} "
+        "TO ROLE STREAMSNOW_DEPLOY_ROLE;"
+        for schema in ("ANALYTICS", "REPORTING")
+        for scope in ("ALL", "FUTURE")
+        for kind in new_kinds
+    ]
     assert added == [
         "SET streamsnow_me = '\"' || CURRENT_USER() || '\"';",
         "GRANT ROLE STREAMSNOW_VIEWER_ROLE TO USER IDENTIFIER($streamsnow_me);",
+        *read_grants,
         "CREATE OR REPLACE" + body,
     ]
     # Every other statement is identical and in the same order.

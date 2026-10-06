@@ -117,6 +117,25 @@ SYSTEM_POOL = "SYSTEM_COMPUTE_POOL_CPU"
 # not USAGE + SELECT.
 _SHARED_DATABASES = ("SNOWFLAKE_SAMPLE_DATA", "SNOWFLAKE")
 
+# Object types an app can read, as GRANT's plural keywords. Snowflake keeps a separate
+# grant per type: "Grants on TABLE don't apply to dynamic tables", so a dynamic table in
+# an allowed schema was unreadable by the CI role that owns the deployed app, and the
+# dashboard came up empty while local preview (a broader personal role) worked (#80).
+# Hybrid tables are covered by TABLES. Left out on purpose: event tables (telemetry,
+# not report data), streams (change-data plumbing), functions and procedures (execution
+# rights, and a procedure can write). Adding a type here is a deliberate change; a test
+# pins this tuple. Docs: https://docs.snowflake.com/en/sql-reference/sql/grant-privilege
+# and https://docs.snowflake.com/en/user-guide/dynamic-tables/privileges
+READ_OBJECT_TYPES = (
+    "TABLES",
+    "VIEWS",
+    "DYNAMIC TABLES",
+    "MATERIALIZED VIEWS",
+    "SEMANTIC VIEWS",
+    "ICEBERG TABLES",
+    "EXTERNAL TABLES",
+)
+
 
 def _stage_objects(cfg: Config) -> list[str]:
     o = cfg.snowflake.objects
@@ -443,19 +462,23 @@ def generate_admin_sql(
         f"-- Data the apps read: governance database {gov.database}, allowed schemas only",
         f"-- ({', '.join(gov.schema_allow)}). Only the CI role gets it: deployed apps run with",
         "-- their owner's rights, so viewers need USAGE on the app, not SELECT on the data.",
+        "-- Schema-level future grants replace database-level ones of the same object type, for",
+        "-- every role: check SHOW FUTURE GRANTS IN DATABASE <db> first, and repeat at schema",
+        "-- level any database-level future grant another role relies on.",
+        "-- If Snowflake rejects a GRANT for an object type this account lacks, delete that line",
+        "-- and run the script again: every statement is safe to re-run.",
     ]
 
     def _data_grants(role: str) -> list[str]:
         grants = [f"GRANT USAGE ON DATABASE {gov.database} TO ROLE {role};"]
         for schema in gov.schema_allow:
             fq = f"{gov.database}.{schema}"
-            grants += [
-                f"GRANT USAGE ON SCHEMA {fq} TO ROLE {role};",
-                f"GRANT SELECT ON ALL TABLES IN SCHEMA {fq} TO ROLE {role};",
-                f"GRANT SELECT ON ALL VIEWS IN SCHEMA {fq} TO ROLE {role};",
-                f"GRANT SELECT ON FUTURE TABLES IN SCHEMA {fq} TO ROLE {role};",
-                f"GRANT SELECT ON FUTURE VIEWS IN SCHEMA {fq} TO ROLE {role};",
-            ]
+            grants.append(f"GRANT USAGE ON SCHEMA {fq} TO ROLE {role};")
+            for scope in ("ALL", "FUTURE"):
+                grants += [
+                    f"GRANT SELECT ON {scope} {kind} IN SCHEMA {fq} TO ROLE {role};"
+                    for kind in READ_OBJECT_TYPES
+                ]
         return grants
 
     def _imported(role: str) -> str:
