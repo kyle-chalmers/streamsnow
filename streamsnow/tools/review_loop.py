@@ -56,9 +56,11 @@ it already resolved. Subcommands:
         ``counts.BLOCK`` into the PR body, because a review stamps the gate
         even with critical findings open (reviewed means reviewed, not clean)
         and the approver needs to see that number. A report with no
-        ``## <Dimension>`` / ``### BLOCK|FLAG|NICE-TO-HAVE`` structure gives
-        ``parsed: false`` with null counts, never 0: a heading drift must not
-        read as a clean review. No report at all exits 2.
+        ``## <Dimension>`` / ``### BLOCK|FLAG|NICE-TO-HAVE`` structure, or with
+        any part the parser would skip (a decorated severity heading, a
+        numbered item under a bucket), gives ``parsed: false`` with null
+        counts, never 0: a heading drift must not read as a clean review. No
+        report at all exits 2.
 
 All output is JSON unless explicitly noted. Exit code 2 = tool error.
 
@@ -320,17 +322,55 @@ def _is_review_report(path: Path) -> bool:
 _STAMP_RE = re.compile(r"^Reviewed-baseline:[ \t]*[0-9a-f]+[ \t]*$", re.MULTILINE)
 
 
+#: Severity words, matched loosely to spot headings the exact bucket regex skips.
+_SEVERITY_WORD_RE = re.compile(r"BLOCK|FLAG|NICE[- ]?TO[- ]?HAVE", re.IGNORECASE)
+#: Item shapes the parser does not read: numbered (``1.`` / ``2)``) or ``+`` bullets.
+_UNREAD_ITEM_RE = re.compile(r"^(?:\d+[.)]|\+)\s+\S")
+
+
+def report_parse_problems(text: str) -> list[str]:
+    """Forms in a report that ``parse_findings`` would silently skip.
+
+    ``parse_findings`` drops whatever it does not recognize, so a report that is
+    only partly in the expected shape (a ``### **BLOCK**`` heading, numbered
+    items under ``### BLOCK``) parses its valid buckets and loses the rest. A
+    lost critical finding then reads as zero open. Any problem here makes the
+    report unparsed, which callers must render as unknown, never 0.
+    """
+    problems: list[str] = []
+    sections = _split_sections(text)
+    if not any(
+        _BUCKET_RE.search(body)
+        for title, body in sections.items()
+        if title.lower() != "resolutions"
+    ):
+        problems.append("no '## <Dimension>' section with a '### BLOCK|FLAG|NICE-TO-HAVE' heading")
+    for title, body in sections.items():
+        if title.lower() == "resolutions":
+            continue
+        if _SEVERITY_WORD_RE.search(title):
+            problems.append(f"severity used as a section: '## {title}'")
+        in_bucket = False
+        for raw in body.splitlines():
+            line = raw.strip()
+            if line.startswith("###"):
+                in_bucket = bool(_BUCKET_RE.match(line))
+                if not in_bucket and _SEVERITY_WORD_RE.search(line):
+                    problems.append(f"severity heading not in the exact form: '{line}'")
+                continue
+            if in_bucket and _UNREAD_ITEM_RE.match(line):
+                problems.append(f"item not written as a '- ' bullet: '{line[:60]}'")
+    return problems
+
+
 def report_is_parseable(text: str) -> bool:
-    """True when the report has at least one severity bucket under a dimension.
+    """True when every finding-shaped line in the report is one the parser reads.
 
     ``parse_findings`` returns [] both for a clean report and for one written in
-    a heading format it does not know. Only the first is a real zero.
+    a heading format it does not know. Only the first is a real zero. See
+    ``report_parse_problems`` for what fails closed.
     """
-    return any(
-        _BUCKET_RE.search(body)
-        for title, body in _split_sections(text).items()
-        if title.lower() != "resolutions"
-    )
+    return not report_parse_problems(text)
 
 
 def newest_review_report(session_dir: Path) -> Path | None:
@@ -444,11 +484,9 @@ def cmd_open_findings(args: argparse.Namespace) -> int:
     # `.review/` outlives a ship, so the newest report may belong to an earlier
     # change. /ship-app only trusts the count from the stamped report.
     result["stamped"] = bool(_STAMP_RE.search(text))
-    if not report_is_parseable(text):
-        result["reason"] = (
-            "no '## <Dimension>' section with a '### BLOCK|FLAG|NICE-TO-HAVE' heading; "
-            "open findings unknown"
-        )
+    problems = report_parse_problems(text)
+    if problems:
+        result["reason"] = "; ".join(problems[:5]) + "; open findings unknown"
         print(json.dumps(result, indent=2))
         return 0
     # Only the counted report's own Applied block closes a finding. Writing

@@ -32,7 +32,8 @@ Slug, timestamp, runtime, scope, and the top-3 summary go here, above the first 
   as the separator. An empty bucket is `- _none_`.
 - Keep the summary free of `### BLOCK`, `### FLAG` and `### NICE-TO-HAVE` headings, or its items
   count twice.
-- Don't bold or rename the severity headings. A report the parser can't read gives
+- Don't bold, annotate or rename the severity headings, and write every finding as a `- ` or `* `
+  bullet, never a numbered item. A report the parser can't fully read, even in one bucket, gives
   `parsed: false` in `streamsnow review-loop open-findings`, and `/ship-app` then writes
   "Open critical: unknown" in the PR body.
 
@@ -79,7 +80,10 @@ SHAs, and writes it into the PR body at step 9:
   - `parsed` is false: `Open critical: unknown`;
   - otherwise `Open critical: N`, with N from `counts.BLOCK`.
 
-  Never write 0 for an unknown.
+  Never write 0 for an unknown. The count therefore always comes from the newest stamped report,
+  and `stamped` cannot prove that report covers the current content: after a revert to older
+  reviewed content, classify reads reviewed through an older report's coverage while N still
+  describes the newest one.
 - **Commits since review**, one `<short sha> <subject>` line per entry in
   `.apps[0].commits_since_review`, or `none` when the list is empty. When
   `.apps[0].reviewed_head_status` is not `ancestor`, write `unknown` instead: `not-ancestor` means

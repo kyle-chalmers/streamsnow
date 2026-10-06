@@ -442,3 +442,65 @@ def test_open_findings_without_a_report_errors(
     assert code == 2
     assert out["parsed"] is False
     assert out["counts"] is None
+
+
+_CRITICAL = "[apps/acme-sales-dashboard/queries/revenue_daily.sql:12] SELECT * over a wide view"
+
+
+def _partly_malformed(tmp_path: Path, block_section: str) -> Path:
+    session = tmp_path / ".review"
+    session.mkdir()
+    (session / "review-20260831-090000.md").write_text(
+        "# Review\n\n## SQL\n\n"
+        + block_section
+        + "\n### FLAG\n- _none_\n\n### NICE-TO-HAVE\n- _none_\n",
+        encoding="utf-8",
+    )
+    return session
+
+
+@pytest.mark.parametrize(
+    "block_section",
+    [
+        pytest.param(f"### **BLOCK**\n- {_CRITICAL} -- name the columns.\n", id="bold-heading"),
+        pytest.param(f"### BLOCK (critical)\n- {_CRITICAL}\n", id="annotated-heading"),
+        pytest.param(f"### Block\n- {_CRITICAL}\n", id="lowercase-heading"),
+        pytest.param(f"### BLOCK\n1. {_CRITICAL} -- name the columns.\n", id="numbered-item"),
+        pytest.param(f"### BLOCK\n2) {_CRITICAL}\n", id="numbered-paren-item"),
+        pytest.param(f"### BLOCK\n+ {_CRITICAL}\n", id="plus-bullet"),
+    ],
+)
+def test_open_findings_fails_closed_on_a_partly_malformed_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture, block_section: str
+) -> None:
+    """A critical finding in a form the parser skips must never read as 0 open.
+    The valid FLAG/NICE-TO-HAVE buckets alone used to make the report "parsed"."""
+    code, out = _open(capsys, str(_partly_malformed(tmp_path, block_section)))
+    assert code == 0
+    assert out["parsed"] is False
+    assert out["counts"] is None
+    assert out["open_block"] is None
+
+
+def test_open_findings_fails_closed_on_a_severity_named_section(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    session = tmp_path / ".review"
+    session.mkdir()
+    (session / "review-20260831-090000.md").write_text(
+        REPORT + f"\n## BLOCK\n- {_CRITICAL}\n", encoding="utf-8"
+    )
+    _, out = _open(capsys, str(session))
+    assert out["parsed"] is False
+
+
+def test_open_findings_still_parses_star_bullets_and_prose(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Failing closed must not reject the forms the parser does read."""
+    session = _partly_malformed(
+        tmp_path, f"### BLOCK\n* {_CRITICAL} -- name the columns.\nSee the wide view.\n"
+    )
+    _, out = _open(capsys, str(session))
+    assert out["parsed"] is True
+    assert out["counts"]["BLOCK"] == 1
