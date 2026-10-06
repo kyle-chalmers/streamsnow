@@ -196,5 +196,9 @@ def test_lift_then_conform_scanners_and_gates_agree(tmp_path, monkeypatch):
     assert scan_hardfails(a, policy)[1]["blocks"] is False
     report = _validate()
     assert report["exit"] == 0, report
-    assert not [w for c in report["checks"] for w in c.get("warnings", [])]
+    # starter-text is the warn-only reminder to rewrite AGENTS.md and the README Apps row;
+    # every other check must carry no warning.
+    assert not [
+        w for c in report["checks"] if c["name"] != "starter-text" for w in c.get("warnings", [])
+    ]
     assert sql_review.main(["check", SLUG, "--dir", str(repo)]) == 0

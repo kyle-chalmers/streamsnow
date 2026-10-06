@@ -960,7 +960,10 @@ def test_build_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
     assert (a / "sql_review/01_sales_trend.sql").is_file()
     result = runner.invoke(app, ["validate-app", "sales-trends", "--format", "json"])
     assert result.exit_code == 0, result.output
-    assert not [w for c in _json.loads(result.output)["checks"] for w in c.get("warnings", [])]
+    # starter-text is the warn-only reminder to rewrite AGENTS.md and the README Apps row
+    # (this test leaves both as scaffolded); every other check must carry no warning.
+    checks = _json.loads(result.output)["checks"]
+    assert not [w for c in checks if c["name"] != "starter-text" for w in c.get("warnings", [])]
 
     # pages.md's documented check for this end state is validate-app. It once said
     # `grep -rn YOUR_TABLE apps/<slug>` must print nothing, but the app's own AGENTS.md

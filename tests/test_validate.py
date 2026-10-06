@@ -1738,3 +1738,142 @@ def test_sql_review_advisory_is_a_validate_warning_never_a_failure(tmp_path):
         sqlr = next(c for c in res["checks"] if c["name"].startswith("sql-review"))
         assert sqlr["ok"] and not sqlr["findings"], policy
         assert [w["kind"] for w in sqlr["warnings"]] == ["advisory"], policy
+
+
+# --------------------------------------------------------------------------- #
+# starter-text: warn-only, for prose the placeholders gate cannot scan
+# --------------------------------------------------------------------------- #
+_STARTER_AGENTS_MARKERS = (
+    "starter page with sample numbers; replace it with your real pages.",
+    "`queries/example_metric.sql`: placeholder;",
+    "_None recorded yet._",
+)
+
+
+def _starter_text(res: dict) -> dict:
+    return next(c for c in res["checks"] if c["name"] == "starter-text")
+
+
+def _validate_scaffold(tmp_path: Path, slug: str = "acme-sales") -> tuple[dict, Path]:
+    cfg = _cfg()
+    app = _finish_starter(_scaffold_with_trail(cfg, tmp_path, slug))
+    return validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg), app
+
+
+def test_starter_text_markers_really_appear_in_the_rendered_scaffold(tmp_path):
+    """The marker strings are copied from the AGENTS.md template; if the template is
+    reworded this fails, instead of the check silently going quiet."""
+    cfg = _cfg()
+    app = _scaffold_with_trail(cfg, tmp_path, "acme-sales")
+    text = (app / "AGENTS.md").read_text(encoding="utf-8")
+    for marker in _STARTER_AGENTS_MARKERS:
+        assert marker in text, marker
+
+
+def test_starter_text_warns_on_scaffold_agents_md_but_the_app_passes(tmp_path):
+    res, _ = _validate_scaffold(tmp_path)
+    chk = _starter_text(res)
+    assert res["ok"] and chk["ok"] and not chk["findings"]
+    # the scaffold's own README already lists the app, so only AGENTS.md warns
+    assert {w["file"] for w in chk["warnings"]} == {"AGENTS.md"}
+    joined = "\n".join(json.dumps(w) for w in chk["warnings"])
+    assert "AGENTS.md" in joined
+    assert len([w for w in chk["warnings"] if w["file"] == "AGENTS.md"]) == 3
+
+
+def test_starter_text_is_quiet_once_agents_md_is_rewritten(tmp_path):
+    res, app = _validate_scaffold(tmp_path)
+    text = (app / "AGENTS.md").read_text(encoding="utf-8")
+    for marker in _STARTER_AGENTS_MARKERS:
+        text = text.replace(marker, "Real content.")
+    (app / "AGENTS.md").write_text(text, encoding="utf-8")
+    cfg = _cfg()
+    res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+    assert _starter_text(res)["warnings"] == []
+
+
+def test_starter_text_warns_when_readme_apps_table_says_none_yet(tmp_path):
+    res, app = _validate_scaffold(tmp_path)
+    _write(
+        tmp_path / "README.md",
+        "# Acme\n\n## Apps\n\n| App | Path |\n|-----|------|\n"
+        "| _(none yet)_ | `streamsnow new <domain> <function>` adds one |\n\n## Next\n",
+    )
+    cfg = _cfg()
+    res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+    readme = [w for w in _starter_text(res)["warnings"] if w["file"] == "README.md"]
+    assert res["ok"] and len(readme) == 1
+    assert "none yet" in readme[0]["detail"]
+
+
+def test_starter_text_warns_when_readme_apps_table_lacks_the_slug(tmp_path):
+    res, app = _validate_scaffold(tmp_path)
+    _write(
+        tmp_path / "README.md",
+        "# Acme\n\n## Apps\n\n| App | Path |\n|-----|------|\n| Other | `apps/acme-other/` |\n",
+    )
+    cfg = _cfg()
+    res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+    readme = [w for w in _starter_text(res)["warnings"] if w["file"] == "README.md"]
+    assert res["ok"] and len(readme) == 1
+    assert "apps/acme-sales/" in readme[0]["detail"]
+
+
+def test_starter_text_readme_row_for_the_slug_is_quiet(tmp_path):
+    res, app = _validate_scaffold(tmp_path)
+    _write(
+        tmp_path / "README.md",
+        "# Acme\n\n## Apps\n\n| App | Path |\n|-----|------|\n"
+        "| Acme Sales | `apps/acme-sales/` |\n\n## Add an app\n\nSee `apps/<slug>/`.\n",
+    )
+    cfg = _cfg()
+    res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+    assert not [w for w in _starter_text(res)["warnings"] if w["file"] == "README.md"]
+
+
+def test_starter_text_readme_row_outside_the_apps_section_does_not_count(tmp_path):
+    res, app = _validate_scaffold(tmp_path)
+    _write(
+        tmp_path / "README.md",
+        "# Acme\n\n## Apps\n\n| App | Path |\n|-----|------|\n\n"
+        "## Notes\n\n`apps/acme-sales/` is mentioned here only.\n",
+    )
+    cfg = _cfg()
+    res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+    assert [w for w in _starter_text(res)["warnings"] if w["file"] == "README.md"]
+
+
+def test_starter_text_silent_without_a_readme_or_an_apps_heading(tmp_path):
+    res, app = _validate_scaffold(tmp_path)
+    cfg = _cfg()
+    (tmp_path / "README.md").unlink()  # scaffold() wrote one; this repo has none
+    res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+    assert not [w for w in _starter_text(res)["warnings"] if w["file"] == "README.md"]
+    _write(tmp_path / "README.md", "# Acme\n\nNo apps table here.\n")
+    res = validate_app(app, SchemaPolicy.from_governance(cfg.governance), cfg)
+    assert not [w for w in _starter_text(res)["warnings"] if w["file"] == "README.md"]
+
+
+def test_starter_text_never_changes_the_exit_code(tmp_path, capsys):
+    from streamsnow.tools import validate_app as va
+
+    res, app = _validate_scaffold(tmp_path)
+    assert _starter_text(res)["warnings"]
+    _write(tmp_path / "streamsnow.config.yaml", EXAMPLE.read_text(encoding="utf-8"))
+    rc = va.main(["acme-sales", "--dir", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "! starter-text" in out and "PASS" in out
+    rc = va.main(["acme-sales", "--dir", str(tmp_path), "--format", "json"])
+    data = json.loads(capsys.readouterr().out)
+    assert rc == 0 and data["ok"]
+    assert next(c for c in data["checks"] if c["name"] == "starter-text")["warnings"]
+
+
+@pytest.mark.parametrize("slug", FLEET_APPS)
+def test_starter_text_adds_no_failure_to_fleet_apps(slug):
+    cfg = _fleet_cfg()
+    res = validate_app(FLEET / "apps" / slug, SchemaPolicy.from_governance(cfg.governance), cfg)
+    chk = _starter_text(res)
+    assert chk["ok"] and not chk["findings"]
+    assert not [w for w in chk["warnings"] if w["file"] == "README.md"]

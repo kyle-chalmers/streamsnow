@@ -92,6 +92,7 @@ entry also carries `warnings` (coverage under `warn`, and advisories), and the
 | `requirements` | `REQUIREMENTS.md` §11 build state is malformed (see the `check requirements` row below) |
 | `sql-review (coverage policy: warn\|fail)` | The `sql-review check` finding kinds `index`, `provenance`, `marker`, `objects`, `lint`, `comments`, `readonly` and `bind`; uncovered pages or queries (`coverage`) fail only under `fail` |
 | `placeholders` | The starter's `YOUR_TABLE` or sample numbers are still there |
+| `starter-text` | Warn-only. The app `AGENTS.md` still has the scaffold's starter lines, or the repo README's Apps table has no row for the app |
 
 A freshly scaffolded app **fails** `placeholders` on purpose until you repoint the
 starter query and review window; every other step passing is what proves the scaffold

@@ -5,7 +5,10 @@ artifacts, schema-refs, app-security, bind-predicates, caching, sql-tokens,
 session-fallback, page-imports, path-leaks, requirements-§11, and the offline
 ``sql-review check``) over ``apps/<slug>/`` and returns a single PASS/FAIL. A
 ``placeholders`` check fails while any authored app file still carries the
-scaffold's ``YOUR_TABLE`` or the starter page's sample metric and chart.
+scaffold's ``YOUR_TABLE`` or the starter page's sample metric and chart. A warn-only
+``starter-text`` check covers the prose that scan skips: an app ``AGENTS.md`` still
+describing the starter page and ``example_metric.sql``, and a repo README whose Apps
+table has no row for the app.
 No database, no network, which is why ``check_dependency_vulns`` (OSV.dev) is
 deliberately NOT in this aggregate: it runs as its own pre-commit hook
 (``--best-effort``) and CI job, as does the CI-only ``tombstones`` check. This is
@@ -86,6 +89,32 @@ _STARTER_SAMPLE_RE = re.compile(
 # their query's text, so scanning them would report every placeholder twice.
 _PLACEHOLDER_SUFFIXES = (".py", ".sql", ".json", ".yaml")
 _GENERATED_PAGE_FILE_RE = re.compile(r"^\d{2}_[a-z0-9_]+\.sql$")
+
+# Prose the placeholders scan cannot see. The app AGENTS.md is skipped there on purpose,
+# because it legitimately names YOUR_TABLE, so a real app shipped with an AGENTS.md that
+# still described the starter page and example_metric.sql, and only a human docs review
+# caught it. These are Jinja-free lines copied from _templates/app/AGENTS.md.j2; a test
+# renders a scaffold and asserts each is still there, so rewording the template cannot
+# silently turn the check off.
+_STARTER_AGENTS_MARKERS = (
+    (
+        "starter page with sample numbers; replace it with your real pages.",
+        "still describes the starter page (Pages section): list the app's real pages",
+    ),
+    (
+        "`queries/example_metric.sql`: placeholder;",
+        "still describes the placeholder example_metric.sql (Queries section): "
+        "list the app's real queries",
+    ),
+    (
+        "_None recorded yet._",
+        "Data notes still say none recorded: write the grain, metric definitions, "
+        "quirks and freshness a reviewer needs",
+    ),
+)
+_README_NONE_YET = "_(none yet)_"
+_APPS_HEADING_RE = re.compile(r"^##[ \t]+Apps[ \t]*$", re.MULTILINE)
+_NEXT_HEADING_RE = re.compile(r"^#{1,2}[ \t]+\S", re.MULTILINE)
 
 # Container-runtime fields that must be ABSENT in warehouse mode.
 _CONTAINER_ONLY = ("runtime_name", "compute_pool", "external_access_integrations")
@@ -409,6 +438,64 @@ def _check_placeholders(app_dir: Path) -> list[dict]:
     return found
 
 
+def _check_starter_text(app_dir: Path, repo_root: Path) -> list[dict]:
+    """Warnings for starter prose the placeholders gate does not scan (warn-only).
+
+    Two sources. The app's ``AGENTS.md`` still carrying the scaffold's lines about the
+    starter page, ``example_metric.sql`` or empty data notes. And the repo ``README.md``
+    whose ``## Apps`` table still reads ``_(none yet)_`` or has no ``apps/<slug>/`` row,
+    which is what ``streamsnow new`` leaves behind when the README was written before the
+    app existed. Both read as finished docs while describing an app that is not there.
+
+    Warn-only because a stricter check must not fail a repo that passed before. A repo
+    with no README, or a README with no ``## Apps`` heading, is silent: the README is not
+    ours to demand.
+    """
+    warnings: list[dict] = []
+    agents = app_dir / "AGENTS.md"
+    if agents.is_file():
+        try:
+            text = agents.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        for marker, detail in _STARTER_AGENTS_MARKERS:
+            idx = text.find(marker)
+            if idx != -1:
+                warnings.append(
+                    {
+                        "file": "AGENTS.md",
+                        "line": text.count("\n", 0, idx) + 1,
+                        "detail": f"scaffold text, {detail}",
+                    }
+                )
+
+    readme = repo_root / "README.md"
+    if readme.is_file():
+        try:
+            body = readme.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            body = ""
+        heading = _APPS_HEADING_RE.search(body)
+        if heading:
+            rest = body[heading.end() :]
+            nxt = _NEXT_HEADING_RE.search(rest)
+            section = rest[: nxt.start()] if nxt else rest
+            line = body.count("\n", 0, heading.start()) + 1
+            slug_row = re.search(rf"apps/{re.escape(app_dir.name)}(?![\w-])", section)
+            if _README_NONE_YET in section:
+                detail = (
+                    f"README.md Apps table still says {_README_NONE_YET}: "
+                    f"add a row for `apps/{app_dir.name}/`"
+                )
+            elif not slug_row:
+                detail = f"README.md Apps table has no row for `apps/{app_dir.name}/`"
+            else:
+                detail = ""
+            if detail:
+                warnings.append({"file": "README.md", "line": line, "detail": detail})
+    return warnings
+
+
 def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     checks: list[dict] = []
 
@@ -489,6 +576,10 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
 
     placeholders = _check_placeholders(app_dir)
     checks.append({"name": "placeholders", "ok": not placeholders, "findings": placeholders})
+
+    # Warn-only: never sets ok=False, so the exit code and PASS/FAIL are unchanged.
+    starter = _check_starter_text(app_dir, app_dir.parent.parent)
+    checks.append({"name": "starter-text", "ok": True, "findings": [], "warnings": starter})
 
     return {
         "app": app_dir.name,
