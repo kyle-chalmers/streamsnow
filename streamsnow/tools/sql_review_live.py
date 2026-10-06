@@ -51,7 +51,10 @@ its aliases, ``FLOAT``/``DOUBLE``/``REAL``, ``DECFLOAT``), keyed by the column
 name as Snowflake reports it (``DESCRIBE RESULT`` de-duplicates repeats as
 ``NAME_1``). A sum over no non-null values is ``null``. ``FLOAT`` columns are
 listed in ``float_columns``: their sums depend on evaluation order, so compare
-them with a tolerance.
+them with a tolerance. ``distinct`` (when present) holds ``{COLUMN: int}``, the
+count of distinct non-null values of each text, date, time or boolean column:
+``compare`` uses it to tell a page that groups the result from one that slices
+it. A count, never a value.
 
 Bench
 -----
@@ -106,6 +109,13 @@ _NUMERIC_TYPE_RE = re.compile(
     re.IGNORECASE,
 )
 _FLOAT_TYPE_RE = re.compile(r"^(FLOAT|FLOAT4|FLOAT8|DOUBLE|REAL)\b", re.IGNORECASE)
+#: Columns a page can group by, whose distinct values ``run`` counts. Semi-structured
+#: and spatial types are left out: they are not keys, and DISTINCT may not apply.
+_KEY_TYPE_RE = re.compile(
+    r"^(VARCHAR|CHAR|CHARACTER|NCHAR|NVARCHAR|NVARCHAR2|STRING|TEXT|DATE|DATETIME|"
+    r"TIME|TIMESTAMP|TIMESTAMP_LTZ|TIMESTAMP_NTZ|TIMESTAMP_TZ|BOOLEAN)\b",
+    re.IGNORECASE,
+)
 _UNWRAPPABLE_ROOTS = frozenset({"SHOW", "DESCRIBE", "DESC", "EXPLAIN"})
 _PLACEHOLDER_RE = re.compile(r"\bYOUR_TABLE\b")
 #: Committed-log totals: a single all-numeric row (a KPI) or at least this many rows.
@@ -543,6 +553,10 @@ class Column:
     def is_float(self) -> bool:
         return bool(_FLOAT_TYPE_RE.match(self.type))
 
+    @property
+    def is_key(self) -> bool:
+        return bool(_KEY_TYPE_RE.match(self.type))
+
 
 def parse_columns(result: sx.ResultSet) -> list[Column]:
     return [
@@ -551,13 +565,21 @@ def parse_columns(result: sx.ResultSet) -> list[Column]:
     ]
 
 
-def measure_sql(section_sql: str, columns: list[Column], *, sums: bool = True) -> str:
+def measure_sql(
+    section_sql: str, columns: list[Column], *, sums: bool = True, distinct: bool = False
+) -> str:
     """One row of aggregates: row count, order-insensitive hash, column totals.
 
     Positional references (``$n``) keep duplicate column names unambiguous;
     the hash takes columns sorted by name, so a reordered projection hashes the
     same. Everything is cast to text in Snowflake so no precision is lost on
     the way through JSON.
+
+    With ``distinct``, each key-shaped column (text, date, time, boolean) also
+    gets its count of distinct non-null values. ``compare`` trusts a page that
+    groups this result only when the grouping keeps every one of them: a head
+    or filtered slice whose dropped rows sum to zero keeps the totals but
+    loses keys.
     """
     ordered = sorted(columns, key=lambda c: (c.name, c.position))
     parts = ['COUNT(*) AS "__ROWS"']
@@ -569,6 +591,10 @@ def measure_sql(section_sql: str, columns: list[Column], *, sums: bool = True) -
             if c.numeric:
                 parts.append(f'COUNT(${c.position}) AS "__C{c.position}_N"')
                 parts.append(f'TO_VARCHAR(SUM(${c.position})) AS "__C{c.position}_SUM"')
+    if distinct:
+        for c in columns:
+            if c.is_key:
+                parts.append(f'COUNT(DISTINCT ${c.position}) AS "__C{c.position}_DISTINCT"')
     select = ",\n    ".join(parts)
     return f"SELECT\n    {select}\nFROM (\n{section_sql}\n)"
 
@@ -654,12 +680,22 @@ def parse_measure(row: dict, columns: list[Column]) -> dict:
             name = f"{name}#{seen[name]}"
         value = row.get(key)
         totals[name] = None if value in (None, "") else str(value)
-    return {
+    out = {
         "rows": _int(row.get("__ROWS")),
         "hash": None if row.get("__HASH") in (None, "") else str(row.get("__HASH")),
         "totals": totals,
         "float_columns": [c.name for c in columns if c.is_float],
     }
+    distinct: dict[str, int] = {}
+    named: dict[str, int] = {}
+    for c in columns:
+        named[c.name] = named.get(c.name, 0) + 1
+        count = _int(row.get(f"__C{c.position}_DISTINCT"))
+        if count is not None:
+            distinct[c.name if named[c.name] == 1 else f"{c.name}#{named[c.name]}"] = count
+    if distinct:
+        out["distinct"] = distinct
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -984,7 +1020,8 @@ def measure_sections(
             out[s.ref] = {"status": "fail", "detail": str(got)}
         else:
             columns[s.ref] = parse_columns(got[1])
-            measures.append((s.ref, [measure_sql(s.sql, columns[s.ref]), _LAST_QID_SQL]))
+            measure = measure_sql(s.sql, columns[s.ref], distinct=True)
+            measures.append((s.ref, [measure, _LAST_QID_SQL]))
     if not measures:
         return out, session, []
     try:

@@ -28,11 +28,14 @@ Matching
   rows than ``rows``. That is a ``match`` with the rule ``aggregated`` only
   when the screen has fewer rows (at least one), every screen total pairs by
   name with its run total exactly (``FLOAT`` within 1e-9, summation drift
-  only, never the display tolerance), the screen's group keys are all
-  non-numeric columns of the SQL result (or the screen is one total row), and
-  at least one total is non-zero. A head or filtered slice changes the totals,
-  and a derived or numeric key cannot tell a grouping from a slice, so those
-  stay a ``mismatch``.
+  only, never the display tolerance), at least one total is non-zero, and the
+  screen's group keys are all non-numeric columns of the SQL result that never
+  repeat on screen and keep every distinct value the run counted (or the
+  screen is one total row with no key). A head or filtered slice changes the
+  totals or loses keys even when its dropped rows sum to zero, and a derived
+  or numeric key cannot tell a grouping from a slice, so those stay a
+  ``mismatch``. A run or a ``review.py`` from before key counts never gives
+  ``aggregated``.
 - **Scalars and displayed numbers:** against the single numeric total of a
   one-row result, or against the row count when the result has no numeric
   column. A multi-row result with exactly one numeric column whose non-zero
@@ -423,14 +426,15 @@ def _aggregated_frame(run: dict, cap: dict) -> dict | None:
     - the screen has fewer rows than the run, and at least one;
     - every screen total pairs by name with a run total, exactly (``FLOAT``
       within 1e-9; see ``_same_sum``);
-    - the screen's columns without a total (its group keys) are all
-      non-numeric columns of the SQL result, or the screen is one total row;
-    - at least one total is non-zero.
+    - at least one total is non-zero;
+    - the screen's columns without a total (its group keys) pass
+      ``_keys_grouped``: non-numeric SQL columns, no repeated key row, every
+      distinct value kept. With no key, the screen must be one total row.
 
-    A head or filtered slice changes the totals. A derived key (a month name
-    built in pandas) or a numeric key (a year) is not trusted, since its
-    totals cannot tell a grouping from a slice. Anything else falls through
-    to the ordinary frame rules.
+    A head or filtered slice changes the totals or loses keys. A derived key
+    (a month name built in pandas) or a numeric key (a year) is not trusted,
+    since its totals cannot tell a grouping from a slice. Anything else falls
+    through to the ordinary frame rules.
     """
     rows, shown_rows = run.get("rows"), cap.get("row_count")
     if type(rows) is not int or type(shown_rows) is not int or not 1 <= shown_rows < rows:
@@ -458,7 +462,10 @@ def _aggregated_frame(run: dict, cap: dict) -> dict | None:
     if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
         return None
     keys = [c for c in columns if c not in cap_totals]
-    if shown_rows > 1 and (not keys or not set(keys) <= _text_columns(run)):
+    if not keys:
+        if shown_rows > 1:
+            return None
+    elif not _keys_grouped(run, headline, keys):
         return None
     notes = [f"grouped: {shown_rows} screen rows from {rows} run rows"]
     hidden = [name for d, (name, _) in run_totals.items() if d not in cap_totals]
@@ -482,6 +489,39 @@ def _same_sum(expected: Decimal | None, observed: Decimal | None, *, is_float: b
     if not is_float:
         return observed == expected
     return abs(observed - expected) <= abs(expected) * AGGREGATED_FLOAT_TOLERANCE
+
+
+def _keys_grouped(run: dict, headline: dict, keys: list[str]) -> bool:
+    """Do the screen's key columns look like a grouping of the SQL result?
+
+    Equal totals alone cannot tell ``df.head(2)`` of ``REGION=[A, A, B, C]``,
+    ``REVENUE=[60, 40, 0, 0]`` from a grouping: the dropped rows sum to zero
+    (or cancel, ``[7, -7]``). A grouping has two properties such a slice lacks:
+    no key row repeats, and every key keeps all the distinct values the SQL
+    returned (``distinct`` in the run, ``key_distinct`` in the capture). A run
+    or a review.py from before those counts gives no evidence, so no match.
+    """
+    if not set(keys) <= _text_columns(run):
+        return False
+    shown = headline.get("key_distinct")
+    if headline.get("key_rows_unique") is not True or not isinstance(shown, dict):
+        return False
+    source = _distinct(run)
+    return all(type(shown.get(k)) is int and shown[k] == source.get(k) for k in keys)
+
+
+def _distinct(run: dict) -> dict[str, int]:
+    """The run's distinct counts by hashed name. A name that repeats once
+    normalised cannot be paired by name, so it is left out."""
+    raw = run.get("distinct")
+    if not isinstance(raw, dict):
+        return {}
+    normals = [_normal(str(k)) for k in raw]
+    return {
+        name_digest(n): v
+        for n, v in zip(normals, raw.values(), strict=True)
+        if type(v) is int and "#" not in n and normals.count(n) == 1
+    }
 
 
 def _text_columns(run: dict) -> set[str]:

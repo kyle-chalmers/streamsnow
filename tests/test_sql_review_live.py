@@ -227,6 +227,18 @@ def test_run_reports_aggregates_with_stable_ids(repo: Path, capsys: pytest.Captu
     assert "USE_CACHED_RESULT = FALSE" in fake.calls[1][1]  # a cached rerun reads as instant
 
 
+def test_run_records_distinct_counts_of_key_columns(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    fake = FakeSnow()
+    fake.measures["REGION_ROLLUP"]["__C1_DISTINCT"] = "4"
+    assert _live(repo, fake, "run") == 0
+    by_id = {r["id"]: r for r in _out(capsys)["results"]}
+    assert by_id["run:02#1"]["distinct"] == {"REGION": 4}
+    assert 'COUNT(DISTINCT $1) AS "__C1_DISTINCT"' in fake.calls[1][1]
+    assert "COUNT(DISTINCT $2)" not in fake.calls[1][1]  # N is a number: a total, not a key
+
+
 def test_run_output_lists_every_file_it_wrote(repo: Path, capsys: pytest.CaptureFixture) -> None:
     assert _live(repo, FakeSnow(), "run") == 0
     out = _out(capsys)
@@ -388,6 +400,25 @@ def test_measure_uses_positions_and_a_name_sorted_hash() -> None:
     )
     assert parsed["totals"] == {"B": "5", "B#2": None}
     assert parsed["float_columns"] == ["B"]
+    assert "DISTINCT" not in sql and "distinct" not in parsed
+
+
+def test_measure_counts_distinct_values_of_key_shaped_columns() -> None:
+    """compare trusts a grouped frame only if it keeps every distinct key: the
+    run counts them for text, date, time and boolean columns (never a value)."""
+    cols = [
+        live.Column(1, "REGION", "VARCHAR(16777216)"),
+        live.Column(2, "REVENUE", "NUMBER(38,2)"),
+        live.Column(3, "DAY", "DATE"),
+        live.Column(4, "PAYLOAD", "VARIANT"),
+        live.Column(5, "REGION", "TEXT"),
+    ]
+    sql = live.measure_sql("SELECT 1", cols, distinct=True)
+    assert 'COUNT(DISTINCT $1) AS "__C1_DISTINCT"' in sql
+    assert 'COUNT(DISTINCT $3) AS "__C3_DISTINCT"' in sql
+    assert "DISTINCT $2" not in sql and "DISTINCT $4" not in sql
+    row = {"__ROWS": "72", "__C1_DISTINCT": "6", "__C3_DISTINCT": "12", "__C5_DISTINCT": "2"}
+    assert live.parse_measure(row, cols)["distinct"] == {"REGION": 6, "DAY": 12, "REGION#2": 2}
 
 
 def test_split_page_reads_each_tagged_section(repo: Path) -> None:

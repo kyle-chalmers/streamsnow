@@ -22,6 +22,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+import test_review_helper as rh
 import test_sql_review_live as lt
 
 from streamsnow.scaffolder import _env
@@ -78,17 +79,23 @@ def _frame(
     rows: int,
     totals: dict[str, str | None],
     floats: tuple[str, ...] = (),
-    keys: tuple[str, ...] = (),
+    keys: dict[str, int] | None = None,
+    unique: bool = True,
 ) -> dict:
-    """A frame capture; ``keys`` are its non-numeric columns (no total)."""
+    """A frame capture. ``keys`` are its non-numeric columns (no total), each
+    with its distinct count; ``unique`` says whether key rows never repeat."""
     d = cmp.name_digest
+    headline: dict = {
+        "totals": {d(k): v for k, v in totals.items()},
+        "float_columns": [d(k) for k in floats],
+    }
+    if keys:
+        headline["key_distinct"] = {d(k): n for k, n in keys.items()}
+        headline["key_rows_unique"] = unique
     return {
         "row_count": rows,
-        "columns": [d(k) for k in (*keys, *totals)],
-        "headline": {
-            "totals": {d(k): v for k, v in totals.items()},
-            "float_columns": [d(k) for k in floats],
-        },
+        "columns": [d(k) for k in (*(keys or {}), *totals)],
+        "headline": headline,
     }
 
 
@@ -457,6 +464,7 @@ COARSE = {
     "rows": 72,
     "totals": {"REVENUE": "9000.50", "ORDERS": "500"},
     "float_columns": [],
+    "distinct": {"REGION": 6, "ORDER_MONTH": 12},
     "columns": [
         {"name": "REGION", "type": "VARCHAR(16777216)"},
         {"name": "ORDER_MONTH", "type": "DATE"},
@@ -474,7 +482,7 @@ def _coarse(run_dir: Path, **extra: object) -> None:
 def test_grouped_frame_is_aggregated(run_dir: Path, capsys: pytest.CaptureFixture) -> None:
     """df.groupby("REGION")[["REVENUE", "ORDERS"]].sum().reset_index(): 6 rows of 72."""
     _coarse(run_dir)
-    frame = _frame(6, {"Revenue": "9000.5", "orders": "500"}, keys=("Region",))
+    frame = _frame(6, {"Revenue": "9000.5", "orders": "500"}, keys={"Region": 6})
     _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
     rc, out = _compare(run_dir, capsys)
     r = _by_id(out)["compare:02#1"]
@@ -496,7 +504,7 @@ def test_a_single_total_row_is_aggregated(run_dir: Path, capsys: pytest.CaptureF
 def test_head_slice_stays_a_mismatch(run_dir: Path, capsys: pytest.CaptureFixture) -> None:
     """df.head(10): fewer rows, and the totals of only those rows."""
     _coarse(run_dir)
-    frame = _frame(10, {"REVENUE": "1250.25", "ORDERS": "70"}, keys=("REGION",))
+    frame = _frame(10, {"REVENUE": "1250.25", "ORDERS": "70"}, keys={"REGION": 2}, unique=False)
     _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
     rc, out = _compare(run_dir, capsys)
     r = _by_id(out)["compare:02#1"]
@@ -517,7 +525,8 @@ def test_head_slice_with_a_small_tail_stays_a_mismatch(
         60,
         {"REVENUE": "8964.5" if float_column else "8964.50"},
         floats=("REVENUE",) if float_column else (),
-        keys=("REGION",),
+        keys={"REGION": 2},
+        unique=False,
     )
     _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
     rc, out = _compare(run_dir, capsys)
@@ -531,7 +540,7 @@ def test_grouped_float_column_matches_despite_summation_drift(
 ) -> None:
     """pandas float sums drift around 1e-12; a grouping still matches."""
     _coarse(run_dir, totals={"REVENUE": "9000.50"}, float_columns=["REVENUE"])
-    frame = _frame(6, {"REVENUE": "9000.500000000002"}, floats=("REVENUE",), keys=("REGION",))
+    frame = _frame(6, {"REVENUE": "9000.500000000002"}, floats=("REVENUE",), keys={"REGION": 6})
     _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
     _, out = _compare(run_dir, capsys)
     r = _by_id(out)["compare:02#1"]
@@ -541,7 +550,7 @@ def test_grouped_float_column_matches_despite_summation_drift(
 def test_filtered_slice_stays_a_mismatch(run_dir: Path, capsys: pytest.CaptureFixture) -> None:
     """df[df.REGION == "West"]: one total can agree by chance; every one must."""
     _coarse(run_dir)
-    frame = _frame(12, {"REVENUE": "1500.25", "ORDERS": "500"}, keys=("REGION",))
+    frame = _frame(12, {"REVENUE": "1500.25", "ORDERS": "500"}, keys={"REGION": 1}, unique=False)
     _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
     rc, out = _compare(run_dir, capsys)
     r = _by_id(out)["compare:02#1"]
@@ -552,7 +561,7 @@ def test_filtered_slice_stays_a_mismatch(run_dir: Path, capsys: pytest.CaptureFi
 def test_a_derived_key_is_not_aggregated(run_dir: Path, capsys: pytest.CaptureFixture) -> None:
     """A key the SQL never returned (a month name built in pandas) proves no grouping."""
     _coarse(run_dir)
-    frame = _frame(12, {"REVENUE": "9000.5", "ORDERS": "500"}, keys=("Month name",))
+    frame = _frame(12, {"REVENUE": "9000.5", "ORDERS": "500"}, keys={"Month name": 12})
     _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
     _, out = _compare(run_dir, capsys)
     assert _by_id(out)["compare:02#1"]["status"] == "mismatch"
@@ -564,7 +573,7 @@ def test_a_derived_key_is_not_aggregated(run_dir: Path, capsys: pytest.CaptureFi
         # YEAR shown as a number: its screen total is a sum of distinct years.
         _frame(6, {"YEAR": "12147", "REVENUE": "9000.5", "ORDERS": "500"}),
         # YEAR shown as text: a key, but a numeric source column.
-        _frame(6, {"REVENUE": "9000.5", "ORDERS": "500"}, keys=("YEAR",)),
+        _frame(6, {"REVENUE": "9000.5", "ORDERS": "500"}, keys={"YEAR": 1}),
     ],
 )
 def test_a_numeric_key_is_not_aggregated(
@@ -578,7 +587,7 @@ def test_a_numeric_key_is_not_aggregated(
 
 def test_all_zero_totals_are_not_aggregated(run_dir: Path, capsys: pytest.CaptureFixture) -> None:
     _coarse(run_dir, totals={"REVENUE": "0", "ORDERS": "0"})
-    frame = _frame(6, {"REVENUE": "0", "ORDERS": "0"}, keys=("REGION",))
+    frame = _frame(6, {"REVENUE": "0", "ORDERS": "0"}, keys={"REGION": 6})
     _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
     _, out = _compare(run_dir, capsys)
     assert _by_id(out)["compare:02#1"]["status"] == "mismatch"
@@ -598,7 +607,7 @@ def test_scalar_sum_of_a_multi_row_source_is_aggregated(
 
 def test_log_cell_names_aggregated(run_dir: Path, capsys: pytest.CaptureFixture) -> None:
     _coarse(run_dir)
-    frame = _frame(6, {"REVENUE": "9000.5", "ORDERS": "500"}, keys=("REGION",))
+    frame = _frame(6, {"REVENUE": "9000.5", "ORDERS": "500"}, keys={"REGION": 6})
     _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
     _run(run_dir, "01", {"n": 1, "rows": 1, "totals": {"REVENUE": "5"}})
     _capture(run_dir, "overview", "total_revenue", "scalar", headline={"value": "5"})
@@ -606,6 +615,90 @@ def test_log_cell_names_aggregated(run_dir: Path, capsys: pytest.CaptureFixture)
     cells = live._screen_cells(run_dir)
     assert cells["compare:02#1"] == "match (aggregated)"
     assert cells["compare:01#1"] == "match"
+
+
+def test_repeated_key_rows_are_not_aggregated(run_dir: Path, capsys: pytest.CaptureFixture) -> None:
+    """A grouping has one row per key; a slice of the coarse rows repeats keys."""
+    _coarse(run_dir)
+    frame = _frame(12, {"REVENUE": "9000.5", "ORDERS": "500"}, keys={"REGION": 6}, unique=False)
+    _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
+    _, out = _compare(run_dir, capsys)
+    assert _by_id(out)["compare:02#1"]["status"] == "mismatch"
+
+
+def test_a_grouping_that_lost_a_key_is_not_aggregated(
+    run_dir: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """5 of the SQL's 6 regions: rows went missing, even if their totals cancel."""
+    _coarse(run_dir)
+    frame = _frame(5, {"REVENUE": "9000.5", "ORDERS": "500"}, keys={"REGION": 5})
+    _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
+    _, out = _compare(run_dir, capsys)
+    assert _by_id(out)["compare:02#1"]["status"] == "mismatch"
+
+
+@pytest.mark.parametrize("missing", ["run", "capture"])
+def test_without_key_counts_a_grouping_is_not_trusted(
+    run_dir: Path, capsys: pytest.CaptureFixture, missing: str
+) -> None:
+    """A run or a review.py from before key counts: no evidence, so no aggregated."""
+    _coarse(run_dir, **({"distinct": None} if missing == "run" else {}))
+    frame = _frame(6, {"REVENUE": "9000.5", "ORDERS": "500"}, keys={"REGION": 6})
+    if missing == "capture":
+        del frame["headline"]["key_distinct"], frame["headline"]["key_rows_unique"]
+    _capture(run_dir, "regions", "orders_by_region", "frame", **frame)
+    _, out = _compare(run_dir, capsys)
+    assert _by_id(out)["compare:02#1"]["status"] == "mismatch"
+
+
+#: Codex's repro: REGION=[A, A, B, C], REVENUE=[60, 40, *tail], tail 0 or cancelling.
+CODEX_RUN = {
+    "n": 1,
+    "rows": 4,
+    "totals": {"REVENUE": "100"},
+    "float_columns": [],
+    "distinct": {"REGION": 3},
+    "columns": [
+        {"name": "REGION", "type": "VARCHAR(16777216)"},
+        {"name": "REVENUE", "type": "NUMBER(38,0)"},
+    ],
+}
+
+
+def _shipped_capture(run_dir: Path, monkeypatch: pytest.MonkeyPatch, frame: object) -> None:
+    """Capture ``frame`` with the scaffolded review.py itself, as the preview does."""
+    app = _repo(run_dir).parent / "helper_app"
+    app.mkdir(exist_ok=True)
+    module, _ = rh._load(app, monkeypatch, str(run_dir / "capture"))
+    rh._call_from(app / "pages" / "regions.py", module, "orders_by_region", frame)
+
+
+@pytest.mark.parametrize("tail", [[0, 0], [7, -7]])
+def test_codex_head_slice_is_not_aggregated(
+    run_dir: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch, tail: list
+) -> None:
+    """df.head(2) keeps both A rows (60 + 40 = 100); the dropped tail is zero or cancels."""
+    _run(run_dir, "02", CODEX_RUN)
+    head = rh.DataFrame({"REGION": ("O", ["A", "A"]), "REVENUE": ("i", [60, 40])})
+    _shipped_capture(run_dir, monkeypatch, head)
+    rc, out = _compare(run_dir, capsys)
+    r = _by_id(out)["compare:02#1"]
+    assert r["status"] == "mismatch" and r["rule"] != "aggregated"
+    assert rc == 1
+
+
+@pytest.mark.parametrize("tail", [[0, 0], [7, -7]])
+def test_codex_source_grouped_is_aggregated(
+    run_dir: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch, tail: list
+) -> None:
+    """The same source, grouped by REGION: one row per region, all three kept."""
+    _run(run_dir, "02", CODEX_RUN)
+    grouped = rh.DataFrame({"REGION": ("O", ["A", "B", "C"]), "REVENUE": ("i", [100, *tail])})
+    _shipped_capture(run_dir, monkeypatch, grouped)
+    rc, out = _compare(run_dir, capsys)
+    r = _by_id(out)["compare:02#1"]
+    assert (r["status"], r["rule"]) == ("match", "aggregated")
+    assert rc == 0
 
 
 # --------------------------------------------------------------------------- #

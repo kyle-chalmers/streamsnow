@@ -29,8 +29,11 @@ Below, `<run_dir>` is `.streamsnow/sql-review/<slug>/<run_id>`.
    candidate findings, never log them yourself. Exit `2` with "nothing was captured" means no
    page rendered, or the app's `review.py` predates capture. A page that shares one loader and
    groups it shows fewer rows than the SQL: when every total it shows equals the SQL's and its
-   group keys are non-numeric columns of the result, that is a `match` with the rule `aggregated`
-   (`match (aggregated)` in the log). A head or filtered slice stays a `mismatch`.
+   group keys are non-numeric columns of the result that never repeat and keep every distinct
+   value the run counted, that is a `match` with the rule `aggregated` (`match (aggregated)` in
+   the log). A head or filtered slice stays a `mismatch`, even when its dropped rows sum to zero.
+   Grouped visuals need a `run` and a `review.py` that record key counts: an older one reads as
+   `mismatch`, so rerun `run` and refresh `review.py` from the current scaffold.
 
 ## Reading a page (the walk)
 
