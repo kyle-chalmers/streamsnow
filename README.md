@@ -351,6 +351,31 @@ streamsnow update --apply                # re-render AGENTS.md, CLAUDE.md, hooks
 
 Generated CI and deploy workflows pin `streamsnow>=0.10.1,<0.11`; bump the pin with
 `update --apply` when you move to a new minor release (before 1.0, minors can break).
+
+`update` stops at the repo-level governance files. It never rewrites app files
+(`apps/<slug>/review.py`, `pages/_glossary.py`) and never rewrites an existing `.sqlfluff`.
+Refresh a stale `review.py` with `streamsnow sql-review helper <slug> --apply` (a dry run
+without `--apply`; `--force` as well when it reports `modified`).
+
+Two small template fixes reach new repos only, so an existing repo makes them by hand:
+
+- In `apps/<slug>/pages/_glossary.py`, change the last line of `hover_definition` from
+  `return metric_help(key).replace("%", "%%")` to `return metric_help(key)`.
+- In `.sqlfluff` (optional: a comment only, no rule or setting changes), replace the two
+  comment lines `# rule set below. Run the same lint by hand with:` and the one after it
+  (`#   sqlfluff lint apps/<slug>/queries --templater placeholder`) with the current text:
+
+  ```text
+  # rule set below. Lint through it, not through a bare sqlfluff run:
+  #   streamsnow sql-review check <slug>
+  # The query files hold {TOKEN} placeholders, which sqlfluff's placeholder templater
+  # (param_style colon) cannot parse. sql-review check substitutes the index's sample
+  # tokens first, so the same files lint cleanly there.
+  ```
+
+A plugin update does not apply to a session that is already running: restart the
+session (or run `/reload-plugins`) before relying on the new skill text.
+
 `claude plugin details streamsnow@streamsnow` lists the 8 skills below.
 
 ## The skills

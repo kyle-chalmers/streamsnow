@@ -33,7 +33,9 @@ Below, `<run_dir>` is `.streamsnow/sql-review/<slug>/<run_id>`.
    value the run counted, that is a `match` with the rule `aggregated` (`match (aggregated)` in
    the log). A head or filtered slice stays a `mismatch`, even when its dropped rows sum to zero.
    Grouped visuals need a `run` and a `review.py` that record key counts: an older one reads as
-   `mismatch`, so rerun `run` and refresh `review.py` from the current scaffold.
+   `mismatch`, so rerun `run` and refresh the helper: `streamsnow sql-review helper <slug>` shows
+   its state and a diff, `--apply` writes the current scaffold (`--force` as well when it is
+   `modified`, which may hold the user's changes; ask first). `streamsnow update` never does this.
 
 ## Reading a page (the walk)
 

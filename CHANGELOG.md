@@ -8,6 +8,25 @@ entry.
 
 ## [Unreleased]
 
+### Added
+
+- **`streamsnow sql-review helper <slug> [--apply] [--force]`** refreshes an app's `review.py`
+  from the current scaffold, which `streamsnow update` never does. The default is a dry run that
+  prints the helper's state (`current`, `modified` or `missing`) and a diff; `--apply` writes the
+  scaffold, and a `modified` file is refused (exit 1) unless `--force` is also passed. An unknown
+  slug, a missing config or a non-UTF-8 helper is exit 2, and a symlinked `review.py` is
+  refused (exit 1) even with `--force`. `sql-review compare` points at it when the helper is stale.
+
+### Fixed
+
+- **Docs no longer say `streamsnow update --apply` refreshes `review.py`.** `update` re-renders
+  repo-level governance files only; `.sqlfluff` and app files are never rewritten. The docs now
+  say so, name `sql-review helper` for `review.py`, and give the one-line manual change an
+  existing repo needs for the glossary `%` fix and the `.sqlfluff` comment.
+- **`stage-bundle` leaves out `*.egg-info` directories, `*.pyc` and `.DS_Store`.** A local
+  editable install's ignored build metadata reached the stage in a live test; it is never read
+  at runtime.
+
 ## [0.10.1] - 2026-10-07
 
 - Generated CI and deploy workflows pin `streamsnow>=0.10.1,<0.11`, because the stage-copy
@@ -57,8 +76,9 @@ Most entries below come from a first end-to-end run of the plugin (onboard throu
   reads `match` with rule `aggregated` when every total it shows equals the SQL's exactly and its
   group keys are unique and complete. Head and filtered slices stay `mismatch`. `sql-review run`
   records distinct counts for text, date, time and boolean columns, and the scaffolded
-  `review.py` records key counts (never values) to support this; refresh `review.py` with
-  `streamsnow update --apply` or grouped visuals keep reading `mismatch`.
+  `review.py` records key counts (never values) to support this; refresh an existing app's
+  `review.py` with `streamsnow sql-review helper <slug> --apply` (`streamsnow update --apply`
+  does not touch app files) or grouped visuals keep reading `mismatch`.
 - **`sql-review run` output lists the `run-NN.json` files it wrote** in a new `files` key.
 
 ### Changed
