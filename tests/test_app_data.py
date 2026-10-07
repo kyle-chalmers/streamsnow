@@ -131,6 +131,23 @@ def test_other_deployable_view_forms_parse_clean(text):
             id="no-initialize",
         ),
         pytest.param(
+            DT_DDL.replace(
+                "  INITIALIZE = ON_CREATE\n", "  WAREHOUSE = BIG_WH\n  INITIALIZE = ON_CREATE\n"
+            ),
+            DT_PARTS,
+            "exactly once",
+            id="warehouse-twice",
+        ),
+        pytest.param(
+            DT_DDL.replace(
+                "  INITIALIZE = ON_CREATE\n",
+                "  INITIALIZE = ON_CREATE\n  INITIALIZE = ON_SCHEDULE\n",
+            ),
+            DT_PARTS,
+            "INITIALIZE = ON_CREATE exactly once",
+            id="initialize-twice",
+        ),
+        pytest.param(
             DT_DDL.replace("ON_CREATE", "ON_SCHEDULE"),
             DT_PARTS,
             "INITIALIZE = ON_CREATE",
@@ -251,3 +268,13 @@ def test_ddl_kind_is_lenient():
     assert ddl_kind(VIEW_DDL) == KIND_VIEW
     assert ddl_kind("CREATE TABLE A.B.C (x INT);") == ""
     assert ddl_kind("-- nothing here\n") == ""
+
+
+def test_a_cr_only_file_reports_the_real_line():
+    text = VIEW_DDL.replace("\n", "\r")
+    p = _parse(text, expect=VIEW_PARTS)
+    assert p.problems == ()
+    assert [line for line, _parts in p.reads] == [3, 4]
+    assert p.line == 1
+    late = ("-- c\r-- c\r" + VIEW_DDL.replace("\n", "\r")).replace("COPY GRANTS", "")
+    assert [line for line, _d in _parse(late, expect=VIEW_PARTS).problems] == [3]

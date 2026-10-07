@@ -1039,7 +1039,7 @@ def relation_names(sql: str) -> list[RelationName]:
         cte = len(parts) == 1 and any(
             name == parts and start < pos < end for name, start, end in scopes
         )
-        out.append(RelationName(sql.count("\n", 0, pos) + 1, parts, kind, cte))
+        out.append(RelationName(text.count("\n", 0, pos) + 1, parts, kind, cte))
     return out
 
 

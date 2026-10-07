@@ -45,7 +45,7 @@ import re
 from dataclasses import dataclass
 
 from .policy import NAME_PATTERN, display_name, split_name
-from .tools.check_schema_refs import relation_names
+from .tools.check_schema_refs import _normalize_breaks, relation_names
 from .tools.sql_review import _mask_with_status
 
 KIND_VIEW = "view"
@@ -94,6 +94,7 @@ def _statements(text: str) -> tuple[list[tuple[int, str, str]], str | None]:
     """``(line, original, masked)`` per statement, split on ``;`` outside literals and
     comments; leading comments dropped, and the original cut where the masked text
     ends, so a trailing comment never swallows the ``;`` printed after it."""
+    text = _normalize_breaks(text)  # a lone CR is a line break to the scanners and to us
     masked, unterminated = _mask_with_status(text)
     out: list[tuple[int, str, str]] = []
     start = 0
@@ -232,24 +233,31 @@ def parse_ddl(
             problems.append(
                 (line, f"a dynamic table deploys with CREATE OR ALTER DYNAMIC TABLE: {why}")
             )
-        wm = _WAREHOUSE_RE.search(clauses)
-        wh = split_name(orig[after + wm.start("wh") : after + wm.end("wh")]) if wm else ()
-        if wh != (warehouse.upper(),):
-            sets = f"; this file sets {display_name(wh)}" if wh else ""
+        whs = [
+            split_name(orig[after + m_.start("wh") : after + m_.end("wh")])
+            for m_ in _WAREHOUSE_RE.finditer(clauses)
+        ]
+        if whs != [(warehouse.upper(),)]:
+            if len(whs) > 1:
+                sets = "; this file sets it more than once"
+            else:
+                sets = f"; this file sets {display_name(whs[0])}" if whs else ""
             problems.append(
                 (
                     line,
-                    f"set WAREHOUSE = {warehouse} (snowflake.objects.default_warehouse): the CI "
-                    f"role that owns the dynamic table may refresh it on no other warehouse{sets}",
+                    f"set WAREHOUSE = {warehouse} (snowflake.objects.default_warehouse) exactly "
+                    "once: the CI role that owns the dynamic table may refresh it on no other "
+                    f"warehouse{sets}",
                 )
             )
-        im = _INITIALIZE_RE.search(clauses)
-        if not im or im.group("v").upper() != "ON_CREATE":
+        inits = [m_.group("v").upper() for m_ in _INITIALIZE_RE.finditer(clauses)]
+        if inits != ["ON_CREATE"]:
             problems.append(
                 (
                     line,
-                    "set INITIALIZE = ON_CREATE: the first refresh then runs inside the deploy, "
-                    "so a query that cannot refresh fails the deploy before any app changes",
+                    "set INITIALIZE = ON_CREATE exactly once: the first refresh then runs inside "
+                    "the deploy, so a query that cannot refresh fails the deploy before any app "
+                    "changes",
                 )
             )
     elif mode == "REPLACE" and not _COPY_GRANTS_RE.search(clauses):

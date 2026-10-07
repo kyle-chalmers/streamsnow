@@ -687,3 +687,10 @@ def test_statement_relations_tell_queries_apart_and_skip_prose():
     assert {r.parts for r in rels} == {("A", "B", "C")}
     assert len({r.query for r in rels}) == 2
     assert {r.line for r in rels} == {3, 4}
+
+
+def test_relation_lines_survive_cr_only_breaks():
+    assert [r.line for r in relation_names("SELECT 1\rFROM A.B.C\rJOIN D.E.F f ON f.x = 1")] == [
+        2,
+        3,
+    ]
