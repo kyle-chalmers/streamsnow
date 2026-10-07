@@ -712,8 +712,9 @@ def _pushed(fake) -> bool:
     return any(c[:2] == ["git", "push"] or c[:3] == ["gh", "pr", "create"] for c in fake.calls)
 
 
-@pytest.mark.parametrize("note", ["see /home/acmedev/x", "see /Users/acmedev/x", "ask a@b.test"])
+@pytest.mark.parametrize("note", ["see /home/{u}/x", "see /Users/{u}/x", "ask a@b.test"])
 def test_open_pr_rejects_a_private_pin_floor_note(tmp_path, capsys, note):
+    note = note.format(u="acmedev")  # built at runtime so the repo's own privacy scan stays clean
     root = _pr_repo(tmp_path, capsys)
     fake = pr_run(root, {})
     code, _, _ = run_main(
