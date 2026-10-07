@@ -397,6 +397,9 @@ def generate_admin_sql(
     imported = imported_databases(cfg)
     granted = {db: fqs for db, fqs in by_db.items() if db not in imported}
     shared = [db for db in by_db if db in imported]
+    app_data = gov.app_data
+    app_data_db = app_data.split(".", 1)[0]
+    created_dbs = {d.upper() for d in databases}
 
     out: list[str] = [
         "-- StreamSnow admin bootstrap: one-time Snowflake objects for a first deploy.",
@@ -412,7 +415,19 @@ def generate_admin_sql(
         "USE ROLE SYSADMIN;",
     ]
     out += [f"CREATE DATABASE IF NOT EXISTS {db};" for db in databases]
+    if app_data_db.upper() not in created_dbs | set(by_db):
+        out.append(f"CREATE DATABASE IF NOT EXISTS {app_data_db};")
     out += [f"CREATE SCHEMA IF NOT EXISTS {s};" for s in schemas]
+    if app_data.upper() not in {s.upper() for s in schemas}:
+        if app_data_db.upper() in by_db:
+            out += [
+                f"-- App data lives in source database {app_data_db}: SYSADMIN needs CREATE SCHEMA",
+                "-- on it, or run the next line as that database's owner.",
+            ]
+        out += [
+            "-- App data: the schema for views and dynamic tables built for the apps.",
+            f"CREATE SCHEMA IF NOT EXISTS {app_data};",
+        ]
     out += [
         f"CREATE WAREHOUSE IF NOT EXISTS {o.default_warehouse}",
         "  WAREHOUSE_SIZE = XSMALL AUTO_SUSPEND = 60 AUTO_RESUME = TRUE",
@@ -526,6 +541,39 @@ def generate_admin_sql(
             *[f"--   {_imported(db, ci)}" for db in granted],
         ]
 
+    out += [
+        "",
+        f"-- App data ({app_data}): views and dynamic tables built for the apps. The deploy",
+        "-- job creates them from DDL in the repo, owned by the CI role. No CREATE TABLE:",
+        "-- deployed DDL never holds a plain table, whose CREATE OR ALTER can drop column data.",
+        f"-- Dynamic tables there refresh with WAREHOUSE = {o.default_warehouse}, which the CI",
+        "-- role already uses. Before the first one: enable change tracking on each source",
+        "-- table an incremental refresh reads (its owner runs ALTER TABLE ... SET",
+        "-- CHANGE_TRACKING = TRUE), or use REFRESH_MODE = FULL; and grant the CI role",
+        "-- OPERATE on any dynamic table in a source that one of them reads.",
+    ]
+    if app_data_db.upper() not in created_dbs | set(granted):
+        out.append(f"GRANT USAGE ON DATABASE {app_data_db} TO ROLE {ci};")
+    out += [
+        f"GRANT USAGE ON SCHEMA {app_data} TO ROLE {ci};",
+        f"GRANT CREATE VIEW ON SCHEMA {app_data} TO ROLE {ci};",
+        f"GRANT CREATE DYNAMIC TABLE ON SCHEMA {app_data} TO ROLE {ci};",
+    ]
+    viewer_app_data: list[str] = []
+    if app_data_db.upper() not in created_dbs:
+        viewer_app_data.append(f"GRANT USAGE ON DATABASE {app_data_db} TO ROLE {viewer};")
+    viewer_app_data.append(f"GRANT USAGE ON SCHEMA {app_data} TO ROLE {viewer};")
+    for scope in ("ALL", "FUTURE"):
+        viewer_app_data += [
+            f"GRANT SELECT ON {scope} {kind} IN SCHEMA {app_data} TO ROLE {viewer};"
+            for kind in READ_OBJECT_TYPES
+        ]
+    out += [
+        "-- Opt-in only: let the viewer role query app data directly (local preview).",
+        "-- Leave commented for least privilege:",
+        *[f"--   {g}" for g in viewer_app_data],
+    ]
+
     out += ["", "-- 4. Account-level objects -----------------------------------------------"]
     out.append("USE ROLE ACCOUNTADMIN;")
     account: list[str] = []
@@ -601,7 +649,10 @@ def generate_teardown_sql(cfg: Config) -> str:
     database that holds a source, Snowflake's shares and the pre-provisioned
     compute pool are never named, system roles are refused, and every DROP of
     something that may predate StreamSnow says so. Every statement uses
-    ``IF EXISTS``, so a partial teardown can simply be re-run.
+    ``IF EXISTS``, so a partial teardown can simply be re-run. App data in the
+    app database goes with it; elsewhere its DROP SCHEMA is printed commented.
+    PR 3 adds the declared app-data objects' DROPs at the top of section 2,
+    before any role is dropped.
     """
     o = cfg.snowflake.objects
     ci = cfg.snowflake.roles.ci_role
@@ -655,16 +706,26 @@ def generate_teardown_sql(cfg: Config) -> str:
         ]
         if outside:
             out += ["-- Deploy-source objects that live outside the app database:", *outside]
+    app_data = cfg.governance.app_data
+    out += ["", f"-- 2. App data ({app_data})."]
+    if app_data.split(".", 1)[0].upper() == o.app_database.upper():
+        out.append(f"-- It lives in {o.app_database}, so step 1 dropped it with everything in it.")
+    else:
+        out += [
+            "-- It lives outside the app database. Drop it only if nothing else lives there:",
+            "-- uncomment the next line.",
+            f"--   DROP SCHEMA IF EXISTS {app_data};",
+        ]
     out += [
         "",
-        "-- 2. Warehouse, CI service user, roles (after the objects they own are gone).",
+        "-- 3. Warehouse, CI service user, roles (after the objects they own are gone).",
         existed,
         f"DROP WAREHOUSE IF EXISTS {o.default_warehouse};",
         f"DROP USER IF EXISTS {ci_user_name(ci)};",
         f"DROP ROLE IF EXISTS {viewer};",
         f"DROP ROLE IF EXISTS {ci};",
         "",
-        "-- 3. Account-level objects.",
+        "-- 4. Account-level objects.",
     ]
     account: list[str] = []
     if cfg.runtime == "container":

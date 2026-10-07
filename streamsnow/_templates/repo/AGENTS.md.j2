@@ -7,6 +7,7 @@ truth: `streamsnow.config.yaml`.
 ## Data access rules
 
 - Query only the governance sources, always naming objects in full (DATABASE.SCHEMA.OBJECT): {{ sources | join(', ') }}.
+- App data: `{{ app_data }}`, the one schema for views and dynamic tables built for these apps. Query the sources directly unless an object there is needed.
 - **Never** reference these schemas in committed app code: {{ schema_deny | join(', ') }}. This denylist is **auto-enforced**.
 {% if read_exceptions %}
 - Sanctioned direct-read exceptions (named columns only): {{ read_exceptions | join(', ') }}.

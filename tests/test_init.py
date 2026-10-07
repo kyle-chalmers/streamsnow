@@ -104,6 +104,9 @@ def test_init_container_scaffolds_a_working_repo(tmp_path):
         "artifacts",
     ):
         assert f"streamsnow-{hook}" in hooks, f"missing hook: {hook}"
+    assert "STREAMSNOW_APPS.STREAMSNOW_REPORTING" in (tmp_path / "AGENTS.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_init_warehouse_runtime(tmp_path):

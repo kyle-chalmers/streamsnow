@@ -405,6 +405,21 @@ def test_scan_conformance_required_grants_split(tmp_path):
     assert res["required_grants"][0]["granted_by_default"] is True
 
 
+def test_scan_conformance_counts_app_data_as_granted(tmp_path):
+    app = _lifted_app(tmp_path)
+    _write(
+        app / "pages" / "30_rollup.py",
+        "import streamlit as st\n\n\n"
+        "@st.cache_data(ttl=1800)\n"
+        "def load_rollup():\n"
+        '    conn = st.connection("snowflake")\n'
+        '    return conn.query("SELECT d FROM STREAMSNOW_APPS.STREAMSNOW_REPORTING.DAILY")\n',
+    )
+    _, res = scan_conformance(app, _cfg())
+    grants = {(g["database"], g["schema"]): g for g in res["required_grants"]}
+    assert grants[("STREAMSNOW_APPS", "STREAMSNOW_REPORTING")]["granted_by_default"] is True
+
+
 def test_scan_conformance_respects_cache_noqa_and_docstring_select_star(tmp_path):
     app = tmp_path / "apps" / "acme-ops"
     _write(

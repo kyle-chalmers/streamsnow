@@ -215,6 +215,48 @@ def _stmts(sql: str) -> str:
     return "\n".join(ln for ln in sql.splitlines() if not ln.lstrip().startswith("--"))
 
 
+def _app_data_cfg(app_data: str) -> Config:
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
+    data["governance"]["app_data"] = app_data
+    return Config.from_dict(data)
+
+
+def test_admin_sql_creates_app_data_and_lets_ci_build_views_and_dynamic_tables():
+    sql = generate_admin_sql(_cfg())
+    sec = _sections(sql)
+    ad = "STREAMSNOW_APPS.STREAMSNOW_REPORTING"
+    assert f"CREATE SCHEMA IF NOT EXISTS {ad};" in _stmts(sec["SYSADMIN"])
+    grants = _stmts(sec["SECURITYADMIN"])
+    for priv in ("USAGE", "CREATE VIEW", "CREATE DYNAMIC TABLE"):
+        assert f"GRANT {priv} ON SCHEMA {ad} TO ROLE STREAMSNOW_DEPLOY_ROLE;" in grants
+    assert f"CREATE TABLE ON SCHEMA {ad}" not in _stmts(sql)  # D3: no plain tables
+    viewer = (
+        f"--   GRANT SELECT ON FUTURE DYNAMIC TABLES IN SCHEMA {ad} TO ROLE STREAMSNOW_VIEWER_ROLE;"
+    )
+    assert viewer in sql
+    for line in _stmts(sql).splitlines():
+        if ad in line:
+            assert "STREAMSNOW_VIEWER_ROLE" not in line, line
+    assert "CHANGE_TRACKING" in sql and "OPERATE" in sql and "WAREHOUSE = STREAMSNOW_WH" in sql
+
+
+def test_admin_sql_app_data_in_a_new_database_creates_it():
+    stmts = _stmts(generate_admin_sql(_app_data_cfg("STREAMSNOW_DATA.REPORTING")))
+    assert "CREATE DATABASE IF NOT EXISTS STREAMSNOW_DATA;" in stmts
+    assert (
+        stmts.count("GRANT USAGE ON DATABASE STREAMSNOW_DATA TO ROLE STREAMSNOW_DEPLOY_ROLE;") == 1
+    )
+
+
+def test_admin_sql_app_data_in_a_source_database_never_recreates_it():
+    sql = generate_admin_sql(_app_data_cfg("ANALYTICS_DB.STREAMSNOW_REPORTING"))
+    stmts = _stmts(sql)
+    assert "CREATE DATABASE IF NOT EXISTS ANALYTICS_DB;" not in stmts
+    assert "CREATE SCHEMA IF NOT EXISTS ANALYTICS_DB.STREAMSNOW_REPORTING;" in stmts
+    assert stmts.count("GRANT USAGE ON DATABASE ANALYTICS_DB TO ROLE STREAMSNOW_DEPLOY_ROLE;") == 1
+    assert "SYSADMIN needs CREATE SCHEMA" in sql
+
+
 def test_admin_sql_creates_every_object_a_first_deploy_needs():
     sql = generate_admin_sql(_cfg())
     sec = _sections(sql)
