@@ -147,6 +147,11 @@ def _without_role_statements(line: str) -> str:
     return out
 
 
+def _is_expr(part: str) -> bool:
+    """True for the stand-in of an interpolated part (:data:`_EXPR`)."""
+    return part.upper() == _EXPR.upper()
+
+
 def _denied_in_line(line: str, policy: SchemaPolicy, read_exc: set[str]) -> set[tuple[str, str]]:
     """``(DATABASE, schema)`` for each denied reference in one line (``""``: unknown).
 
@@ -166,14 +171,14 @@ def _denied_in_line(line: str, policy: SchemaPolicy, read_exc: set[str]) -> set[
         first, second, third = m.group(1), m.group(2), m.group(3)
         if third:
             if policy.is_denied(second, first):
-                hits.add((first.upper(), second))
+                hits.add(("" if _is_expr(first) else first.upper(), second))
         elif policy.is_denied(first):
             hits.add(("", first))
     # USE SCHEMA <denied> / USE SCHEMA DB.<denied>: not a dotted object ref.
     for m in _USE.finditer(norm):
         database, schema = (m.group(1), m.group(2)) if m.group(2) else (None, m.group(1))
         if schema and policy.is_denied(schema, database):
-            hits.add((database.upper() if database else "", schema))
+            hits.add(("" if not database or _is_expr(database) else database.upper(), schema))
     return hits
 
 
@@ -255,7 +260,9 @@ def _collect_enclosed_string_ids(tree: ast.AST, names: frozenset[str]) -> set[in
 #: with an unknown database or schema part (``{db}.{schema}.T``) is recognizable.
 _EXPR = "__expr__"
 # A string that opens with a SQL statement keyword is SQL wherever it sits in Python.
-_STATEMENT_START_RE = re.compile(r"(?i)\s*(?:SELECT|WITH|INSERT|UPDATE|DELETE|MERGE|CREATE|USE)\b")
+_STATEMENT_START_RE = re.compile(
+    r"(?i)\s*(?:SELECT|WITH|INSERT|UPDATE|DELETE|MERGE|CREATE|USE|EXPLAIN|SHOW|DESCRIBE|DESC|COPY)\b"
+)
 
 
 class _Chunk(NamedTuple):
@@ -284,7 +291,14 @@ def _fold_string(node: ast.AST) -> str | None:
         left, right = _fold_string(node.left), _fold_string(node.right)
         if left is None and right is None:
             return None
-        return (f" {_EXPR} " if left is None else left) + (f" {_EXPR} " if right is None else right)
+        # Pad with the newlines between the operands so a name on a later source line
+        # of a parenthesized concatenation is reported on that line.
+        gap = max(0, node.right.lineno - getattr(node.left, "end_lineno", node.left.lineno))
+        return (
+            (f" {_EXPR} " if left is None else left)
+            + "\n" * gap
+            + (f" {_EXPR} " if right is None else right)
+        )
     return None
 
 
@@ -334,18 +348,62 @@ def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list
         return []
     docstrings = _collect_docstring_ids(tree)
     queries = _collect_enclosed_string_ids(tree, _QUERY_CALL_NAMES)
-    # A query call wins over prose: a literal under execute()/query() is SQL even
-    # when it is also an argument of a call named like a text element.
-    prose = _collect_call_arg_ids(tree, _PROSE_CALL_NAMES) - queries if skip_prose else set()
+    prose = _prose_ids(tree) if skip_prose else set()
     chunks: list[_Chunk] = []
-    for node, sql in _string_expressions(tree):
-        if id(node) in docstrings or id(node) in prose:
-            continue
+
+    def add(node: ast.AST, sql: str, inherited: bool, deny_only: bool = False) -> bool:
+        """Add one chunk; True when it is a statement (so its parts belong to it).
+        ``deny_only`` keeps it out of the boundary scan: a piece already inside the
+        folded whole, whose cut-off name (``FROM DB.S.`` before ``{t}``) is no name."""
         queried = any(id(inner) in queries for inner in ast.walk(node))
-        if queried or _SQL_KEYWORD_RE.search(sql):
-            opens = bool(_STATEMENT_START_RE.match(_strip_sql_comments(sql)))
-            chunks.append(_Chunk(node.lineno, sql, queried or opens))
+        if id(node) in docstrings or (id(node) in prose and not queried):
+            return False
+        opens = bool(_STATEMENT_START_RE.match(_strip_sql_comments(sql)))
+        if queried or inherited or opens or _SQL_KEYWORD_RE.search(sql):
+            chunks.append(
+                _Chunk(node.lineno, sql, not deny_only and (queried or inherited or opens))
+            )
+        return queried or opens
+
+    for node, sql in _string_expressions(tree):
+        statement = add(node, sql, False)
+        if isinstance(node, ast.Constant):
+            continue
+        # The folded whole is an extra chunk: every literal inside it is still read on
+        # its own, as before folding, and belongs to the statement the whole opens.
+        folded = _folded_parts(node)
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+                add(inner, inner.value, statement, deny_only=id(inner) in folded)
     return chunks
+
+
+def _folded_parts(node: ast.AST) -> set[int]:
+    """``id()`` of the literals whose text is already part of *node*'s folded string:
+    f-string parts and operands of ``+``. Literals inside an interpolation are not."""
+    ids: set[int] = set()
+    if isinstance(node, ast.Constant):
+        ids.add(id(node))
+    elif isinstance(node, ast.JoinedStr):
+        ids.update(id(v) for v in node.values if isinstance(v, ast.Constant))
+    elif isinstance(node, ast.BinOp):
+        for side in (node.left, node.right):
+            ids |= _folded_parts(side)
+    return ids
+
+
+def _prose_ids(tree: ast.AST) -> set[int]:
+    """``id()`` of every node inside a string argument of a Streamlit text element: a
+    literal, or a ``+`` concatenation of them (``st.caption("Rows from " + "DB.S.T")``).
+    An f-string argument keeps being scanned, as it always was."""
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _call_name(node.func) not in _PROSE_CALL_NAMES:
+            continue
+        for arg in list(node.args) + [kw.value for kw in node.keywords]:
+            if isinstance(arg, (ast.Constant, ast.BinOp)) and _fold_string(arg) is not None:
+                ids.update(id(n) for n in ast.walk(arg))
+    return ids
 
 
 class BoundaryRef(NamedTuple):
@@ -619,7 +677,7 @@ def _relation_names(sql: str) -> list[tuple[int, tuple[str, ...], str]]:
                 parts = split_name(peek(j)[1])
                 found.append((line_of(peek(j)[2]), parts, "schema" if len(parts) == 2 else what))
         prev = tok
-    return [f for f in found if not _unresolved(f[1], f[2])]
+    return found
 
 
 def _db_schema(parts: tuple[str, ...], kind: str) -> tuple[str, str]:
@@ -667,6 +725,7 @@ def _deny_hits(
             else:
                 denied = bool(parts) and _verdict(policy, parts, kind) == DENIED
                 database, schema = _db_schema(parts, kind) if parts else ("", "")
+            database = "" if _is_expr(database) else database
             if denied:
                 at = base_line + line - 1
                 hits.setdefault((at, database.upper(), schema.upper()), (at, database, schema))
@@ -701,13 +760,13 @@ def find_boundary_refs(
             continue
         base_line, sql = chunk.line, chunk.sql
         for line, parts, kind in _relation_names(sql):
-            if not parts:
+            if not parts or _unresolved(parts, kind):
                 continue
             verdict = _verdict(policy, parts, kind)
             if verdict not in BOUNDARY_VERDICTS:
                 continue
             at = base_line + line - 1
-            ref = display_name(parts)
+            ref = display_name(parts).replace(_EXPR.upper(), "<expr>")
             database, schema = _db_schema(parts, kind)
             detail = _BOUNDARY_DETAIL[verdict].format(ref=ref)
             out.setdefault((at, ref), BoundaryRef(at, ref, verdict, database, schema, detail))

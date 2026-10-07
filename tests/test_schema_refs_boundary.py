@@ -496,3 +496,53 @@ def test_prose_in_selectbox_style_calls_is_skipped_for_both_scans():
     src = 'st.selectbox("From RAW.EVENTS", [1])\nst.tabs("Rows from ANALYTICS.SALES")\n'
     assert _refs(src, ENFORCE, is_python=True) == []
     assert find_denied_refs(src, POLICY, is_python=True) == []
+
+
+# --- recheck fixes: folding must not lose what the literal scan saw ---------------------
+
+
+def test_nested_literal_in_a_folded_expression_is_still_denied(tmp_path):
+    src = "q = f\"{'SELECT * FROM DB.RAW.X'}\" + ' WHERE 1=1'\n"
+    assert _check(tmp_path, src, POLICY, ".py") == ([(1, "denied", "RAW")], [])
+
+
+def test_nested_literal_of_a_folded_statement_is_boundary_scanned(tmp_path):
+    src = "q = f\"SELECT * {'FROM DB.S.X'}\"\n"
+    assert _check(tmp_path, src, ENFORCE, ".py") == ([(1, "outside_boundary", "DB.S.X")], [])
+
+
+@pytest.mark.parametrize("keyword", ["EXPLAIN", "SHOW", "DESCRIBE", "DESC", "COPY"])
+def test_more_statement_keywords_open_a_sql_literal(keyword):
+    src = f'Q = "{keyword} SELECT * FROM SALES_DB.PUBLIC.X"\n'
+    assert [r for _, r, _ in _refs(src, ENFORCE, is_python=True)] == ["SALES_DB.PUBLIC.X"]
+
+
+def test_prose_rule_applies_to_folded_expressions_too(tmp_path):
+    prose = 'st.expander("Rows from " + "DB.RAW.X")\n'
+    assert _check(tmp_path, prose, ENFORCE, ".py") == ([], [])
+    sql = 'session.sql("SELECT * FROM " + "DB.RAW.X")\n'
+    assert _check(tmp_path, sql, ENFORCE, ".py") == ([(1, "denied", "RAW")], [])
+
+
+def test_multiline_concatenation_reports_the_line_of_the_name(tmp_path):
+    src = 'q = ("SELECT *" +\n     " FROM " +\n     "SALES_DB.PUBLIC.X")\nsession.sql(q)\n'
+    assert _check(tmp_path, src, ENFORCE, ".py") == (
+        [(3, "outside_boundary", "SALES_DB.PUBLIC.X")],
+        [],
+    )
+
+
+def test_placeholder_never_reaches_the_findings(tmp_path):
+    path = tmp_path / "q.py"
+    path.write_text(
+        'a = f"SELECT * FROM {db}.RAW.T"\nb = f"SELECT * FROM SALES_DB.PUBLIC.{t}"\n',
+        encoding="utf-8",
+    )
+    res = check_paths([path], ENFORCE)
+    assert "__" not in str(res).replace("__init__", "")
+    assert [(f["line"], f["reason"], f["database"]) for f in res["findings"]][0] == (
+        1,
+        "denied",
+        "",
+    )
+    assert res["findings"][1]["ref"] == "SALES_DB.PUBLIC.<expr>"
