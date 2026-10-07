@@ -58,7 +58,10 @@ def _value(row: dict, key: str) -> str:
 def app_url(cfg: Config, slug: str, run_query: RunQuery) -> dict:
     """``{"app", "fqn", "url"}`` for one app. Raises ValueError on an invalid slug
     and AppUrlError when the query fails or returns no usable names."""
-    fqn = streamlit_fqn(cfg, slug)
+    # The deploy SQL names the database and schema unquoted, so Snowflake stores
+    # them upper case (`analytics` becomes `ANALYTICS`). Config only accepts
+    # unquoted identifiers, so upper-casing gives the stored name.
+    fqn = streamlit_fqn(cfg, slug).upper()
     try:
         rows = run_query(ORG_ACCOUNT_SQL)
     except Exception as exc:

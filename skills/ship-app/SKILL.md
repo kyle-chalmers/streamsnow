@@ -39,10 +39,9 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
 6. **Commit** conventionally (`feat(<slug>): <summary>`), the summary matching the diff —
    underclaim, never overclaim. Pre-commit hooks block → **stop and surface the error**; never
    `--no-verify` (the hooks run the same checks CI does).
-7. **Sync with `origin/main` before pushing** per
-   [_shared/sync-with-main.md](../_shared/sync-with-main.md): rebase (never merge), then
-   `git push --force-with-lease`. A rebase conflict stops with manual instructions — don't guess a
-   resolution.
+7. **Sync with `origin/main` before pushing** per [sync-with-main](../_shared/sync-with-main.md):
+   rebase (never merge), then `git push --force-with-lease`. A rebase conflict stops with manual
+   instructions — don't guess a resolution.
 8. **Push** (`git push -u origin HEAD` if the sync didn't already) — refuse to push to `main`.
 9. **Open the PR** (title/body: what changed, validation passed, then `Open critical: N` and the
    commits since review from step 2, per [these rules](../review-app/report-and-stamp.md#in-the-ship-app-pr-body)). Print the number and URL.
@@ -58,7 +57,8 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
   differ by runtime — see [_shared/runtime-decision.md](../_shared/runtime-decision.md)); stop.
 - **Green but unmerged** → it's waiting on a teammate's approval (you can't approve your own PR) —
   say so plainly rather than looping on the checks. /ship-app never merges; it stops here.
-- **Merged** → confirm, report the deploy run's outcome; when it succeeded, run `streamsnow app-url <slug>` and hand the user the link with a click-through checklist per [click-through.md](click-through.md). Then run [After merge](#after-merge).
+- **Merged** → confirm, report the deploy run's outcome; green → `streamsnow app-url <slug>` per
+  [click-through.md](click-through.md) (the link and checklist), then [After merge](#after-merge).
 
 ## After merge
 

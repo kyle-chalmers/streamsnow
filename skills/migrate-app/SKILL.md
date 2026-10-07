@@ -65,11 +65,11 @@ it documents every verb: when to run it, what its JSON says, the judgment call t
    chart standard, rebuild navigation with `st.navigation` if `legacy_pages_only`, and put the
    `required_grants` needing a DBA in the PR. **Walk each query's Feeds/Schemas with the user**;
    plumbing SQL stays inline with `# noqa: inline-sql`.
-10. Check `snowflake.yml` matches the runtime; scrub personal absolute paths the copy brought along.
-    Then, as /build-app does ([pages.md](../build-app/pages.md#one-page)), rewrite the app `AGENTS.md` starter Pages and Queries lines to the real pages and queries (noting non-default TTLs and the runtime decision there)
-    and add the repo README Apps row (title and `apps/<slug>/`); validate-app's `starter-text` check warns otherwise.
-11. **Verify:** build-app [verify.md](../build-app/verify.md), then the user clicks through every page in /preview-app.
-    A warehouse app failing locally on `get_active_session` is the runtime's signature, not a bug.
+10. Check `snowflake.yml` fits the runtime; scrub personal absolute paths. As /build-app does,
+    rewrite the app `AGENTS.md` starter Pages and Queries lines (with non-default TTLs and the
+    runtime) and add the README Apps row (title, `apps/<slug>/`), or `starter-text` warns.
+11. **Verify:** build-app [verify.md](../build-app/verify.md), then the user clicks through every
+    page in /preview-app; a warehouse app failing locally on `get_active_session` is not a bug.
 12. **Gate:** `streamsnow validate-app <slug>` PASS, `streamsnow sql-review check <slug>` clean,
     and both conform scans' fix-lists empty. Then commit the conform as its own changeset. A
     deploy error you can't place → [_shared/deploy-error-translator.md](../_shared/deploy-error-translator.md).

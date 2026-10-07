@@ -67,6 +67,24 @@ def test_app_url_uses_the_deploy_fqn(tmp_path):
     }
 
 
+def test_app_url_upper_cases_a_lower_case_database_and_schema(tmp_path):
+    """The deploy SQL names the database and schema unquoted, so Snowflake stores
+    `analytics` as `ANALYTICS`; the URL must name the object as stored."""
+    cfg_path = _repo(tmp_path)
+    text = cfg_path.read_text(encoding="utf-8")
+    text = text.replace('"STREAMSNOW_APPS"', '"acme_apps"').replace('"DASHBOARDS"', '"reporting"')
+    cfg_path.write_text(text, encoding="utf-8")
+    cfg = load_config(cfg_path)
+    assert cfg.snowflake.objects.app_database == "acme_apps"
+    result = app_url(
+        cfg, "acme-sales", lambda sql: [{"ORGANIZATION": "ACME", "ACCOUNT": "ACME_PROD"}]
+    )
+    assert result["fqn"] == "ACME_APPS.REPORTING.ACME_SALES"
+    assert result["url"] == (
+        "https://app.snowflake.com/acme/acme_prod/#/streamlit-apps/ACME_APPS.REPORTING.ACME_SALES"
+    )
+
+
 def test_cli_prints_the_exact_url(tmp_path, monkeypatch):
     cfg = _repo(tmp_path)
     fake = FakeSnow()
