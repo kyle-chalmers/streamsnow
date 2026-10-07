@@ -1070,7 +1070,7 @@ def deploy_setup(
         False,
         "--teardown",
         help="Print (never run) the reverse of --admin: DROP the app database, warehouse, "
-        "roles, CI user and integrations, to start fresh. Keeps the governance database.",
+        "roles, CI user and integrations, to start fresh. Keeps every source database.",
     ),
 ) -> None:
     """Emit the one-time Snowflake DDL for your configured deploy source.

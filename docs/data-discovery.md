@@ -113,7 +113,7 @@ what you expect:
    to work around it. Roles are the enforcement mechanism.
 3. **For restricted (e.g. PII) schemas**, don't grant the app role access to the
    whole schema. Instead expose **only the columns you need** through a
-   passthrough view in an allowed schema (explicit column list, never `SELECT *`,
+   passthrough view in a governance source or the app-data schema (explicit column list, never `SELECT *`,
    so a future sensitive column can't leak), and point the app at that view.
 
 ## See also

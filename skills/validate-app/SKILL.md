@@ -57,7 +57,7 @@ Names as the gate prints them. How to fix each: [fixing-checks.md](fixing-checks
 - **Per-app, deterministic, offline:** it catches contract violations, not slow SQL, wrong numbers
   or awkward UI. Quality is `/review-app`; numbers against live Snowflake are `/sql-review`.
 - **Never "fix" by weakening governance.** Editing the deny list, deleting a check, or
-  string-escaping past the dynamic-SQL rule is a regression. Route through allowed schemas,
+  string-escaping past the dynamic-SQL rule is a regression. Route through governance sources,
   parameterize, or remove the capability.
 - **Local PASS is necessary, not final:** CI is authoritative and re-runs after push.
 - **Trust the aggregate for the verdict.** A focused check can pass while the gate fails: four checks

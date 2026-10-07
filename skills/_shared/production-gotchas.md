@@ -8,7 +8,7 @@ recipes: [`docs/production-lessons.md`](../../docs/production-lessons.md).
 | Symptom | Rule |
 |---|---|
 | Works locally / in preview, `not authorized` deployed | Deployed apps run with the **ci_role's** (owner's) grants, not yours and not the viewer's. Verify the ci_role can SELECT every source; prefer `GRANT SELECT ON FUTURE ...` per schema so new objects are zero-touch. |
-| App needs one fact from a denied/restricted schema | Don't widen grants — add a narrow **projection-only passthrough view** in an allowed schema, owned by a privileged role. Keep it non-secure and join-free so predicates push down to the base scan. |
+| App needs one fact from a denied/restricted schema | Don't widen grants: add a narrow **projection-only passthrough view** in the app-data schema or a governance source, owned by a privileged role. Keep it non-secure and join-free so predicates push down to the base scan. |
 | Dynamic table refresh fails though CREATE worked | DT refresh runs as the **owner's primary role only** (secondary roles ignored). Source the DT from a view the primary role reads, not the restricted base. |
 | `CREATE DYNAMIC TABLE` rejects a source view | A DT can't read a view that references other DTs. Keep DT sources DT-safe; put DT-joins in the downstream view layer. |
 | Manual `ALTER DYNAMIC TABLE ... REFRESH` not authorized | Needs OPERATE on all upstream DTs. Wait for `TARGET_LAG`, or query a downstream consumer to trigger `DOWNSTREAM` lag. |

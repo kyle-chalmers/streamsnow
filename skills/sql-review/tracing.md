@@ -41,7 +41,7 @@ From the DDL plus the app's predicates:
   columns. For an app-side `SELECT *`, inline the object's real columns (from `probe`) in the
   finding's fix: that makes it mechanical instead of a judgment call.
 - **Materialization candidates:** a heavy aggregation or window function recomputed on every load,
-  or an object several apps read, is better pre-computed in an allowed schema. Tailor to runtime —
+  or an object several apps read, is better pre-computed in the app-data schema. Tailor to runtime:
   container apps can lean on app-side caching for some of this; warehouse apps benefit more from a
   pre-aggregated / dynamic table. Proposals only, never applied DDL. Dynamic-table proposals must
   respect the platform rules (refresh runs as the owner's primary role only; a DT can't read
@@ -72,7 +72,7 @@ What the review learned belongs in the index, so the next review starts from it:
 
 - **No connection resolves** → `streamsnow configure` sets `snowflake.connection_name`, then
   `snow connection add`; re-run preflight.
-- **A live command refuses a denied schema** → that's the intended block; changing the allowlist
+- **A live command refuses a denied schema** → that's the intended block; changing `governance.sources`
   is a governance decision in `streamsnow.config.yaml`, not something this skill works around.
 - **`probe` says an object is not found** → wrong database or schema casing, a renamed or dropped
   object, or the role cannot see it. The detail names the role; check its grants before calling

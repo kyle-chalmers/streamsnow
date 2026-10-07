@@ -65,7 +65,7 @@ removes working features while fixing nothing.
   `get_active_session` errors outside Snowflake — that's the runtime's signature, not a code bug;
   use the fallback swap or verify in Snowsight.
 - **Don't mix patterns within one app.** Match whatever the app's existing pages already do.
-- **Governance is runtime-independent.** The schema allowlist, security, caching, and bind-predicate
+- **Governance is runtime-independent.** The data boundary (sources, app data and the deny list), security, caching, and bind-predicate
   checks apply identically to both runtimes.
 
 ## Deploy-failure signatures (post-merge)

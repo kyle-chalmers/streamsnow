@@ -196,7 +196,7 @@ return get_active_session().sql(sql, params=[start, end]).to_pandas()
 - **Page missing from the sidebar after preview** — the `st.Page` entry didn't land inside a
   `st.navigation` group list; re-check `streamlit_app.py` with wider `Edit` context.
 - **`check schema-refs` flags a TODO line** — a real or denied schema was left in the header;
-  keep a generic `<TODO>` or use an allowed schema.
+  keep a generic `<TODO>` or use a governance source.
 - **Preview errors loading a query** — the placeholder body was replaced with invalid SQL, or a
   param/token in the loader isn't declared in the `.sql`. Restore the placeholder until the real
   query is ready.

@@ -67,7 +67,7 @@ the checks enforce, and container apps can't import repo-level shared modules an
 - **Every UI-feeding query lives in `apps/<slug>/queries/<name>.sql`**, loaded through the scaffolded
   `sql_loader` — never inlined as a Python f-string. Each file opens with the required header block
   (`Query / Feeds / Schemas / Params / Tokens`); copy the shape from an existing file. Named-column
-  `SELECT`s against allowed schemas only.
+  `SELECT`s against governance sources and app data only.
 - **`st.navigation` runs before any data call** in `streamlit_app.py`. A loader above it leaves
   Streamlit's fallback menu of every `pages/*.py` helper on screen for the whole first run.
   Call `st.navigation(...)` first, then load data.

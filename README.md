@@ -283,8 +283,8 @@ and says what it is doing at every step:
    `snow` connection, a Snowflake MCP server, a dbt profile), and installs any
    missing tools after one approval.
 2. **One round of questions.** Clickable choices, each explained first: the
-   the setup answers (runtime, sources, app-data schema, deploy source, and the schemas apps may not query), the defaults the
-   wizard does not ask about, your git name if it is missing, and who runs the
+   setup answers (runtime, sources, app-data schema, deploy source, and the
+   schemas apps may not query), the defaults the wizard does not ask about, your git name if it is missing, and who runs the
    Snowflake admin script, which it describes before asking, plus which of
    your Snowflake roles can open the apps.
 3. **Build.** The config and the governed repo files (`AGENTS.md`, `CLAUDE.md`,

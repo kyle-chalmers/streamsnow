@@ -47,7 +47,8 @@ Most entries below come from a first end-to-end run of the plugin (onboard throu
 - **`configure` and `init` take `--sources` and `--app-data`**; `--database` and `--schemas`
   are gone, so scripts that pass them fail with "No such option".
 - **App SQL names objects in full.** `check schema-refs` now reads which names sit in relation
-  position (after `FROM`, `JOIN`, a FROM list's commas, `IDENTIFIER('...')`) and reports names
+  position (after `FROM`, `JOIN`, `INTO`, `UPDATE`, `USE`, a FROM list's commas,
+  `IDENTIFIER('...')`, `TABLE('...')`) and reports names
   outside `governance.sources` and app data, and two-part `SCHEMA.OBJECT` names. Quoted names
   keep their case, as in Snowflake. Under `governance.boundary: warn` (the default) these are
   warnings in schema-refs, validate-app, the live SQL review and `migrate`; `enforce` makes

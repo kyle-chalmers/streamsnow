@@ -41,8 +41,8 @@ Nothing. Return the profile; the orchestrator writes §3.
 
 ## Verify
 
-The orchestrator checks every `fqn` against the allowlist (`streamsnow check schema-refs` runs on
-the queries later) and copies `max_date` into the review window and the page defaults.
+The orchestrator checks every `fqn` against `governance.sources` and app data (`streamsnow
+check schema-refs` runs on the queries later) and copies `max_date` into the review window and the page defaults.
 
 ## Degrade
 

@@ -311,7 +311,7 @@ A few facts hold whatever the naming:
 Different sources run as different roles and can see different databases (a personal `snow`
 connection may see a handful where an admin-role MCP sees many more). When they disagree, show
 what each role sees rather than picking one silently. Proposing from a broader role is fine: the
-allowed schemas still reach apps only through the grants `deploy-setup --admin` writes.
+sources still reach apps only through the grants `deploy-setup --admin` writes.
 
 These are SHOW and SELECT-over-SHOW (or `INFORMATION_SCHEMA`) only. **Never run DDL, grants, or anything that writes**, and
 never switch roles to get more visibility. A probe that errors (no privilege, no source can see
