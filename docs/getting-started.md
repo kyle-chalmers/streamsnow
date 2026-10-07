@@ -420,10 +420,20 @@ Two small template fixes reach new repos only, so an existing repo makes them by
 
 - In `apps/<slug>/pages/_glossary.py`, change the last line of `hover_definition` from
   `return metric_help(key).replace("%", "%%")` to `return metric_help(key)`.
-- In `.sqlfluff`, change the comment line `#   sqlfluff lint apps/<slug>/queries --templater placeholder`
-  to `#   streamsnow sql-review check <slug>`.
+- In `.sqlfluff` (optional: a comment only, no rule or setting changes), replace the two
+  comment lines `# rule set below. Run the same lint by hand with:` and the one after it
+  (`#   sqlfluff lint apps/<slug>/queries --templater placeholder`) with the current text:
 
-A plugin update does not apply to a session that is already running: restart the session (or run `/reload-plugins`) before relying on the new skill text.
+  ```text
+  # rule set below. Lint through it, not through a bare sqlfluff run:
+  #   streamsnow sql-review check <slug>
+  # The query files hold {TOKEN} placeholders, which sqlfluff's placeholder templater
+  # (param_style colon) cannot parse. sql-review check substitutes the index's sample
+  # tokens first, so the same files lint cleanly there.
+  ```
+
+A plugin update does not apply to a session that is already running: restart the
+session (or run `/reload-plugins`) before relying on the new skill text.
 
 ## The config file
 
