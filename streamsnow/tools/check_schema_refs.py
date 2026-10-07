@@ -306,14 +306,43 @@ def _add_leaves(node: ast.AST) -> list[ast.AST]:
     return leaves
 
 
+def _joined_parts(node: ast.JoinedStr) -> list[tuple[ast.AST, str, int]]:
+    """``(part, text, first line)`` for each part of an f-string, interpolations as
+    :data:`_EXPR`. Before Python 3.12 (PEP 701) the parts carry the f-string's own
+    position, so a part's line is the f-string's first line plus the newlines of the
+    parts before it, the same on every supported version."""
+    parts, line = [], node.lineno
+    for v in node.values:
+        piece = v.value if isinstance(v, ast.Constant) else f" {_EXPR} "
+        parts.append((v, piece, line))
+        line += piece.count("\n")
+    return parts
+
+
+def _part_lines(node: ast.AST) -> dict[int, int]:
+    """``id()`` of each literal folded into *node* -> its first source line."""
+    lines: dict[int, int] = {}
+    for leaf in _add_leaves(node):
+        if isinstance(leaf, ast.Constant):
+            lines[id(leaf)] = leaf.lineno
+        elif isinstance(leaf, ast.JoinedStr):
+            for v, _piece, line in _joined_parts(leaf):
+                if isinstance(v, ast.Constant):
+                    lines[id(v)] = line
+    return lines
+
+
 def _fold_leaf(node: ast.AST) -> _Folded | None:
     if isinstance(node, ast.Constant):
         return (node.value, [(0, node.lineno)]) if isinstance(node.value, str) else None
     if isinstance(node, ast.JoinedStr):
+        # Before Python 3.12 (PEP 701) the parts of an f-string carry the f-string's own
+        # position, so each part's line is the f-string's first line plus the newlines
+        # of the parts before it, the same on every supported version.
         text, starts = "", []
-        for v in node.values:
-            starts.append((len(text), v.lineno))
-            text += v.value if isinstance(v, ast.Constant) else f" {_EXPR} "
+        for _v, piece, line in _joined_parts(node):
+            starts.append((len(text), line))
+            text += piece
         return text, starts or [(0, node.lineno)]
     return None
 
@@ -478,9 +507,11 @@ def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list
         # The folded whole is an extra chunk: every literal inside it is still read on
         # its own, as before folding, and belongs to the statement the whole opens.
         folded = _folded_parts(node)
+        part_lines = _part_lines(node)
         for inner in ast.walk(node):
             if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
-                add(inner, inner.value, [(0, inner.lineno)], flags, id(inner) in folded)
+                line = part_lines.get(id(inner), inner.lineno)
+                add(inner, inner.value, [(0, line)], flags, id(inner) in folded)
     return chunks
 
 
