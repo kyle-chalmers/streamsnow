@@ -40,6 +40,7 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
 import tempfile
 import tomllib
 import urllib.error
@@ -311,6 +312,62 @@ def scan_commits(run: Run, root: Path, end: str, deny: Path | None) -> dict:
         "paths": paths,
         "terms": len(terms) + len(patterns),
     }
+
+
+def denylist_hits(text: str, deny: Path) -> int:
+    """How many denylist entries ``text`` matches. Callers report the count, never the term."""
+    terms, patterns = load_denylist(deny)
+    low = text.lower()
+    return sum(t in low for t in terms) + sum(bool(p.search(text)) for p in patterns)
+
+
+def _safe_extract(tar_path: Path, dest: Path) -> None:
+    """Extract a `git archive` tar, refusing any member or link that would land outside."""
+    dest = dest.resolve()
+    with tarfile.open(tar_path) as tf:
+        members = tf.getmembers()
+        for m in members:
+            name = Path(m.name)
+            target = (dest / name).resolve()
+            if name.is_absolute() or not target.is_relative_to(dest):
+                raise ToolError(f"git archive member would escape the export dir: {m.name!r}")
+            if m.issym() or m.islnk():
+                link = Path(m.linkname)
+                base = dest if m.islnk() else target.parent
+                if link.is_absolute() or not (base / link).resolve().is_relative_to(dest):
+                    raise ToolError(f"git archive link would escape the export dir: {m.name!r}")
+            elif not (m.isfile() or m.isdir()):
+                raise ToolError(f"git archive member has an unexpected type: {m.name!r}")
+        extra = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+        tf.extractall(dest, members=members, **extra)  # noqa: S202 (members checked above)
+
+
+def scan_tree_at(run: Run, root: Path, sha: str, deny: Path | None) -> int:
+    """Privacy-scan the files of ``sha`` itself (not the checkout); returns the finding count."""
+    with tempfile.TemporaryDirectory(prefix="streamsnow-release-scan-") as tmp:
+        tmpdir = Path(tmp)
+        tar_path = tmpdir / "tree.tar"
+        proc = _exec(run, ["git", "archive", "--format=tar", "-o", str(tar_path), sha], root)
+        if proc.returncode != 0 or not tar_path.is_file():
+            raise ToolError(f"git archive {sha[:12]} failed: {_err(proc)}")
+        tree = tmpdir / "tree"
+        tree.mkdir()
+        _safe_extract(tar_path, tree)
+        args = [sys.executable, "-m", "streamsnow.tools.check_export_clean", str(tree)]
+        args += ["--format", "json"]
+        if deny:
+            args += ["--denylist", str(deny)]
+        proc = _exec(run, args, root)
+        if proc.returncode not in (0, 1):
+            raise ToolError(f"check_export_clean exit {proc.returncode} on {sha[:12]}")
+        try:
+            result = json.loads(proc.stdout or "")
+        except json.JSONDecodeError as exc:
+            raise ToolError(f"check_export_clean returned invalid JSON on {sha[:12]}") from exc
+        findings = len(result.get("findings") or [])
+        if proc.returncode == 1 and not findings:
+            raise ToolError(f"check_export_clean failed on {sha[:12]} without findings")
+        return findings
 
 
 def _scan_problems(scan: dict) -> str:
@@ -670,6 +727,20 @@ def open_pr(
         raise Refused(f"the current branch is {_out(proc)!r}, not {branch!r}")
     rep.add("branch", "PASS", branch)
 
+    # Everything typed into the commit message or the public PR goes through the denylist
+    # too: the gates only see files, and these strings land on GitHub verbatim.
+    deny = find_denylist(root, run)
+    if not deny:
+        raise Refused(_NO_DENYLIST_GATES.format(d=DENYLIST))
+    for what, text in (
+        ("the release title", subject),
+        ("--trailer", trailer),
+        ("--pin-floor-note", pin_note),
+    ):
+        hits = denylist_hits(text or "", deny)
+        if hits:
+            raise Refused(f"{what} matches {hits} denylist term(s); it would be public, reword it")
+
     proc = _exec(run, ["git", "fetch", "origin"], root)
     if proc.returncode != 0:
         raise ToolError(f"git fetch origin failed: {_err(proc)}")
@@ -741,15 +812,6 @@ def open_pr(
         return rep
     rep.add("gates", "PASS", g.message)
 
-    ref = f"refs/heads/{branch}"
-    proc = _exec(run, ["git", "push", "--set-upstream", "origin", f"{ref}:{ref}"], root)
-    if proc.returncode != 0:
-        rep.add("push", "FAIL", _err(proc))
-        rep.exit = 1
-        rep.message = "the push failed; the release commit is local only"
-        return rep
-    rep.add("push", "PASS", ref)
-
     body = [
         f"Release {version}.",
         "",
@@ -760,7 +822,31 @@ def open_pr(
     if pin_note:
         body += ["", "Pin floor raised: " + pin_note]
     body += ["", f"After this merges, the maintainer types `/release tag {version}`."]
-    path = _tmp_text("\n".join(body) + "\n", "streamsnow-pr-")
+    body_text = "\n".join(body) + "\n"
+    hits = denylist_hits(body_text, deny)
+    if hits:
+        # the gate details are what put the term there, so withhold them from the output too
+        rep.extra["gates"] = [
+            {"name": r.name, "status": r.status, "detail": "(withheld)"} for r in g.results
+        ]
+        rep.add("pr body", "FAIL", f"matches {hits} denylist term(s)")
+        rep.exit = 1
+        rep.message = (
+            f"the generated PR body matches {hits} denylist term(s); the release commit is "
+            "local only and nothing was pushed"
+        )
+        return rep
+
+    ref = f"refs/heads/{branch}"
+    proc = _exec(run, ["git", "push", "--set-upstream", "origin", f"{ref}:{ref}"], root)
+    if proc.returncode != 0:
+        rep.add("push", "FAIL", _err(proc))
+        rep.exit = 1
+        rep.message = "the push failed; the release commit is local only"
+        return rep
+    rep.add("push", "PASS", ref)
+
+    path = _tmp_text(body_text, "streamsnow-pr-")
     try:
         args = ["gh", "pr", "create", "--base", "main", "--head", branch, "--title", subject]
         proc = _exec(run, [*args, "--body-file", path], root)
@@ -983,6 +1069,17 @@ def tag(
         rep.add("commit messages", "PASS", f"{scan['count']} commit(s) clean")
     else:
         rep.add("commit messages", "WARN", "NO DENYLIST (--allow-no-denylist): paths only")
+
+    # RELEASING.md's privacy gate scans files; nothing forces `gates` to have run on this
+    # exact commit, so scan the files of the commit being tagged.
+    findings = scan_tree_at(run, root, sha, deny)
+    if findings:
+        raise Refused(
+            f"the files at {sha[:12]} fail the privacy scan with {findings} finding(s); run "
+            "check_export_clean on that commit locally to see them"
+        )
+    scope = "with the local denylist" if deny else "NO DENYLIST (--allow-no-denylist): generic"
+    rep.add("privacy scan", "PASS" if deny else "WARN", f"files at {sha[:12]} clean, {scope}")
 
     proc = _exec(run, ["git", "tag", t, sha], root)
     if proc.returncode != 0:
