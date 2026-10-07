@@ -87,7 +87,8 @@ GATE_NAMES = (
 
 UNRELEASED = "## [Unreleased]"
 _SEMVER = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
-_TRAILER = re.compile(r"Co-Authored-By: [^<>\n]+ <[^<>\s]+>")
+_TRAILER = re.compile(r"Co-Authored-By: [^<>\x00-\x1f\x7f]+ <[^<>\s\x00-\x1f\x7f]+>")
+_PRIVATE_NOTE = re.compile(r"/Users/|/home/|@")
 _VERSION_PATTERNS = {
     PYPROJECT: re.compile(r'^(version = ")([^"]+)(")$', re.M),
     PLUGIN_JSON: re.compile(r'^(\s*"version": ")([^"]+)(",?)$', re.M),
@@ -98,6 +99,11 @@ _PIN = re.compile(r"streamsnow>=(\d+\.\d+(?:\.\d+)?),<(\d+)\.(\d+)(?![\d.])")
 _DATED = r"^## \[{v}\] - \d{{4}}-\d{{2}}-\d{{2}}$"
 _HOME_PATH = re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+")
 _PLAYWRIGHT_PIN = re.compile(r"@playwright/cli@(\d+\.\d+\.\d+)")
+# gates and open-pr are pre-approved in the /release skill, so they take no bypass flag;
+# only `tag`, which always shows a permission prompt, accepts --allow-no-denylist.
+_NO_DENYLIST_GATES = (
+    "no {d} found in the repo root or the main worktree; the gates need it, so add it there"
+)
 _NO_DENYLIST = (
     "no {d} found in the repo root or the main worktree; add it, or pass "
     "--allow-no-denylist to accept a generic-only check"
@@ -263,14 +269,15 @@ def find_denylist(root: Path, run: Run) -> Path | None:
     here = root / DENYLIST
     if here.is_file():
         return here
-    proc = _exec(run, ["git", "rev-parse", "--git-common-dir"], root)
-    if proc.returncode == 0 and _out(proc):
-        common = Path(_out(proc))
-        if not common.is_absolute():
-            common = root / common
-        main = common.resolve().parent / DENYLIST
-        if main.is_file():
-            return main
+    # The first entry of `git worktree list` is always the main worktree, even when the
+    # common dir lives elsewhere (a bare repo or a separate --git-dir).
+    proc = _exec(run, ["git", "worktree", "list", "--porcelain"], root)
+    if proc.returncode == 0:
+        first = next((ln for ln in (proc.stdout or "").splitlines() if ln.strip()), "")
+        if first.startswith("worktree "):
+            main = Path(first[len("worktree ") :]) / DENYLIST
+            if main.is_file():
+                return main
     return None
 
 
@@ -534,7 +541,7 @@ def _gate_changelog(version: str, root: Path) -> Result:
     return Result("changelog closed", "PASS", f"## [{version}] dated, [Unreleased] empty")
 
 
-def _gate_privacy(root: Path, run: Run, deny: Path | None, allow_none: bool) -> Result:
+def _gate_privacy(root: Path, run: Run, deny: Path | None) -> Result:
     args = [sys.executable, "-m", "streamsnow.tools.check_export_clean", "."]
     if deny:
         args += ["--denylist", str(deny)]
@@ -543,16 +550,10 @@ def _gate_privacy(root: Path, run: Run, deny: Path | None, allow_none: bool) -> 
         return Result("privacy scan", "FAIL", f"check_export_clean exit {proc.returncode}")
     if deny:
         return Result("privacy scan", "PASS", "clean with the local denylist")
-    if allow_none:
-        return Result(
-            "privacy scan",
-            "WARN",
-            "NO DENYLIST (--allow-no-denylist): denylist not present, scan is generic only",
-        )
-    return Result("privacy scan", "FAIL", _NO_DENYLIST.format(d=DENYLIST))
+    return Result("privacy scan", "FAIL", _NO_DENYLIST_GATES.format(d=DENYLIST))
 
 
-def _gate_commits(root: Path, run: Run, deny: Path | None, allow_none: bool) -> Result:
+def _gate_commits(root: Path, run: Run, deny: Path | None) -> Result:
     scan = scan_commits(run, root, "HEAD", deny)
     detail = f"{scan['count']} commit(s) since {scan['since']}"
     problems = _scan_problems(scan)
@@ -560,11 +561,7 @@ def _gate_commits(root: Path, run: Run, deny: Path | None, allow_none: bool) -> 
         return Result("commit messages", "FAIL", f"{detail}: {problems}")
     if deny:
         return Result("commit messages", "PASS", f"{detail}: clean against {scan['terms']} term(s)")
-    if allow_none:
-        return Result(
-            "commit messages", "WARN", f"NO DENYLIST (--allow-no-denylist): {detail}; paths only"
-        )
-    return Result("commit messages", "FAIL", _NO_DENYLIST.format(d=DENYLIST))
+    return Result("commit messages", "FAIL", _NO_DENYLIST_GATES.format(d=DENYLIST))
 
 
 def _gate_links(root: Path, run: Run, online: bool) -> Result:
@@ -596,9 +593,7 @@ def _gate_playwright(root: Path, run: Run) -> Result:
     return Result("playwright pin", "PASS", f"{latest} is current")
 
 
-def gates(
-    version: str, root: Path, run: Run, online: bool, allow_no_denylist: bool = False
-) -> Report:
+def gates(version: str, root: Path, run: Run, online: bool) -> Report:
     rep = Report("gates", version)
     parse_semver(version)
     deny = find_denylist(root, run)
@@ -606,8 +601,8 @@ def gates(
     rep.results.append(Result("git tree clean", "PASS" if clean else "FAIL", detail))
     rep.results.append(_gate_lockstep(version, root, run))
     rep.results.append(_gate_changelog(version, root))
-    rep.results.append(_gate_privacy(root, run, deny, allow_no_denylist))
-    rep.results.append(_gate_commits(root, run, deny, allow_no_denylist))
+    rep.results.append(_gate_privacy(root, run, deny))
+    rep.results.append(_gate_commits(root, run, deny))
     rep.results.append(_gate_links(root, run, online))
     rep.results.append(_gate_playwright(root, run))
     if tuple(r.name for r in rep.results) != GATE_NAMES:
@@ -628,18 +623,43 @@ def _tmp_text(text: str, prefix: str) -> str:
     return path
 
 
+def _git_lines(run: Run, root: Path, args: list[str]) -> list[str]:
+    proc = _exec(run, args, root)
+    if proc.returncode != 0:
+        raise ToolError(f"{' '.join(args[:3])} failed: {_err(proc)}")
+    return [ln for ln in (proc.stdout or "").splitlines() if ln.strip()]
+
+
+def _branch_problem(run: Run, root: Path, subject: str) -> str | None:
+    """Why the branch is not exactly one release commit on top of origin/main, or None."""
+    subjects = _git_lines(run, root, ["git", "log", "--format=%s", "origin/main..HEAD"])
+    if subjects != [subject]:
+        found = "; ".join(subjects) or "none"
+        return (
+            f"the branch must hold exactly one commit, `{subject}`, on origin/main; found: {found}"
+        )
+    names = _git_lines(run, root, ["git", "diff", "--name-only", "origin/main...HEAD"])
+    stray = [n for n in names if n not in RELEASE_EDITS]
+    if stray:
+        return f"the release commit touches files outside the release edits: {', '.join(stray)}"
+    return None
+
+
 def open_pr(
     version: str,
     root: Path,
     run: Run,
     trailer: str | None,
     pin_note: str | None,
-    allow_no_denylist: bool = False,
 ) -> Report:
     rep = Report("open-pr", version)
     parse_semver(version)
     if trailer is not None and not _TRAILER.fullmatch(trailer):
         raise ToolError("--trailer must be one line of the form `Co-Authored-By: Name <address>`")
+    if pin_note is not None and _PRIVATE_NOTE.search(pin_note):
+        raise ToolError(
+            "--pin-floor-note goes into a public PR body; leave out home paths and any `@`"
+        )
     branch = f"claude/release-{version}"
     subject = f"chore({version}): release {version}"
 
@@ -650,31 +670,69 @@ def open_pr(
         raise Refused(f"the current branch is {_out(proc)!r}, not {branch!r}")
     rep.add("branch", "PASS", branch)
 
+    proc = _exec(run, ["git", "fetch", "origin"], root)
+    if proc.returncode != 0:
+        raise ToolError(f"git fetch origin failed: {_err(proc)}")
+    proc = _exec(run, ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"], root)
+    if proc.returncode == 1:
+        raise Refused(
+            f"{branch} is not cut from the current origin/main; delete it and cut it again "
+            "from origin/main"
+        )
+    if proc.returncode != 0:
+        raise ToolError(f"git merge-base failed: {_err(proc)}")
+    rep.add("based on origin/main", "PASS")
+
     lines = _porcelain(run, root)
     untracked = [ln[3:] for ln in lines if ln.startswith("??")]
     if untracked:
         raise Refused(f"untracked files present: {', '.join(untracked)}")
+    deleted = [ln[3:] for ln in lines if "D" in ln[:2]]
+    if deleted:
+        raise Refused(f"files are deleted, which a release never does: {', '.join(deleted)}")
     unexpected = [
         ln[3:] for ln in lines if " -> " in ln[3:] or ln[3:].strip('"') not in RELEASE_EDITS
     ]
     if unexpected:
         raise Refused(f"files outside the release edits are modified: {', '.join(unexpected)}")
+    existing = _git_lines(run, root, ["git", "log", "--format=%s", "origin/main..HEAD"])
     if lines:
+        if existing:
+            raise Refused(
+                "the branch already has commits beyond origin/main "
+                f"({'; '.join(existing)}); the release must be exactly one commit"
+            )
         proc = _exec(run, ["git", "add", "-u"], root)
         if proc.returncode != 0:
             raise ToolError(f"git add -u failed: {_err(proc)}")
+        staged = _git_lines(run, root, ["git", "diff", "--cached", "--name-status"])
+        bad = [
+            ln
+            for ln in staged
+            if ln.split("\t")[0].startswith("D") or ln.split("\t")[-1] not in RELEASE_EDITS
+        ]
+        if bad:
+            _exec(run, ["git", "reset", "-q"], root)
+            raise Refused(f"unexpected staged changes (unstaged again): {', '.join(bad)}")
         msg = ["-m", subject] + (["-m", trailer] if trailer else [])
         proc = _exec(run, ["git", "commit", *msg], root)
         if proc.returncode != 0:
             raise ToolError(f"git commit failed: {_err(proc)}")
         rep.add("commit", "PASS", subject)
+    elif not existing:
+        raise Refused("nothing to commit; run prepare first")
     else:
-        head = _exec(run, ["git", "log", "-1", "--format=%s"], root)
-        if _out(head) != subject:
-            raise Refused("nothing to commit; run prepare first")
         rep.add("commit", "PASS", "already committed")
 
-    g = gates(version, root, run, online=True, allow_no_denylist=allow_no_denylist)
+    problem = _branch_problem(run, root, subject)
+    if problem:
+        rep.add("release branch", "FAIL", problem)
+        rep.exit = 1
+        rep.message = f"REFUSED: {problem}. Nothing was pushed."
+        return rep
+    rep.add("release branch", "PASS", "one release commit on origin/main, release files only")
+
+    g = gates(version, root, run, online=True)
     rep.extra["gates"] = [asdict(r) for r in g.results]
     if g.exit != 0:
         rep.add("gates", "FAIL", g.message)
@@ -878,7 +936,7 @@ def tag(
     rep = Report("tag", version)
     parse_semver(version)
     t = f"v{version}"
-    tag_ref, head_ref = f"refs/tags/{t}", f"refs/heads/{t}"
+    tag_ref = f"refs/tags/{t}"
 
     proc = _exec(run, ["git", "fetch", "origin", "--tags"], root)
     if proc.returncode != 0:
@@ -904,12 +962,11 @@ def tag(
 
     if _exec(run, ["git", "rev-parse", "-q", "--verify", tag_ref], root).returncode == 0:
         raise Refused(f"tag {t} already exists locally")
-    remote = _remote_refs(run, root, tag_ref, head_ref)
-    if tag_ref in remote:
+    # A vX.Y.Z BRANCH on origin is the release-branch convention (RELEASING.md); the fully
+    # qualified refs/tags/ refspec below keeps the push unambiguous, so only a tag refuses.
+    if tag_ref in _remote_refs(run, root, tag_ref):
         raise Refused(f"tag {t} already exists on origin")
-    if head_ref in remote:
-        raise Refused(f"a branch named {t} exists on origin; delete or rename it first")
-    rep.add("tag is new", "PASS", f"no {t} tag locally or on origin, no {t} branch")
+    rep.add("tag is new", "PASS", f"no {t} tag locally or on origin")
 
     rep.add("ci green", "PASS", _ci_green(run, root, sha))
     notes = _changelog_at(run, root, sha, version)
@@ -1083,32 +1140,29 @@ def main(
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--root", default=".", help="Repository root (default: .).")
     common.add_argument("--format", choices=("md", "json"), default="md")
-    deny = argparse.ArgumentParser(add_help=False)
-    deny.add_argument(
-        "--allow-no-denylist",
-        action="store_true",
-        help="Accept a generic-only privacy check when no denylist is found (loud WARN).",
-    )
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("suggest", parents=[common], help="Recommend a version bump.")
     p = sub.add_parser("prepare", parents=[common], help="Bump, close the changelog, lock.")
     p.add_argument("version")
     p.add_argument("--pin-floor", action="store_true")
-    o = sub.add_parser(
-        "open-pr", parents=[common, deny], help="Commit, gate, push and open the release PR."
-    )
+    o = sub.add_parser("open-pr", parents=[common], help="Commit, gate, push, open the PR.")
     o.add_argument("version")
     o.add_argument("--trailer", help="One `Co-Authored-By: Name <address>` line.")
     o.add_argument("--pin-floor-note", help="Why the pin floor moved, for the PR body.")
-    g = sub.add_parser("gates", parents=[common, deny], help="Run the release gates (read-only).")
+    g = sub.add_parser("gates", parents=[common], help="Run the release gates (read-only).")
     g.add_argument("version")
     g.add_argument("--online", action="store_true")
-    t = sub.add_parser(
-        "tag", parents=[common, deny], help="Tag the release commit and create the Release."
-    )
+    t = sub.add_parser("tag", parents=[common], help="Tag the release commit, create the Release.")
     t.add_argument("version")
     t.add_argument("--release-only", action="store_true")
+    # Only on `tag`: the skill pre-approves every other subcommand, so a bypass flag there
+    # would skip the permission prompt. `tag` always prompts.
+    t.add_argument(
+        "--allow-no-denylist",
+        action="store_true",
+        help="Accept a generic-only commit-message check when no denylist is found (loud WARN).",
+    )
     v = sub.add_parser("verify", parents=[common], help="Check the publish landed (read-only).")
     v.add_argument("version")
     try:
@@ -1118,7 +1172,6 @@ def main(
 
     root = Path(args.root).resolve()
     version = getattr(args, "version", None)
-    allow = getattr(args, "allow_no_denylist", False)
     rep = Report(args.cmd, version)
     try:
         if args.cmd == "suggest":
@@ -1126,11 +1179,11 @@ def main(
         elif args.cmd == "prepare":
             rep = prepare(version, root, run, today or date.today(), args.pin_floor)
         elif args.cmd == "open-pr":
-            rep = open_pr(version, root, run, args.trailer, args.pin_floor_note, allow)
+            rep = open_pr(version, root, run, args.trailer, args.pin_floor_note)
         elif args.cmd == "gates":
-            rep = gates(version, root, run, args.online, allow)
+            rep = gates(version, root, run, args.online)
         elif args.cmd == "tag":
-            rep = tag(version, root, run, args.release_only, allow)
+            rep = tag(version, root, run, args.release_only, args.allow_no_denylist)
         else:
             rep = verify(version, root, run, fetch_json)
     except Refused as exc:

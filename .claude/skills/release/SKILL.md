@@ -4,7 +4,7 @@ description: Maintainer-only release of StreamSnow, driven by scripts/release.py
 argument-hint: "prepare|tag|verify|suggest <X.Y.Z>"
 model: haiku
 disable-model-invocation: true
-allowed-tools: ["Bash(uv run python scripts/release.py *)", "Bash(git status *)", "Bash(git fetch origin)", "Bash(git switch -c claude/release-* origin/main)"]
+allowed-tools: ["Bash(uv run python scripts/release.py suggest)", "Bash(uv run python scripts/release.py prepare *)", "Bash(uv run python scripts/release.py open-pr *)", "Bash(uv run python scripts/release.py gates *)", "Bash(uv run python scripts/release.py verify *)", "Bash(git status *)", "Bash(git fetch origin)", "Bash(git switch -c claude/release-* origin/main)"]
 ---
 
 # /release
@@ -13,8 +13,9 @@ You run exact commands and report their output. The script makes every decision.
 RELEASING.md is the source of truth for the procedure; this skill only drives the script.
 This skill is the maintainer-sanctioned exception to the rule in `.claude/CLAUDE.md` that
 puts tags and releases off-limits for agents, and only through scripts/release.py.
-The maintainer typing `/release tag X.Y.Z` is the confirmation for the one step that
-cannot be undone (the tag push that publishes to PyPI).
+The one step that cannot be undone (the tag push that publishes to PyPI) needs two
+confirmations: the maintainer typing `/release tag X.Y.Z`, and approving the permission
+prompt for the `tag` command, which this skill deliberately does not pre-approve.
 
 ## Rules
 
@@ -24,7 +25,7 @@ cannot be undone (the tag push that publishes to PyPI).
 4. Never run `git push`, `git commit`, `git tag`, `gh pr`, `gh release` or `uv publish` except through the script.
 5. Never pick the version. If the user gave none, run `suggest`, show its output, and ask.
 6. Never wait for or poll CI. Report and stop.
-7. Never pass `--allow-no-denylist` unless the maintainer explicitly asks for it.
+7. Never pass `--allow-no-denylist` (it exists only on `tag`) unless the maintainer explicitly asks for it.
 
 ## suggest
 
@@ -50,8 +51,11 @@ cannot be undone (the tag push that publishes to PyPI).
 
 ## tag X.Y.Z
 
-1. `uv run python scripts/release.py tag X.Y.Z`
-2. Show the output verbatim. On exit 0, tell the user to run `/release verify X.Y.Z` in a
+1. Tell the user: "Next you will see a permission prompt for the tag command. Approving it
+   pushes the tag, which publishes to PyPI and cannot be undone."
+2. `uv run python scripts/release.py tag X.Y.Z`. If the user denies the permission prompt,
+   stop and say nothing was tagged.
+3. Show the output verbatim. On exit 0, tell the user to run `/release verify X.Y.Z` in a
    few minutes. If it says to rerun with `--release-only`, tell the user that and stop; run
    `uv run python scripts/release.py tag X.Y.Z --release-only` only when they ask.
 
