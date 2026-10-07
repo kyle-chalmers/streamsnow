@@ -17,7 +17,7 @@ import pytest
 from streamsnow import sf_exec as sx
 from streamsnow.policy import SchemaPolicy
 
-POLICY = SchemaPolicy(database="ANALYTICS_DB", schema_allow=("REPORTING",), schema_deny=("RAW",))
+POLICY = SchemaPolicy(sources=("ANALYTICS_DB.REPORTING",), schema_deny=("RAW",))
 
 
 class Recorder:

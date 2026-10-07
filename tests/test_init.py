@@ -122,9 +122,7 @@ def test_init_warehouse_runtime(tmp_path):
 
 
 def test_schema_refs_guardrail_blocks_denied_schema():
-    policy = SchemaPolicy(
-        database="ANALYTICS_DB", schema_allow=("ANALYTICS",), schema_deny=("RAW", "BRIDGE")
-    )
+    policy = SchemaPolicy(sources=("ANALYTICS_DB.ANALYTICS",), schema_deny=("RAW", "BRIDGE"))
     # denied
     assert find_denied_refs("SELECT * FROM RAW.events", policy)
     assert find_denied_refs("FROM mydb.BRIDGE.t", policy)
@@ -173,7 +171,7 @@ def test_init_reuses_existing_config_for_multiple_apps(tmp_path):
 
 
 def test_schema_refs_catches_quoted_and_whitespaced_refs():
-    policy = SchemaPolicy(database="DB", schema_allow=("ANALYTICS",), schema_deny=("BRIDGE",))
+    policy = SchemaPolicy(sources=("DB.ANALYTICS",), schema_deny=("BRIDGE",))
     assert find_denied_refs('FROM "BI"."BRIDGE"."T"', policy)  # quoted identifiers
     assert find_denied_refs("FROM BI . BRIDGE . T", policy)  # whitespace around dots
     assert not find_denied_refs("FROM BI.ANALYTICS.T", policy)

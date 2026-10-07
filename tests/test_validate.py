@@ -514,12 +514,11 @@ def test_security_walk_skips_dotted_dirs(tmp_path):
 def test_schema_refs_use_statement_and_read_exceptions():
     from streamsnow.policy import SchemaPolicy as SP
 
-    policy = SP(database="DB", schema_allow=("ANALYTICS",), schema_deny=("RAW",))
+    policy = SP(sources=("DB.ANALYTICS",), schema_deny=("RAW",))
     assert find_denied_refs("USE SCHEMA RAW;", policy)
     assert find_denied_refs("use schema raw", policy)
     exc = SP(
-        database="DB",
-        schema_allow=("ANALYTICS",),
+        sources=("DB.ANALYTICS",),
         schema_deny=("RAW",),
         read_exceptions=("DB.RAW.SANCTIONED",),
     )
@@ -533,7 +532,7 @@ def test_schema_refs_use_statement_and_read_exceptions():
 def _deny_policy():
     from streamsnow.policy import SchemaPolicy as SP
 
-    return SP(database="DB", schema_allow=("ANALYTICS", "REPORTING"), schema_deny=("BRIDGE", "RAW"))
+    return SP(sources=("DB.ANALYTICS", "DB.REPORTING"), schema_deny=("BRIDGE", "RAW"))
 
 
 def test_schema_refs_flags_real_sql_and_python_query():
@@ -591,7 +590,7 @@ def test_schema_refs_check_paths_skips_dotted_dirs(tmp_path):
     from streamsnow.policy import SchemaPolicy as SP
     from streamsnow.tools.check_schema_refs import check_paths
 
-    policy = SP(database="DB", schema_allow=("ANALYTICS",), schema_deny=("BRIDGE",))
+    policy = SP(sources=("DB.ANALYTICS",), schema_deny=("BRIDGE",))
     # A real review artifact under a dotted dir (.review/) must be skipped.
     review = _write(tmp_path / "apps/x/.review/stub.sql", "SELECT * FROM BRIDGE.T\n")
     # A real query under apps/x/queries must still be flagged.
@@ -1559,7 +1558,7 @@ def test_schema_refs_scans_whatever_the_checkout_path_looks_like(tmp_path, shape
     from streamsnow.policy import SchemaPolicy as SP
     from streamsnow.tools.check_schema_refs import _iter_files, check_paths
 
-    policy = SP(database="DB", schema_allow=("ANALYTICS",), schema_deny=("BRIDGE",))
+    policy = SP(sources=("DB.ANALYTICS",), schema_deny=("BRIDGE",))
     repo = tmp_path / shape / "repo"
     (repo / "apps" / "x" / "queries").mkdir(parents=True)
     (repo / "apps" / "x" / "queries" / "q.sql").write_text(_DENIED, encoding="utf-8")

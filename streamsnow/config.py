@@ -345,6 +345,25 @@ class GovernanceCfg:
             ),
         )
 
+    # Temporary bridge for PR 2 (removed in its Task 6, when governance moves to
+    # schema_version 2): the v2 read API over v1 data, so every consumer moves to
+    # it before the model flips.
+    @property
+    def sources(self) -> tuple[str, ...]:
+        return tuple(f"{self.database}.{s}".upper() for s in self.schema_allow)
+
+    @property
+    def app_data(self) -> str:
+        return ""
+
+    @property
+    def imported_databases(self) -> tuple[str, ...]:
+        return ()
+
+    @property
+    def boundary(self) -> str:
+        return "warn"
+
 
 # Files an app may deliberately leave out of ``snowflake.yml`` ``artifacts:``
 # because the repo's deploy pipeline ships them another way (the generated
