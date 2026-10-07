@@ -8,32 +8,6 @@ entry.
 
 ## [Unreleased]
 
-### Added
-
-- **`streamsnow sql-review helper <slug> [--apply] [--force]`** refreshes an app's `review.py`
-  from the current scaffold, which `streamsnow update` never does. The default is a dry run that
-  prints the helper's state (`current`, `modified` or `missing`) and a diff; `--apply` writes the
-  scaffold, and a `modified` file is refused (exit 1) unless `--force` is also passed. An unknown
-  slug, a missing config or a non-UTF-8 helper is exit 2, and a symlinked `review.py` is
-  refused (exit 1) even with `--force`. `sql-review compare` points at it when the helper is stale.
-
-### Fixed
-
-- **Docs no longer say `streamsnow update --apply` refreshes `review.py`.** `update` re-renders
-  repo-level governance files only; `.sqlfluff` and app files are never rewritten. The docs now
-  say so, name `sql-review helper` for `review.py`, and give the one-line manual change an
-  existing repo needs for the glossary `%` fix and the `.sqlfluff` comment.
-- **`stage-bundle` leaves out `*.egg-info` directories, `*.pyc` and `.DS_Store`.** A local
-  editable install's ignored build metadata reached the stage in a live test; it is never read
-  at runtime.
-
-## [0.10.1] - 2026-10-07
-
-- Generated CI and deploy workflows pin `streamsnow>=0.10.1,<0.11`, because the stage-copy
-  deploy now calls `streamsnow stage-bundle`; run `streamsnow update --apply` to pick it up.
-
-Most entries below come from a first end-to-end run of the plugin (onboard through ship).
-
 ### Breaking
 
 - **Config `schema_version: 2`: `governance.sources` and `governance.app_data` replace
@@ -74,6 +48,32 @@ Most entries below come from a first end-to-end run of the plugin (onboard throu
   the sources and app data, or a two-part name. The deny list fails either way.
 - **`check schema-refs --format json` gains `warnings` and `boundary`**, and its findings gain
   `database` and `reason`. `validate-app` shows boundary warnings alongside its checks.
+- **`streamsnow sql-review helper <slug> [--apply] [--force]`** refreshes an app's `review.py`
+  from the current scaffold, which `streamsnow update` never does. The default is a dry run that
+  prints the helper's state (`current`, `modified` or `missing`) and a diff; `--apply` writes the
+  scaffold, and a `modified` file is refused (exit 1) unless `--force` is also passed. An unknown
+  slug, a missing config or a non-UTF-8 helper is exit 2, and a symlinked `review.py` is
+  refused (exit 1) even with `--force`. `sql-review compare` points at it when the helper is stale.
+
+### Fixed
+
+- **Docs no longer say `streamsnow update --apply` refreshes `review.py`.** `update` re-renders
+  repo-level governance files only; `.sqlfluff` and app files are never rewritten. The docs now
+  say so, name `sql-review helper` for `review.py`, and give the one-line manual change an
+  existing repo needs for the glossary `%` fix and the `.sqlfluff` comment.
+- **`stage-bundle` leaves out `*.egg-info` directories, `*.pyc` and `.DS_Store`.** A local
+  editable install's ignored build metadata reached the stage in a live test; it is never read
+  at runtime.
+
+## [0.10.1] - 2026-10-07
+
+- Generated CI and deploy workflows pin `streamsnow>=0.10.1,<0.11`, because the stage-copy
+  deploy now calls `streamsnow stage-bundle`; run `streamsnow update --apply` to pick it up.
+
+Most entries below come from a first end-to-end run of the plugin (onboard through ship).
+
+### Added
+
 - **`streamsnow app-url <slug>`** prints the Snowsight URL of a deployed app (Snowflake's
   app-builder form), built from the name the deploy SQL creates and the organization and
   account your connection reports. `/ship-app` runs it after a green deploy and hands you

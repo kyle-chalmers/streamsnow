@@ -126,3 +126,13 @@ def test_from_governance_reads_the_v2_api():
     assert policy.sources == ("ANALYTICS_DB.ANALYTICS", "ANALYTICS_DB.REPORTING")
     assert policy.boundary == "warn"
     assert policy.app_data == "STREAMSNOW_APPS.STREAMSNOW_REPORTING"
+
+
+def test_split_name_reads_an_empty_middle_part_as_public():
+    """Snowflake resolves ``DB..OBJ`` as ``DB.PUBLIC.OBJ`` (name resolution docs)."""
+    from streamsnow.policy import split_name
+
+    assert split_name("sales_db..leads") == ("SALES_DB", "PUBLIC", "LEADS")
+    assert split_name('"Sales"..T') == ("Sales", "PUBLIC", "T")
+    assert split_name("A.B.C") == ("A", "B", "C")
+    assert split_name("A..") == ()

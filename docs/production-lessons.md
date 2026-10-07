@@ -48,10 +48,16 @@ preview. StreamSnow's guardrails assume owner's rights and do not adopt it.
 (raw ingestion, PII), and the temptation is to grant the app role into it.
 
 Don't widen grants: build a **narrow, projection-only view** in a governance
-source or the app-data schema, owned by a role that can read the restricted base. The base resolves
+source schema, owned by a role that can read the restricted base. The base resolves
 with the *view owner's* rights; the app reads only the view and stays inside
-its sources and app data. Drop every column the app doesn't need (especially direct
+its sources. Drop every column the app doesn't need (especially direct
 identifiers) at the view boundary.
+
+Keep the passthrough out of the app-data schema. The CI role gets `USAGE`, `CREATE VIEW` and
+`CREATE DYNAMIC TABLE` there, but no `SELECT` on objects other roles own, so a view owned by a
+privileged role in app data is unreadable by the deployed app. A governance source schema is where
+the admin script grants the CI role `SELECT` on every object type. App data holds only objects the
+CI role creates and owns.
 
 Performance corollary: keep the passthrough **non-secure and join-free**.
 Snowflake will not push an outer `WHERE` predicate through a secure view or

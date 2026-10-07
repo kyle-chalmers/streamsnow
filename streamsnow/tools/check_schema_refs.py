@@ -35,7 +35,13 @@ Two scans, because they protect different things:
   ``QUOTED_IDENTIFIERS_IGNORE_CASE = FALSE``; with it TRUE, quoted names fold to
   upper case too and the exact-case match is stricter than Snowflake. A
   three-part name outside ``governance.sources`` and app data, or any two-part
-  name, is reported. Text handed to a Streamlit element (``st.caption``,
+  name, is reported. ``DB..OBJ`` is read as ``DB.PUBLIC.OBJ``, the way Snowflake resolves it
+  (https://docs.snowflake.com/en/sql-reference/name-resolution). Python string
+  concatenation and f-strings are folded into one statement first, with ``__expr__``
+  for each interpolation, so a name is not cut off from the FROM before it. In Python
+  the boundary scan reads only literals that are certainly SQL (a query-call argument,
+  or one opening with SELECT, WITH, INSERT, UPDATE, DELETE, MERGE, CREATE or USE); the
+  deny scan keeps reading every literal with a SQL keyword. Text handed to a Streamlit element (``st.caption``,
   ``st.markdown``, ...) is prose about data, never SQL, and neither scan reads it.
 
 Detection (mirrors the battle-tested source monorepo
@@ -84,6 +90,7 @@ from ..policy import (
     DENIED,
     NAME_PATTERN,
     OUTSIDE_BOUNDARY,
+    PUBLIC_SCHEMA,
     TWO_PART,
     SchemaPolicy,
     display_name,
@@ -113,7 +120,31 @@ def _strip_sql_comments(text: str) -> str:
 
 # `USE ROLE <name>` and `USE SECONDARY ROLES ...` name roles, never schemas: a role
 # called "STAGING.READ_ONLY" must not read as a reference to a STAGING schema.
-_USE_ROLE = re.compile(r'(?i)\bUSE\s+(?:SECONDARY\s+ROLES|ROLE)\s+(?:"(?:[^"]|"")*"|\S+)')
+_USE_ROLE = re.compile(
+    r'(?i)(?:^|(?<=;))\s*(USE\s+(?:SECONDARY\s+ROLES|ROLE)\s+(?:"(?:[^"]|"")*"|[^\s;]+))'
+)
+_QUOTED_IDENT = re.compile(r'"(?:[^"]|"")*"')
+# `DB..OBJ`: an empty schema part is PUBLIC (https://docs.snowflake.com/en/sql-reference/name-resolution)
+_EMPTY_SCHEMA = re.compile(r"([A-Za-z0-9_$])\.\.(?=[A-Za-z_])")
+
+
+def _without_role_statements(line: str) -> str:
+    """*line* with every ``USE ROLE`` / ``USE SECONDARY ROLES`` statement blanked.
+
+    Only a real statement counts: one at the start of the line or after a ``;``,
+    and outside string literals and quoted identifiers. Matching the text blindly
+    also blanked ``GET_DDL('TABLE', 'DB.RAW."USE ROLE X"')``, which hid a denied
+    ``RAW`` behind a table name that merely contains the words.
+    """
+    masked = _mask_sql(line)
+    quoted = [m.span() for m in _QUOTED_IDENT.finditer(masked)]
+    out = line
+    for m in _USE_ROLE.finditer(masked):
+        start, end = m.span(1)
+        if any(a < start < b for a, b in quoted):
+            continue
+        out = out[:start] + _blank(out[start:end]) + out[end:]
+    return out
 
 
 def _denied_in_line(line: str, policy: SchemaPolicy, read_exc: set[str]) -> set[tuple[str, str]]:
@@ -127,7 +158,8 @@ def _denied_in_line(line: str, policy: SchemaPolicy, read_exc: set[str]) -> set[
     ``DB.BRIDGE`` is not a hit.
     """
     hits: set[tuple[str, str]] = set()
-    norm = re.sub(r"\s*\.\s*", ".", _USE_ROLE.sub(" ", line).replace('"', ""))
+    norm = re.sub(r"\s*\.\s*", ".", _without_role_statements(line).replace('"', ""))
+    norm = _EMPTY_SCHEMA.sub(rf"\1.{PUBLIC_SCHEMA}.", norm)
     for m in _DOTTED.finditer(norm):
         if m.group(0).upper() in read_exc:
             continue  # sanctioned exact-FQN read
@@ -187,6 +219,7 @@ _PROSE_CALL_NAMES = frozenset(
     {
         "markdown", "caption", "write", "title", "header", "subheader",
         "info", "warning", "error", "success", "toast", "metric",
+        "expander", "selectbox", "radio", "tabs", "multiselect",
     }
 )  # fmt: skip
 
@@ -217,13 +250,84 @@ def _collect_enclosed_string_ids(tree: ast.AST, names: frozenset[str]) -> set[in
     return ids
 
 
-def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list[tuple[int, str]]:
-    """``(first line, sql)`` pieces to scan: the whole text for ``.sql``; for
-    ``.py``, the SQL-looking string literals (query-call args, or containing a
-    SQL keyword), never docstrings, and with ``skip_prose`` never the text of a
-    Streamlit element. Unparseable Python yields nothing (see the module docs)."""
+#: Stands for an interpolated or non-literal part of a Python string expression. A
+#: lone identifier, so ``FROM {t} a, X.Y.Z`` keeps its relation context, and a name
+#: with an unknown database or schema part (``{db}.{schema}.T``) is recognizable.
+_EXPR = "__expr__"
+# A string that opens with a SQL statement keyword is SQL wherever it sits in Python.
+_STATEMENT_START_RE = re.compile(r"(?i)\s*(?:SELECT|WITH|INSERT|UPDATE|DELETE|MERGE|CREATE|USE)\b")
+
+
+class _Chunk(NamedTuple):
+    line: int  # first line of the string expression
+    sql: str
+    statement: bool  # a query-call argument or opens with a statement keyword
+
+
+def _fold_string(node: ast.AST) -> str | None:
+    """The text of a Python string expression, or ``None`` when it is not one.
+
+    ``"a" + "b"`` folds to one string, so ``"SELECT * FROM " + "DB.S.T"`` reads as
+    the statement it builds. An f-string joins its literal parts around
+    :data:`_EXPR`, and a non-literal operand of ``+`` next to a string becomes
+    :data:`_EXPR` too. Scanning each ``ast.Constant`` alone split every such query
+    in front of the name it reads.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.JoinedStr):
+        return "".join(
+            v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else f" {_EXPR} "
+            for v in node.values
+        )
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _fold_string(node.left), _fold_string(node.right)
+        if left is None and right is None:
+            return None
+        return (f" {_EXPR} " if left is None else left) + (f" {_EXPR} " if right is None else right)
+    return None
+
+
+def _string_expressions(tree: ast.AST) -> list[tuple[ast.AST, str]]:
+    """Each maximal string expression with its folded text, in source order.
+
+    The pieces of a folded expression are not visited again; the expressions
+    interpolated into an f-string are, since they may hold strings of their own.
+    """
+    found: list[tuple[ast.AST, str]] = []
+
+    def visit(node: ast.AST) -> None:
+        text = _fold_string(node)
+        if text is not None:
+            found.append((node, text))
+            if isinstance(node, ast.JoinedStr):
+                for v in node.values:
+                    if isinstance(v, ast.FormattedValue):
+                        visit(v.value)
+            elif isinstance(node, ast.BinOp):
+                for side in (node.left, node.right):
+                    if _fold_string(side) is None:
+                        visit(side)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    visit(tree)
+    return found
+
+
+def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list[_Chunk]:
+    """The SQL pieces to scan: the whole text for ``.sql``; for ``.py``, the
+    SQL-looking string expressions (query-call args, or containing a SQL keyword),
+    never docstrings, and with ``skip_prose`` never the text of a Streamlit
+    element. Unparseable Python yields nothing (see the module docs).
+
+    ``statement`` marks a chunk that is certainly SQL (a query-call argument, or
+    one that opens with a statement keyword). The deny scan reads every chunk; the
+    boundary scan only these, because ``raise ValueError("could not read from
+    settings.toml")`` has a FROM and is not a query."""
     if not is_python:
-        return [(1, text)]
+        return [_Chunk(1, text, True)]
     try:
         tree = ast.parse(text)
     except SyntaxError:
@@ -233,14 +337,14 @@ def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list
     # A query call wins over prose: a literal under execute()/query() is SQL even
     # when it is also an argument of a call named like a text element.
     prose = _collect_call_arg_ids(tree, _PROSE_CALL_NAMES) - queries if skip_prose else set()
-    chunks: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
-            continue
+    chunks: list[_Chunk] = []
+    for node, sql in _string_expressions(tree):
         if id(node) in docstrings or id(node) in prose:
             continue
-        if id(node) in queries or _SQL_KEYWORD_RE.search(node.value):
-            chunks.append((node.lineno, node.value))
+        queried = any(id(inner) in queries for inner in ast.walk(node))
+        if queried or _SQL_KEYWORD_RE.search(sql):
+            opens = bool(_STATEMENT_START_RE.match(_strip_sql_comments(sql)))
+            chunks.append(_Chunk(node.lineno, sql, queried or opens))
     return chunks
 
 
@@ -290,6 +394,14 @@ _SOFT_CLAUSE_END = frozenset({"LIMIT", "OFFSET", "FETCH"})
 _RELATION_MODIFIERS = frozenset(
     {"AT", "BEFORE", "CHANGES", "SAMPLE", "TABLESAMPLE", "PIVOT", "UNPIVOT", "MATCH_RECOGNIZE"}
 )
+
+
+def _unresolved(parts: tuple[str, ...], kind: str) -> bool:
+    """True when an interpolated part (:data:`_EXPR`) hides what the name says about the
+    boundary: any part of a ``USE`` name, or the database or schema of an object name.
+    ``DB.SCHEMA.{table}`` still says everything the boundary needs."""
+    hidden = parts if kind != "object" else parts[:-1]
+    return _EXPR.upper() in hidden
 
 
 def _blank(span: str) -> str:
@@ -507,7 +619,7 @@ def _relation_names(sql: str) -> list[tuple[int, tuple[str, ...], str]]:
                 parts = split_name(peek(j)[1])
                 found.append((line_of(peek(j)[2]), parts, "schema" if len(parts) == 2 else what))
         prev = tok
-    return found
+    return [f for f in found if not _unresolved(f[1], f[2])]
 
 
 def _db_schema(parts: tuple[str, ...], kind: str) -> tuple[str, str]:
@@ -540,7 +652,8 @@ def _deny_hits(
         return []
     read_exc = {e.upper() for e in policy.read_exceptions}
     hits: dict[tuple[int, str, str], tuple[int, str, str]] = {}
-    for base_line, sql in _sql_chunks(text, is_python, skip_prose=True):
+    for chunk in _sql_chunks(text, is_python, skip_prose=True):
+        base_line, sql = chunk.line, chunk.sql
         for offset, database, schema in _scan_text(_strip_sql_comments(sql), policy, read_exc):
             # A literal's lineno is its first line; offset is 1-based within it.
             at = base_line + offset - 1
@@ -583,7 +696,10 @@ def find_boundary_refs(
     if not policy.boundary_schemas:
         return []
     out: dict[tuple[int, str], BoundaryRef] = {}
-    for base_line, sql in _sql_chunks(text, is_python, skip_prose=True):
+    for chunk in _sql_chunks(text, is_python, skip_prose=True):
+        if not chunk.statement:
+            continue
+        base_line, sql = chunk.line, chunk.sql
         for line, parts, kind in _relation_names(sql):
             if not parts:
                 continue

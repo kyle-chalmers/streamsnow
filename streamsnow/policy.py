@@ -55,12 +55,15 @@ TWO_PART = "two_part"
 IGNORED = "ignored"
 #: Verdicts that follow ``boundary`` (warn or enforce). DENIED always fails.
 BOUNDARY_VERDICTS = (OUTSIDE_BOUNDARY, TWO_PART)
+PUBLIC_SCHEMA = "PUBLIC"
 _SYSTEM_SCHEMA = "INFORMATION_SCHEMA"
 _SYSTEM_DATABASES = frozenset({"SNOWFLAKE"})
 
 _PART = r'"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*'
 #: One dotted SQL name: unquoted or "quoted" parts, whitespace (newlines too) around dots.
-NAME_PATTERN = rf"(?:{_PART})(?:\s*\.\s*(?:{_PART}))*"
+#: ``DB..OBJ`` is one name too: Snowflake resolves the empty middle part as ``PUBLIC``
+#: (https://docs.snowflake.com/en/sql-reference/name-resolution).
+NAME_PATTERN = rf"(?:{_PART})(?:\s*\.\s*\.\s*(?:{_PART}))?(?:\s*\.\s*(?:{_PART}))*"
 _PART_RE = re.compile(_PART)
 _NAME_RE = re.compile(NAME_PATTERN)
 _PLAIN_RE = re.compile(r"^[A-Z_][A-Z0-9_$]*$")
@@ -70,7 +73,9 @@ def split_name(text: str) -> tuple[str, ...]:
     """A dotted SQL name as Snowflake resolves it, one entry per identifier.
 
     Unquoted parts fold to upper case; a quoted part keeps its exact text, may
-    hold dots, and has ``""`` unescaped. ``()`` when *text* is not one name.
+    hold dots, and has ``""`` unescaped. ``DB..OBJ`` is ``DB.PUBLIC.OBJ``: Snowflake
+    resolves an empty schema part as ``PUBLIC``, so a double dot must not hide a
+    schema from the boundary or the deny list. ``()`` when *text* is not one name.
     """
     text = text.strip()
     if not _NAME_RE.fullmatch(text):
@@ -79,6 +84,8 @@ def split_name(text: str) -> tuple[str, ...]:
     for m in _PART_RE.finditer(text):
         part = m.group(0)
         parts.append(part[1:-1].replace('""', '"') if part.startswith('"') else part.upper())
+        if len(parts) == 1 and re.match(r"\s*\.\s*\.", text[m.end() :]):
+            parts.append(PUBLIC_SCHEMA)
     return tuple(parts)
 
 

@@ -276,3 +276,15 @@ def test_table_literal_warns_under_warn_and_is_refused_under_enforce(sql, ref, c
     with pytest.raises(sx.SnowError, match=rf"^refused: .*{re.escape(ref)}"):
         strict.run([sql])
     assert refused.calls == []
+
+
+@pytest.mark.parametrize(
+    "sql",
+    ["SELECT * FROM SALES_DB..LEADS", "SELECT * FROM IDENTIFIER('SALES_DB..LEADS')"],
+)
+def test_enforce_refuses_double_dot_names_before_sending(sql) -> None:
+    rec = Recorder()
+    ex = sx.SnowExec(sx.Session(connection="acme"), STRICT_POLICY, runner=rec)
+    with pytest.raises(sx.SnowError, match=r"^refused: .*SALES_DB\.PUBLIC\.LEADS"):
+        ex.run([sql])
+    assert rec.calls == []

@@ -413,3 +413,86 @@ def test_using_parenthesized_and_values_relations_are_in_relation_position(sql, 
     assert _refs(sql, SOURCES) == expected
     enforced = dataclasses.replace(SOURCES, boundary="enforce")
     assert [(r.line, r.ref, r.verdict) for r in find_boundary_refs(sql, enforced)] == expected
+
+
+# --- final review fixes: name resolution, concatenation, role suppression, prose ----------
+
+DENY_PUBLIC = dataclasses.replace(ENFORCE, schema_deny=("SALES_DB.PUBLIC",))
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM SALES_DB..LEADS",
+        "SELECT * FROM IDENTIFIER('SALES_DB..LEADS')",
+        "SELECT * FROM SALES_DB . . LEADS",
+    ],
+)
+def test_double_dot_name_is_the_public_schema(sql):
+    """``DB..OBJ`` resolves as ``DB.PUBLIC.OBJ`` (Snowflake name resolution)."""
+    assert [v for _, _, v in _refs(sql, ENFORCE)] == ["outside_boundary"]
+    assert find_denied_refs(sql, ENFORCE) == []
+    assert find_denied_refs(sql, DENY_PUBLIC) == [(1, "PUBLIC")]
+    assert _refs(sql, DENY_PUBLIC) == []  # denied names are never double-reported
+
+
+def test_python_constant_concatenation_is_one_statement(tmp_path):
+    src = "sql = 'SELECT * FROM ' + 'SALES_DB.PUBLIC.LEADS'\nsession.sql(sql)\n"
+    assert _check(tmp_path, src, ENFORCE, ".py") == (
+        [(1, "outside_boundary", "SALES_DB.PUBLIC.LEADS")],
+        [],
+    )
+
+
+def test_python_fstring_keeps_relation_context_across_interpolations(tmp_path):
+    src = 'sql = f"SELECT * FROM {t} a, SALES_DB.PUBLIC.X"\nsession.sql(sql)\n'
+    assert _check(tmp_path, src, ENFORCE, ".py") == (
+        [(1, "outside_boundary", "SALES_DB.PUBLIC.X")],
+        [],
+    )
+
+
+def test_python_fstring_with_unknown_database_or_schema_is_not_guessed(tmp_path):
+    src = 'sql = f"SELECT * FROM {db}.{schema}.LEADS"\nsession.sql(sql)\n'
+    assert _check(tmp_path, src, ENFORCE, ".py") == ([], [])
+
+
+def test_use_role_suppression_ignores_strings_and_quoted_identifiers():
+    sql = "SELECT GET_DDL('TABLE', 'ANALYTICS_DB.RAW.\"USE ROLE ORDERS\"')"
+    assert find_denied_refs(sql, POLICY) == [(1, "RAW")]
+    assert find_denied_refs('SELECT * FROM ANALYTICS_DB.RAW."USE ROLE X"', POLICY) == [(1, "RAW")]
+    assert find_denied_refs('USE ROLE "STAGING.READ_ONLY"', STAGING_DENY) == []
+    assert find_denied_refs("SELECT 1; USE SECONDARY ROLES RAW.X", POLICY) == []
+
+
+STAGING_DENY = SchemaPolicy(sources=("SALES_DB.STAGING",), schema_deny=("STAGING",))
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        'raise ValueError("could not read from settings.toml")\n',
+        'st.expander("Rows from ANALYTICS.SALES")\n',
+        'st.text("Data from orders.csv")\n',
+    ],
+)
+def test_prose_literals_get_no_boundary_finding(src):
+    assert _refs(src, ENFORCE, is_python=True) == []
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        'session.sql("SELECT * FROM SALES_DB.PUBLIC.X")\n',
+        'Q = "SELECT * FROM SALES_DB.PUBLIC.X"\n',
+        'Q = """\n  -- note\n  WITH a AS (SELECT 1) SELECT * FROM SALES_DB.PUBLIC.X"""\n',
+    ],
+)
+def test_sql_literals_still_get_boundary_findings(src):
+    assert [r for _, r, _ in _refs(src, ENFORCE, is_python=True)] == ["SALES_DB.PUBLIC.X"]
+
+
+def test_prose_in_selectbox_style_calls_is_skipped_for_both_scans():
+    src = 'st.selectbox("From RAW.EVENTS", [1])\nst.tabs("Rows from ANALYTICS.SALES")\n'
+    assert _refs(src, ENFORCE, is_python=True) == []
+    assert find_denied_refs(src, POLICY, is_python=True) == []
