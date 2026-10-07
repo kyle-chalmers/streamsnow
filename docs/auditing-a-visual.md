@@ -155,7 +155,7 @@ warehouse.
 `sql_review/index.yaml` (one entry per visual; a manifest's `set_block` becomes
 `review_window`, its `token_dispatchers` literals become per-metric `tokens`,
 its `param_bindings` become `binds`), wrap each visual in `review_value`, add
-`review.py` to the app (copy it from a fresh `streamsnow new`, and list it in
+`review.py` to the app (`streamsnow sql-review helper <slug> --apply` writes it; list it in
 `snowflake.yml` artifacts), run `streamsnow update` for the repo's `.sqlfluff`,
 then `streamsnow sql-review generate <slug>`: it deletes the old
 `*.review.sql` files. Delete `sql_review/manifests/` yourself.

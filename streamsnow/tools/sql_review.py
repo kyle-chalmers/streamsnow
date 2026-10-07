@@ -101,6 +101,9 @@ Verbs
 ``compare <slug>``   the screen against ``run``: what each visual received in
                      review preview mode; see ``sql_review_compare``.
 
+``helper <slug>``    refresh the app's review.py from the scaffold (dry run unless
+                     ``--apply``; a modified file needs ``--force``).
+
 Exit codes: 0 = clean, 1 = findings/drift/gaps, 2 = tool error.
 """
 
@@ -108,6 +111,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import difflib
 import hashlib
 import json
 import re
@@ -1738,6 +1742,68 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_helper(args: argparse.Namespace) -> int:
+    """Show, and with ``--apply`` refresh, the app's ``review.py`` helper.
+
+    ``review.py`` renders with no template variables, so the current scaffold is
+    exactly the refreshed file. ``streamsnow update`` never rewrites app files, which
+    left an app scaffolded before a helper change with no supported way to catch up.
+    A modified file may hold the user's own changes, so it is overwritten only with
+    ``--force``. A symlinked ``review.py`` is refused (exit 1) even then, and an app folder
+    that resolves outside the repo or a non-UTF-8 helper is a tool error (exit 2).
+    """
+    from ..scaffolder import _env  # noqa: PLC0415
+    from .sql_review_compare import helper_state  # noqa: PLC0415
+
+    repo = Path(args.dir).resolve()
+    if find_config(repo) is None:
+        raise ToolError(f"no streamsnow.config.yaml found at or above {repo}")
+    app = _app_dir(repo, args.slug)
+    if not app.resolve().is_relative_to(repo):
+        raise ToolError(f"{_rel(app)} resolves outside the repo; refusing to touch it")
+    path = app / "review.py"
+    rel = _rel(app, "review.py")
+    if path.is_symlink():
+        print(
+            f"error: {rel} is a symlink; it could write outside the repo, so it is never "
+            "touched, even with --force. Replace the link with a regular file first.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        state = helper_state(app)
+    except UnicodeDecodeError as exc:
+        raise ToolError(f"{rel} is not valid UTF-8 ({exc.reason}); fix or remove it first") from exc
+    shipped = _env().get_template("app/review.py.j2").render()
+    print(f"{rel}: {state}")
+    if state == "current":
+        print("Nothing to do: it matches the current scaffold.")
+        return 0
+    if state == "modified":
+        current = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        diff = difflib.unified_diff(
+            current.splitlines(keepends=True),
+            shipped.splitlines(keepends=True),
+            fromfile=f"{rel} (yours)",
+            tofile=f"{rel} (scaffold)",
+        )
+        print("".join(diff), end="")
+        if args.apply and not args.force:
+            print(
+                f"error: {rel} differs from the scaffold and may hold your changes; "
+                "nothing written. Rerun with --apply --force to overwrite it "
+                "(git is the backup: commit or stash first if you want to keep a copy).",
+                file=sys.stderr,
+            )
+            return 1
+    if not args.apply:
+        print("Dry run: nothing written. Add --apply to write the current scaffold.")
+        return 0
+    path.write_text(shipped, encoding="utf-8", newline="\n")
+    print(f"Wrote {rel} from the current scaffold.")
+    return 0
+
+
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
@@ -1764,6 +1830,18 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="Lint only these query files (pre-commit passes the staged ones). "
         "Every other check still runs in full.",
+    )
+
+    p = sub.add_parser(
+        "helper", help="Refresh apps/<slug>/review.py from the current scaffold (dry run default)."
+    )
+    p.add_argument("slug")
+    p.add_argument("--dir", default=".", help="Repo root (default: cwd).")
+    p.add_argument("--apply", action="store_true", help="Write the current scaffold.")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="With --apply, overwrite a modified review.py (it may hold your changes).",
     )
 
     # Live review (implemented in sql_review_live; the parsers stay here so the
@@ -1826,7 +1904,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    dispatch = {"generate": cmd_generate, "check": cmd_check}
+    dispatch = {"generate": cmd_generate, "check": cmd_check, "helper": cmd_helper}
     try:
         if args.cmd not in dispatch:
             from . import sql_review_live as live  # noqa: PLC0415

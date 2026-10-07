@@ -226,8 +226,9 @@ caught it. Runtime-specific facts link to the official page in
   installed version.
 - **Fix:** `claude plugin uninstall --scope project streamsnow@streamsnow`,
   `claude plugin install --scope project streamsnow@streamsnow`, then, if the
-  skills don't refresh in an open session, run `/reload-plugins` in Claude Code
-  (no restart needed).
+  skills don't refresh in an open session, run `/reload-plugins` in Claude Code, or restart
+  the session. A plugin update does not apply to a session that is already running, so do
+  one of the two before relying on the new skill text.
 
 ### 20. "Playwright CLI unavailable, so the UI walkthrough was skipped"
 

@@ -19,7 +19,8 @@ trust the reviewer's reasoning, only the files.
    needs the join keys in the SQL; a grant claim needs the probe result; a speed-up needs
    `equivalent: true` and better medians in the bench results; a screen claim needs a
    `compare:` result whose status and diffs show it, from a `compare.json` whose `helper` is
-   `current` (a modified review.py can record anything).
+   `current` (a modified review.py can record anything; `streamsnow sql-review helper <slug>
+   --apply` restores it, and `--force` only for a modified file the user agreed to replace).
 3. **Severity fits** the sql-review skill's `findings.md`. Downgrade rather than drop when the
    problem is real but smaller.
 4. **Nothing private:** no row-level values, small-group totals, names, emails or paths.

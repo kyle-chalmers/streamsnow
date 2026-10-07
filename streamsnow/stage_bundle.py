@@ -17,7 +17,8 @@ The workflow uploads the bundle instead of ``apps/``. What is excluded:
   ``help.md`` keeps it);
 - ``sql_review/``, the reviewers' audit trail (``check artifacts`` already
   treats it as non-runtime);
-- dot-directories other than ``.streamlit``, and ``__pycache__``;
+- dot-directories other than ``.streamlit``, ``__pycache__`` and ``*.egg-info`` directories
+  (build metadata from a local editable install), plus ``*.pyc`` and ``.DS_Store`` files;
 - everything in ``.streamlit/`` except ``config.toml``, so a local
   ``secrets.toml`` can never ship;
 - ``.env`` and ``.env.*`` files anywhere in the app, even when declared:
@@ -71,6 +72,8 @@ def _dir_reason(name: str) -> str | None:
     """Why a directory named ``name`` (one path segment) never ships."""
     if name == "__pycache__":
         return "Python bytecode cache"
+    if name.endswith(".egg-info"):
+        return "build metadata, never read at runtime"
     if name.startswith(".") and name != _STREAMLIT_DIR:
         return "tooling dot-directory (only .streamlit ships)"
     return None
@@ -89,6 +92,10 @@ def excluded_reason(rel: str, entries: list[str] | None) -> str | None:
             return reason
     # Case-insensitive: macOS and Windows checkouts read `.ENV` as `.env`.
     base = parts[-1].casefold()
+    if base == ".ds_store":
+        return "macOS Finder metadata"
+    if base.endswith(".pyc"):
+        return "Python bytecode"
     if base == ".env" or base.startswith(".env."):
         return _ENV_REASON
     if base == "secrets.toml":
