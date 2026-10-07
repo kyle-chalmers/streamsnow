@@ -83,8 +83,16 @@ def probe_schemas(
     role: str | None = None,
     runner: sx.Runner | None = None,
     timeout_s: int = 60,
+    max_wait_s: int | None = None,
 ) -> ProbeReport:
-    """Probe every ``DATABASE.SCHEMA`` in *targets* in one ``snow sql`` call."""
+    """Probe every ``DATABASE.SCHEMA`` in *targets* in one ``snow sql`` call.
+
+    ``max_wait_s`` caps the whole call, login included. ``SnowExec`` budgets
+    ``timeout_s`` per statement plus a 120 s login allowance, which is right for doctor
+    but too long for configure: a missed SSO window would block the wizard past an agent
+    command's own timeout, before the config is written. With a cap, a wait that runs
+    out is ``unverified`` (with the reason), never an exception.
+    """
     if not connection:
         return unverified(targets, "no snow connection to probe with")
     try:
@@ -92,7 +100,13 @@ def probe_schemas(
         session = sx.Session(
             connection=connection, role=role, query_tag="streamsnow:probe", timeout_s=timeout_s
         )
-        ex = sx.SnowExec(session, None, runner=runner)
+        inner = runner or sx._default_runner
+        capped = (
+            inner
+            if max_wait_s is None
+            else lambda argv, stdin, timeout: inner(argv, stdin, min(timeout, max_wait_s))
+        )
+        ex = sx.SnowExec(session, None, runner=capped)
         names = sorted({t.split(".", 1)[1] for t in wanted})
         statements = [
             _ROLE_SQL,
@@ -100,6 +114,14 @@ def probe_schemas(
             *(f"SHOW TERSE SCHEMAS LIKE {quote_sql_literal(n)} IN ACCOUNT" for n in names),
         ]
         results = ex.run(statements)
+    except sx.SnowTimeout as exc:
+        if max_wait_s is None:
+            return unverified(targets, str(exc))
+        return unverified(
+            targets,
+            f"no answer from Snowflake within {max_wait_s}s (a sign-in window left open counts); "
+            "`streamsnow doctor --live` checks the sources later",
+        )
     except (sx.SnowError, ConfigError) as exc:
         return unverified(targets, str(exc))
     ran_as = str(sx.first_row(results[0]).get("ROLE") or "") or None

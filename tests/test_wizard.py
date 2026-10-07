@@ -335,7 +335,9 @@ def test_live_probe_only_runs_for_a_connection_this_machine_has(monkeypatch):
     seen = []
     monkeypatch.setattr(cli, "_snow_connections", lambda: [{"connection_name": "acme"}])
     monkeypatch.setattr(
-        probe, "probe_schemas", lambda c, t: seen.append((c, t)) or probe.unverified(t, "x")
+        probe,
+        "probe_schemas",
+        lambda c, t, **_kw: seen.append((c, t)) or probe.unverified(t, "x"),
     )
     _REAL_LIVE_PROBE("acme", ["ANALYTICS_DB.REPORTING"])
     assert seen == [("acme", ["ANALYTICS_DB.REPORTING"])]

@@ -16,11 +16,15 @@ import typer
 import yaml
 from typer.testing import CliRunner
 
-from streamsnow import cli
+from streamsnow import cli, probe
+from streamsnow import sf_exec as sx
 from streamsnow.cli import _prompt_config, app
 from streamsnow.config import CONFIG_FILENAME, Config
 
 runner = CliRunner()
+
+# Captured at import, before tests/conftest.py stubs it per test.
+_REAL_LIVE_PROBE = cli._live_probe
 
 # One set of answers, as the wizard would be typed and as flags would pass it.
 ANSWERS = {
@@ -349,3 +353,64 @@ def test_setup_skill_probes_are_shell_safe():
     )
     assert '-q "<query>"' not in text
     assert "-q '<query>'" in text
+
+
+_NO_ACCT = [f for f in FLAGS if f not in ("--account", ANSWERS["account"])]
+
+
+def _real_probe_with_runner(monkeypatch, fake_runner):
+    """configure with the real probe seam, a snow connection that exists, and a fake runner
+    standing in for ``snow sql`` (no network, no login)."""
+    monkeypatch.setattr(cli, "_live_probe", _REAL_LIVE_PROBE)
+    _connections(
+        monkeypatch,
+        [{"connection_name": "acme", "parameters": {"account": ANSWERS["account"]}}],
+    )
+    monkeypatch.setattr(sx, "_default_runner", fake_runner)
+    _no_prompts(monkeypatch)
+
+
+def test_a_probe_that_times_out_is_unverified_and_configure_still_writes_the_file(
+    tmp_path, monkeypatch
+):
+    def never_answered(argv, stdin, timeout):
+        raise sx.SnowTimeout(f"`snow sql` did not finish within {int(timeout)}s (login included)")
+
+    _real_probe_with_runner(monkeypatch, never_answered)
+    r = runner.invoke(app, ["configure", "--dir", str(tmp_path), "--connection", "acme", *_NO_ACCT])
+    assert r.exit_code == 0, r.output
+    out = " ".join(r.output.split())
+    assert "sources not checked live" in out and "within 90s" in out
+    assert "streamsnow doctor --live" in out
+    written = yaml.safe_load((tmp_path / CONFIG_FILENAME).read_text(encoding="utf-8"))
+    assert "imported_databases" not in written["governance"]
+    Config.from_dict(written)
+
+
+def test_configure_caps_the_time_the_probe_may_wait(tmp_path, monkeypatch):
+    waits: list[float] = []
+
+    def record(argv, stdin, timeout):
+        waits.append(timeout)
+        raise sx.SnowTimeout("slow")
+
+    _real_probe_with_runner(monkeypatch, record)
+    many = ",".join(f"ACME_DB{i}.MARTS{i}" for i in range(8))  # 8 distinct schema names
+    flags = [many if f == ANSWERS["sources"] else f for f in _NO_ACCT]
+    r = runner.invoke(app, ["configure", "--dir", str(tmp_path), "--connection", "acme", *flags])
+    assert r.exit_code == 0, r.output
+    assert waits and all(w <= cli._PROBE_MAX_WAIT_S for w in waits), waits
+    assert cli._PROBE_MAX_WAIT_S <= 90
+    # The uncapped budget (per statement + login allowance) would have been far longer.
+    assert cli._PROBE_STATEMENT_S * 10 + 120 > cli._PROBE_MAX_WAIT_S
+
+
+def test_doctor_style_probe_keeps_its_uncapped_budget(monkeypatch):
+    waits: list[float] = []
+
+    def record(argv, stdin, timeout):
+        waits.append(timeout)
+        raise sx.SnowTimeout("slow")
+
+    report = probe.probe_schemas("acme", ["ACME_DB.MARTS"], runner=record)
+    assert waits == [60 * 3 + 120] and report.results[0].status == probe.UNVERIFIED

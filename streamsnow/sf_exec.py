@@ -69,6 +69,14 @@ class SnowError(RuntimeError):
     """A statement was refused before sending, or ``snow`` failed. User-facing."""
 
 
+class SnowTimeout(SnowError):
+    """``snow sql`` did not finish in time (a login window nobody answered, a stuck call).
+
+    A subclass so callers that can degrade (the configure probe) tell a wait that ran
+    out from a statement that failed, without matching on message text.
+    """
+
+
 @dataclass(frozen=True)
 class Session:
     """How the review connects. Validated on construction."""
@@ -114,7 +122,7 @@ def _default_runner(argv: list[str], stdin: str, timeout: float) -> tuple[int, s
             "`uv tool install snowflake-cli`, then add a connection (`streamsnow doctor` checks both)"
         ) from exc
     except subprocess.TimeoutExpired as exc:
-        raise SnowError(
+        raise SnowTimeout(
             f"`snow sql` did not finish within {int(timeout)}s (login included); "
             "raise --timeout or review one page at a time with --page"
         ) from exc

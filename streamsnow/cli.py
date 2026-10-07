@@ -229,6 +229,13 @@ def _snow_connections() -> list[dict] | None:
     return _doctor.snow_connections()
 
 
+# Configure writes the file only after the probe returns, so a missed SSO window must
+# read as "unverified" within an agent command's usual ~120 s timeout. doctor --live
+# keeps the longer defaults: waiting there is the point.
+_PROBE_STATEMENT_S = 20
+_PROBE_MAX_WAIT_S = 90
+
+
 def _live_probe(connection: str, targets: list[str]) -> _probe.ProbeReport:
     """Probe the sources, read-only, as ``connection``'s role when this machine has it.
 
@@ -241,7 +248,9 @@ def _live_probe(connection: str, targets: list[str]) -> _probe.ProbeReport:
         return _probe.unverified(
             targets, f"no snow connection named {connection!r} on this machine yet"
         )
-    return _probe.probe_schemas(connection, targets)
+    return _probe.probe_schemas(
+        connection, targets, timeout_s=_PROBE_STATEMENT_S, max_wait_s=_PROBE_MAX_WAIT_S
+    )
 
 
 def _report_probe(report: _probe.ProbeReport) -> None:
