@@ -234,3 +234,15 @@ def test_ci_key_verify_is_offered_before_the_push_turns_the_deploy_on():
     assert "On a no, skip it" in section
     stage4 = _flat(SKILL.split("## Stage 4")[1].split("## Done when")[0])
     assert stage4.index("ci-key verify") < stage4.index("ci-key push")
+
+
+def test_a_refused_secret_file_is_replaced_with_the_user_not_for_them():
+    """`ci-key push` refuses an unusable secret file by name. The key guard keeps the agent
+    out of ~/.streamsnow-ci, so the skill walks the user through the delete and then rebuilds
+    the value from the config; the private key file is never replaced this way."""
+    flat = _flat(SETUP)
+    walk = flat.split("If `ci-key push` refuses a secret file by name")[1].split("## 2e")[0]
+    assert "offer to walk the user through replacing it" in walk
+    assert "rm ~/.streamsnow-ci/secrets/<NAME>" in walk
+    assert walk.index("streamsnow ci-key create") < walk.index("streamsnow ci-key push")
+    assert "SNOWFLAKE_PRIVATE_KEY_RAW" in walk and "stop instead" in walk

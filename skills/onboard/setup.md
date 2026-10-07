@@ -511,6 +511,16 @@ Setting `SNOWFLAKE_ACCOUNT` switches the deploy job on, so tell the user the nex
 `main` will deploy. If it stops partway, it names what failed and leaves `SNOWFLAKE_ACCOUNT`
 unset; fix the cause and run it again.
 
+If `ci-key push` refuses a secret file by name (empty, not UTF-8 text, contains a NUL byte, or
+differs from the config), offer to walk the user through replacing it. The key guard keeps you
+out of `~/.streamsnow-ci`, so the user runs the delete. Name the file, say that it is a value
+the config can rebuild and not the key itself, and give them the one command to run in their
+own terminal: `rm ~/.streamsnow-ci/secrets/<NAME>` (with `--dir`, use that folder instead).
+Then run `streamsnow ci-key create`, which rewrites the missing file from the config and keeps
+the existing key pair, and run `streamsnow ci-key push` again. If the refused file is
+`SNOWFLAKE_PRIVATE_KEY_RAW`, stop instead: that file points at the key itself, and replacing
+the key means the admin registers a new public key (§2d steps 3 to 5).
+
 **Delete merged branches on GitHub.** Skip this when there is no GitHub remote yet or `gh` is
 not signed in; it does not wait on §2d. Find the repo with
 `gh repo view --json nameWithOwner --jq .nameWithOwner`, then read the setting first:
