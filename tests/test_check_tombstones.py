@@ -13,7 +13,7 @@ from pathlib import Path
 
 from streamsnow.tools.check_tombstones import drop_sql, load_registry, main
 
-CONFIG = """\
+CONFIG_V1 = """\
 schema_version: 1
 runtime: warehouse
 project:
@@ -35,6 +35,11 @@ governance:
   database: "ANALYTICS_DB"
   schema_allow: ["ANALYTICS", "REPORTING"]
 """
+
+CONFIG = CONFIG_V1.replace("schema_version: 1", "schema_version: 2").replace(
+    '  database: "ANALYTICS_DB"\n  schema_allow: ["ANALYTICS", "REPORTING"]\n',
+    '  sources: ["ANALYTICS_DB.ANALYTICS", "ANALYTICS_DB.REPORTING"]\n',
+)
 
 MANIFEST = """\
 definition_version: 2
@@ -328,6 +333,20 @@ def test_base_identity_survives_a_base_config_this_streamsnow_cannot_read(
     assert code == 1, out
     assert SALES_FQN in out and CAMPAIGN_FQN in out
     assert "unparseable" not in out
+
+
+def test_v1_base_commit_still_yields_base_fqns(tmp_path, monkeypatch, capsys):
+    """C17 after the config change: a base commit still on schema_version 1 must
+    yield its own FQNs, so an app_database move in the upgrade PR needs tombstones."""
+    _init_repo(tmp_path, config=CONFIG_V1)
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        CONFIG.replace('app_database: "STREAMSNOW_APPS"', 'app_database: "NEW_APPS"'),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    assert main(["--base-ref", "main"]) == 1
+    out = capsys.readouterr().out
+    assert SALES_FQN in out and "unparseable" not in out
 
 
 def test_drop_sql_from_wrong_cwd_fails_closed(tmp_path, monkeypatch, capsys):

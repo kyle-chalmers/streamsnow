@@ -32,7 +32,7 @@ SLUG = base.SLUG
 ROLLUP = base.ROLLUP
 
 CONFIG = """\
-schema_version: 1
+schema_version: 2
 runtime: warehouse
 project:
   name: "Acme Sales"
@@ -50,9 +50,9 @@ snowflake:
     ci_role: "STREAMSNOW_DEPLOY_ROLE"
     viewer_role: "STREAMSNOW_VIEWER_ROLE"
 governance:
-  database: "ANALYTICS_DB"
-  schema_allow: ["REPORTING", "APP"]
+  sources: ["ANALYTICS_DB.REPORTING", "ANALYTICS_DB.APP"]
   schema_deny: ["RAW"]
+  boundary: warn
 """
 
 LIVE_VIEW_DDL = (
@@ -346,7 +346,11 @@ def test_the_scaffold_placeholder_is_refused(repo: Path) -> None:
 def test_a_denied_schema_in_a_section_is_never_sent(repo: Path) -> None:
     cfg = repo / "streamsnow.config.yaml"
     cfg.write_text(
-        cfg.read_text(encoding="utf-8").replace('["RAW"]', '["REPORTING"]'), encoding="utf-8"
+        CONFIG.replace(
+            'sources: ["ANALYTICS_DB.REPORTING", "ANALYTICS_DB.APP"]',
+            'sources: ["ANALYTICS_DB.APP"]',
+        ).replace('schema_deny: ["RAW"]', 'schema_deny: ["REPORTING"]'),
+        encoding="utf-8",
     )
     fake = FakeSnow()
     with pytest.raises(live.ToolError, match="denied schema"):
@@ -1032,12 +1036,29 @@ def test_error_masking_keeps_escaped_quotes_inside_one_value(value: str) -> None
     assert "'…' is not recognized" in detail
 
 
+def test_probe_under_enforce_refuses_objects_outside_the_boundary(repo: Path) -> None:
+    (repo / "streamsnow.config.yaml").write_text(
+        CONFIG.replace(
+            'sources: ["ANALYTICS_DB.REPORTING", "ANALYTICS_DB.APP"]',
+            'sources: ["ANALYTICS_DB.REPORTING"]',
+        ).replace("boundary: warn", "boundary: enforce"),
+        encoding="utf-8",
+    )
+    fake = FakeSnow()
+    with pytest.raises(live.ToolError, match="outside governance.sources"):
+        _live(repo, fake, "probe")
+    assert fake.calls == []
+
+
 def test_probe_warns_on_objects_outside_the_boundary_and_still_probes_them(
     repo: Path, capsys: pytest.CaptureFixture
 ) -> None:
     cfg = repo / "streamsnow.config.yaml"
     cfg.write_text(
-        CONFIG.replace('schema_allow: ["REPORTING", "APP"]', 'schema_allow: ["REPORTING"]'),
+        CONFIG.replace(
+            'sources: ["ANALYTICS_DB.REPORTING", "ANALYTICS_DB.APP"]',
+            'sources: ["ANALYTICS_DB.REPORTING"]',
+        ),
         encoding="utf-8",
     )
     fake = FakeSnow()

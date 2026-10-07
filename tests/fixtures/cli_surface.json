@@ -175,14 +175,14 @@
     "configure": {
       "options": [
         "--account",
+        "--app-data",
         "--config",
         "--connection",
-        "--database",
         "--deny-schemas",
         "--deploy-source",
         "--dir",
         "--runtime",
-        "--schemas"
+        "--sources"
       ],
       "arguments": []
     },
@@ -221,9 +221,9 @@
       "options": [
         "--account",
         "--app",
+        "--app-data",
         "--config",
         "--connection",
-        "--database",
         "--deny-schemas",
         "--deploy-source",
         "--dir",
@@ -231,7 +231,7 @@
         "--no-starter-app",
         "--reconfigure",
         "--runtime",
-        "--schemas"
+        "--sources"
       ],
       "arguments": []
     },

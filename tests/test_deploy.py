@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -303,7 +302,7 @@ def test_admin_sql_viewer_read_grants_are_commented_for_every_type():
 
 def test_admin_sql_shared_database_gets_no_per_type_grants():
     data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
-    data["governance"]["database"] = "SNOWFLAKE_SAMPLE_DATA"
+    data["governance"]["sources"] = ["SNOWFLAKE_SAMPLE_DATA.TPCH_SF1"]
     stmts = _stmts(generate_admin_sql(Config.from_dict(data)))
     assert "SELECT ON" not in stmts
     assert (
@@ -352,8 +351,7 @@ def test_admin_sql_warehouse_runtime_has_no_container_objects():
 
 def test_admin_sql_shared_database_uses_imported_privileges():
     data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
-    data["governance"]["database"] = "SNOWFLAKE_SAMPLE_DATA"
-    data["governance"]["schema_allow"] = ["TPCH_SF1"]
+    data["governance"]["sources"] = ["SNOWFLAKE_SAMPLE_DATA.TPCH_SF1"]
     sql = generate_admin_sql(Config.from_dict(data))
     stmts = _stmts(sql)
     assert (
@@ -485,7 +483,7 @@ def test_admin_sql_viewer_role_gets_no_data_grants_by_default():
 
 def test_admin_sql_shared_database_imported_privileges_ci_role_only():
     data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
-    data["governance"]["database"] = "SNOWFLAKE_SAMPLE_DATA"
+    data["governance"]["sources"] = ["SNOWFLAKE_SAMPLE_DATA.TPCH_SF1"]
     sql = generate_admin_sql(Config.from_dict(data))
     stmts = _stmts(sql)
     assert (
@@ -499,19 +497,13 @@ def test_admin_sql_shared_database_imported_privileges_ci_role_only():
 
 
 def _with_sources(*sources: str, imported: tuple[str, ...] = (), **overrides) -> Config:
-    """The example config with these governance sources. Until the schema_version 2
-    model lands (PR 2 Task 6) a v1 config cannot hold several databases, so the
-    governance block is swapped for an object with the fields the generators read."""
-    cfg = _cfg(**overrides)
-    gov = SimpleNamespace(
-        sources=tuple(sources),
-        imported_databases=imported,
-        app_data="",
-        schema_deny=("RAW",),
-        read_exceptions=(),
-        boundary="warn",
-    )
-    return dataclasses.replace(cfg, governance=gov)
+    """The example config with these governance sources (and imported databases)."""
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
+    for k, v in overrides.items():
+        data[k] = v
+    data["governance"]["sources"] = list(sources)
+    data["governance"]["imported_databases"] = list(imported)
+    return Config.from_dict(data)
 
 
 def test_admin_sql_sources_across_databases_get_usage_once_per_database():

@@ -125,4 +125,4 @@ def test_from_governance_reads_the_v2_api():
     policy = SchemaPolicy.from_governance(cfg.governance)
     assert policy.sources == ("ANALYTICS_DB.ANALYTICS", "ANALYTICS_DB.REPORTING")
     assert policy.boundary == "warn"
-    assert policy.app_data == ""  # Task 6 changes this to the example's app data
+    assert policy.app_data == "STREAMSNOW_APPS.STREAMSNOW_REPORTING"

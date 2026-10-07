@@ -1625,6 +1625,22 @@ def test_schema_refs_cli_reports_a_violation(tmp_path, monkeypatch, capsys):
     assert "BLOCK" in capsys.readouterr().out
 
 
+def test_schema_refs_cli_exit_code_follows_the_boundary_mode(tmp_path, monkeypatch, capsys):
+    from streamsnow.tools.check_schema_refs import main
+
+    repo = _mini_repo(tmp_path, "-- q\nSELECT a FROM SALES_DB.PUBLIC.LEADS\n")
+    monkeypatch.chdir(repo)
+    assert main(["apps"]) == 0
+    assert "WARN" in capsys.readouterr().out
+    cfg = repo / "streamsnow.config.yaml"
+    cfg.write_text(
+        cfg.read_text(encoding="utf-8").replace("boundary: warn", "boundary: enforce"),
+        encoding="utf-8",
+    )
+    assert main(["apps"]) == 1
+    assert "BLOCK" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("fmt", ["md", "json"])
 def test_app_security_cli_clean_run_does_not_crash(tmp_path, monkeypatch, capsys, fmt):
     from streamsnow.tools.check_app_security import main

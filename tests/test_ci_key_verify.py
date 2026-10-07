@@ -382,6 +382,16 @@ def test_a_read_exception_is_no_verify_object(tmp_path, monkeypatch):
     assert ci_key._select_probe_sql(cfg, "ANALYTICS_DB.ANALYTICS.ORDERS").endswith("LIMIT 0")
 
 
+def test_verify_object_accepts_any_source_database_and_app_data():
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
+    data["governance"]["sources"] = ["ANALYTICS_DB.ANALYTICS", "FINANCE_DB.MARTS"]
+    cfg = Config.from_dict(data)
+    for obj in ("FINANCE_DB.MARTS.FEES", "STREAMSNOW_APPS.STREAMSNOW_REPORTING.DAILY"):
+        assert ci_key._select_probe_sql(cfg, obj) == f"SELECT * FROM {obj} LIMIT 0"
+    with pytest.raises(ci_key.CiKeyError):
+        ci_key._select_probe_sql(cfg, "SALES_DB.MARTS.FEES")
+
+
 def test_a_secret_file_that_differs_from_the_config_exits_2(tmp_path, monkeypatch):
     cfg = _cfg()
     fake = FakeSnow(cfg)
@@ -461,8 +471,9 @@ def test_expected_ci_grants_match_the_admin_script_line_for_line(overrides):
     if overrides.get("runtime"):
         cfg = dataclasses.replace(cfg, runtime=overrides["runtime"])
     if overrides.get("governance_db"):
+        source = f"{overrides['governance_db']}.TPCH_SF1"
         cfg = dataclasses.replace(
-            cfg, governance=dataclasses.replace(cfg.governance, database=overrides["governance_db"])
+            cfg, governance=dataclasses.replace(cfg.governance, sources=(source,))
         )
     if overrides.get("source"):
         cfg = with_source(cfg, overrides["source"], git_origin="https://github.com/acme/apps")

@@ -31,6 +31,7 @@ from pathlib import Path
 from .config import (
     DEPLOY_SOURCES,
     GITHUB_AUTH_MODES,
+    SHARED_DATABASES,
     Config,
     ConfigError,
     github_owner,
@@ -113,9 +114,7 @@ def generate_create_sql(cfg: Config, slug: str, sha: str = "<sha>") -> str:
 # in every account (owned by ACCOUNTADMIN, USAGE granted to PUBLIC by default),
 # so setup SQL must never try to create it.
 SYSTEM_POOL = "SYSTEM_COMPUTE_POOL_CPU"
-# Databases Snowflake shares into every account: reads need IMPORTED PRIVILEGES,
-# not USAGE + SELECT.
-_SHARED_DATABASES = ("SNOWFLAKE_SAMPLE_DATA", "SNOWFLAKE")
+_SHARED_DATABASES = SHARED_DATABASES  # moved to config: the loader refuses app data there
 
 # Object types an app can read, as GRANT's plural keywords. Snowflake keeps a separate
 # grant per type: "Grants on TABLE don't apply to dynamic tables", so a dynamic table in

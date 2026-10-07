@@ -2,7 +2,7 @@
 # Copy to `streamsnow.config.yaml` and edit, or run `streamsnow init` to generate.
 # SECRETS NEVER GO HERE (Snowflake key/PAT, etc. live in CI secrets / secrets.toml).
 
-schema_version: 1
+schema_version: 2
 
 # container = cheaper, full PyPI, modern Streamlit (default).
 # warehouse = legacy: instant start, Anaconda channel, no compute pool/EAI.
@@ -44,11 +44,25 @@ snowflake:
     viewer_role: "STREAMSNOW_VIEWER_ROLE"  # role granted USAGE on each app; preview role
 
 governance:
-  database: "ANALYTICS_DB"             # the BI database your apps query
-  schema_allow: ["ANALYTICS", "REPORTING"]
+  # Report-ready data your apps read, as DATABASE.SCHEMA, in any databases.
+  # deploy-setup --admin grants the CI role read on exactly these, and app SQL
+  # names objects in full (DATABASE.SCHEMA.OBJECT).
+  sources: ["ANALYTICS_DB.ANALYTICS", "ANALYTICS_DB.REPORTING"]
+  # The one schema per repo for views and dynamic tables built for the apps
+  # (default <app_database>.STREAMSNOW_REPORTING); deploy-setup --admin creates it.
+  app_data: "STREAMSNOW_APPS.STREAMSNOW_REPORTING"
+  # Never queried by app code: RAW blocks a RAW schema in every database,
+  # FINANCE.RAW only in that database.
   schema_deny: ["RAW", "STAGING", "BRIDGE"]
   read_exceptions: []                  # exact objects readable despite schema_deny,
                                        # e.g. "ANALYTICS_DB.RAW.CALENDAR_DIM"
+  # Shared (Marketplace or data-share) databases holding sources take IMPORTED
+  # PRIVILEGES instead of per-schema grants. SNOWFLAKE and SNOWFLAKE_SAMPLE_DATA
+  # are built in.
+  # imported_databases: ["PARTNER_SHARE"]
+  boundary: warn                       # warn (default): names outside sources and
+                                       # app_data, and two-part names, are reported.
+                                       # enforce: they fail schema-refs, validate-app, CI.
 
 deploy:
   source: "stage-copy"                 # stage-copy (default) | git-repository

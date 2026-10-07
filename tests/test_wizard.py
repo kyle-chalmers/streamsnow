@@ -1,4 +1,4 @@
-"""The configure wizard's UX contract: ≤5 questions, commented-YAML output."""
+"""The configure wizard's UX contract: every question prefilled, commented-YAML output."""
 
 from __future__ import annotations
 
@@ -18,22 +18,27 @@ _REAL_SNOW_CONNECTIONS = cli._snow_connections
 
 def _run_wizard(monkeypatch, prefill=None, directory=Path("acme-analytics")):
     """Drive the wizard accepting every default; return (config dict, prompts asked)."""
-    asked: list[str] = []
+    asked: list[tuple[str, object]] = []
 
     def fake_prompt(text, default=None, **kwargs):
-        asked.append(str(text))
-        # The account locator is the one question with no default.
+        asked.append((str(text), default))
+        # The account locator is the one question with no default on a first run.
         return default if default is not None else "ab12345.us-east-1"
 
     monkeypatch.setattr(typer, "prompt", fake_prompt)
     return _prompt_config(prefill, directory), asked
 
 
-def test_wizard_asks_at_most_five_questions(monkeypatch):
+def test_every_question_has_a_detected_or_default_answer(monkeypatch):
+    """D8: no fixed question count. Every question arrives prefilled, so Enter through
+    the wizard writes a complete, valid config. The account locator is the one value
+    nothing can default on a first run; a re-run prefills it too."""
     cfg_dict, asked = _run_wizard(monkeypatch)
-    assert len(asked) <= 5, f"configure asked {len(asked)} questions: {asked}"
-    # The result is a complete, valid config despite only 5 answers.
+    no_default = [q for q, default in asked if default in (None, "")]
+    assert all(q.startswith("Snowflake account") for q in no_default), no_default
     Config.from_dict(cfg_dict)
+    _, again = _run_wizard(monkeypatch, prefill=cfg_dict)
+    assert all(default not in (None, "") for _, default in again), again
 
 
 def test_wizard_derives_project_identity_from_directory(monkeypatch):
@@ -50,7 +55,9 @@ def test_wizard_prefill_survives_for_unasked_values(monkeypatch):
         "governance": {"schema_deny": ["SECRET_SCHEMA"]},
     }
     cfg_dict, asked = _run_wizard(monkeypatch, prefill=prefill)
-    assert len(asked) <= 5
+    assert all(
+        default not in (None, "") for q, default in asked if not q.startswith("Snowflake account")
+    )
     # Hand-edited values the wizard no longer asks about are preserved.
     assert cfg_dict["project"]["slug"] == "custom-slug"
     assert cfg_dict["snowflake"]["roles"]["viewer_role"] == "MY_VIEWER"
@@ -194,7 +201,7 @@ def test_wizard_defaults_connection_name_to_the_existing_default_connection(monk
     _fake_snow(monkeypatch, (0, _ROWS))
     cfg_dict, asked = _run_wizard(monkeypatch)
     assert cfg_dict["snowflake"]["connection_name"] == "tutorial"
-    assert len(asked) <= 5  # detected, never asked
+    assert not any("connection" in q.lower() for q, _ in asked)  # detected, never asked
     cfg = Config.from_dict(cfg_dict)
     # ...so the doctor's connection check passes on the same rows.
     res = doctor.check_snow_connection(
@@ -219,7 +226,7 @@ def test_wizard_ignores_a_default_connection_for_another_account(monkeypatch, ca
     cfg_dict, asked = _run_wizard(monkeypatch)
     assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics"
     assert cfg_dict["snowflake"]["account"] == "ab12345.us-east-1"
-    assert len(asked) <= 5
+    assert not any("connection" in q.lower() for q, _ in asked)  # detected, never asked
     out = capsys.readouterr().out
     assert "'tutorial' is for another account" in out
     assert "zz99999" not in out.lower() and "ab12345" not in out.lower()

@@ -87,7 +87,7 @@ def test_config_valid(tmp_path):
     )
     res = doctor.check_config(start=tmp_path)
     assert res["ok"] and res["level"] == "required"
-    assert res["detail"]["schema_version"] == 1
+    assert res["detail"]["schema_version"] == 2
 
 
 def test_config_invalid_is_required_failure(tmp_path):

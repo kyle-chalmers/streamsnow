@@ -33,9 +33,24 @@ CONFIG_FILENAME = "streamsnow.config.yaml"
 
 # Bumped when the config schema changes shape. ``streamsnow doctor`` compares
 # this against a generated repo's config to catch CLI/repo drift.
-CONFIG_SCHEMA_VERSION = 1
+CONFIG_SCHEMA_VERSION = 2
 
 RUNTIMES = ("container", "warehouse")
+BOUNDARY_MODES = ("warn", "enforce")
+#: The app-data schema's name when ``governance.app_data`` is unset. It lives in
+#: ``snowflake.objects.app_database``, so leaving StreamSnow drops it with the apps.
+DEFAULT_APP_DATA_SCHEMA = "STREAMSNOW_REPORTING"
+#: schema_version 1 governance keys: their presence is the v1 error, never a fallback.
+RETIRED_GOVERNANCE_KEYS = ("database", "schema_allow")
+#: Databases Snowflake shares into every account: reads need IMPORTED PRIVILEGES.
+SHARED_DATABASES = ("SNOWFLAKE_SAMPLE_DATA", "SNOWFLAKE")
+V1_CONFIG_ERROR = (
+    "this streamsnow.config.yaml uses schema_version 1 (governance.database + "
+    "governance.schema_allow), which this StreamSnow no longer reads: governance.sources "
+    "(a list of DATABASE.SCHEMA entries, in any databases) and governance.app_data replace "
+    "them. Run `streamsnow configure` to rewrite the file as schema_version 2; it keeps your "
+    "other values and proposes sources from the old ones."
+)
 DEPLOY_SOURCES = ("stage-copy", "git-repository")
 # pat / github-app: a token stored in deploy.secret_name; public: a public
 # GitHub repo, no token and no secret.
@@ -52,6 +67,8 @@ _GITHUB_ORIGIN_RE = re.compile(
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 # A dotted FQN like DB.SCHEMA.NAME (each part a valid identifier).
 _FQN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*)*$")
+# Exactly DATABASE.SCHEMA: two identifiers, one dot.
+_SCHEMA_REF_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*$")
 # Git branch: conservative safe subset (no spaces, shell metachars, or '..').
 _BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 
@@ -83,6 +100,68 @@ def validate_fqn(value: str, field_name: str) -> str:
             "(expected DB.SCHEMA.OBJECT, each part a valid identifier)."
         )
     return value
+
+
+def validate_schema_ref(value: object, field_name: str) -> str:
+    """Return ``value`` upper-cased if it is exactly ``DATABASE.SCHEMA``, else raise.
+
+    Two unquoted identifiers only: Snowflake stores unquoted names upper-case,
+    which is what every comparison against a quoted name in SQL assumes.
+    """
+    text = str(value).strip() if value is not None else ""
+    if not _SCHEMA_REF_RE.match(text):
+        raise ConfigError(
+            f"{field_name!r} = {value!r} must be DATABASE.SCHEMA (two Snowflake identifiers "
+            "joined by a dot, e.g. ANALYTICS_DB.REPORTING)."
+        )
+    return text.upper()
+
+
+def validate_deny_entry(value: object, field_name: str) -> str:
+    """A deny entry: a schema name (that schema in every database) or DATABASE.SCHEMA."""
+    text = str(value) if value is not None else ""
+    if _IDENT_RE.match(text) or _SCHEMA_REF_RE.match(text):
+        return text
+    raise ConfigError(
+        f"{field_name!r} = {value!r} must be a schema name (RAW: that schema in every "
+        "database) or DATABASE.SCHEMA (FINANCE.RAW: one database only)."
+    )
+
+
+def governance_overlaps(sources, deny) -> list[str]:
+    """Each ``DATABASE.SCHEMA`` in *sources* that an entry of *deny* also blocks.
+
+    One rule for the loader and the wizard's early flag check: a bare entry
+    blocks the schema in every database, a qualified one only its own.
+    """
+    bare = {str(e).upper() for e in deny if "." not in str(e)}
+    qualified = {str(e).upper() for e in deny if "." in str(e)}
+    out = []
+    for fq in sources:
+        up = str(fq).strip().upper()
+        if up in qualified or up.split(".", 1)[-1] in bare:
+            out.append(up)
+    return out
+
+
+def _str_list(d: dict, key: str) -> list[str]:
+    value = d.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ConfigError(f"governance.{key} must be a list.")
+    return [str(v) for v in value]
+
+
+def _reject_v1(d: dict) -> None:
+    """A schema_version 1 file, or v2 with v1 keys, fails with the D5 message."""
+    gov = d.get("governance") if isinstance(d.get("governance"), dict) else {}
+    retired = [f"governance.{k}" for k in RETIRED_GOVERNANCE_KEYS if k in gov]
+    version = d.get("schema_version")
+    old = version is not None and int(version) < CONFIG_SCHEMA_VERSION
+    if old or retired:
+        found = f" (found {', '.join(retired)})" if retired else ""
+        raise ConfigError(V1_CONFIG_ERROR + found)
 
 
 def validate_branch(value: str, field_name: str) -> str:
@@ -316,53 +395,89 @@ class SnowflakeCfg:
 
 @dataclass(frozen=True)
 class GovernanceCfg:
-    database: str
-    schema_allow: tuple[str, ...]
-    schema_deny: tuple[str, ...]
+    """The data boundary: what app code may read, and where app-built objects live.
+
+    ``sources`` are existing report-ready ``DATABASE.SCHEMA`` locations in any
+    databases (#78): deploy-setup grants the CI role read there and nowhere
+    else, and ``check schema-refs`` treats them as the boundary. ``app_data`` is
+    the one schema per repo for views and dynamic tables built for the apps.
+    ``schema_deny`` entries are bare (that schema in every database) or
+    ``DATABASE.SCHEMA``. ``imported_databases`` are shares that hold sources
+    (they take IMPORTED PRIVILEGES); Snowflake's own shares always count.
+    ``boundary`` decides whether reads outside sources and app data warn or fail.
+    """
+
+    sources: tuple[str, ...]
+    app_data: str
+    schema_deny: tuple[str, ...] = ()
     read_exceptions: tuple[str, ...] = ()
+    imported_databases: tuple[str, ...] = ()
+    boundary: str = "warn"
 
     @classmethod
-    def from_dict(cls, d: dict) -> GovernanceCfg:
-        vi = validate_identifier
-        schema_allow = tuple(
-            vi(str(s), "governance.schema_allow[]") for s in (d.get("schema_allow") or [])
-        )
-        if not schema_allow:
+    def from_dict(cls, d: dict, app_database: str) -> GovernanceCfg:
+        raw = d.get("sources")
+        if not isinstance(raw, list) or not raw:
             raise ConfigError(
-                "governance.schema_allow must list at least one allowed schema "
-                "(it is what your apps query and what the scaffold templates target)."
+                "governance.sources must list at least one DATABASE.SCHEMA your apps read, e.g. "
+                '["ANALYTICS_DB.REPORTING"]: deploy-setup --admin grants read on exactly these, '
+                "and schema-refs checks app SQL against them."
             )
-        return cls(
-            database=vi(str(_require(d, "database", "governance")), "governance.database"),
-            schema_allow=schema_allow,
+        gov = cls(
+            sources=tuple(
+                dict.fromkeys(validate_schema_ref(s, "governance.sources[]") for s in raw)
+            ),
+            app_data=validate_schema_ref(
+                d.get("app_data") or f"{app_database}.{DEFAULT_APP_DATA_SCHEMA}",
+                "governance.app_data",
+            ),
             schema_deny=tuple(
-                vi(str(s), "governance.schema_deny[]") for s in (d.get("schema_deny") or [])
+                validate_deny_entry(s, "governance.schema_deny[]")
+                for s in _str_list(d, "schema_deny")
             ),
             # read_exceptions are FQNs (DB.SCHEMA.OBJECT) for sanctioned direct reads.
             read_exceptions=tuple(
-                validate_fqn(str(s), "governance.read_exceptions[]")
-                for s in (d.get("read_exceptions") or [])
+                validate_fqn(s, "governance.read_exceptions[]")
+                for s in _str_list(d, "read_exceptions")
+            ),
+            imported_databases=tuple(
+                dict.fromkeys(
+                    validate_identifier(s, "governance.imported_databases[]").upper()
+                    for s in _str_list(d, "imported_databases")
+                )
+            ),
+            boundary=validate_choice(
+                str(d.get("boundary", "warn")), BOUNDARY_MODES, "governance.boundary"
             ),
         )
+        gov._check_consistency()
+        return gov
 
-    # Temporary bridge for PR 2 (removed in its Task 6, when governance moves to
-    # schema_version 2): the v2 read API over v1 data, so every consumer moves to
-    # it before the model flips.
-    @property
-    def sources(self) -> tuple[str, ...]:
-        return tuple(f"{self.database}.{s}".upper() for s in self.schema_allow)
-
-    @property
-    def app_data(self) -> str:
-        return ""
-
-    @property
-    def imported_databases(self) -> tuple[str, ...]:
-        return ()
-
-    @property
-    def boundary(self) -> str:
-        return "warn"
+    def _check_consistency(self) -> None:
+        both = governance_overlaps(self.sources, self.schema_deny)
+        if both:
+            raise ConfigError(
+                f"schema(s) {', '.join(both)} are both allowed and denied: listed in "
+                "governance.sources and blocked by governance.schema_deny. Drop them from one "
+                "of the two (--sources or --deny-schemas)."
+            )
+        if self.app_data in self.sources:
+            raise ConfigError(
+                f"governance.app_data {self.app_data} is also a source. App data is a separate "
+                "schema the deploy job writes views and dynamic tables into; choose another "
+                f"(default: <app_database>.{DEFAULT_APP_DATA_SCHEMA})."
+            )
+        if governance_overlaps((self.app_data,), self.schema_deny):
+            raise ConfigError(
+                f"governance.app_data {self.app_data} is denied by governance.schema_deny; "
+                "the apps could never read what the deploy job builds there."
+            )
+        db = self.app_data.split(".", 1)[0]
+        if db in {*SHARED_DATABASES, *self.imported_databases}:
+            raise ConfigError(
+                f"governance.app_data {self.app_data} is in shared database {db}, which is "
+                "read-only; choose a schema in a database your account owns."
+            )
 
 
 # Files an app may deliberately leave out of ``snowflake.yml`` ``artifacts:``
@@ -492,6 +607,7 @@ class Config:
     def from_dict(cls, d: dict) -> Config:
         if not isinstance(d, dict):
             raise ConfigError("config root must be a mapping")
+        _reject_v1(d)
         schema_version = int(d.get("schema_version", CONFIG_SCHEMA_VERSION))
         if schema_version > CONFIG_SCHEMA_VERSION:
             raise ConfigError(
@@ -511,7 +627,9 @@ class Config:
             schema_version=schema_version,
             project=ProjectCfg.from_dict(dict(_require(d, "project", "<root>"))),
             snowflake=snowflake,
-            governance=GovernanceCfg.from_dict(dict(_require(d, "governance", "<root>"))),
+            governance=GovernanceCfg.from_dict(
+                dict(_require(d, "governance", "<root>")), snowflake.objects.app_database
+            ),
             deploy=DeployCfg.from_dict(_mapping(d, "deploy")),
             runtime=runtime,
             sql_review=SqlReviewCfg.from_dict(_mapping(d, "sql_review")),

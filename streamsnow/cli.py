@@ -48,15 +48,20 @@ from . import ci_key as _ci_key
 from .agent_skills import main as _agent_skills_main
 from .config import (
     CONFIG_FILENAME,
+    CONFIG_SCHEMA_VERSION,
+    DEFAULT_APP_DATA_SCHEMA,
     DEPLOY_SOURCES,
     GITHUB_AUTH_MODES,
+    RETIRED_GOVERNANCE_KEYS,
     RUNTIMES,
     Config,
     ConfigError,
     find_config,
+    governance_overlaps,
     load_config,
     normalize_account,
     validate_github_origin,
+    validate_schema_ref,
 )
 from .deploy import (
     ci_user_name,
@@ -254,44 +259,72 @@ def _split_schemas(value: str) -> list[str]:
     return [s.strip() for s in value.split(",") if s.strip()]
 
 
-# The five wizard questions, as the keys ``_prompt_config``'s ``given`` accepts
+# The wizard's questions, as the keys ``_prompt_config``'s ``given`` accepts
 # (``deny_schemas`` and ``connection`` are extra answers the wizard never asks).
-_QUESTIONS = ("runtime", "account", "database", "schemas", "deploy_source")
+_QUESTIONS = ("runtime", "account", "sources", "app_data", "deploy_source")
+
+
+def _drop_retired(prefill: dict | None) -> dict:
+    """The prefill minus the schema_version 1 governance keys. ``_deep_merge``
+    keeps base-only keys, so leaving them in would write a file the loader rejects."""
+    out = dict(prefill or {})
+    gov = out.get("governance")
+    if isinstance(gov, dict):
+        out["governance"] = {k: v for k, v in gov.items() if k not in RETIRED_GOVERNANCE_KEYS}
+    return out
+
+
+def _default_sources(prefill: dict | None) -> str:
+    """The sources prompt's default, comma-separated: the current sources; for a
+    schema_version 1 file its database x schema_allow (a proposal the user
+    confirms at the prompt); otherwise the example's two schemas."""
+    current = _pf(prefill, "governance.sources", None)
+    if isinstance(current, list) and current:
+        return ",".join(str(s) for s in current)
+    database = _pf(prefill, "governance.database", None)
+    allow = _pf(prefill, "governance.schema_allow", None)
+    if isinstance(database, str) and isinstance(allow, list) and allow:
+        return ",".join(f"{database}.{s}".upper() for s in allow)
+    return "ANALYTICS_DB.ANALYTICS,ANALYTICS_DB.REPORTING"
 
 
 def _prompt_config(
     prefill: dict | None = None, directory: Path | None = None, given: dict | None = None
 ) -> dict:
-    """Setup wizard: detect first, ask at most 5 questions.
+    """Setup wizard: detect first, prefill every answer, ask only what nothing can detect.
 
-    Only the values nothing can detect or default are asked — runtime, account,
-    the governed database, the allowed schemas, and the deploy source.
-    Everything else is written as a commented default in the config file (the
-    file is the editing surface). When ``prefill`` is supplied (an existing
-    config being updated), its values become the defaults everywhere — and the
-    result is deep-merged over the prefill so hand-edited keys the wizard
-    doesn't ask about survive the rewrite.
+    The questions (``_QUESTIONS``): runtime, account, the sources the apps read
+    (``DATABASE.SCHEMA`` entries in any databases), the app-data schema, and the
+    deploy source. Every prompt carries a default: the current config's value,
+    a detected one, or StreamSnow's own (the account locator is the one value
+    with nothing to default to on a first run). Everything else is written as
+    a commented default in the config file (the file is the editing surface).
+    When ``prefill`` is supplied (an existing config being updated), its values
+    become the defaults everywhere, and the result is deep-merged over the
+    prefill so hand-edited keys the wizard doesn't ask about survive the
+    rewrite. A schema_version 1 prefill loses ``database``/``schema_allow`` and
+    offers them as the sources default.
 
     ``given`` holds answers passed as flags (``_QUESTIONS`` plus
     ``deny_schemas`` and ``connection``); each one replaces its prompt, so the
-    same answers build the same dict whether typed or passed. All five given
-    means no prompt fires (the non-interactive path ``/onboard`` uses).
+    same answers build the same dict whether typed or passed. Every question
+    given means no prompt fires (the non-interactive path ``/onboard`` uses).
     """
     given = {k: v for k, v in (given or {}).items() if v is not None}
     left = sum(1 for q in _QUESTIONS if q not in given)
     if left == len(_QUESTIONS):
         console.print(
-            "[bold]StreamSnow setup[/] — 5 questions (Enter accepts the default);\n"
+            "[bold]StreamSnow setup[/]: Enter accepts the default shown;\n"
             "everything else is written as an editable, commented default.\n"
         )
     elif left:
         console.print(
-            f"[bold]StreamSnow setup:[/] {5 - left} answers from flags, {left} "
+            f"[bold]StreamSnow setup:[/] {len(_QUESTIONS) - left} answers from flags, {left} "
             "question(s) left (Enter accepts the default).\n"
         )
     else:
         console.print(
-            "[bold]StreamSnow setup:[/] all 5 answers from flags; everything else is\n"
+            "[bold]StreamSnow setup:[/] every answer from flags; everything else is\n"
             "written as an editable, commented default.\n"
         )
     p = typer.prompt
@@ -299,7 +332,6 @@ def _prompt_config(
     dir_slug = _slugify(directory.name) if directory is not None else "my-dashboards"
     slug = _pf(prefill, "project.slug", dir_slug)
     name = _pf(prefill, "project.name", slug.replace("-", " ").title())
-    # The five questions.
     runtime = given.get("runtime") or _prompt_choice(
         "Runtime", RUNTIMES, _pf(prefill, "runtime", "container")
     )
@@ -314,12 +346,14 @@ def _prompt_config(
     connection_name = given.get("connection") or _pf(prefill, "snowflake.connection_name", None)
     if connection_name is None:
         connection_name = _detect_connection_name(account, slug)
-    gov_db = given.get("database") or p(
-        "Database your apps query", default=_pf(prefill, "governance.database", "ANALYTICS_DB")
+    app_db = _pf(prefill, "snowflake.objects.app_database", "STREAMSNOW_APPS")
+    sources_answer = given.get("sources") or p(
+        "Sources: DATABASE.SCHEMA locations your apps read, any databases (comma-separated)",
+        default=_default_sources(prefill),
     )
-    allow = given.get("schemas") or p(
-        "Schemas apps may query (comma-separated)",
-        default=",".join(_pf(prefill, "governance.schema_allow", ["ANALYTICS", "REPORTING"])),
+    app_data = given.get("app_data") or p(
+        "App data: DATABASE.SCHEMA for views and dynamic tables built for the apps",
+        default=_pf(prefill, "governance.app_data", f"{app_db}.{DEFAULT_APP_DATA_SCHEMA}"),
     )
     source = given.get("deploy_source") or _prompt_choice(
         "Deploy source", DEPLOY_SOURCES, _pf(prefill, "deploy.source", "stage-copy")
@@ -328,17 +362,8 @@ def _prompt_config(
         deny = _split_schemas(given["deny_schemas"])
     else:
         deny = _pf(prefill, "governance.schema_deny", ["RAW", "STAGING"])
-    if given:
-        # Flags can meet a default or prefilled list they never named (--schemas RAW
-        # against the RAW,STAGING default), so check the lists that will be written.
-        both = {s.upper() for s in _split_schemas(allow)} & {s.upper() for s in deny}
-        if both:
-            raise ConfigError(
-                f"schema(s) {', '.join(sorted(both))} are both allowed and denied; "
-                "drop them from --schemas or set --deny-schemas."
-            )
+    sources = [s.upper() for s in _split_schemas(sources_answer)]
     # Everything below ships as a commented default in the written file.
-    app_db = _pf(prefill, "snowflake.objects.app_database", "STREAMSNOW_APPS")
     app_schema = _pf(prefill, "snowflake.objects.app_schema", "DASHBOARDS")
     warehouse = _pf(prefill, "snowflake.objects.default_warehouse", "STREAMSNOW_WH")
     objects: dict = {
@@ -370,7 +395,7 @@ def _prompt_config(
         )
         deploy["github_auth_mode"] = _pf(prefill, "deploy.github_auth_mode", GITHUB_AUTH_MODES[0])
     answers = {
-        "schema_version": 1,
+        "schema_version": CONFIG_SCHEMA_VERSION,
         "runtime": runtime,
         "project": {"name": name, "slug": slug},
         "snowflake": {
@@ -385,13 +410,14 @@ def _prompt_config(
             },
         },
         "governance": {
-            "database": gov_db,
-            "schema_allow": _split_schemas(allow),
+            "sources": sources,
+            "app_data": str(app_data).strip().upper(),
             "schema_deny": deny,
+            "boundary": _pf(prefill, "governance.boundary", "warn"),
         },
         "deploy": deploy,
     }
-    return _deep_merge(prefill or {}, answers)
+    return _deep_merge(_drop_retired(prefill), answers)
 
 
 # Inline "when to change this" comments for the values the wizard defaults
@@ -410,7 +436,10 @@ _DEFAULT_COMMENTS: dict[str, str] = {
     "snowflake.objects.external_access_integration": "container: PyPI access during image build",
     "snowflake.roles.ci_role": "role the CI deploy runs as",
     "snowflake.roles.viewer_role": "role viewers (and local preview) use",
-    "governance.schema_deny": "schemas apps must never query",
+    "governance.app_data": "deploy-setup --admin creates it; CI builds views and DTs here",
+    "governance.schema_deny": "RAW: every database; FINANCE.RAW: one; apps never query these",
+    "governance.imported_databases": "shared databases holding sources (IMPORTED PRIVILEGES)",
+    "governance.boundary": "warn: outside sources/app_data is reported; enforce: it fails",
     "deploy.git_repository_fqn": "TODO: confirm before first deploy",
     "deploy.git_branch": "branch the deploy tracks",
     "deploy.api_integration_name": "TODO: confirm before first deploy",
@@ -434,9 +463,9 @@ def _yaml_scalar(value: Any) -> str:
 def _render_config_yaml(cfg_dict: dict) -> str:
     """Render config YAML with inline comments on the defaulted values.
 
-    Comments make the file self-documenting: `configure` asks 5 questions and
-    the rest is edited here. Falls back to plain YAML if the commented render
-    ever fails to round-trip (defensive — comments must never corrupt config).
+    Comments make the file self-documenting: `configure` asks only what it cannot
+    detect, and the rest is edited here. Falls back to plain YAML if the commented
+    render ever fails to round-trip (defensive: comments must never corrupt config).
     """
 
     def walk(node: dict, path: str, indent: int) -> list[str]:
@@ -482,10 +511,12 @@ _ANSWER_HELP = {
     "account": "Wizard answer: Snowflake account locator (no .snowflakecomputing.com).",
     "connection": "Read the account from this snow connection (never printed) and use it "
     "as snowflake.connection_name. Instead of --account.",
-    "database": "Wizard answer: the database your apps query (governance.database).",
-    "schemas": "Wizard answer: schemas apps may query, comma-separated (governance.schema_allow).",
-    "deny_schemas": "Schemas apps must never query, comma-separated (governance.schema_deny; "
-    "default RAW,STAGING; '' denies none).",
+    "sources": "Wizard answer: DATABASE.SCHEMA locations apps read, comma-separated, any "
+    "databases (governance.sources).",
+    "app_data": "Wizard answer: DATABASE.SCHEMA for views and dynamic tables built for the apps "
+    f"(governance.app_data; default <app_database>.{DEFAULT_APP_DATA_SCHEMA}).",
+    "deny_schemas": "Schemas apps must never query, comma-separated: RAW (every database) or "
+    "FINANCE.RAW (one database) (governance.schema_deny; default RAW,STAGING; '' denies none).",
     "deploy_source": f"Wizard answer: deploy source ({' | '.join(DEPLOY_SOURCES)}).",
 }
 
@@ -527,8 +558,8 @@ def _flag_answers(
     runtime: str | None,
     account: str | None,
     connection: str | None,
-    database: str | None,
-    schemas: str | None,
+    sources: str | None,
+    app_data: str | None,
     deny_schemas: str | None,
     deploy_source: str | None,
     config: Path | None,
@@ -542,8 +573,8 @@ def _flag_answers(
         "runtime": runtime,
         "account": account,
         "connection": connection,
-        "database": database,
-        "schemas": schemas,
+        "sources": sources,
+        "app_data": app_data,
         "deny_schemas": deny_schemas,
         "deploy_source": deploy_source,
     }
@@ -558,10 +589,14 @@ def _flag_answers(
         raise ConfigError(
             f"--deploy-source must be one of {', '.join(DEPLOY_SOURCES)} (got {deploy_source!r})."
         )
-    if database is not None and not database.strip():
-        raise ConfigError("--database is empty.")
-    if schemas is not None and not _split_schemas(schemas):
-        raise ConfigError("--schemas must name at least one schema.")
+    if sources is not None:
+        entries = _split_schemas(sources)
+        if not entries:
+            raise ConfigError("--sources must name at least one DATABASE.SCHEMA.")
+        for entry in entries:
+            validate_schema_ref(entry, "--sources")
+    if app_data is not None:
+        validate_schema_ref(app_data, "--app-data")
     if account is not None and connection is not None:
         raise ConfigError("pass --account or --connection, not both.")
     if account is not None:
@@ -572,14 +607,12 @@ def _flag_answers(
                 "--account must be an account locator such as ab12345.us-east-1 "
                 "(no .snowflakecomputing.com)."
             ) from None
-    if schemas is not None and deny_schemas is not None:
-        both = {s.upper() for s in _split_schemas(schemas)} & {
-            s.upper() for s in _split_schemas(deny_schemas)
-        }
+    if sources is not None and deny_schemas is not None:
+        both = governance_overlaps(_split_schemas(sources), _split_schemas(deny_schemas))
         if both:
             raise ConfigError(
-                f"schema(s) {', '.join(sorted(both))} are both allowed and denied; "
-                "drop them from --schemas or --deny-schemas."
+                f"schema(s) {', '.join(both)} are both allowed and denied; "
+                "drop them from --sources or --deny-schemas."
             )
     if connection is not None:
         given["account"] = _account_from_connection(connection)
@@ -636,8 +669,8 @@ def configure(
     runtime: str = typer.Option(None, "--runtime", help=_ANSWER_HELP["runtime"]),
     account: str = typer.Option(None, "--account", help=_ANSWER_HELP["account"]),
     connection: str = typer.Option(None, "--connection", help=_ANSWER_HELP["connection"]),
-    database: str = typer.Option(None, "--database", help=_ANSWER_HELP["database"]),
-    schemas: str = typer.Option(None, "--schemas", help=_ANSWER_HELP["schemas"]),
+    sources: str = typer.Option(None, "--sources", help=_ANSWER_HELP["sources"]),
+    app_data: str = typer.Option(None, "--app-data", help=_ANSWER_HELP["app_data"]),
     deny_schemas: str = typer.Option(None, "--deny-schemas", help=_ANSWER_HELP["deny_schemas"]),
     deploy_source: str = typer.Option(None, "--deploy-source", help=_ANSWER_HELP["deploy_source"]),
 ) -> None:
@@ -646,9 +679,8 @@ def configure(
     Run after `streamsnow doctor` (machine setup) and before/around
     building apps. Idempotent: re-running prefills from the current config, so
     it's an edit rather than a restart. Writes no secrets. The answer flags
-    (--runtime, --account or --connection, --database, --schemas,
-    --deploy-source, plus --deny-schemas) skip their questions; all five skip
-    the prompts entirely.
+    (--runtime, --account or --connection, --sources, --app-data, --deploy-source,
+    plus --deny-schemas) skip their questions; all of them skip the prompts entirely.
     """
     target = directory.resolve()
     target.mkdir(parents=True, exist_ok=True)
@@ -658,8 +690,8 @@ def configure(
             runtime=runtime,
             account=account,
             connection=connection,
-            database=database,
-            schemas=schemas,
+            sources=sources,
+            app_data=app_data,
             deny_schemas=deny_schemas,
             deploy_source=deploy_source,
             config=config,
@@ -709,8 +741,8 @@ def init(
     runtime: str = typer.Option(None, "--runtime", help=_ANSWER_HELP["runtime"]),
     account: str = typer.Option(None, "--account", help=_ANSWER_HELP["account"]),
     connection: str = typer.Option(None, "--connection", help=_ANSWER_HELP["connection"]),
-    database: str = typer.Option(None, "--database", help=_ANSWER_HELP["database"]),
-    schemas: str = typer.Option(None, "--schemas", help=_ANSWER_HELP["schemas"]),
+    sources: str = typer.Option(None, "--sources", help=_ANSWER_HELP["sources"]),
+    app_data: str = typer.Option(None, "--app-data", help=_ANSWER_HELP["app_data"]),
     deny_schemas: str = typer.Option(None, "--deny-schemas", help=_ANSWER_HELP["deny_schemas"]),
     deploy_source: str = typer.Option(None, "--deploy-source", help=_ANSWER_HELP["deploy_source"]),
 ) -> None:
@@ -736,8 +768,8 @@ def init(
             runtime=runtime,
             account=account,
             connection=connection,
-            database=database,
-            schemas=schemas,
+            sources=sources,
+            app_data=app_data,
             deny_schemas=deny_schemas,
             deploy_source=deploy_source,
             config=config,
