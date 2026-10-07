@@ -7,6 +7,7 @@ SQL) into a StreamSnow repo. All translate-deps tests run offline — no network
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -391,7 +392,7 @@ def test_scan_conformance_required_grants_split(tmp_path):
     )
     _, res = scan_conformance(app, _cfg())
     grants = {(g["database"], g["schema"]): g for g in res["required_grants"]}
-    # ANALYTICS_DB.ANALYTICS is governance.database × schema_allow → default grant.
+    # ANALYTICS_DB.ANALYTICS is a governance source, so it is a default grant.
     assert grants[("ANALYTICS_DB", "ANALYTICS")]["granted_by_default"] is True
     assert grants[("VENDOR_DB", "EXTERNAL")]["granted_by_default"] is False
     reason = grants[("VENDOR_DB", "EXTERNAL")]["reason"]
@@ -528,3 +529,20 @@ def test_cli_missing_config_is_tool_error(tmp_path, capsys):
     rc = main(["scan-hardfails", str(src), "--config", str(tmp_path / "no-config.yaml")])
     assert rc == 2
     assert "config error" in capsys.readouterr().err
+
+
+def test_hardfails_reports_boundary_refs_and_blocks_only_under_enforce(tmp_path):
+    src = _acme_source(tmp_path)
+    _write(
+        src / "pages" / "30_leads.py",
+        "import streamlit as st\n\n\ndef load():\n"
+        '    conn = st.connection("snowflake")\n'
+        '    return conn.query("SELECT id FROM SALES_DB.PUBLIC.LEADS")\n',
+    )
+    code, res = scan_hardfails(src, _policy())
+    assert code == 0 and res["blocks"] is False and res["boundary"] == "warn"
+    assert [(r["file"], r["ref"], r["reason"]) for r in res["boundary_refs"]] == [
+        ("pages/30_leads.py", "SALES_DB.PUBLIC.LEADS", "outside_boundary")
+    ]
+    code, res = scan_hardfails(src, dataclasses.replace(_policy(), boundary="enforce"))
+    assert code == 1 and res["blocks"] is True

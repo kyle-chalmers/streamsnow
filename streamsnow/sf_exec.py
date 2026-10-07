@@ -22,11 +22,14 @@ session before any reviewed statement runs:
 
 Every statement the caller passes, never just the app's sections, must pass the
 review SQL's read-only allowlist (``sql_review._verify_read_only``) and the
-governance schema denylist (``check_schema_refs.find_denied_refs``) **before**
-the subprocess starts. A violation is a :class:`SnowError` and nothing is sent.
-The session prefix above is built here from validated identifiers only, so it is
-the one part exempt from the allowlist (``ALTER SESSION`` / ``USE`` are not
-review SQL).
+governance checks (``check_schema_refs``) **before** the subprocess starts. A
+denied schema is always a :class:`SnowError` and nothing is sent. A name outside
+``governance.sources`` and app data, or a two-part name, is refused the same way
+under ``governance.boundary: enforce``; under ``warn`` the review still runs and
+says so once on stderr, because a review that silently queried outside the
+boundary would hide the grant gap the deployed app will hit. The session prefix
+above is built here from validated identifiers only, so it is the one part
+exempt from the allowlist (``ALTER SESSION`` / ``USE`` are not review SQL).
 
 ``snow sql`` runs with ``--enable-templating NONE`` (by default it rewrites
 ``&name`` and ``<% %>`` inside the SQL, which breaks a literal like
@@ -43,6 +46,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -117,8 +121,8 @@ def _default_runner(argv: list[str], stdin: str, timeout: float) -> tuple[int, s
     return proc.returncode, proc.stdout or "", proc.stderr or ""
 
 
-def guard(statement: str, policy: SchemaPolicy | None) -> None:
-    """Refuse anything that is not one read-only statement on allowed schemas."""
+def guard(statement: str, policy: SchemaPolicy | None, *, warned: set[str] | None = None) -> None:
+    """Refuse anything that is not one read-only statement inside the boundary."""
     from .tools import sql_review as sr  # noqa: PLC0415  (import cycle: tools import config)
 
     if len(sr._split_statements(statement)) != 1:
@@ -126,16 +130,32 @@ def guard(statement: str, policy: SchemaPolicy | None) -> None:
     problems = sr._verify_read_only(statement)
     if problems:
         raise SnowError("refused, not read-only review SQL: " + "; ".join(problems))
-    if policy is not None:
-        from .tools.check_schema_refs import find_denied_refs  # noqa: PLC0415
+    if policy is None:
+        return
+    from .tools.check_schema_refs import find_boundary_refs, find_denied_refs  # noqa: PLC0415
 
-        hits = find_denied_refs(statement, policy)
-        if hits:
-            names = ", ".join(sorted({schema for _, schema in hits}))
-            raise SnowError(
-                f"refused: references governance-denied schema(s) {names}; "
-                "nothing was sent to Snowflake"
-            )
+    hits = find_denied_refs(statement, policy)
+    if hits:
+        names = ", ".join(sorted({schema for _, schema in hits}))
+        raise SnowError(
+            f"refused: references governance-denied schema(s) {names}; "
+            "nothing was sent to Snowflake"
+        )
+    outside = find_boundary_refs(statement, policy)
+    if not outside:
+        return
+    if policy.enforcing:
+        names = ", ".join(sorted({r.ref for r in outside}))
+        raise SnowError(
+            f"refused: references {names} outside governance.sources and app_data "
+            "(governance.boundary: enforce); nothing was sent to Snowflake"
+        )
+    for ref in outside:
+        message = f"warning: {ref.detail} (governance.boundary: warn)"
+        if warned is None or message not in warned:
+            print(message, file=sys.stderr)
+            if warned is not None:
+                warned.add(message)
 
 
 def _without_terminator(statement: str) -> str:
@@ -229,6 +249,8 @@ class SnowExec:
     ) -> None:
         self.session = session
         self.policy = policy
+        #: Boundary warnings already printed, so a repeated name warns once per run.
+        self.warned: set[str] = set()
         self._runner = runner or _default_runner
         self._snow = snow
 
@@ -273,7 +295,7 @@ class SnowExec:
         if not statements:
             return []
         for stmt in statements:
-            guard(stmt, self.policy)
+            guard(stmt, self.policy, warned=self.warned)
         prefix = self.prefix(result_cache=result_cache)
         # The terminator goes on its own line: a statement ending in a `--`
         # comment would otherwise swallow the `;` after it.

@@ -1030,3 +1030,19 @@ def test_error_masking_keeps_escaped_quotes_inside_one_value(value: str) -> None
     detail = sx._error_detail(f"100038 (22018): Numeric value '{value}' is not recognized", "")
     assert "Brien" not in detail and "b''c" not in detail and "slash" not in detail
     assert "'…' is not recognized" in detail
+
+
+def test_probe_warns_on_objects_outside_the_boundary_and_still_probes_them(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    cfg = repo / "streamsnow.config.yaml"
+    cfg.write_text(
+        CONFIG.replace('schema_allow: ["REPORTING", "APP"]', 'schema_allow: ["REPORTING"]'),
+        encoding="utf-8",
+    )
+    fake = FakeSnow()
+    assert _live(repo, fake, "probe") == 0
+    out = _out(capsys)
+    assert any(ROLLUP in w and "governance.boundary: warn" in w for w in out["warnings"])
+    by_id = {r["id"]: r for r in out["results"]}
+    assert by_id[f"probe:{ROLLUP}"]["exists"] is True

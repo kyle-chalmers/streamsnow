@@ -10,6 +10,7 @@ a role the user does not hold.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 
 import pytest
@@ -209,3 +210,69 @@ def test_default_runner_forces_utf8_for_the_child(monkeypatch: pytest.MonkeyPatc
     assert sx._default_runner(["snow"], "SELECT 1", 5) == (0, "[]", "")
     assert seen["env"]["PYTHONUTF8"] == "1" and seen["encoding"] == "utf-8"
     assert seen["input"] == "SELECT 1" and "shell" not in seen
+
+
+WARN_POLICY = SchemaPolicy(sources=("ANALYTICS_DB.REPORTING",), schema_deny=("RAW",))
+STRICT_POLICY = SchemaPolicy(
+    sources=("ANALYTICS_DB.REPORTING", "FINANCE_DB.MARTS"), schema_deny=("RAW",), boundary="enforce"
+)
+
+
+def test_outside_boundary_warns_once_on_stderr_and_still_runs(capsys) -> None:
+    rec = Recorder()
+    ex = sx.SnowExec(sx.Session(connection="acme"), WARN_POLICY, runner=rec)
+    ex.run(["SELECT * FROM SALES_DB.PUBLIC.LEADS", "SELECT COUNT(*) FROM SALES_DB.PUBLIC.LEADS"])
+    assert len(rec.calls) == 1
+    err = capsys.readouterr().err
+    assert err.count("SALES_DB.PUBLIC.LEADS") == 1
+    assert "governance.boundary: warn" in err
+
+
+def test_identifier_literal_warns_under_warn(capsys) -> None:
+    rec = Recorder()
+    ex = sx.SnowExec(sx.Session(connection="acme"), WARN_POLICY, runner=rec)
+    ex.run(["SELECT * FROM IDENTIFIER('SALES_DB.PUBLIC.LEADS')"])
+    assert len(rec.calls) == 1
+    assert "SALES_DB.PUBLIC.LEADS" in capsys.readouterr().err
+
+
+def test_enforce_refuses_outside_boundary_before_sending() -> None:
+    rec = Recorder()
+    ex = sx.SnowExec(sx.Session(connection="acme"), STRICT_POLICY, runner=rec)
+    with pytest.raises(sx.SnowError, match=r"^refused: .*outside governance\.sources"):
+        ex.run(["SELECT 1", "SELECT * FROM REPORTING.ORDERS"])
+    assert rec.calls == []
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM ANALYTICS_DB.REPORTING.A a JOIN FINANCE_DB.MARTS.B b ON a.id=b.id, "
+        "SALES_DB.PUBLIC.C c",
+        "SELECT * FROM IDENTIFIER('SALES_DB.PUBLIC.LEADS')",
+    ],
+)
+def test_enforce_refuses_a_comma_join_after_join_and_an_identifier_literal(sql) -> None:
+    rec = Recorder()
+    ex = sx.SnowExec(sx.Session(connection="acme"), STRICT_POLICY, runner=rec)
+    with pytest.raises(sx.SnowError, match=r"^refused: .*SALES_DB\.PUBLIC"):
+        ex.run([sql])
+    assert rec.calls == []
+
+
+@pytest.mark.parametrize(
+    ("sql", "ref"),
+    [
+        ("SELECT * FROM TABLE('SALES_DB.PUBLIC.LEADS') l", "SALES_DB.PUBLIC.LEADS"),
+        ("SELECT * FROM TABLE($$REPORTING.ORDERS$$)", "REPORTING.ORDERS"),
+    ],
+)
+def test_table_literal_warns_under_warn_and_is_refused_under_enforce(sql, ref, capsys) -> None:
+    rec = Recorder()
+    sx.SnowExec(sx.Session(connection="acme"), WARN_POLICY, runner=rec).run([sql])
+    assert len(rec.calls) == 1 and ref in capsys.readouterr().err
+    refused = Recorder()
+    strict = sx.SnowExec(sx.Session(connection="acme"), STRICT_POLICY, runner=refused)
+    with pytest.raises(sx.SnowError, match=rf"^refused: .*{re.escape(ref)}"):
+        strict.run([sql])
+    assert refused.calls == []
