@@ -24,7 +24,7 @@ source of truth behind both.
 The `streamsnow` package is the **one implementation, many consumers** core: the
 CLI, the plugin skills, pre-commit, and CI all call the same code. The generated
 CI and deploy workflows install a pinned range (`uv tool install
-'streamsnow>=0.10,<0.11'`), and pre-commit and your editor use the `streamsnow` on
+'streamsnow>=0.10.1,<0.11'`), and pre-commit and your editor use the `streamsnow` on
 your PATH, so `streamsnow check …` runs the same rules everywhere. To adopt a new
 minor release, upgrade your local install and run `streamsnow update --apply`,
 which re-renders the workflows with the new pin.
@@ -69,7 +69,7 @@ is actually true today, so a team can decide with open eyes.
   ([RELEASING.md](../RELEASING.md)). Co-maintainers are welcome; the
   [contributing guide](../CONTRIBUTING.md) says how.
 - **Release pinning.** Generated CI and deploy workflows install
-  `streamsnow>=0.10,<0.11`, so a repo never takes a major silently. Stricter
+  `streamsnow>=0.10.1,<0.11`, so a repo never takes a major silently. Stricter
   shops pin exact (`streamsnow==0.10.0`) and bump on purpose.
 - **Rollback.** `uv tool install streamsnow==<previous>` and
   `streamsnow update --apply` re-render the governance files from that

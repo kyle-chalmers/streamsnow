@@ -55,7 +55,7 @@ jobs:
       - name: Install tooling
         if: steps.gate.outputs.go == 'true'
         run: |
-          uv tool install 'streamsnow>=0.10,<0.11'
+          uv tool install 'streamsnow>=0.10.1,<0.11'
           uv tool install snowflake-cli
 
       # A repo can have deploy secrets before it has an app (`streamsnow init
