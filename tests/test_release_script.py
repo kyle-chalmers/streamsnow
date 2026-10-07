@@ -146,7 +146,7 @@ def make_repo(tmp_path: Path, version="0.4.2", unreleased=FIXED_ONLY, git=True) 
         "skills/_shared/playwright-walkthrough.md": "Pinned version: `@playwright/cli@0.1.22`.\n",
     }
     for rel in PIN_FILES:
-        files[rel] = f"run: uv tool install 'streamsnow>=0.4.1,<0.5'\n"
+        files[rel] = "run: uv tool install 'streamsnow>=0.4.1,<0.5'\n"
     files["docs/deploying.md"] = (
         "0.3 moved the pin to `streamsnow>=0.3,<0.4`, and 0.4 to\n`streamsnow>=0.4.1,<0.5`.\n"
     )
@@ -163,7 +163,9 @@ def make_repo(tmp_path: Path, version="0.4.2", unreleased=FIXED_ONLY, git=True) 
 
 def _uv_lock_rewrites(root: Path):
     def handler(args, kw):
-        v = re.search(r'^version = "([^"]+)"$', (root / "pyproject.toml").read_text("utf-8"), re.M)
+        v = re.search(
+            r'^version = "([^"]+)"$', (root / "pyproject.toml").read_text(encoding="utf-8"), re.M
+        )
         (root / "uv.lock").write_text(_lock(v.group(1)), encoding="utf-8", newline="\n")
         return (0, "", "")
 
@@ -236,15 +238,18 @@ def test_prepare_bumps_every_spot_and_closes_the_changelog(tmp_path, capsys):
         capsys, ["prepare", "0.5.0", "--root", str(root)], run=fake, today=TODAY
     )
     assert code == 0, payload
-    assert 'version = "0.5.0"' in (root / "pyproject.toml").read_text("utf-8")
-    assert 'target-version = "py311"' in (root / "pyproject.toml").read_text("utf-8")
+    assert 'version = "0.5.0"' in (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'target-version = "py311"' in (root / "pyproject.toml").read_text(encoding="utf-8")
     assert (
-        json.loads((root / ".claude-plugin/plugin.json").read_text("utf-8"))["version"] == "0.5.0"
+        json.loads((root / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
+        == "0.5.0"
     )
-    assert '    __version__ = "0.5.0"' in (root / "streamsnow/__init__.py").read_text("utf-8")
-    assert 'version = "0.5.0"' in (root / "uv.lock").read_text("utf-8")
+    assert '    __version__ = "0.5.0"' in (root / "streamsnow/__init__.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'version = "0.5.0"' in (root / "uv.lock").read_text(encoding="utf-8")
     assert ["uv", "lock"] in fake.calls and ["uv", "lock", "--check"] in fake.calls
-    log = (root / "CHANGELOG.md").read_text("utf-8")
+    log = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     assert (
         log
         == PREFACE
@@ -254,7 +259,7 @@ def test_prepare_bumps_every_spot_and_closes_the_changelog(tmp_path, capsys):
         + OLD_SECTION
     )
     # no pin change without --pin-floor
-    assert "streamsnow>=0.4.1,<0.5" in (root / "README.md").read_text("utf-8")
+    assert "streamsnow>=0.4.1,<0.5" in (root / "README.md").read_text(encoding="utf-8")
     assert fake.mutations() == []
     assert not any(c[:2] == ["git", "commit"] for c in fake.calls)
 
@@ -270,12 +275,12 @@ def test_prepare_twice_refuses_the_second_run(tmp_path, capsys):
     )
     assert code == 1 and "not clean" in out
     _git(root, "commit", "-qam", "chore(0.4.3): release 0.4.3")
-    before = (root / "CHANGELOG.md").read_text("utf-8")
+    before = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     code, _, out = run_main(
         capsys, ["prepare", "0.4.3", "--root", str(root)], run=prep_run(root), today=TODAY
     )
     assert code == 1 and "not greater" in out
-    assert (root / "CHANGELOG.md").read_text("utf-8") == before
+    assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == before
     assert before.count("## [0.4.3]") == 1
 
 
@@ -288,7 +293,7 @@ def test_prepare_rejects_invalid_or_lower_versions(tmp_path, capsys, version, co
         capsys, ["prepare", version, "--root", str(root)], run=prep_run(root), today=TODAY
     )
     assert got == code
-    assert 'version = "0.4.2"' in (root / "pyproject.toml").read_text("utf-8")
+    assert 'version = "0.4.2"' in (root / "pyproject.toml").read_text(encoding="utf-8")
 
 
 def test_prepare_refuses_a_dirty_tree(tmp_path, capsys):
@@ -298,7 +303,7 @@ def test_prepare_refuses_a_dirty_tree(tmp_path, capsys):
         capsys, ["prepare", "0.4.3", "--root", str(root)], run=prep_run(root), today=TODAY
     )
     assert code == 1 and "not clean" in out
-    assert 'version = "0.4.2"' in (root / "pyproject.toml").read_text("utf-8")
+    assert 'version = "0.4.2"' in (root / "pyproject.toml").read_text(encoding="utf-8")
 
 
 def test_prepare_refuses_an_empty_unreleased(tmp_path, capsys):
@@ -317,7 +322,7 @@ def test_prepare_fails_loudly_when_a_version_pattern_is_missing(tmp_path, capsys
         capsys, ["prepare", "0.4.3", "--root", str(root)], run=prep_run(root), today=TODAY
     )
     assert code == 2 and "__init__.py" in out
-    assert 'version = "0.4.2"' in (root / "pyproject.toml").read_text("utf-8")
+    assert 'version = "0.4.2"' in (root / "pyproject.toml").read_text(encoding="utf-8")
 
 
 def test_pin_floor_patch_rewrites_exactly_the_listed_files(tmp_path, capsys):
@@ -330,11 +335,11 @@ def test_pin_floor_patch_rewrites_exactly_the_listed_files(tmp_path, capsys):
     )
     assert code == 0, payload
     for rel in PIN_FILES:
-        text = (root / rel).read_text("utf-8")
+        text = (root / rel).read_text(encoding="utf-8")
         assert "streamsnow>=0.4.3,<0.5" in text, rel
         assert "streamsnow>=0.4.1,<0.5" not in text, rel
-    assert "streamsnow>=0.3,<0.4" in (root / "docs/deploying.md").read_text("utf-8")
-    assert "pin `streamsnow>=0.4.1,<0.5`" in (root / "CHANGELOG.md").read_text("utf-8")
+    assert "streamsnow>=0.3,<0.4" in (root / "docs/deploying.md").read_text(encoding="utf-8")
+    assert "pin `streamsnow>=0.4.1,<0.5`" in (root / "CHANGELOG.md").read_text(encoding="utf-8")
     changed = _git(root, "diff", "--name-only").split()
     expected = {
         *PIN_FILES,
@@ -357,7 +362,7 @@ def test_pin_floor_minor_bump_moves_the_upper_bound(tmp_path, capsys):
     )
     assert code == 0
     for rel in PIN_FILES:
-        assert "streamsnow>=0.5.0,<0.6" in (root / rel).read_text("utf-8"), rel
+        assert "streamsnow>=0.5.0,<0.6" in (root / rel).read_text(encoding="utf-8"), rel
 
 
 def test_pin_floor_fails_loudly_when_a_file_lacks_the_pin(tmp_path, capsys):
@@ -371,8 +376,8 @@ def test_pin_floor_fails_loudly_when_a_file_lacks_the_pin(tmp_path, capsys):
         today=TODAY,
     )
     assert code == 2 and "docs/distribution.md" in out
-    assert 'version = "0.4.2"' in (root / "pyproject.toml").read_text("utf-8")
-    assert "streamsnow>=0.4.1,<0.5" in (root / "README.md").read_text("utf-8")
+    assert 'version = "0.4.2"' in (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert "streamsnow>=0.4.1,<0.5" in (root / "README.md").read_text(encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- gates
@@ -459,7 +464,9 @@ def test_gates_dirty_tree_fails(tmp_path, capsys):
 def test_gates_undated_changelog_fails(tmp_path, capsys):
     root = _released_repo(tmp_path, denylist=DENY)
     log = (
-        (root / "CHANGELOG.md").read_text("utf-8").replace("## [0.4.3] - 2031-04-09", "## [0.4.3]")
+        (root / "CHANGELOG.md")
+        .read_text(encoding="utf-8")
+        .replace("## [0.4.3] - 2031-04-09", "## [0.4.3]")
     )
     (root / "CHANGELOG.md").write_text(log, encoding="utf-8", newline="\n")
     _git(root, "commit", "-qam", "docs: acme")
@@ -585,7 +592,7 @@ def test_tag_release_notes_are_the_changelog_section(tmp_path, capsys, monkeypat
     fake = tag_run()
 
     def create(args, kw):
-        captured["notes"] = Path(args[args.index("--notes-file") + 1]).read_text("utf-8")
+        captured["notes"] = Path(args[args.index("--notes-file") + 1]).read_text(encoding="utf-8")
         return (0, "", "")
 
     fake.handlers.insert(0, (["gh", "release", "create", "v0.5.0"], create))
@@ -762,7 +769,7 @@ def test_gate_list_tracks_releasing_md():
         ("npm view @playwright/cli version", '"@playwright/cli"'),
         ("check_docs_links.py --online", "check_docs_links.py"),
         ("refs/tags/vX.Y.Z", "refs/tags/"),
-        ("GitHub Release", '"release", "create"'),
+        ("GitHub Release", '"--verify-tag"'),
     ]
     for doc_kw, src_kw in pairs:
         assert doc_kw in doc, f"RELEASING.md no longer mentions {doc_kw!r}; update release.py"
