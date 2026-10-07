@@ -535,18 +535,16 @@ def test_gates_fail_without_a_denylist(tmp_path, capsys):
     assert code == 1
     assert statuses(payload)["privacy scan"] == "FAIL"
     assert statuses(payload)["commit messages"] == "FAIL"
-    assert "--allow-no-denylist" in out
+    assert ".streamsnow/export-denylist.txt" in out
 
 
-def test_gates_allow_no_denylist_is_a_loud_warn(tmp_path, capsys):
+@pytest.mark.parametrize("cmd", ["gates", "open-pr"])
+def test_the_denylist_bypass_exists_only_on_tag(tmp_path, capsys, cmd):
+    # gates and open-pr are pre-approved in the skill, so a bypass flag on them would skip
+    # the permission prompt; only `tag`, which always prompts, accepts it.
     root = _released_repo(tmp_path, denylist=None)
-    code, payload, out = run_main(
-        capsys, ["gates", "0.4.3", "--allow-no-denylist", "--root", str(root)], run=gates_run()
-    )
-    assert code == 0
-    assert statuses(payload)["privacy scan"] == "WARN"
-    assert "denylist not present, scan is generic only" in out
-    assert "NO DENYLIST" in out
+    code = release.main([cmd, "0.4.3", "--allow-no-denylist", "--root", str(root)], run=gates_run())
+    assert code == 2
 
 
 @pytest.mark.parametrize("message", ["feat: globex-internal report", "fix: see INITECH-42"])
@@ -588,18 +586,26 @@ def test_gates_playwright_pin_only_ever_warns(tmp_path, capsys, kw):
 # --------------------------------------------------------------------------- open-pr
 
 
-def _pr_repo(tmp_path, capsys, version="0.4.3", branch=None):
+def _pr_repo(tmp_path, capsys, version="0.4.3", branch=None, extra_commit=False, prepare=True):
     root = make_repo(tmp_path)
     _git(root, "tag", "v0.4.2")
+    # stand in for the fetched remote: origin/main is the baseline commit
+    _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
     _git(root, "switch", "-q", "-c", branch or f"claude/release-{version}")
-    code, payload, _ = _prepare(capsys, root, version)
-    assert code == 0, payload
+    if extra_commit:
+        (root / "docs/extra.md").write_text("acme extra\n", encoding="utf-8")
+        _git(root, "add", "docs/extra.md")
+        _git(root, "commit", "-qm", "feat: acme extra")
+    if prepare:
+        code, payload, _ = _prepare(capsys, root, version)
+        assert code == 0, payload
     return root
 
 
 def pr_run(root: Path, captured: dict, **gate_kw) -> FakeRun:
     fake = gates_run(base=prep_run(root), **gate_kw)
     fake.on(["git", "push"])
+    fake.on(["git", "fetch", "origin"])
 
     def create(args, kw):
         captured["body"] = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
@@ -655,6 +661,9 @@ def test_open_pr_adds_the_pin_floor_note_to_the_body(tmp_path, capsys):
         "Signed-off-by: Acme Bot <bot@example.com>",
         "Co-Authored-By: Acme <bot@example.com>\nevil",
         "Co-Authored-By: Acme <bot @example.com>",
+        "Co-Authored-By: Acme\tBot <bot@example.com>",
+        "Co-Authored-By: Acme\x1b[31m <bot@example.com>",
+        "Co-Authored-By: Acme <bot@example.com\x7f>",
     ],
 )
 def test_open_pr_rejects_a_malformed_trailer(tmp_path, capsys, trailer):
@@ -697,6 +706,78 @@ def test_open_pr_stops_before_the_push_when_a_gate_fails(tmp_path, capsys):
     assert code == 1
     assert not any(c[:2] == ["git", "push"] for c in fake.calls)
     assert not any(c[:3] == ["gh", "pr", "create"] for c in fake.calls)
+
+
+def _pushed(fake) -> bool:
+    return any(c[:2] == ["git", "push"] or c[:3] == ["gh", "pr", "create"] for c in fake.calls)
+
+
+@pytest.mark.parametrize("note", ["see /home/acmedev/x", "see /Users/acmedev/x", "ask a@b.test"])
+def test_open_pr_rejects_a_private_pin_floor_note(tmp_path, capsys, note):
+    root = _pr_repo(tmp_path, capsys)
+    fake = pr_run(root, {})
+    code, _, _ = run_main(
+        capsys, ["open-pr", "0.4.3", "--pin-floor-note", note, "--root", str(root)], run=fake
+    )
+    assert code == 2 and fake.mutations() == []
+
+
+def test_open_pr_refuses_a_branch_not_cut_from_origin_main(tmp_path, capsys):
+    root = _pr_repo(tmp_path, capsys)
+    # origin/main moved to a commit this branch does not contain
+    _git(root, "switch", "-q", "-c", "acme-other", "main")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "feat: acme elsewhere")
+    _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(root, "switch", "-q", "claude/release-0.4.3")
+    fake = pr_run(root, {})
+    code, _, out = run_main(capsys, ["open-pr", "0.4.3", "--root", str(root)], run=fake)
+    assert code == 1 and "origin/main" in out
+    assert fake.mutations() == []
+
+
+def test_open_pr_refuses_an_extra_non_release_commit(tmp_path, capsys):
+    root = _pr_repo(tmp_path, capsys, extra_commit=True)
+    fake = pr_run(root, {})
+    code, _, out = run_main(capsys, ["open-pr", "0.4.3", "--root", str(root)], run=fake)
+    assert code == 1 and "feat: acme extra" in out
+    assert fake.mutations() == []
+
+
+def test_open_pr_refuses_a_stray_file_in_the_release_commit(tmp_path, capsys):
+    root = _pr_repo(tmp_path, capsys)
+    (root / "notes.txt").write_text("acme scratch\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "chore(0.4.3): release 0.4.3")
+    fake = pr_run(root, {})
+    code, _, out = run_main(capsys, ["open-pr", "0.4.3", "--root", str(root)], run=fake)
+    assert code == 1 and "notes.txt" in out and not _pushed(fake)
+
+
+def test_open_pr_refuses_two_release_commits(tmp_path, capsys):
+    root = _pr_repo(tmp_path, capsys)
+    _git(root, "commit", "-qam", "chore(0.4.3): release 0.4.3")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "chore(0.4.3): release 0.4.3")
+    fake = pr_run(root, {})
+    code, _, out = run_main(capsys, ["open-pr", "0.4.3", "--root", str(root)], run=fake)
+    assert code == 1 and "exactly one" in out and not _pushed(fake)
+
+
+def test_open_pr_accepts_the_already_committed_release(tmp_path, capsys):
+    root = _pr_repo(tmp_path, capsys)
+    _git(root, "commit", "-qam", "chore(0.4.3): release 0.4.3")
+    fake = pr_run(root, {})
+    code, payload, _ = run_main(capsys, ["open-pr", "0.4.3", "--root", str(root)], run=fake)
+    assert code == 0, payload
+    assert _pushed(fake)
+
+
+def test_open_pr_refuses_a_deleted_release_file(tmp_path, capsys):
+    root = _pr_repo(tmp_path, capsys)
+    (root / "README.md").unlink()
+    fake = pr_run(root, {})
+    code, _, out = run_main(capsys, ["open-pr", "0.4.3", "--root", str(root)], run=fake)
+    assert code == 1 and "README.md" in out and "delet" in out
+    assert fake.mutations() == []
 
 
 # --------------------------------------------------------------------------- tag
@@ -750,7 +831,10 @@ def tag_run(
     t = f"v{version}"
     fake.on(["git", "fetch", "origin", "--tags"])
     fake.on(["git", "rev-parse", "--verify", "origin/main^{commit}"], out=SHA + "\n")
-    fake.on(["git", "rev-parse", "--git-common-dir"], out=".git\n")
+    fake.on(
+        ["git", "worktree", "list", "--porcelain"],
+        out=f"worktree {tmp_path}\nHEAD {SHA}\nbranch refs/heads/main\n\n",
+    )
     fake.on(["git", "show", f"{SHA}:pyproject.toml"], out=_pyproject(ov))
     fake.on(["git", "show", f"{SHA}:.claude-plugin/plugin.json"], out=_plugin(ov))
     fake.on(["git", "show", f"{SHA}:streamsnow/__init__.py"], out=_init(ov))
@@ -827,7 +911,6 @@ MOVED = PREFACE + "## [Unreleased]\n\n- Acme follow-up.\n\n## [0.5.0] - 2031-04-
         ({"changelog": MOVED}, "moved past the release commit"),
         ({"local_tag": True}, "already exists"),
         ({"remote_refs": f"{SHA}\trefs/tags/v0.5.0\n"}, "already exists"),
-        ({"remote_refs": f"{SHA}\trefs/heads/v0.5.0\n"}, "branch"),
         ({"runs": [_ci(status="in_progress", conclusion="")]}, "still running"),
         ({"runs": [_ci(conclusion="failure")]}, "did not succeed"),
         ({"runs": []}, "no `ci` push run"),
@@ -856,6 +939,14 @@ def test_tag_allow_no_denylist_still_scans_home_paths(tmp_path, capsys):
     fake = tag_run(tmp_path, denylist=None, messages=f"fix: /home/{user}/x\x00")
     code, _, _ = _tag(capsys, tmp_path, fake, "--allow-no-denylist")
     assert code == 1 and fake.mutations() == []
+
+
+def test_tag_allows_a_release_branch_with_the_tag_name(tmp_path, capsys):
+    # RELEASING.md: vX.Y.Z branches are the convention; refs/tags/ keeps the push unambiguous
+    fake = tag_run(tmp_path, remote_refs=f"{SHA}\trefs/heads/v0.5.0\n")
+    code, _, out = _tag(capsys, tmp_path, fake)
+    assert code == 0, out
+    assert ["git", "push", "origin", "refs/tags/v0.5.0"] in fake.calls
 
 
 def test_tag_ignores_unrelated_workflows(tmp_path, capsys):
@@ -1049,7 +1140,11 @@ def test_verify_smoke_output_must_match_exactly(tmp_path, capsys, out):
 
 SKILL = REPO_ROOT / ".claude" / "skills" / "release" / "SKILL.md"
 ALLOWED = [
-    "Bash(uv run python scripts/release.py *)",
+    "Bash(uv run python scripts/release.py suggest)",
+    "Bash(uv run python scripts/release.py prepare *)",
+    "Bash(uv run python scripts/release.py open-pr *)",
+    "Bash(uv run python scripts/release.py gates *)",
+    "Bash(uv run python scripts/release.py verify *)",
     "Bash(git status *)",
     "Bash(git fetch origin)",
     "Bash(git switch -c claude/release-* origin/main)",
@@ -1086,6 +1181,39 @@ def test_release_skill_pre_approves_only_the_narrow_patterns():
     for entry in tools:
         for banned in ("push", "tag", "commit", "--amend", "--no-verify", "gh ", "publish"):
             assert banned not in entry, (entry, banned)
+
+
+def _matches(pattern: str, command: str) -> bool:
+    """Claude Code's Bash(...) rule: `*` matches anything, the rest is literal."""
+    inner = pattern[len("Bash(") : -1]
+    return re.fullmatch(".*".join(map(re.escape, inner.split("*"))), command) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run python scripts/release.py tag 0.5.0",
+        "uv run python scripts/release.py tag 0.5.0 --release-only",
+        "uv run python scripts/release.py tag 0.5.0 --allow-no-denylist",
+        "git push origin refs/tags/v0.5.0",
+        "git push --tags",
+        "git commit --amend --no-edit",
+        "git commit --no-verify -m x",
+        "gh release create v0.5.0",
+    ],
+)
+def test_no_pre_approved_pattern_covers_an_irreversible_command(command):
+    fm, _ = _frontmatter_and_body(SKILL.read_text(encoding="utf-8"))
+    hits = [p for p in _allowed_tools(fm) if _matches(p, command)]
+    assert not hits, (command, hits)
+
+
+def test_allow_no_denylist_is_never_pre_approved():
+    # The flag only exists on `tag`, which no pattern covers; on the pre-approved
+    # subcommands argparse rejects it (see test_the_denylist_bypass_exists_only_on_tag).
+    fm, body = _frontmatter_and_body(SKILL.read_text(encoding="utf-8"))
+    assert "--allow-no-denylist" not in fm
+    assert "permission prompt" in body
 
 
 def test_release_skill_never_tells_the_agent_to_push_tag_or_release_directly():
@@ -1128,12 +1256,30 @@ def test_gate_list_tracks_releasing_md():
 
 
 # Update only after reading the new "Cut a release" text against scripts/release.py.
-CUT_A_RELEASE_SHA256 = "e0734758c02bedc6d40fd7da24fdece7ba21e11356f1855b754821b382f89c89"
+CUT_A_RELEASE_SHA256 = "51efcd751ec6754f80c61fd5dd00571d937b612fee491259874383a0e9ae0f26"
+
+
+def _normalized_section(doc: str, heading: str) -> str:
+    m = re.search(rf"^{re.escape(heading)}\n(.*?)(?=^## )", doc, re.M | re.S)
+    assert m, (
+        f"RELEASING.md has no {heading!r} section followed by another `## ` heading; "
+        "the release script and this pin need a review"
+    )
+    lines = [ln.rstrip() for ln in m.group(1).replace("\r\n", "\n").split("\n")]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip() + "\n"
+
+
+def test_section_normalization_ignores_whitespace_only_edits():
+    a = "## Cut a release\n\n1. Bump.\n\n## Next\n"
+    b = "## Cut a release\n1. Bump.   \n\n\n\n## Next\n"
+    assert _normalized_section(a, "## Cut a release") == _normalized_section(b, "## Cut a release")
+    with pytest.raises(AssertionError, match="no '## Cut a release' section"):
+        _normalized_section("## Cut a release\n\n1. Bump.\n", "## Cut a release")
 
 
 def test_cut_a_release_section_is_pinned():
-    doc = (REPO_ROOT / "RELEASING.md").read_text(encoding="utf-8").replace("\r\n", "\n")
-    section = re.search(r"^## Cut a release\n.*?(?=^## )", doc, re.M | re.S).group(0)
+    doc = (REPO_ROOT / "RELEASING.md").read_text(encoding="utf-8")
+    section = _normalized_section(doc, "## Cut a release")
     digest = hashlib.sha256(section.encode("utf-8")).hexdigest()
     assert digest == CUT_A_RELEASE_SHA256, (
         "RELEASING.md's 'Cut a release' section changed. Review scripts/release.py and "
