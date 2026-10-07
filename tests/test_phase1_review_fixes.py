@@ -250,7 +250,7 @@ def test_tombstones_honors_custom_apps_dir_on_both_sides(tmp_path: Path) -> None
     dash.mkdir(parents=True)
     (dash / "snowflake.yml").write_text("definition_version: 2\n", encoding="utf-8")
     (root / "streamsnow.config.yaml").write_text(
-        "schema_version: 1\n"
+        "schema_version: 2\n"
         "runtime: warehouse\n"
         "project: {name: Acme, slug: acme}\n"
         "snowflake:\n"
@@ -263,7 +263,7 @@ def test_tombstones_honors_custom_apps_dir_on_both_sides(tmp_path: Path) -> None
         "    stage_schema: DASHBOARDS\n"
         "    default_warehouse: STREAMSNOW_WH\n"
         "  roles: {ci_role: STREAMSNOW_DEPLOY_ROLE, viewer_role: STREAMSNOW_VIEWER_ROLE}\n"
-        "governance: {database: ANALYTICS_DB, schema_allow: [ANALYTICS]}\n",
+        "governance: {sources: [ANALYTICS_DB.ANALYTICS]}\n",
         encoding="utf-8",
     )
     _git(root, "init", "-q", "-b", "main")

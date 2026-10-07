@@ -38,10 +38,15 @@ hyphens not underscores. Renaming an app is a human decision (its deployed ident
 follow), so hand it back rather than moving the folder.
 
 **schema-refs.** Code references a schema in `governance.schema_deny`. Fix by routing the query
-through an allowed schema, typically a curated reporting/analytics view, never by editing the deny
+through a source schema, typically a curated reporting/analytics view, never by editing the deny
 list: changing governance to pass the check defeats the check. A single object that must stay
 readable belongs in `governance.read_exceptions` (exact fully-qualified name), and that is a human
 governance decision, not a mechanical fix.
+
+A boundary warning or finding (`outside_boundary`, `two_part`) means the name is not in a source
+or not three-part. Write `DATABASE.SCHEMA.OBJECT`. Adding a schema the apps genuinely need to
+`governance.sources` is a human governance decision, and the admin then re-runs
+`deploy-setup --admin` so the CI role can read it.
 
 **app-security.** Each finding names its kind; all are mechanical to locate, some judgment-bound to fix:
 

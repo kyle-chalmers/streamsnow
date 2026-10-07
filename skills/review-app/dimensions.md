@@ -15,7 +15,7 @@ governed view may exist" as a question, not an assertion.
 
 ## Data / lineage sanity
 
-Schema allowlist adherence (governed view vs. raw base table), column fidelity, cache-key
+Boundary adherence (governance sources and app data) (governed view vs. raw base table), column fidelity, cache-key
 correctness (filter params must be function arguments, not closure variables), TTL appropriateness
 vs. stated freshness needs, wide unfiltered DataFrames that risk the result-size ceiling. Static
 read only — live-DB tracing belongs to `/sql-review`. For the production failure modes behind

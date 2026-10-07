@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 
+from streamsnow import probe
 from streamsnow.tools import doctor
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -87,7 +88,7 @@ def test_config_valid(tmp_path):
     )
     res = doctor.check_config(start=tmp_path)
     assert res["ok"] and res["level"] == "required"
-    assert res["detail"]["schema_version"] == 1
+    assert res["detail"]["schema_version"] == 2
 
 
 def test_config_invalid_is_required_failure(tmp_path):
@@ -777,3 +778,101 @@ def test_pre_commit_hook_must_be_executable(tmp_path, monkeypatch):
     assert "pre-commit install" in res["hint"]
     hook.chmod(0o755)
     assert doctor.check_pre_commit_hook(cfg)["ok"]
+
+
+_TARGETS = (
+    "ANALYTICS_DB.ANALYTICS",
+    "ANALYTICS_DB.REPORTING",
+    "STREAMSNOW_APPS.STREAMSNOW_REPORTING",  # the example's app data
+)
+_ACME_ROWS = [{"connection_name": "acme", "is_default": True}]
+
+
+def _example_repo(tmp_path):
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    return doctor.check_config(start=tmp_path)
+
+
+def _report(*statuses, detail=""):
+    return probe.ProbeReport(
+        role="ANALYST",
+        results=tuple(
+            probe.ProbeResult(t, s, "ANALYST", detail)
+            for t, s in zip(_TARGETS, statuses, strict=True)
+        ),
+    )
+
+
+def test_doctor_without_live_never_probes(tmp_path, monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("doctor probed without --live")
+
+    monkeypatch.setattr(doctor._probe, "probe_schemas", boom)
+    _example_repo(tmp_path)
+    names = [r["name"] for r in doctor.run_checks(start=tmp_path)]
+    assert "source-access" not in names
+
+
+def test_source_access_probes_every_source_and_app_data(tmp_path):
+    cfg = _example_repo(tmp_path)
+    seen = []
+
+    def fake_probe(connection, targets):
+        seen.append((connection, list(targets)))
+        return _report(probe.VISIBLE, probe.VISIBLE, probe.VISIBLE)
+
+    res = doctor.check_source_access(cfg, _ACME_ROWS, probe_fn=fake_probe)
+    assert res["ok"] and res["level"] == "optional"
+    assert res["detail"]["role"] == "ANALYST"
+    assert seen == [("acme", list(_TARGETS))]
+
+
+def test_source_access_not_visible_is_a_warning_naming_the_target(tmp_path):
+    cfg = _example_repo(tmp_path)
+    res = doctor.check_source_access(
+        cfg,
+        _ACME_ROWS,
+        probe_fn=lambda c, t: _report(probe.VISIBLE, probe.VISIBLE, probe.NOT_VISIBLE),
+    )
+    assert not res["ok"] and res["level"] == "optional" and res["detail"]["warn"]
+    assert "STREAMSNOW_APPS.STREAMSNOW_REPORTING" in res["hint"] and "ANALYST" in res["hint"]
+    assert "deploy-setup --admin" in res["hint"]
+
+
+def test_source_access_without_the_connection_is_not_checked(tmp_path):
+    cfg = _example_repo(tmp_path)
+    res = doctor.check_source_access(cfg, [], probe_fn=lambda c, t: 1 / 0)
+    assert not res["ok"] and res["detail"]["skipped"] and "not checked" in res["hint"]
+
+
+def test_live_doctor_reports_unverified_targets_as_not_checked(tmp_path, monkeypatch):
+    """Integration: run_checks --live, a snow and connection that exist, and a probe
+    that could verify nothing although the call itself worked (no report.error)."""
+    monkeypatch.setattr(doctor.subprocess, "run", _fake_run({}))
+    monkeypatch.setattr(
+        doctor,
+        "check_snow",
+        lambda: doctor._result("snow", True, doctor.OPTIONAL, {"found": True, "version": "3.0"}),
+    )
+    monkeypatch.setattr(doctor, "_list_connections", lambda: (_ACME_ROWS, ""))
+    _example_repo(tmp_path)
+    reason = "SHOW SCHEMAS printed no database_name"
+    results = doctor.run_checks(
+        start=tmp_path,
+        live=True,
+        probe_fn=lambda c, t: _report(*[probe.UNVERIFIED] * 3, detail=reason),
+    )
+    res = {r["name"]: r for r in results}["source-access"]
+    assert not res["ok"] and res["level"] == "optional" and res["detail"]["warn"]
+    assert "not checked" in res["hint"] and reason in res["hint"]
+
+
+def test_main_live_adds_the_source_access_row(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(doctor.shutil, "which", _which_only("git", "uv"))
+    _example_repo(tmp_path)
+    doctor.main(["--live", "--format", "json"])
+    checks = {c["name"]: c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert checks["source-access"]["detail"]["skipped"]  # no snow here: not checked, not failed

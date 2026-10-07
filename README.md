@@ -159,7 +159,7 @@ setup question yourself and wait for my answer; never answer one for me.
    Otherwise, if the repo already has Streamlit apps, read
    https://github.com/kyle-chalmers/streamsnow/blob/main/skills/onboard/adopt.md and
    follow that instead of scaffolding. Otherwise set up with `streamsnow init --no-starter-app`.
-   Its wizard asks five questions. Answer what you can first with read-only SHOW queries
+   Its wizard asks a few questions, each with a prefilled answer. Answer what you can first with read-only SHOW queries
    over whatever Snowflake access I already have (my default snow connection, a Snowflake
    MCP server, a dbt profile), explain each setting and ask me each question with what you
    found as the recommended answer, then pass the confirmed answers as flags (see `streamsnow init --help`). If you cannot, hand the
@@ -283,8 +283,8 @@ and says what it is doing at every step:
    `snow` connection, a Snowflake MCP server, a dbt profile), and installs any
    missing tools after one approval.
 2. **One round of questions.** Clickable choices, each explained first: the
-   five setup answers (and the schemas apps may not query), the defaults the
-   wizard does not ask about, your git name if it is missing, and who runs the
+   setup answers (runtime, sources, app-data schema, deploy source, and the
+   schemas apps may not query), the defaults the wizard does not ask about, your git name if it is missing, and who runs the
    Snowflake admin script, which it describes before asking, plus which of
    your Snowflake roles can open the apps.
 3. **Build.** The config and the governed repo files (`AGENTS.md`, `CLAUDE.md`,
@@ -303,9 +303,10 @@ repo that already has Streamlit apps it maps onto them and writes a
 ```bash
 uv tool install streamsnow           # persistent `streamsnow` on your PATH
 mkdir my-snowflake-apps && cd my-snowflake-apps
-streamsnow init                      # 5-question wizard, then a governed scaffold
+streamsnow init                      # setup wizard (every answer prefilled), then a governed scaffold
 # or skip the prompts: streamsnow init --runtime warehouse --account <locator> \
-#   --database ANALYTICS --schemas MARTS,REPORTING --deploy-source stage-copy
+#   --sources ANALYTICS.MARTS,ANALYTICS.REPORTING \
+#   --app-data STREAMSNOW_APPS.STREAMSNOW_REPORTING --deploy-source stage-copy
 snow connection add --connection-name <name> --account <locator> \
   --user <you> --authenticator externalbrowser --default   # init prints the exact command
 uv tool install pre-commit && pre-commit install

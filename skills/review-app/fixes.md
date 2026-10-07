@@ -59,7 +59,7 @@ extra question.
 
 | Finding | Prove it cleared with |
 |---|---|
-| Denied/allowed schema swap | `streamsnow check schema-refs apps/<slug>` |
+| Denied schema swap for a governance source | `streamsnow check schema-refs apps/<slug>` |
 | Egress / code-exec / write-SQL / dynamic SQL | `streamsnow check security apps/<slug>` |
 | Missing `@st.cache_data(ttl=…)` | `streamsnow check caching apps/<slug>` |
 | `:N IS NULL OR` trap | `streamsnow check bind-predicates apps/<slug>` |

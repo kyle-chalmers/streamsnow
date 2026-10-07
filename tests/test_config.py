@@ -9,6 +9,7 @@ import yaml
 
 from streamsnow.config import (
     CONFIG_SCHEMA_VERSION,
+    V1_CONFIG_ERROR,
     Config,
     ConfigError,
     normalize_account,
@@ -22,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 def _base() -> dict:
     """A valid container + stage-copy config dict, ready to mutate per test."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "runtime": "container",
         "project": {"name": "Acme Dashboards", "slug": "acme-dashboards"},
         "snowflake": {
@@ -41,8 +42,7 @@ def _base() -> dict:
             "roles": {"ci_role": "STREAMSNOW_DEPLOY_ROLE", "viewer_role": "STREAMSNOW_VIEWER_ROLE"},
         },
         "governance": {
-            "database": "ANALYTICS_DB",
-            "schema_allow": ["ANALYTICS", "REPORTING"],
+            "sources": ["ANALYTICS_DB.ANALYTICS", "ANALYTICS_DB.REPORTING"],
             "schema_deny": ["RAW", "STAGING", "BRIDGE"],
         },
         "deploy": {"source": "stage-copy"},
@@ -54,7 +54,7 @@ def test_valid_container_config_loads():
     assert cfg.runtime == "container"
     assert cfg.deploy.source == "stage-copy"
     assert cfg.snowflake.objects.compute_pool == "SYSTEM_COMPUTE_POOL_CPU"
-    assert "ANALYTICS" in cfg.governance.schema_allow
+    assert "ANALYTICS_DB.ANALYTICS" in cfg.governance.sources
 
 
 def test_example_file_is_valid():
@@ -166,9 +166,9 @@ def test_injection_rejected_across_all_rendered_fields(path, bad):
         Config.from_dict(d)
 
 
-def test_empty_schema_allow_rejected():
+def test_empty_sources_rejected():
     d = _base()
-    d["governance"]["schema_allow"] = []
+    d["governance"]["sources"] = []
     with pytest.raises(ConfigError):
         Config.from_dict(d)
 
@@ -248,4 +248,102 @@ def test_artifact_exclude_must_be_a_list():
     d = _base()
     d["deploy"]["artifact_exclude"] = ".streamlit/config.toml"
     with pytest.raises(ConfigError):
+        Config.from_dict(d)
+
+
+def test_v1_config_is_rejected_with_the_new_keys_named():
+    d = _base()
+    d["schema_version"] = 1
+    d["governance"] = {"database": "ANALYTICS_DB", "schema_allow": ["ANALYTICS"]}
+    with pytest.raises(ConfigError) as exc:
+        Config.from_dict(d)
+    msg = str(exc.value)
+    assert msg.startswith(V1_CONFIG_ERROR)
+    assert "governance.sources" in msg and "governance.app_data" in msg
+    assert "streamsnow configure" in msg and "--reconfigure" not in msg  # C10
+    assert "(found governance.database, governance.schema_allow)" in msg
+
+
+def test_retired_keys_in_a_v2_file_are_rejected_too():
+    d = _base()
+    d["governance"]["database"] = "ANALYTICS_DB"
+    with pytest.raises(ConfigError, match="found governance.database"):
+        Config.from_dict(d)
+
+
+def test_app_data_defaults_into_the_app_database():
+    cfg = Config.from_dict(_base())
+    assert cfg.governance.app_data == "STREAMSNOW_APPS.STREAMSNOW_REPORTING"
+    assert cfg.governance.boundary == "warn"
+    assert cfg.governance.imported_databases == ()
+
+
+def test_sources_are_uppercased_and_deduplicated():
+    d = _base()
+    d["governance"]["sources"] = [
+        "analytics_db.reporting",
+        "FINANCE_DB.MARTS",
+        "ANALYTICS_DB.REPORTING",
+    ]
+    assert Config.from_dict(d).governance.sources == ("ANALYTICS_DB.REPORTING", "FINANCE_DB.MARTS")
+
+
+@pytest.mark.parametrize("bad", ["REPORTING", "A.B.C", "A-B.C", "A.", "A.B;DROP", '"a".b'])
+def test_a_source_must_be_exactly_database_dot_schema(bad):
+    d = _base()
+    d["governance"]["sources"] = [bad]
+    with pytest.raises(ConfigError, match="DATABASE.SCHEMA"):
+        Config.from_dict(d)
+
+
+@pytest.mark.parametrize(
+    ("deny", "ok"), [(["FINANCE.RAW"], True), (["RAW"], True), (["A.B.C"], False), (["A-B"], False)]
+)
+def test_deny_entries_are_bare_or_qualified(deny, ok):
+    d = _base()
+    d["governance"]["schema_deny"] = deny
+    if ok:
+        assert Config.from_dict(d).governance.schema_deny == tuple(deny)
+    else:
+        with pytest.raises(ConfigError):
+            Config.from_dict(d)
+
+
+@pytest.mark.parametrize("deny", [["REPORTING"], ["ANALYTICS_DB.REPORTING"]])
+def test_a_denied_source_is_rejected(deny):
+    d = _base()
+    d["governance"]["schema_deny"] = deny
+    with pytest.raises(ConfigError, match="both allowed and denied"):
+        Config.from_dict(d)
+
+
+def test_a_qualified_deny_in_another_database_is_no_conflict():
+    d = _base()
+    d["governance"]["schema_deny"] = ["FINANCE_DB.REPORTING"]
+    Config.from_dict(d)
+
+
+@pytest.mark.parametrize(
+    ("app_data", "imported", "match"),
+    [
+        ("ANALYTICS_DB.REPORTING", [], "is also a source"),
+        ("STREAMSNOW_APPS.RAW", [], "denied"),
+        ("PARTNER_SHARE.APP", ["PARTNER_SHARE"], "shared database"),
+        ("SNOWFLAKE_SAMPLE_DATA.APP", [], "shared database"),
+    ],
+)
+def test_app_data_must_be_a_writable_non_source_schema(app_data, imported, match):
+    d = _base()
+    d["governance"]["app_data"] = app_data
+    d["governance"]["imported_databases"] = imported
+    with pytest.raises(ConfigError, match=match):
+        Config.from_dict(d)
+
+
+def test_boundary_is_warn_or_enforce():
+    d = _base()
+    d["governance"]["boundary"] = "enforce"
+    assert Config.from_dict(d).governance.boundary == "enforce"
+    d["governance"]["boundary"] = "strict"
+    with pytest.raises(ConfigError, match="governance.boundary"):
         Config.from_dict(d)

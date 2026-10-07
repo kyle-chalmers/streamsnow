@@ -53,7 +53,7 @@ returns their inputs instead of editing shared files.
    ```sql
    -- Query: <name>
    -- Feeds: <Page title> (<sections>)
-   -- Schemas: <TODO: fill from §3 — must be on governance.schema_allow>
+   -- Schemas: <TODO: fill from §3, each a governance.sources entry>
    -- Params: <TODO: :1 start_date … — or omit>
    -- Tokens: TOKEN_NAME (what it filters), no braces; omit the line when there are none
    SELECT 1 AS placeholder;
@@ -196,7 +196,7 @@ return get_active_session().sql(sql, params=[start, end]).to_pandas()
 - **Page missing from the sidebar after preview** — the `st.Page` entry didn't land inside a
   `st.navigation` group list; re-check `streamlit_app.py` with wider `Edit` context.
 - **`check schema-refs` flags a TODO line** — a real or denied schema was left in the header;
-  keep a generic `<TODO>` or use an allowed schema.
+  keep a generic `<TODO>` or use a governance source.
 - **Preview errors loading a query** — the placeholder body was replaced with invalid SQL, or a
   param/token in the loader isn't declared in the `.sql`. Restore the placeholder until the real
   query is ready.

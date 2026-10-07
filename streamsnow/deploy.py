@@ -31,6 +31,7 @@ from pathlib import Path
 from .config import (
     DEPLOY_SOURCES,
     GITHUB_AUTH_MODES,
+    SHARED_DATABASES,
     Config,
     ConfigError,
     github_owner,
@@ -113,9 +114,7 @@ def generate_create_sql(cfg: Config, slug: str, sha: str = "<sha>") -> str:
 # in every account (owned by ACCOUNTADMIN, USAGE granted to PUBLIC by default),
 # so setup SQL must never try to create it.
 SYSTEM_POOL = "SYSTEM_COMPUTE_POOL_CPU"
-# Databases Snowflake shares into every account: reads need IMPORTED PRIVILEGES,
-# not USAGE + SELECT.
-_SHARED_DATABASES = ("SNOWFLAKE_SAMPLE_DATA", "SNOWFLAKE")
+_SHARED_DATABASES = SHARED_DATABASES  # moved to config: the loader refuses app data there
 
 # Object types an app can read, as GRANT's plural keywords. Snowflake keeps a separate
 # grant per type: "Grants on TABLE don't apply to dynamic tables", so a dynamic table in
@@ -135,6 +134,26 @@ READ_OBJECT_TYPES = (
     "ICEBERG TABLES",
     "EXTERNAL TABLES",
 )
+
+
+def imported_databases(cfg: Config) -> frozenset[str]:
+    """Databases that take IMPORTED PRIVILEGES instead of per-schema grants: the
+    configured ``governance.imported_databases`` plus Snowflake's own shares. A
+    share rejects USAGE + SELECT grants, so the admin script would fail there."""
+    return frozenset({*_SHARED_DATABASES, *(d.upper() for d in cfg.governance.imported_databases)})
+
+
+def source_databases(cfg: Config) -> dict[str, list[str]]:
+    """``governance.sources`` grouped by database, in config order.
+
+    One ``GRANT USAGE ON DATABASE`` per database however many of its schemas
+    are sources: Snowflake accepts the repeat, but the admin reading the file
+    should see each grant once.
+    """
+    grouped: dict[str, list[str]] = {}
+    for fq in cfg.governance.sources:
+        grouped.setdefault(fq.split(".", 1)[0].upper(), []).append(fq.upper())
+    return grouped
 
 
 def _stage_objects(cfg: Config) -> list[str]:
@@ -374,7 +393,13 @@ def generate_admin_sql(
                 f"--viewer-role {r!r} is a Snowflake system role or one of StreamSnow's own "
                 "roles: grant the viewer role to a role people or agents use day to day."
             )
-    shared_gov = gov.database.upper() in _SHARED_DATABASES
+    by_db = source_databases(cfg)
+    imported = imported_databases(cfg)
+    granted = {db: fqs for db, fqs in by_db.items() if db not in imported}
+    shared = [db for db in by_db if db in imported]
+    app_data = gov.app_data
+    app_data_db = app_data.split(".", 1)[0]
+    created_dbs = {d.upper() for d in databases}
 
     out: list[str] = [
         "-- StreamSnow admin bootstrap: one-time Snowflake objects for a first deploy.",
@@ -390,7 +415,19 @@ def generate_admin_sql(
         "USE ROLE SYSADMIN;",
     ]
     out += [f"CREATE DATABASE IF NOT EXISTS {db};" for db in databases]
+    if app_data_db.upper() not in created_dbs | set(by_db):
+        out.append(f"CREATE DATABASE IF NOT EXISTS {app_data_db};")
     out += [f"CREATE SCHEMA IF NOT EXISTS {s};" for s in schemas]
+    if app_data.upper() not in {s.upper() for s in schemas}:
+        if app_data_db.upper() in by_db:
+            out += [
+                f"-- App data lives in source database {app_data_db}: SYSADMIN needs CREATE SCHEMA",
+                "-- on it, or run the next line as that database's owner.",
+            ]
+        out += [
+            "-- App data: the schema for views and dynamic tables built for the apps.",
+            f"CREATE SCHEMA IF NOT EXISTS {app_data};",
+        ]
     out += [
         f"CREATE WAREHOUSE IF NOT EXISTS {o.default_warehouse}",
         "  WAREHOUSE_SIZE = XSMALL AUTO_SUSPEND = 60 AUTO_RESUME = TRUE",
@@ -459,8 +496,8 @@ def generate_admin_sql(
 
     out += [
         "",
-        f"-- Data the apps read: governance database {gov.database}, allowed schemas only",
-        f"-- ({', '.join(gov.schema_allow)}). Only the CI role gets it: deployed apps run with",
+        f"-- Data the apps read: governance.sources ({', '.join(gov.sources)}).",
+        "-- Only the CI role gets it: deployed apps run with",
         "-- their owner's rights, so viewers need USAGE on the app, not SELECT on the data.",
         "-- Schema-level future grants replace database-level ones of the same object type, for",
         "-- every role: check SHOW FUTURE GRANTS IN DATABASE <db> first, and repeat at schema",
@@ -470,45 +507,79 @@ def generate_admin_sql(
     ]
 
     def _data_grants(role: str) -> list[str]:
-        grants = [f"GRANT USAGE ON DATABASE {gov.database} TO ROLE {role};"]
-        for schema in gov.schema_allow:
-            fq = f"{gov.database}.{schema}"
-            grants.append(f"GRANT USAGE ON SCHEMA {fq} TO ROLE {role};")
-            for scope in ("ALL", "FUTURE"):
-                grants += [
-                    f"GRANT SELECT ON {scope} {kind} IN SCHEMA {fq} TO ROLE {role};"
-                    for kind in READ_OBJECT_TYPES
-                ]
+        grants: list[str] = []
+        for db, fqs in granted.items():
+            grants.append(f"GRANT USAGE ON DATABASE {db} TO ROLE {role};")
+            for fq in fqs:
+                grants.append(f"GRANT USAGE ON SCHEMA {fq} TO ROLE {role};")
+                for scope in ("ALL", "FUTURE"):
+                    grants += [
+                        f"GRANT SELECT ON {scope} {kind} IN SCHEMA {fq} TO ROLE {role};"
+                        for kind in READ_OBJECT_TYPES
+                    ]
         return grants
 
-    def _imported(role: str) -> str:
-        return f"GRANT IMPORTED PRIVILEGES ON DATABASE {gov.database} TO ROLE {role};"
+    def _imported(db: str, role: str) -> str:
+        return f"GRANT IMPORTED PRIVILEGES ON DATABASE {db} TO ROLE {role};"
 
     viewer_opt_in = [
         "-- Opt-in only: let the viewer role query this data directly (for example so",
         "-- local preview can connect as the viewer role). Leave commented for least privilege:",
     ]
-    if shared_gov:
+    for db in shared:
         out += [
-            f"-- {gov.database} is a shared database: USAGE + SELECT grants do not apply to it;",
+            f"-- {db} is a shared database: USAGE + SELECT grants do not apply to it;",
             "-- IMPORTED PRIVILEGES (below, as ACCOUNTADMIN) grants read on the whole share.",
         ]
-    else:
+    if granted:
         out += _data_grants(ci)
         out += viewer_opt_in + [f"--   {g}" for g in _data_grants(viewer)]
         out += [
-            f"-- If {gov.database} is a SHARED database (a Marketplace or data-share import,",
-            "-- e.g. SNOWFLAKE_SAMPLE_DATA), the grants above fail; use this instead,",
-            "-- as ACCOUNTADMIN (it covers the whole share, not just the allowed schemas):",
-            f"--   {_imported(ci)}",
+            "-- If one of these is a SHARED database (a Marketplace or data-share import),",
+            "-- its grants above fail: list it under governance.imported_databases and re-run",
+            "-- this command. It then gets, as ACCOUNTADMIN (covering the whole share):",
+            *[f"--   {_imported(db, ci)}" for db in granted],
         ]
+
+    out += [
+        "",
+        f"-- App data ({app_data}): views and dynamic tables built for the apps. The deploy",
+        "-- job creates them from DDL in the repo, owned by the CI role. No CREATE TABLE:",
+        "-- deployed DDL never holds a plain table, whose CREATE OR ALTER can drop column data.",
+        f"-- Dynamic tables there refresh with WAREHOUSE = {o.default_warehouse}, which the CI",
+        "-- role already uses. Before the first one: enable change tracking on each source",
+        "-- table an incremental refresh reads (its owner runs ALTER TABLE ... SET",
+        "-- CHANGE_TRACKING = TRUE), or use REFRESH_MODE = FULL; and grant the CI role",
+        "-- OPERATE on any dynamic table in a source that one of them reads.",
+    ]
+    if app_data_db.upper() not in created_dbs | set(granted):
+        out.append(f"GRANT USAGE ON DATABASE {app_data_db} TO ROLE {ci};")
+    out += [
+        f"GRANT USAGE ON SCHEMA {app_data} TO ROLE {ci};",
+        f"GRANT CREATE VIEW ON SCHEMA {app_data} TO ROLE {ci};",
+        f"GRANT CREATE DYNAMIC TABLE ON SCHEMA {app_data} TO ROLE {ci};",
+    ]
+    viewer_app_data: list[str] = []
+    if app_data_db.upper() not in created_dbs:
+        viewer_app_data.append(f"GRANT USAGE ON DATABASE {app_data_db} TO ROLE {viewer};")
+    viewer_app_data.append(f"GRANT USAGE ON SCHEMA {app_data} TO ROLE {viewer};")
+    for scope in ("ALL", "FUTURE"):
+        viewer_app_data += [
+            f"GRANT SELECT ON {scope} {kind} IN SCHEMA {app_data} TO ROLE {viewer};"
+            for kind in READ_OBJECT_TYPES
+        ]
+    out += [
+        "-- Opt-in only: let the viewer role query app data directly (local preview).",
+        "-- Leave commented for least privilege:",
+        *[f"--   {g}" for g in viewer_app_data],
+    ]
 
     out += ["", "-- 4. Account-level objects -----------------------------------------------"]
     out.append("USE ROLE ACCOUNTADMIN;")
     account: list[str] = []
-    if shared_gov:
-        account.append(_imported(ci))
-        account += viewer_opt_in + [f"--   {_imported(viewer)}"]
+    if shared:
+        account += [_imported(db, ci) for db in shared]
+        account += viewer_opt_in + [f"--   {_imported(db, viewer)}" for db in shared]
     if cfg.runtime == "container":
         eai = o.external_access_integration
         account += [
@@ -574,23 +645,26 @@ def generate_teardown_sql(cfg: Config) -> str:
     Printed, never run. Everything the bootstrap created goes, in an order
     where each DROP succeeds: the app database first (it holds the apps,
     stage, secret and git repository the CI role owns), then the warehouse,
-    the CI user, the roles, and the account-level integrations. The
-    governance database the apps read and Snowflake's pre-provisioned
+    the CI user, the roles, and the account-level integrations. Every
+    database that holds a source, Snowflake's shares and the pre-provisioned
     compute pool are never named, system roles are refused, and every DROP of
     something that may predate StreamSnow says so. Every statement uses
-    ``IF EXISTS``, so a partial teardown can simply be re-run.
+    ``IF EXISTS``, so a partial teardown can simply be re-run. App data in the
+    app database goes with it; elsewhere its DROP SCHEMA is printed commented.
+    PR 3 adds the declared app-data objects' DROPs at the top of section 2,
+    before any role is dropped.
     """
     o = cfg.snowflake.objects
     ci = cfg.snowflake.roles.ci_role
     viewer = cfg.snowflake.roles.viewer_role
-    gov = cfg.governance.database.upper()
-    protected = {gov, *_SHARED_DATABASES}
+    by_db = source_databases(cfg)
+    protected = set(by_db) | imported_databases(cfg)
     for field, db in (("app_database", o.app_database), ("stage_database", o.stage_database)):
         if db.upper() in protected:
             raise ConfigError(
-                f"snowflake.objects.{field} = {db!r} is the governance or a Snowflake-shared "
-                "database; teardown would drop data the apps read. Refusing: point "
-                f"{field} at a StreamSnow-only database first, or drop objects by hand."
+                f"snowflake.objects.{field} = {db!r} holds a governance source or is a "
+                "Snowflake-shared database; teardown would drop data the apps read. Refusing: "
+                f"point {field} at a StreamSnow-only database first, or drop objects by hand."
             )
     for field, role in (("ci_role", ci), ("viewer_role", viewer)):
         if role.upper() in _SYSTEM_ROLES:
@@ -605,8 +679,7 @@ def generate_teardown_sql(cfg: Config) -> str:
         "-- so you can start fresh. REVIEW EVERY LINE before running; this cannot be undone.",
         f"-- Generated from streamsnow.config.yaml ({cfg.runtime} runtime, "
         f"{cfg.deploy.source} deploy source).",
-        f"-- Kept: the governance database {cfg.governance.database} and its data, and "
-        f"{SYSTEM_POOL}.",
+        f"-- Kept: the source databases ({', '.join(by_db)}) and their data, and {SYSTEM_POOL}.",
         "-- Every DROP uses IF EXISTS, so re-running a partial teardown is safe.",
         "-- Run as ACCOUNTADMIN, which owns or inherits everything the bootstrap made.",
         "USE ROLE ACCOUNTADMIN;",
@@ -633,16 +706,26 @@ def generate_teardown_sql(cfg: Config) -> str:
         ]
         if outside:
             out += ["-- Deploy-source objects that live outside the app database:", *outside]
+    app_data = cfg.governance.app_data
+    out += ["", f"-- 2. App data ({app_data})."]
+    if app_data.split(".", 1)[0].upper() == o.app_database.upper():
+        out.append(f"-- It lives in {o.app_database}, so step 1 dropped it with everything in it.")
+    else:
+        out += [
+            "-- It lives outside the app database. Drop it only if nothing else lives there:",
+            "-- uncomment the next line.",
+            f"--   DROP SCHEMA IF EXISTS {app_data};",
+        ]
     out += [
         "",
-        "-- 2. Warehouse, CI service user, roles (after the objects they own are gone).",
+        "-- 3. Warehouse, CI service user, roles (after the objects they own are gone).",
         existed,
         f"DROP WAREHOUSE IF EXISTS {o.default_warehouse};",
         f"DROP USER IF EXISTS {ci_user_name(ci)};",
         f"DROP ROLE IF EXISTS {viewer};",
         f"DROP ROLE IF EXISTS {ci};",
         "",
-        "-- 3. Account-level objects.",
+        "-- 4. Account-level objects.",
     ]
     account: list[str] = []
     if cfg.runtime == "container":

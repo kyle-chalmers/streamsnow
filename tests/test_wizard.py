@@ -1,4 +1,4 @@
-"""The configure wizard's UX contract: ≤5 questions, commented-YAML output."""
+"""The configure wizard's UX contract: every question prefilled, commented-YAML output."""
 
 from __future__ import annotations
 
@@ -7,33 +7,39 @@ from pathlib import Path
 import typer
 import yaml
 
-from streamsnow import cli
+from streamsnow import cli, probe
 from streamsnow.cli import _connection_hint, _prompt_config, _render_config_yaml
 from streamsnow.config import Config
 from streamsnow.tools import doctor
 
 # Captured at import, before tests/conftest.py stubs it per test.
 _REAL_SNOW_CONNECTIONS = cli._snow_connections
+_REAL_LIVE_PROBE = cli._live_probe
 
 
 def _run_wizard(monkeypatch, prefill=None, directory=Path("acme-analytics")):
     """Drive the wizard accepting every default; return (config dict, prompts asked)."""
-    asked: list[str] = []
+    asked: list[tuple[str, object]] = []
 
     def fake_prompt(text, default=None, **kwargs):
-        asked.append(str(text))
-        # The account locator is the one question with no default.
+        asked.append((str(text), default))
+        # The account locator is the one question with no default on a first run.
         return default if default is not None else "ab12345.us-east-1"
 
     monkeypatch.setattr(typer, "prompt", fake_prompt)
     return _prompt_config(prefill, directory), asked
 
 
-def test_wizard_asks_at_most_five_questions(monkeypatch):
+def test_every_question_has_a_detected_or_default_answer(monkeypatch):
+    """D8: no fixed question count. Every question arrives prefilled, so Enter through
+    the wizard writes a complete, valid config. The account locator is the one value
+    nothing can default on a first run; a re-run prefills it too."""
     cfg_dict, asked = _run_wizard(monkeypatch)
-    assert len(asked) <= 5, f"configure asked {len(asked)} questions: {asked}"
-    # The result is a complete, valid config despite only 5 answers.
+    no_default = [q for q, default in asked if default in (None, "")]
+    assert all(q.startswith("Snowflake account") for q in no_default), no_default
     Config.from_dict(cfg_dict)
+    _, again = _run_wizard(monkeypatch, prefill=cfg_dict)
+    assert all(default not in (None, "") for _, default in again), again
 
 
 def test_wizard_derives_project_identity_from_directory(monkeypatch):
@@ -50,7 +56,9 @@ def test_wizard_prefill_survives_for_unasked_values(monkeypatch):
         "governance": {"schema_deny": ["SECRET_SCHEMA"]},
     }
     cfg_dict, asked = _run_wizard(monkeypatch, prefill=prefill)
-    assert len(asked) <= 5
+    assert all(
+        default not in (None, "") for q, default in asked if not q.startswith("Snowflake account")
+    )
     # Hand-edited values the wizard no longer asks about are preserved.
     assert cfg_dict["project"]["slug"] == "custom-slug"
     assert cfg_dict["snowflake"]["roles"]["viewer_role"] == "MY_VIEWER"
@@ -194,7 +202,7 @@ def test_wizard_defaults_connection_name_to_the_existing_default_connection(monk
     _fake_snow(monkeypatch, (0, _ROWS))
     cfg_dict, asked = _run_wizard(monkeypatch)
     assert cfg_dict["snowflake"]["connection_name"] == "tutorial"
-    assert len(asked) <= 5  # detected, never asked
+    assert not any("connection" in q.lower() for q, _ in asked)  # detected, never asked
     cfg = Config.from_dict(cfg_dict)
     # ...so the doctor's connection check passes on the same rows.
     res = doctor.check_snow_connection(
@@ -219,7 +227,7 @@ def test_wizard_ignores_a_default_connection_for_another_account(monkeypatch, ca
     cfg_dict, asked = _run_wizard(monkeypatch)
     assert cfg_dict["snowflake"]["connection_name"] == "acme-analytics"
     assert cfg_dict["snowflake"]["account"] == "ab12345.us-east-1"
-    assert len(asked) <= 5
+    assert not any("connection" in q.lower() for q, _ in asked)  # detected, never asked
     out = capsys.readouterr().out
     assert "'tutorial' is for another account" in out
     assert "zz99999" not in out.lower() and "ab12345" not in out.lower()
@@ -282,3 +290,54 @@ def test_connection_hint_matches_what_snow_already_has():
     assert exists.startswith(f"snow connection set-default {name}")
     already = _connection_hint(cfg, [{"connection_name": name, "is_default": True}])
     assert "snow connection add" not in already and "already your default" in already
+
+
+def test_wizard_checks_sources_live_and_prefills_imported_databases(monkeypatch, capsys):
+    calls = []
+
+    def fake_probe(connection, targets):
+        calls.append((connection, list(targets)))
+        return probe.ProbeReport(
+            role="ANALYST",
+            results=(
+                probe.ProbeResult("ANALYTICS_DB.ANALYTICS", probe.VISIBLE, "ANALYST"),
+                probe.ProbeResult(
+                    "ANALYTICS_DB.REPORTING", probe.NOT_VISIBLE, "ANALYST", "not visible"
+                ),
+            ),
+            imported_databases=("ANALYTICS_DB", "PARTNER_SHARE"),
+        )
+
+    monkeypatch.setattr(cli, "_live_probe", fake_probe)
+    cfg_dict, _ = _run_wizard(monkeypatch)
+    assert calls == [("acme-analytics", ["ANALYTICS_DB.ANALYTICS", "ANALYTICS_DB.REPORTING"])]
+    # Only an imported database that holds a source (or app data) is recorded.
+    assert cfg_dict["governance"]["imported_databases"] == ["ANALYTICS_DB"]
+    Config.from_dict(cfg_dict)
+    out = " ".join(capsys.readouterr().out.split())
+    assert "role ANALYST" in out and "ANALYTICS_DB.REPORTING: not visible" in out
+
+
+def test_wizard_without_a_probe_says_unverified_and_writes_no_imported_list(monkeypatch, capsys):
+    cfg_dict, _ = _run_wizard(monkeypatch)  # conftest's stub: unverified
+    assert "imported_databases" not in cfg_dict["governance"]
+    assert "not checked live" in capsys.readouterr().out
+
+
+def test_live_probe_only_runs_for_a_connection_this_machine_has(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("probed without a matching snow connection")
+
+    monkeypatch.setattr(probe, "probe_schemas", boom)
+    monkeypatch.setattr(cli, "_snow_connections", lambda: None)
+    report = _REAL_LIVE_PROBE("acme", ["ANALYTICS_DB.REPORTING"])
+    assert report.results[0].status == probe.UNVERIFIED and "acme" in report.error
+    seen = []
+    monkeypatch.setattr(cli, "_snow_connections", lambda: [{"connection_name": "acme"}])
+    monkeypatch.setattr(
+        probe,
+        "probe_schemas",
+        lambda c, t, **_kw: seen.append((c, t)) or probe.unverified(t, "x"),
+    )
+    _REAL_LIVE_PROBE("acme", ["ANALYTICS_DB.REPORTING"])
+    assert seen == [("acme", ["ANALYTICS_DB.REPORTING"])]

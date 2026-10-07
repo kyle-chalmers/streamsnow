@@ -9,8 +9,8 @@ inputs it names ([briefs/](briefs/)); without subagents, follow the brief yourse
 
 1. Dispatch **data-scout** ([briefs/data-scout.md](briefs/data-scout.md)).
 2. Write its profile into §3: each object's fully qualified name, grain, date column and range,
-   and size. Record its `gaps` in §10. Every object must sit on the allowlist; a gap that blocks
-   a page goes to the user now, not after the build.
+   and size. Record its `gaps` in §10. Every object must sit in a governance source or the
+   app-data schema; a gap that blocks a page goes to the user now, not after the build.
 
 ## Design (§11 phase `design`)
 

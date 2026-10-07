@@ -138,7 +138,7 @@ def test_every_admin_statement_is_safe_to_rerun(cfg, key):
 
 
 def test_default_output_changes_only_where_intended():
-    """Without the new flags, only the viewer grant, EAI and read-type hunks change vs 0.7.5."""
+    """Without the new flags, only the viewer grant, EAI, read-type and app-data hunks change vs 0.7.5."""
     old = _statements(BASELINE.read_text(encoding="utf-8"))
     new = _statements(generate_admin_sql(_cfg()))
     removed = [s for s in old if s not in new]
@@ -158,10 +158,18 @@ def test_default_output_changes_only_where_intended():
         for scope in ("ALL", "FUTURE")
         for kind in new_kinds
     ]
+    # 0.11 (#78): the app-data schema, created by SYSADMIN, built in by the CI role.
+    app_data = "STREAMSNOW_APPS.STREAMSNOW_REPORTING"
+    app_data_grants = [
+        f"GRANT {priv} ON SCHEMA {app_data} TO ROLE STREAMSNOW_DEPLOY_ROLE;"
+        for priv in ("USAGE", "CREATE VIEW", "CREATE DYNAMIC TABLE")
+    ]
     assert added == [
+        f"CREATE SCHEMA IF NOT EXISTS {app_data};",
         "SET streamsnow_me = '\"' || CURRENT_USER() || '\"';",
         "GRANT ROLE STREAMSNOW_VIEWER_ROLE TO USER IDENTIFIER($streamsnow_me);",
         *read_grants,
+        *app_data_grants,
         "CREATE OR REPLACE" + body,
     ]
     # Every other statement is identical and in the same order.
@@ -353,12 +361,27 @@ def test_teardown_drops_everything_in_a_safe_order():
     ]
 
 
+def test_teardown_app_data_in_the_app_database_goes_with_it():
+    sql = generate_teardown_sql(_cfg())
+    assert "-- 2. App data (STREAMSNOW_APPS.STREAMSNOW_REPORTING)." in sql
+    assert "DROP SCHEMA" not in sql
+
+
+def test_teardown_app_data_elsewhere_is_offered_commented_before_the_roles():
+    sql = generate_teardown_sql(_cfg(**{"governance.app_data": "STREAMSNOW_DATA.REPORTING"}))
+    line = "--   DROP SCHEMA IF EXISTS STREAMSNOW_DATA.REPORTING;"
+    assert line in sql and "only if nothing else lives there" in sql
+    assert not any(s.startswith("DROP SCHEMA") for s in _drops(sql))
+    assert sql.index(line) < sql.index("DROP ROLE IF EXISTS STREAMSNOW_VIEWER_ROLE;")
+
+
 @pytest.mark.parametrize("cfg", _all_configs(), ids=lambda c: f"{c.runtime}-{c.deploy.source}")
 def test_teardown_never_touches_governance_data_or_the_system_pool(cfg):
     sql = generate_teardown_sql(cfg)
     for stmt in _drops(sql):
         assert re.match(r"^(DROP [A-Z ]+ IF EXISTS|ALTER COMPUTE POOL IF EXISTS) ", stmt), stmt
-        assert cfg.governance.database not in stmt
+        for source in cfg.governance.sources:
+            assert source.split(".", 1)[0] not in stmt, stmt
         assert SYSTEM_POOL not in stmt
 
 

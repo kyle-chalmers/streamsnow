@@ -47,7 +47,7 @@ call); otherwise ask in chat and wait for an explicit answer. Detection never co
 confirmation: what Stage 1 found is the recommended first option. With a config already present
 nothing is being decided, so skip the setup questions (setup.md §2c). In order:
 - no Snowflake connection: set it up for them, or guide them (setup.md §2a); then redo Stage 1 step 3;
-- one question each: runtime, database, allowed schemas, denied schemas, deploy source, and the
+- one question each: runtime, sources, app-data schema, denied schemas, deploy source, and the
   connection when §2a has not confirmed it (setup.md §2c);
 - the defaults it does not ask: bullets explaining each, then one keep or change question (§2c);
 - git name and email, only if missing;

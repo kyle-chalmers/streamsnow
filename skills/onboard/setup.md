@@ -159,17 +159,22 @@ is decided in [SKILL.md](SKILL.md) Stage 3.
 When `streamsnow.config.yaml` already exists, run `streamsnow init --no-starter-app` as is: it
 reuses the file and writes only the missing repo files. Skip the proposals below.
 
-The wizard asks **at most 5 questions**: runtime, Snowflake account, the database apps query, the
-allowed schemas, and the deploy source. Everything else (project name, roles, warehouse, schema
-names, container objects) is written as a sensible default with an inline comment saying when to
-change it; the file is the editing surface. Don't make the user answer those questions cold:
-investigate, explain each setting, ask each one with your proposal as the recommended option, then
-pass the confirmed answers as flags.
+The wizard asks only what nothing can detect or default, and prefills every answer: runtime,
+Snowflake account, the **sources** (each `DATABASE.SCHEMA` holding report-ready data the apps
+read, in any databases), the **app-data schema** (where views and dynamic tables built for the
+apps will live; default `<app_database>.STREAMSNOW_REPORTING`), and the deploy source. When the
+`snow` connection exists it checks each source live, read-only, and says which ones its role can
+see. Everything else (project name, roles, warehouse, schema names, container objects) is written
+as a sensible default with an inline comment saying when to change it; the file is the editing
+surface. Don't make the user answer those questions cold: investigate, explain each setting, ask
+each one with your proposal as the recommended option, then pass the confirmed answers as flags.
+`streamsnow configure` and `init` may open a Snowflake sign-in window for that live check
+(read-only, and the wait is capped); `streamsnow doctor --live` re-checks the sources later.
 
 **The user decides; everything below is a proposal.** Before probing, say in one line what you
 will read and from which connection, so the user can redirect it or decline. The user can:
 
-- skip the investigation and answer the five questions themselves, or run
+- skip the investigation and answer the wizard's questions themselves, or run
   `streamsnow init --no-starter-app` in their own terminal and answer the wizard there;
 - choose which connection, MCP server or role you investigate with;
 - override any proposed answer, including choosing `container` or `git-repository` when the
@@ -257,8 +262,8 @@ read-only SQL tool accepts.
 |---|---|---|
 | Runtime | `SHOW COMPUTE POOLS ->> SELECT "name", "state" FROM $1` | No equivalent: try another source, or ask |
 | Account | none (see below the table) | |
-| Database | `SHOW DATABASES ->> SELECT "name", "kind", "comment" FROM $1` | `SELECT database_name, type, comment FROM SNOWFLAKE.INFORMATION_SCHEMA.DATABASES` |
-| Schemas | `SHOW SCHEMAS IN DATABASE <db> ->> SELECT "name", "comment" FROM $1` | `SELECT schema_name, comment FROM <db>.INFORMATION_SCHEMA.SCHEMATA` |
+| Source databases | `SHOW DATABASES ->> SELECT "name", "kind", "comment" FROM $1` | `SELECT database_name, type, comment FROM SNOWFLAKE.INFORMATION_SCHEMA.DATABASES` |
+| Source schemas | `SHOW SCHEMAS IN DATABASE <db> ->> SELECT "name", "comment" FROM $1` | `SELECT schema_name, comment FROM <db>.INFORMATION_SCHEMA.SCHEMATA` |
 | What schemas hold | `SELECT table_schema, COUNT(*) FROM <db>.INFORMATION_SCHEMA.TABLES WHERE table_schema <> 'INFORMATION_SCHEMA' GROUP BY 1` | (already a SELECT) |
 | Deploy source | `SHOW GIT REPOSITORIES IN ACCOUNT ->> SELECT "database_name", "schema_name", "name" FROM $1` | No equivalent: `stage-copy` is the default either way |
 
@@ -283,10 +288,11 @@ strongest first, and treat names as the weakest:
 
 A few facts hold whatever the naming:
 
-- **Some databases cannot be the governed one**: a share (`kind` `IMPORTED DATABASE`) takes
-  `GRANT IMPORTED PRIVILEGES`, not the per-schema `SELECT` grants `deploy-setup --admin` writes;
-  a `PERSONAL DATABASE` belongs to one user; an `APPLICATION` database (such as `SNOWFLAKE`) and
-  the StreamSnow app database (`STREAMSNOW_APPS` by default) hold no reporting data.
+- **Shared databases can hold sources**: a share (`kind` `IMPORTED DATABASE`) takes
+  `GRANT IMPORTED PRIVILEGES` on the whole share instead of per-schema `SELECT`; the wizard
+  records it in `governance.imported_databases`. App data can never live in a share. A
+  `PERSONAL DATABASE` belongs to one user; an `APPLICATION` database (such as `SNOWFLAKE`) and the
+  StreamSnow app database (`STREAMSNOW_APPS` by default) hold no reporting data.
 - **Runtime**: a visible compute pool means `container` works; propose it, defaulting to
   `SYSTEM_COMPUTE_POOL_CPU` when listed. No pool visible to a role that can see them suggests a
   trial account, which only runs `warehouse`; a paid account's admin can still grant a pool.
@@ -298,17 +304,19 @@ A few facts hold whatever the naming:
   the `RAW,STAGING` default. When there are none, omit `--deny-schemas` so the default stands,
   and say it guards names that do not exist yet. A layer the evidence cannot place (an
   intermediate one, say) goes in neither list until the user decides. Never put a schema in both.
+  An entry is a schema name (`RAW`: blocked in every database) or `DATABASE.SCHEMA`
+  (`FINANCE.RAW`: that database only).
 - **Two or more plausible candidates** for any answer: show them and ask.
 
 Different sources run as different roles and can see different databases (a personal `snow`
 connection may see a handful where an admin-role MCP sees many more). When they disagree, show
 what each role sees rather than picking one silently. Proposing from a broader role is fine: the
-allowed schemas still reach apps only through the grants `deploy-setup --admin` writes.
+sources still reach apps only through the grants `deploy-setup --admin` writes.
 
 These are SHOW and SELECT-over-SHOW (or `INFORMATION_SCHEMA`) only. **Never run DDL, grants, or anything that writes**, and
 never switch roles to get more visibility. A probe that errors (no privilege, no source can see
 it) or returns nothing to choose from is not a failure: that question falls back to asking the
-user plainly, with no proposal, and you say why. With no usable source at all, ask all five and
+user plainly, with no proposal, and you say why. With no usable source at all, ask each question and
 pass `--account` with the locator the user gives.
 
 ### 2c · Propose, confirm, run
@@ -318,22 +326,26 @@ question rule in [SKILL.md](SKILL.md) Stage 2). Before each question, explain th
 or three plain lines: what it is, what it controls, and what changing it later costs. Then ask,
 with the detected value as the recommended first option, its reason and source in one line, and
 the other candidates after it. Where nothing was found or two candidates are plausible, say so
-and ask with no recommendation. Order: runtime, database, allowed schemas, denied schemas, deploy
+and ask with no recommendation. Order: runtime, sources, app-data schema, denied schemas, deploy
 source, plus the connection when §2a has not already confirmed it. The explanations come from the
-facts above (runtime, deploy source and deny list), and for the schema lists: `deploy-setup
---admin` grants the CI role SELECT on exactly the allowed schemas, and deployed apps run with
-their owner's rights (the CI role), so the allowed list is the data boundary for every viewer; the
-denied list is what `streamsnow check schema-refs` blocks in app code. Ask the allowed and denied
-lists as two questions, because they are two different boundaries. Then write the config with
+facts above (runtime, deploy source and deny list), and for the sources: `deploy-setup --admin`
+grants the CI role SELECT on exactly these schemas, and deployed apps run with their owner's
+rights (the CI role), so the sources are the data boundary for every viewer; app SQL names
+objects in full (`DATABASE.SCHEMA.OBJECT`). For the app-data schema: the deploy job will build
+views and dynamic tables there, owned by the CI role, and the admin script creates it; propose the
+default unless the team keeps such objects elsewhere, and never a source or a share. The denied
+list is what `streamsnow check schema-refs` blocks in app code. Ask the sources and the denied
+list as two questions, because they are two different boundaries. Then write the config with
 the confirmed answers:
 
 ```
 streamsnow configure --runtime container --connection <name> \
-  --database ANALYTICS --schemas MARTS,REPORTING --deny-schemas RAW,STG_CRM \
-  --deploy-source stage-copy
+  --sources ANALYTICS.MARTS,ANALYTICS.REPORTING \
+  --app-data STREAMSNOW_APPS.STREAMSNOW_REPORTING \
+  --deny-schemas RAW,STG_CRM --deploy-source stage-copy
 ```
 
-With all five answers passed, no prompt fires. Before writing the repo files, explain the
+With every answer passed, no prompt fires. Before writing the repo files, explain the
 defaults the wizard did not ask about, as a bulleted list with one bullet per thing that applies,
 then ask one question: keep them, or change some. Each bullet gives the proposed value, what it
 is, what uses it, whether the admin script creates it, and when a team would change it (a team
@@ -409,8 +421,9 @@ warehouse, the CI and viewer roles, a CI service user and the grants that tie th
      uncomments them, so local preview uses a role whose data reads match the CI role's.
    - **CI service user**: the account the deploy workflow signs in as, with a key pair and no
      password.
-   - **Grants**: the CI role gets SELECT on exactly the allowed schemas, which is what makes the
-     allowed list the data boundary.
+   - **Grants**: the CI role gets SELECT on exactly the sources, which is what makes the
+     sources the data boundary, and builds views and dynamic tables in the app-data schema the
+     script creates.
    - **Container runtime only**: the PyPI access integration and the compute pool permission.
    - **Safe to re-run**, and Claude never runs it. `streamsnow deploy-setup --teardown` prints
      a start-fresh cleanup the admin must review line by line before running.
@@ -486,8 +499,8 @@ it, tell the user plainly and ask:
   which means the policy is doing its job and the deploy job will still sign in from CI;
 - it is meant to run once, right after the admin setup.
 
-On a yes, run `streamsnow ci-key verify --object <DB.SCHEMA.TABLE>` with a table or view in an
-allowed governance schema that the first app will read (leave `--object` off if there is none
+On a yes, run `streamsnow ci-key verify --object <DB.SCHEMA.TABLE>` with a table or view in a
+governance source that the first app will read (leave `--object` off if there is none
 yet). It prints each check by object name and never the key, account or user. Exit 1 names
 what failed: a missing grant goes back to the admin as one line naming the grant; a sign-in
 failure usually means the admin registered a different public key, so compare the fingerprint
