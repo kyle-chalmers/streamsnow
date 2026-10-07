@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 from _app_data_fixtures import AD as FAD
 from _app_data_fixtures import OBJECTS_DIR, dynamic_table, view, write_app, write_config
 
@@ -538,3 +539,50 @@ def test_any_finding_empties_the_plan_sql_and_names_the_owning_app(tmp_path):
     assert plan.sql() == ""
     assert {f["app"] for f in plan.findings} == {"acme-finance"}
     assert plan.for_app("acme-sales") == []
+
+
+def test_an_object_with_an_unknown_dependency_is_not_in_the_plan(tmp_path):
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"V_ONE": view("V_ONE", REGION_BY_DAY.format(src=f"{FAD}.MISSING"))},
+    )
+    plan = _plan(tmp_path)
+    assert not plan.ok and plan.objects == []
+
+
+def test_a_reader_of_a_doubly_owned_object_is_not_in_the_plan(tmp_path):
+    for slug in ("acme-a", "acme-b"):
+        write_app(tmp_path, slug, {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    write_app(
+        tmp_path,
+        "acme-c",
+        {"V_ONE": view("V_ONE", REGION_BY_DAY.format(src=f"{FAD}.DAILY_REVENUE"))},
+    )
+    plan = _plan(tmp_path)
+    assert not plan.ok
+    assert [o.fqn for o in plan.objects] == []
+
+
+def test_a_duplicate_owner_does_not_hide_the_first_ones_findings(tmp_path):
+    write_app(
+        tmp_path,
+        "acme-a",
+        {"V_ONE": view("V_ONE", REGION_BY_DAY.format(src=f"{FAD}.MISSING"))},
+    )
+    write_app(tmp_path, "acme-b", {"V_ONE": dynamic_table("V_ONE")})
+    assert f"reads {FAD}.MISSING, which sits in app data but no app declares" in _details(
+        _plan(tmp_path)
+    )
+
+
+def test_one_object_listed_twice_in_one_index_is_a_finding(tmp_path):
+    app = write_app(tmp_path, "acme-sales", {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    index = app / "sql_review" / "index.yaml"
+    data = yaml.safe_load(index.read_text(encoding="utf-8"))
+    data["objects"].append(dict(data["objects"][0]))
+    index.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    plan = _plan(tmp_path)
+    assert "did not load in full" in _details(plan, "acme-sales")
+    assert plan.incomplete == ["apps/acme-sales/sql_review/index.yaml"]
+    assert not plan.ok and plan.sql() == ""

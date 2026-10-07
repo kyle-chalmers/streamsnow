@@ -542,6 +542,9 @@ def _load_objects(raw: object, idx: Index, problem) -> None:
             continue
         if name.upper() in seen:
             problem(f"object {name!r} is listed more than once", name)
+            # The later entry is dropped, so the loaded list is not what the file says: the
+            # app-data loader must fail closed rather than build from the first entry.
+            idx.objects_complete = False
             continue
         seen.add(name.upper())
         grants = _str_list(entry.get("grants"), f"object {name!r} grants", problem)

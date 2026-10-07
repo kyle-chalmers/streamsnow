@@ -559,8 +559,13 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
                     problems.append((line, _READ_PROBLEMS[verdict].format(name=name)))
             for line, detail in problems:
                 add(slug, rel, line, detail)
-            built[fqn] = AppDataObject(
-                fqn, parsed.kind, slug, rel, obj.reason, parsed.statements, tuple(deps)
+            # Keep the first declaration (as `declared` does) so a duplicate never hides the
+            # earlier one's findings; the duplicate is reported below and drops it from valid.
+            built.setdefault(
+                fqn,
+                AppDataObject(
+                    fqn, parsed.kind, slug, rel, obj.reason, parsed.statements, tuple(deps)
+                ),
             )
             if not problems:
                 valid.add(fqn)
@@ -590,6 +595,7 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
     for fqn, obj in built.items():
         for dep in obj.depends_on:
             if dep not in plan.declared:
+                valid.discard(fqn)
                 add(
                     obj.app,
                     obj.file,
@@ -598,5 +604,12 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
                     f"job would fail creating {fqn}. Declare {dep} in the app that owns it, or "
                     "read a source",
                 )
+    # An object whose dependency is not valid cannot deploy either: the plan holds valid
+    # objects only, so drop dependents until nothing more changes.
+    while True:
+        dropped = {f for f in valid if any(d not in valid for d in built[f].depends_on)}
+        if not dropped:
+            break
+        valid -= dropped
     plan.objects = [o for o in _order(built, add) if o.fqn in valid]
     return plan
