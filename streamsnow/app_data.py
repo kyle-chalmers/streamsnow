@@ -56,7 +56,11 @@ from .policy import (
     split_name,
 )
 from .tools import sql_review_index as sri
-from .tools.check_schema_refs import _normalize_breaks, relation_names
+from .tools.check_schema_refs import (
+    _normalize_breaks,
+    relation_names,
+    statement_relations,
+)
 from .tools.sql_review import OBJECTS_DIR, _mask_with_status
 
 KIND_VIEW = "view"
@@ -399,6 +403,73 @@ class AppDataPlan:
         )
 
 
+_PASSTHROUGH_STOP = re.compile(
+    r"\b(?:JOIN|WHERE|GROUP|HAVING|QUALIFY|DISTINCT|UNION|EXCEPT|MINUS|INTERSECT|LIMIT|TOP"
+    r"|FETCH|OFFSET|ORDER|OVER|PIVOT|UNPIVOT|LATERAL|WITH|SAMPLE|TABLESAMPLE"
+    r"|MATCH_RECOGNIZE|CONNECT|CASE|AT|BEFORE|CHANGES)\b",
+    re.I,
+)
+_ALIAS = rf"(?:\s+(?:AS\s+)?(?:{_IDENT}))?"
+_ITEM_RE = re.compile(rf"(?:\*|(?:{NAME_PATTERN})(?:\s*\.\s*\*)?){_ALIAS}", re.I)
+_SELECT_FROM_RE = re.compile(
+    rf"\s*SELECT\s+(?P<items>.+?)\s+FROM\s+(?P<rel>{NAME_PATTERN}){_ALIAS}\s*", re.I | re.S
+)
+
+
+def is_passthrough(body: str) -> bool:
+    """True when a view's query only selects or renames columns of one relation.
+
+    Such a view adds a hop someone must review and computes nothing: the app can
+    query the relation directly. Deliberately narrow (no function call, literal,
+    join, filter or aggregate at all), so it never flags a view that does work.
+    """
+    if "$$" in body:
+        return False
+    masked = _mask_with_status(body)[0]
+    if "(" in masked or "'" in masked or _PASSTHROUGH_STOP.search(masked):
+        return False
+    m = _SELECT_FROM_RE.fullmatch(masked)
+    if not m:
+        return False
+    return all(_ITEM_RE.fullmatch(item.strip()) for item in m.group("items").split(","))
+
+
+def _consumers(apps: list[Path], indexes: dict, declared: set[str]) -> dict[str, set[tuple]]:
+    """Who reads each declared object, one entry per query, not per file:
+    ``("query", app, path, chunk, statement)``. Evidence is certain SQL only: a
+    metric's ``reads:`` entry (statement 0 of its query file, so it never counts the
+    same query twice) and the statement chunks of ``queries/*.sql`` and app ``.py``
+    files, read with schema-refs' own rules (``statement_relations``), so an error
+    message that mentions an object is not a reader. ``sql_review/`` is skipped:
+    its page files repeat the queries."""
+    out: dict[str, set[tuple]] = {f: set() for f in declared}
+    for app in apps:
+        for page in indexes[app.name].pages:
+            for metric in page.metrics:
+                for name in metric.reads:
+                    fqn = display_name(split_name(name))
+                    if fqn in out:
+                        out[fqn].add(("query", app.name, metric.query, 0, 0))
+        for path in sorted(app.rglob("*")):
+            rel = path.relative_to(app)
+            if (
+                path.suffix not in (".sql", ".py")
+                or not path.is_file()
+                or rel.parts[0] == "sql_review"
+                or any(p.startswith(".") or p == "__pycache__" for p in rel.parts)
+            ):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for rel_ref in statement_relations(text, path.suffix == ".py"):
+                fqn = display_name(rel_ref.parts)
+                if fqn in out:
+                    out[fqn].add(("query", app.name, rel.as_posix(), *rel_ref.query))
+    return out
+
+
 def _rel(repo: Path, path: Path) -> str:
     try:
         return path.resolve().relative_to(repo.resolve()).as_posix()
@@ -456,11 +527,13 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
         bucket.append({"kind": kind, "app": slug, "file": file, "line": line, "detail": detail})
 
     built: dict[str, AppDataObject] = {}
+    indexes: dict[str, sri.Index] = {}
     valid: set[str] = set()
     owners: dict[str, list[tuple[str, str]]] = {}
     for app in apps:
         slug = app.name
         idx = sri.load_index(app)
+        indexes[slug] = idx
         rel_index = _rel(repo, idx.path)
         if idx.exists and not idx.objects_complete:
             plan.incomplete.append(rel_index)
@@ -541,6 +614,25 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
             )
             plan.declared.setdefault(fqn, (slug, parsed.kind))
             problems = list(parsed.problems)
+            if obj.reason not in REASONS:
+                got = f" (got {obj.reason!r})" if obj.reason else ""
+                add(
+                    slug,
+                    rel_index,
+                    1,
+                    f"{fqn} needs reason: performance (a dynamic table pre-computes a slow or "
+                    "costly query) or reason: shared_logic (one view replaces logic two or more "
+                    "queries, pages or apps repeat) in its index.yaml entry: each app-data object "
+                    f"is more SQL someone must review{got}",
+                )
+            if parsed.kind == KIND_VIEW and parsed.body and is_passthrough(parsed.body):
+                problems.append(
+                    (
+                        parsed.line,
+                        f"{fqn} is a passthrough view: it only selects or renames columns of one "
+                        "relation. Query that relation directly; each object is more SQL to review",
+                    )
+                )
             deps: list[str] = []
             for line, rparts in parsed.reads:
                 name = display_name(rparts)
@@ -611,5 +703,41 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
         if not dropped:
             break
         valid -= dropped
+    consumers = _consumers(apps, indexes, set(plan.declared))
+    for fqn, obj in built.items():
+        for dep in obj.depends_on:
+            if dep in consumers:
+                consumers[dep].add(("object", fqn))
+    for fqn, obj in sorted(built.items()):
+        users = consumers.get(fqn, set())
+        if not users:
+            add(
+                obj.app,
+                obj.file,
+                1,
+                f"no app query reads {fqn}: an app-data object exists for a query that reads it. "
+                "Read it from a query (and list it in that metric's reads:), or delete it (with a "
+                "tombstone if it was deployed)",
+            )
+        elif obj.reason == "shared_logic" and len(users) == 1:
+            (who,) = users
+            reader = who[1] if who[0] == "object" else f"apps/{who[1]}/{who[2]}"
+            add(
+                obj.app,
+                obj.file,
+                1,
+                f"{fqn} is shared_logic but only one query ({reader}) reads it: inline it there, "
+                "or keep it when a second reader is coming",
+                KIND_ADVISORY,
+            )
+        if obj.depends_on:
+            add(
+                obj.app,
+                obj.file,
+                1,
+                f"{fqn} is built on {', '.join(obj.depends_on)} in app data: each hop is more SQL "
+                "to review, so read sources directly when you can",
+                KIND_ADVISORY,
+            )
     plan.objects = [o for o in _order(built, add) if o.fqn in valid]
     return plan

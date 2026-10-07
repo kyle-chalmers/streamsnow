@@ -11,6 +11,7 @@ from streamsnow.app_data import (
     KIND_DYNAMIC_TABLE,
     KIND_VIEW,
     ddl_kind,
+    is_passthrough,
     load_app_data,
     parse_ddl,
 )
@@ -586,3 +587,184 @@ def test_one_object_listed_twice_in_one_index_is_a_finding(tmp_path):
     assert "did not load in full" in _details(plan, "acme-sales")
     assert plan.incomplete == ["apps/acme-sales/sql_review/index.yaml"]
     assert not plan.ok and plan.sql() == ""
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("SELECT region, revenue AS amount FROM ANALYTICS_DB.REPORTING.ORDERS o", True),
+        ("SELECT * FROM ANALYTICS_DB.REPORTING.ORDERS", True),
+        ("SELECT o.*, o.region region_name FROM ANALYTICS_DB.REPORTING.ORDERS AS o", True),
+        ("SELECT region FROM ANALYTICS_DB.REPORTING.ORDERS WHERE region <> 'X'", False),
+        ("SELECT SUM(revenue) AS revenue FROM ANALYTICS_DB.REPORTING.ORDERS", False),
+        ("SELECT DISTINCT region FROM ANALYTICS_DB.REPORTING.ORDERS", False),
+        ("SELECT revenue * 1.1 AS gross FROM ANALYTICS_DB.REPORTING.ORDERS", False),
+        ("SELECT 'EUR' AS currency, revenue FROM ANALYTICS_DB.REPORTING.ORDERS", False),
+        ("SELECT $$EUR$$ AS currency FROM ANALYTICS_DB.REPORTING.ORDERS", False),
+        (
+            "SELECT o.region FROM ANALYTICS_DB.REPORTING.ORDERS o "
+            "JOIN ANALYTICS_DB.REPORTING.REGIONS r ON r.id = o.region_id",
+            False,
+        ),
+        ("SELECT region FROM ANALYTICS_DB.REPORTING.ORDERS -- all of it\n", True),
+    ],
+)
+def test_is_passthrough(body, expected):
+    assert is_passthrough(body) is expected
+
+
+def test_an_app_data_object_needs_a_reason(tmp_path):
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "DAILY_REVENUE": dynamic_table("DAILY_REVENUE"),
+            "WEEKLY_REVENUE": dynamic_table("WEEKLY_REVENUE"),
+        },
+        reasons={"DAILY_REVENUE": "", "WEEKLY_REVENUE": "speed"},
+    )
+    details = _details(_plan(tmp_path))
+    assert f"{FAD}.DAILY_REVENUE needs reason: performance" in details
+    assert "(got 'speed')" in details
+
+
+def test_a_passthrough_view_is_a_finding(tmp_path):
+    body = "SELECT region, revenue AS amount\nFROM ANALYTICS_DB.REPORTING.ORDERS"
+    write_app(tmp_path, "acme-sales", {"ORDERS_RENAMED": view("ORDERS_RENAMED", body)})
+    assert "is a passthrough view" in _details(_plan(tmp_path))
+
+
+def test_an_object_no_query_reads_is_a_finding(tmp_path):
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")},
+        read_objects=False,
+    )
+    assert f"no app query reads {FAD}.DAILY_REVENUE" in _details(_plan(tmp_path))
+
+
+def test_a_read_from_another_apps_query_counts(tmp_path):
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")},
+        read_objects=False,
+    )
+    write_app(
+        tmp_path,
+        "acme-finance",
+        {},
+        queries={"revenue.sql": f"SELECT SUM(revenue) AS r FROM {FAD}.DAILY_REVENUE\n"},
+    )
+    plan = _plan(tmp_path)
+    assert plan.ok, plan.findings
+
+
+def test_a_metric_read_and_a_python_literal_count_as_references(tmp_path):
+    app = write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "DAILY_REVENUE": dynamic_table("DAILY_REVENUE"),
+            "WEEKLY_REVENUE": dynamic_table("WEEKLY_REVENUE"),
+        },
+        read_objects=False,
+    )
+    (app / "pages").mkdir()
+    (app / "pages" / "weekly.py").write_text(
+        "import streamlit as st\n\n"
+        'conn = st.connection("snowflake")\n'
+        f'df = conn.query("SELECT week, revenue FROM {FAD}.WEEKLY_REVENUE")\n'
+        f'st.caption("Loaded from {FAD}.DAILY_REVENUE")\n',
+        encoding="utf-8",
+    )
+    index = app / "sql_review" / "index.yaml"
+    data = yaml.safe_load(index.read_text(encoding="utf-8"))
+    (app / "queries" / "total.sql").write_text("SELECT 1 AS one\n", encoding="utf-8")
+    data["pages"] = [
+        {
+            "path": "pages/weekly.py",
+            "metrics": [
+                {"key": "total", "query": "queries/total.sql", "reads": [f"{FAD}.DAILY_REVENUE"]}
+            ],
+        }
+    ]
+    index.write_text(yaml.safe_dump(data), encoding="utf-8")
+    plan = _plan(tmp_path)
+    assert "no app query reads" not in _details(plan), plan.findings
+
+
+def test_an_object_read_only_by_another_object_is_referenced_and_the_chain_is_advisory(tmp_path):
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "DAILY_REVENUE": dynamic_table("DAILY_REVENUE"),
+            "REGION_REVENUE": view(
+                "REGION_REVENUE", REGION_BY_DAY.format(src=f"{FAD}.DAILY_REVENUE")
+            ),
+        },
+        read_objects=False,
+        queries={"regions.sql": f"SELECT * FROM {FAD}.REGION_REVENUE\n"},
+    )
+    plan = _plan(tmp_path)
+    assert plan.ok, plan.findings
+    advice = " | ".join(a["detail"] for a in plan.advisories)
+    assert f"{FAD}.REGION_REVENUE is built on {FAD}.DAILY_REVENUE" in advice
+
+
+def test_shared_logic_read_by_one_query_is_advisory(tmp_path):
+    shared = view("REGION_REVENUE", REGION_BY_DAY.format(src="ANALYTICS_DB.REPORTING.ORDERS"))
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"REGION_REVENUE": shared},
+        reasons={"REGION_REVENUE": "shared_logic"},
+    )
+    plan = _plan(tmp_path)
+    assert plan.ok
+    assert any("shared_logic but only" in a["detail"] for a in plan.advisories)
+    write_app(
+        tmp_path,
+        "acme-finance",
+        {},
+        queries={"regions.sql": f"SELECT * FROM {FAD}.REGION_REVENUE\n"},
+    )
+    assert not any("shared_logic but only" in a["detail"] for a in _plan(tmp_path).advisories)
+
+
+def test_two_queries_in_one_file_are_two_readers(tmp_path):
+    """Count queries, not files: one .sql file holding two statements that read the
+    shared view is two readers, so shared_logic is earned."""
+    shared = view("REGION_REVENUE", REGION_BY_DAY.format(src="ANALYTICS_DB.REPORTING.ORDERS"))
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"REGION_REVENUE": shared},
+        reasons={"REGION_REVENUE": "shared_logic"},
+        read_objects=False,
+        queries={
+            "regions.sql": f"SELECT * FROM {FAD}.REGION_REVENUE;\n"
+            f"SELECT COUNT(*) AS n FROM {FAD}.REGION_REVENUE;\n"
+        },
+    )
+    plan = _plan(tmp_path)
+    assert plan.ok, plan.findings
+    assert not any("shared_logic but only" in a["detail"] for a in plan.advisories)
+
+
+def test_only_certain_sql_counts_as_a_reader(tmp_path):
+    """An error message that mentions the object ("could not read from ...") is not a
+    query: only statement chunks are evidence, as in schema-refs."""
+    app = write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")},
+        read_objects=False,
+    )
+    (app / "helpers.py").write_text(
+        f'def fail():\n    raise ValueError("could not read from {FAD}.DAILY_REVENUE")\n',
+        encoding="utf-8",
+    )
+    assert f"no app query reads {FAD}.DAILY_REVENUE" in _details(_plan(tmp_path))
