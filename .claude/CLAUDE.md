@@ -70,6 +70,11 @@ Do not modify these. If a task needs them, stop and say so:
   `RELEASING.md`, `publish.yml`, tags and releases
 - `LICENSE`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `docs/versioning.md`, `.claude/` (this file)
 
+One exception: the maintainer's `/release` skill (`.claude/skills/release/`) may bump versions,
+tag and create releases, but only through `scripts/release.py`. The maintainer types the
+command, and `tag` always asks for a permission prompt. Everything above still applies outside
+that skill, and `.claude/skills/release/` itself stays off-limits for any other task.
+
 Never weaken, skip or delete a test, fixture or check to make CI green; fix the code or
 stop and explain.
 
