@@ -14,7 +14,8 @@ entry.
   from the current scaffold, which `streamsnow update` never does. The default is a dry run that
   prints the helper's state (`current`, `modified` or `missing`) and a diff; `--apply` writes the
   scaffold, and a `modified` file is refused (exit 1) unless `--force` is also passed. An unknown
-  slug or a missing config is exit 2. `sql-review compare` points at it when the helper is stale.
+  slug, a missing config or a non-UTF-8 helper is exit 2, and a symlinked `review.py` is
+  refused (exit 1) even with `--force`. `sql-review compare` points at it when the helper is stale.
 
 ### Fixed
 

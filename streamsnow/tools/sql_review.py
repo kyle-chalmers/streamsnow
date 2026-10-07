@@ -1749,7 +1749,8 @@ def cmd_helper(args: argparse.Namespace) -> int:
     exactly the refreshed file. ``streamsnow update`` never rewrites app files, which
     left an app scaffolded before a helper change with no supported way to catch up.
     A modified file may hold the user's own changes, so it is overwritten only with
-    ``--force``.
+    ``--force``. A symlinked ``review.py`` is refused (exit 1) even then, and an app folder
+    that resolves outside the repo or a non-UTF-8 helper is a tool error (exit 2).
     """
     from ..scaffolder import _env  # noqa: PLC0415
     from .sql_review_compare import helper_state  # noqa: PLC0415
@@ -1758,9 +1759,21 @@ def cmd_helper(args: argparse.Namespace) -> int:
     if find_config(repo) is None:
         raise ToolError(f"no streamsnow.config.yaml found at or above {repo}")
     app = _app_dir(repo, args.slug)
+    if not app.resolve().is_relative_to(repo):
+        raise ToolError(f"{_rel(app)} resolves outside the repo; refusing to touch it")
     path = app / "review.py"
     rel = _rel(app, "review.py")
-    state = helper_state(app)
+    if path.is_symlink():
+        print(
+            f"error: {rel} is a symlink; it could write outside the repo, so it is never "
+            "touched, even with --force. Replace the link with a regular file first.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        state = helper_state(app)
+    except UnicodeDecodeError as exc:
+        raise ToolError(f"{rel} is not valid UTF-8 ({exc.reason}); fix or remove it first") from exc
     shipped = _env().get_template("app/review.py.j2").render()
     print(f"{rel}: {state}")
     if state == "current":

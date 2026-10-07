@@ -93,3 +93,49 @@ def test_no_config_is_a_tool_error(repo, capsys):
     (repo / "streamsnow.config.yaml").unlink()
     assert _run(repo) == 2
     assert "streamsnow.config.yaml" in capsys.readouterr().err
+
+
+def _symlink(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable on this platform")
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_symlinked_helper_is_refused_and_writes_nothing_outside(repo, tmp_path, capsys, force):
+    outside = tmp_path / "outside.py"
+    outside.write_text("# not yours\n", encoding="utf-8")
+    _symlink(_helper(repo), outside)
+    flags = ("--apply", "--force") if force else ("--apply",)
+    assert _run(repo, *flags) == 1
+    assert "symlink" in capsys.readouterr().err
+    assert outside.read_text(encoding="utf-8") == "# not yours\n"
+    assert _helper(repo).is_symlink()
+
+
+def test_dangling_symlinked_helper_is_refused(repo, tmp_path, capsys):
+    outside = tmp_path / "created-by-write.py"
+    _symlink(_helper(repo), outside)
+    assert _run(repo, "--apply", "--force") == 1
+    assert "symlink" in capsys.readouterr().err
+    assert not outside.exists()
+
+
+def test_app_dir_symlinked_out_of_the_repo_is_a_tool_error(tmp_path, capsys):
+    root = tmp_path / "repo"
+    (root / "apps").mkdir(parents=True)
+    (root / "streamsnow.config.yaml").write_text("{}\n", encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _symlink(root / "apps" / SLUG, elsewhere)
+    assert _run(root, "--apply") == 2
+    assert "outside the repo" in capsys.readouterr().err
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_non_utf8_helper_is_a_tool_error(repo, capsys):
+    _helper(repo).write_bytes(b"# caf\xe9\n")
+    assert _run(repo, "--apply", "--force") == 2
+    assert "UTF-8" in capsys.readouterr().err
+    assert _helper(repo).read_bytes() == b"# caf\xe9\n"
