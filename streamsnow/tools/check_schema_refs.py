@@ -984,6 +984,88 @@ _IGNORED_DIR_NAMES = frozenset(
 )
 
 
+class RelationName(NamedTuple):
+    line: int  # 1-based, in the text given
+    parts: tuple[str, ...]
+    kind: str  # object | schema | database
+    cte: bool  # a one-part name that reads a CTE in scope, not a table
+
+
+_ONE_PART = r'"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*'
+_CTE_RE = re.compile(
+    rf"(?:\bWITH\s+(?:RECURSIVE\s+)?|,)\s*(?P<name>{_ONE_PART})\s*(?:\([^()]*\)\s*)?AS\s*\(",
+    re.I,
+)
+
+
+def _cte_scopes(masked: str) -> list[tuple[tuple[str, ...], int, int]]:
+    """``(name parts, start, end)`` per CTE: visible from its definition until the
+    parenthesis level it was defined at closes, or (at the top level) until the
+    statement ends. A WITH inside a subquery is invisible outside that subquery."""
+    depth, depths = 0, []
+    for ch in masked:
+        if ch == ")":
+            depth -= 1
+        depths.append(depth)  # "(" belongs to the outer level, ")" too
+        if ch == "(":
+            depth += 1
+    scopes = []
+    for m in _CTE_RE.finditer(masked):
+        level = depths[m.start("name")]
+        end = len(masked)
+        for i in range(m.end(), len(masked)):
+            if depths[i] < level or (level == 0 and masked[i] == ";"):
+                end = i
+                break
+        scopes.append((split_name(m.group("name")), m.start("name"), end))
+    return scopes
+
+
+def relation_names(sql: str) -> list[RelationName]:
+    """Names in relation position in plain SQL text, each with its line.
+
+    The public face of the scanner the boundary check uses, for callers that read
+    SQL files rather than app code (the app-data loader, #79). The scanner reports
+    character offsets; a caller that took them for lines would point a finding at
+    the wrong line, so the conversion lives here, once. ``cte`` marks a one-part
+    name that reads a CTE in scope: a name a CTE in some subquery shadows still
+    reads the table outside that subquery, and treating it as a CTE everywhere
+    would hide a real dependency.
+    """
+    text = _normalize_breaks(sql)
+    scopes = _cte_scopes(_mask_sql(text))
+    out = []
+    for pos, parts, kind in _relation_names(text):
+        cte = len(parts) == 1 and any(
+            name == parts and start < pos < end for name, start, end in scopes
+        )
+        out.append(RelationName(sql.count("\n", 0, pos) + 1, parts, kind, cte))
+    return out
+
+
+class StatementRelation(NamedTuple):
+    query: tuple[int, int]  # (chunk, statement): one query per pair
+    line: int  # 1-based source line
+    parts: tuple[str, ...]
+
+
+def statement_relations(text: str, is_python: bool) -> list[StatementRelation]:
+    """Object names in relation position in a file's certain SQL: statement chunks
+    only, Streamlit prose skipped, exactly as :func:`find_boundary_refs` reads it.
+    ``query`` tells queries apart, so two statements in one ``.sql`` file, or two
+    query literals in one ``.py`` file, count as two readers of an object."""
+    out: list[StatementRelation] = []
+    for index, chunk in enumerate(_sql_chunks(text, is_python, skip_prose=True)):
+        if not chunk.statement:
+            continue
+        masked = _mask_sql(chunk.sql)
+        for pos, parts, kind in _relation_names(chunk.sql):
+            if kind == "object" and parts and not _unresolved(parts, kind):
+                query = (index, masked.count(";", 0, pos))
+                out.append(StatementRelation(query, chunk.line_at(pos), parts))
+    return out
+
+
 def _in_ignored_dir(path: Path, root: Path | None = None) -> bool:
     """True if *path* sits under a directory that never holds reviewable source.
 

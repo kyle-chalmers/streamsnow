@@ -38,6 +38,7 @@ Schema (``schema_version: 2``)::
     objects:
       - name: ANALYTICS.REPORTING.APP_REVENUE_DAILY
         grants: [ROLE_APP_READER]
+        reason: performance            # app-data objects: performance | shared_logic
     fragments:
       - file: queries/_shared_ctes.sql
         reason: "inlined via {SHARED_CTES}; not runnable alone"
@@ -80,7 +81,7 @@ _FQN_RE = re.compile(rf"^{_IDENT}\.{_IDENT}\.{_IDENT}$")
 _TOP_KEYS = frozenset({"schema_version", "app", "review_window", "pages", "objects", "fragments"})
 _PAGE_KEYS = frozenset({"path", "metrics"})
 _METRIC_KEYS = frozenset({"key", "query", "tokens", "binds", "notes", "reads"})
-_OBJECT_KEYS = frozenset({"name", "grants"})
+_OBJECT_KEYS = frozenset({"name", "grants", "reason"})
 _FRAGMENT_KEYS = frozenset({"file", "reason"})
 
 
@@ -118,6 +119,7 @@ class Page:
 class ReportingObject:
     name: str
     grants: list[str] = field(default_factory=list)
+    reason: str = ""
 
 
 @dataclass
@@ -133,6 +135,10 @@ class Index:
     ``exists`` is False when the app has no ``index.yaml``; the other fields are
     then empty. Pages whose path is not in the app's navigation keep
     ``number == 0`` and are excluded from :attr:`numbered_pages`.
+
+    ``objects_complete`` is False when index.yaml exists but its ``objects:`` did
+    not load in full, so a caller that needs the whole declared inventory
+    (tombstones, teardown) must not trust it.
     """
 
     app: Path
@@ -141,6 +147,7 @@ class Index:
     review_window: dict[str, str] = field(default_factory=dict)
     pages: list[Page] = field(default_factory=list)
     objects: list[ReportingObject] = field(default_factory=list)
+    objects_complete: bool = True
     fragments: list[Fragment] = field(default_factory=list)
     nav: list[dict] = field(default_factory=list)
     findings: list[dict] = field(default_factory=list)
@@ -319,6 +326,7 @@ def load_index(app: Path) -> Index:
         idx.findings.append(
             {"kind": KIND_INDEX, "file": rel_index, "line": 1, "detail": f"unreadable: {exc}"}
         )
+        idx.objects_complete = False
         return idx
 
     def problem(detail: str, needle: str | None = None) -> None:
@@ -333,6 +341,7 @@ def load_index(app: Path) -> Index:
 
     if not isinstance(data, dict):
         problem("index.yaml must be a mapping (schema_version, app, review_window, pages, …)")
+        idx.objects_complete = False
         return idx
     _unknown(data, _TOP_KEYS, "index.yaml", problem)
     idx.schema_version = data.get("schema_version")
@@ -517,23 +526,30 @@ def _load_objects(raw: object, idx: Index, problem) -> None:
         return
     if not isinstance(raw, list):
         problem("objects must be a list of {name, grants}", "objects")
+        idx.objects_complete = False
         return
     seen: set[str] = set()
     for i, entry in enumerate(raw):
         if not isinstance(entry, dict):
             problem(f"objects[{i}] must be a mapping with name and grants")
+            idx.objects_complete = False
             continue
         _unknown(entry, _OBJECT_KEYS, f"objects[{i}]", problem)
         name = entry.get("name")
         if not isinstance(name, str) or not _FQN_RE.match(name):
             problem(f"objects[{i}].name {name!r} must be DATABASE.SCHEMA.OBJECT")
+            idx.objects_complete = False
             continue
         if name.upper() in seen:
             problem(f"object {name!r} is listed more than once", name)
             continue
         seen.add(name.upper())
         grants = _str_list(entry.get("grants"), f"object {name!r} grants", problem)
-        idx.objects.append(ReportingObject(name=name, grants=grants))
+        reason = entry.get("reason", "")
+        if not isinstance(reason, str):
+            problem(f"object {name!r}: reason must be a string (performance or shared_logic)", name)
+            reason = ""
+        idx.objects.append(ReportingObject(name=name, grants=grants, reason=reason.strip()))
 
 
 def _load_fragments(app: Path, raw: object, idx: Index, problem, used: set[str]) -> None:
