@@ -42,11 +42,22 @@ https://docs.snowflake.com/en/sql-reference/sql/create-or-alter
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
-from .policy import NAME_PATTERN, display_name, split_name
+from .config import Config
+from .policy import (
+    DENIED,
+    NAME_PATTERN,
+    OUTSIDE_BOUNDARY,
+    TWO_PART,
+    SchemaPolicy,
+    display_name,
+    split_name,
+)
+from .tools import sql_review_index as sri
 from .tools.check_schema_refs import _normalize_breaks, relation_names
-from .tools.sql_review import _mask_with_status
+from .tools.sql_review import OBJECTS_DIR, _mask_with_status
 
 KIND_VIEW = "view"
 KIND_DYNAMIC_TABLE = "dynamic_table"
@@ -316,3 +327,276 @@ def parse_ddl(
                 parts = (*expect[:2], parts[0])
             reads.append((base + rel.line - 1, parts))
     return ParsedDDL(kind, tuple(s[1] for s in stmts), tuple(reads), body, line, tuple(problems))
+
+
+_PLAIN_FQN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*){2}$")
+_READ_PROBLEMS = {
+    DENIED: "{name} is in a denied schema (governance.schema_deny): deployed DDL never reads it",
+    OUTSIDE_BOUNDARY: "{name} is outside governance.sources: the CI role that builds this "
+    "object has no read grant there, so the deploy would fail. Read a source, or add its "
+    "schema to governance.sources",
+    TWO_PART: "{name} does not name its database: the deploy job's session database is not "
+    "yours. Write DATABASE.SCHEMA.OBJECT",
+}
+
+
+@dataclass(frozen=True)
+class AppDataObject:
+    """One app-data object the deploy job builds."""
+
+    fqn: str
+    kind: str
+    app: str  # the owning app's slug
+    file: str  # repo-relative path of its DDL file
+    reason: str
+    statements: tuple[str, ...]
+    depends_on: tuple[str, ...]  # app-data objects its query reads
+
+
+@dataclass
+class AppDataPlan:
+    """Every app-data object in the repo, checked, in the order the deploy applies them."""
+
+    app_data: str
+    objects: list[AppDataObject] = field(default_factory=list)  # valid only, apply order
+    declared: dict[str, tuple[str, str]] = field(default_factory=dict)  # fqn -> (app, kind)
+    findings: list[dict] = field(default_factory=list)
+    advisories: list[dict] = field(default_factory=list)
+    # index.yaml files whose objects: did not load in full: `declared` may miss entries
+    incomplete: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.findings
+
+    def for_app(self, slug: str) -> list[dict]:
+        return [f for f in (*self.findings, *self.advisories) if f["app"] == slug]
+
+    def sql(self) -> str:
+        """The DDL the deploy job runs, or "" when there is nothing to build or any finding."""
+        if not self.ok or not self.objects:
+            return ""
+        out = [
+            f"-- App data ({self.app_data}): {len(self.objects)} object(s) in dependency "
+            "order, from `streamsnow objects-sql`.",
+        ]
+        for obj in self.objects:
+            out += ["", f"-- {obj.fqn} ({obj.kind.replace('_', ' ')}) from {obj.file}"]
+            out += [f"{stmt};" for stmt in obj.statements]
+        return "\n".join(out) + "\n"
+
+    def drop_order(self) -> list[tuple[str, str]]:
+        """``(fqn, kind)`` for every declared object, dependents first (teardown)."""
+        ordered = [o.fqn for o in reversed(self.objects)]
+        rest = sorted(set(self.declared) - set(ordered))
+        return [(f, self.declared[f][1]) for f in (*ordered, *rest)]
+
+    def dynamic_tables(self, slug: str) -> list[str]:
+        return sorted(
+            f
+            for f, (app, kind) in self.declared.items()
+            if app == slug and kind == KIND_DYNAMIC_TABLE
+        )
+
+
+def _rel(repo: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _order(objects: dict[str, AppDataObject], add) -> list[AppDataObject]:
+    """Dependencies first, ties by name so the output is the same on every run. Whatever
+    cannot be ordered is in, or reads from, a cycle, and each such object is a finding."""
+    pending = {f: {d for d in o.depends_on if d in objects} for f, o in objects.items()}
+    ordered: list[AppDataObject] = []
+    while True:
+        ready = sorted(f for f, deps in pending.items() if not deps)
+        if not ready:
+            break
+        for f in ready:
+            ordered.append(objects[f])
+            del pending[f]
+        for deps in pending.values():
+            deps.difference_update(ready)
+    stuck = ", ".join(sorted(pending))
+    for f in sorted(pending):
+        add(
+            objects[f].app,
+            objects[f].file,
+            1,
+            f"{f} cannot be ordered: it is in, or reads from, a dependency cycle among app-data "
+            f"objects ({stuck}). Break the cycle",
+        )
+    return ordered
+
+
+def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppDataPlan:
+    """Load and check every app's app-data objects (see the module docstring).
+
+    Why repo-wide: one app's view may read another app's dynamic table, so the
+    deploy order, the one-owner rule and an unknown app-data name are only
+    decidable across all apps, and the deploy job applies all of them in one
+    pass before any app is replaced.
+    """
+    target = tuple(cfg.governance.app_data.split("."))
+    policy = SchemaPolicy.from_governance(cfg.governance)
+    plan = AppDataPlan(app_data=cfg.governance.app_data)
+    root = Path(apps_dir) if apps_dir is not None else Path("apps")
+    root = root if root.is_absolute() else repo / root
+    apps = (
+        sorted(p for p in root.iterdir() if (p / "snowflake.yml").is_file())
+        if root.is_dir()
+        else []
+    )
+
+    def add(slug: str, file: str, line: int, detail: str, kind: str = KIND_FINDING) -> None:
+        bucket = plan.findings if kind == KIND_FINDING else plan.advisories
+        bucket.append({"kind": kind, "app": slug, "file": file, "line": line, "detail": detail})
+
+    built: dict[str, AppDataObject] = {}
+    valid: set[str] = set()
+    owners: dict[str, list[tuple[str, str]]] = {}
+    for app in apps:
+        slug = app.name
+        idx = sri.load_index(app)
+        rel_index = _rel(repo, idx.path)
+        if idx.exists and not idx.objects_complete:
+            plan.incomplete.append(rel_index)
+            add(
+                slug,
+                rel_index,
+                1,
+                "objects: in index.yaml did not load in full (see its index findings), so the "
+                "deploy job cannot tell which app-data objects this app declares",
+            )
+        odir = app / "sql_review" / OBJECTS_DIR
+        by_name: dict[tuple[str, ...], list[Path]] = {}
+        for path in sorted(odir.glob("*.sql")) if odir.is_dir() else []:
+            parts = split_name(path.name[: -len(".sql")])
+            if len(parts) == 3 and parts[:2] == target:
+                by_name.setdefault(parts, []).append(path)
+        on_disk: dict[tuple[str, ...], Path] = {}
+        collided: set[tuple[str, ...]] = set()
+        for parts, paths in by_name.items():
+            if len(paths) == 1:
+                on_disk[parts] = paths[0]
+                continue
+            collided.add(parts)  # never pick one silently
+            names = ", ".join(p.name for p in paths)
+            for path in paths:
+                add(
+                    slug,
+                    _rel(repo, path),
+                    1,
+                    f"{names} resolve to the same object, {display_name(parts)} (unquoted names "
+                    "fold to upper case): keep one file",
+                )
+        declared_here: set[tuple[str, ...]] = set()
+        for obj in idx.objects:
+            parts = split_name(obj.name)
+            if len(parts) != 3 or parts[:2] != target:
+                continue  # review-only: nothing deploys it
+            declared_here.add(parts)
+            fqn = display_name(parts)
+            owners.setdefault(fqn, []).append((slug, rel_index))
+            if not _PLAIN_FQN_RE.match(obj.name):
+                plan.declared.setdefault(fqn, (slug, ""))
+                add(
+                    slug,
+                    rel_index,
+                    1,
+                    f"{obj.name}: an app-data object is named with three unquoted identifiers "
+                    "(DATABASE.SCHEMA.NAME), the form the deploy, verify and tombstone steps "
+                    "render into SQL",
+                )
+                continue
+            if parts in collided:
+                plan.declared.setdefault(fqn, (slug, ""))
+                continue  # reported above, once per file
+            path = on_disk.get(parts)
+            if path is None:
+                plan.declared.setdefault(fqn, (slug, ""))
+                add(
+                    slug,
+                    rel_index,
+                    1,
+                    f"{fqn} is declared under objects: but has no DDL file at "
+                    f"sql_review/{OBJECTS_DIR}/{fqn}.sql, so the deploy job cannot build it",
+                )
+                continue
+            rel = _rel(repo, path)
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                plan.declared.setdefault(fqn, (slug, ""))
+                add(slug, rel, 1, f"unreadable DDL file ({exc})")
+                continue
+            parsed = parse_ddl(
+                text,
+                parts,
+                warehouse=cfg.snowflake.objects.default_warehouse,
+                grants=tuple(obj.grants),
+            )
+            plan.declared.setdefault(fqn, (slug, parsed.kind))
+            problems = list(parsed.problems)
+            deps: list[str] = []
+            for line, rparts in parsed.reads:
+                name = display_name(rparts)
+                if len(rparts) == 3 and rparts[:2] == target:
+                    if name not in deps:
+                        deps.append(name)
+                    continue
+                if len(rparts) == 2:
+                    # Always a finding here, whatever the boundary says: SCHEMA.OBJECT resolves
+                    # against the deploy session's database, so neither the order nor a cycle
+                    # through it could be seen. (parse_ddl already resolved one-part names.)
+                    problems.append((line, _READ_PROBLEMS[TWO_PART].format(name=name)))
+                    continue
+                verdict = policy.classify_parts(rparts)
+                if verdict in _READ_PROBLEMS:
+                    problems.append((line, _READ_PROBLEMS[verdict].format(name=name)))
+            for line, detail in problems:
+                add(slug, rel, line, detail)
+            built[fqn] = AppDataObject(
+                fqn, parsed.kind, slug, rel, obj.reason, parsed.statements, tuple(deps)
+            )
+            if not problems:
+                valid.add(fqn)
+        for parts, path in on_disk.items():
+            if parts not in declared_here and idx.objects_complete:
+                add(
+                    slug,
+                    _rel(repo, path),
+                    1,
+                    f"{display_name(parts)} sits in app data ({plan.app_data}) but is not under "
+                    "objects: in index.yaml, and the deploy job builds only declared objects. "
+                    "Declare it (with a reason), or move the file out of app data",
+                )
+    for fqn, owned in owners.items():
+        slugs = list(dict.fromkeys(s for s, _ in owned))
+        if len(slugs) > 1:
+            valid.discard(fqn)
+            names = ", ".join(f"apps/{s}" for s in slugs)
+            for s, rel_index in owned:
+                add(
+                    s,
+                    rel_index,
+                    1,
+                    f"{fqn} is declared by {names}: one app owns each app-data object, so the "
+                    "deploy job builds it from one file. Keep it in one app; the others read it",
+                )
+    for fqn, obj in built.items():
+        for dep in obj.depends_on:
+            if dep not in plan.declared:
+                add(
+                    obj.app,
+                    obj.file,
+                    1,
+                    f"{fqn} reads {dep}, which sits in app data but no app declares: the deploy "
+                    f"job would fail creating {fqn}. Declare {dep} in the app that owns it, or "
+                    "read a source",
+                )
+    plan.objects = [o for o in _order(built, add) if o.fqn in valid]
+    return plan

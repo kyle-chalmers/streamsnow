@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 import pytest
+from _app_data_fixtures import AD as FAD
+from _app_data_fixtures import OBJECTS_DIR, dynamic_table, view, write_app, write_config
 
-from streamsnow.app_data import KIND_DYNAMIC_TABLE, KIND_VIEW, ddl_kind, parse_ddl
+from streamsnow.app_data import (
+    KIND_DYNAMIC_TABLE,
+    KIND_VIEW,
+    ddl_kind,
+    load_app_data,
+    parse_ddl,
+)
+from streamsnow.config import load_config
 
 AD = "STREAMSNOW_APPS.STREAMSNOW_REPORTING"
 DT = f"{AD}.DAILY_REVENUE"
@@ -278,3 +287,254 @@ def test_a_cr_only_file_reports_the_real_line():
     assert p.line == 1
     late = ("-- c\r-- c\r" + VIEW_DDL.replace("\n", "\r")).replace("COPY GRANTS", "")
     assert [line for line, _d in _parse(late, expect=VIEW_PARTS).problems] == [3]
+
+
+REGION_BY_DAY = (
+    "SELECT d.order_date, r.region, SUM(d.revenue) AS revenue\n"
+    "FROM {src} d\n"
+    "JOIN ANALYTICS_DB.REPORTING.REGIONS r ON r.region_id = d.region_id\n"
+    "GROUP BY d.order_date, r.region"
+)
+
+
+def _plan(repo, **governance):
+    return load_app_data(repo, load_config(write_config(repo, **governance)))
+
+
+def _details(plan, slug=None) -> str:
+    rows = plan.for_app(slug) if slug else plan.findings
+    return " | ".join(f["detail"] for f in rows)
+
+
+def test_a_repo_without_app_data_objects_plans_nothing(tmp_path):
+    write_app(tmp_path, "acme-sales", {})
+    plan = _plan(tmp_path)
+    assert plan.ok and plan.objects == [] and plan.sql() == ""
+
+
+def test_valid_objects_plan_and_print_in_order(tmp_path):
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "DAILY_REVENUE": dynamic_table("DAILY_REVENUE"),
+            "REGION_REVENUE": view(
+                "REGION_REVENUE", REGION_BY_DAY.format(src=f"{FAD}.DAILY_REVENUE")
+            ),
+        },
+    )
+    plan = _plan(tmp_path)
+    assert plan.ok, plan.findings
+    assert [o.fqn for o in plan.objects] == [f"{FAD}.DAILY_REVENUE", f"{FAD}.REGION_REVENUE"]
+    assert plan.objects[1].depends_on == (f"{FAD}.DAILY_REVENUE",)
+    sql = plan.sql()
+    assert sql.index("CREATE OR ALTER DYNAMIC TABLE") < sql.index("CREATE OR REPLACE VIEW")
+    assert "-- Object:" not in sql
+    statements = [ln for ln in sql.splitlines() if ln.startswith(("CREATE", "GROUP"))]
+    assert statements and sql.rstrip().endswith(";")
+    assert plan.declared[f"{FAD}.DAILY_REVENUE"] == ("acme-sales", "dynamic_table")
+
+
+def test_order_follows_dependencies_not_app_or_name_order(tmp_path):
+    """acme-alpha's view A_REGION_REVENUE reads acme-zeta's Z_DAILY_REVENUE: by app and
+    by name the view sorts first, but the table must exist before the view."""
+    write_app(
+        tmp_path,
+        "acme-alpha",
+        {
+            "A_REGION_REVENUE": view(
+                "A_REGION_REVENUE", REGION_BY_DAY.format(src=f"{FAD}.Z_DAILY_REVENUE")
+            )
+        },
+    )
+    write_app(tmp_path, "acme-zeta", {"Z_DAILY_REVENUE": dynamic_table("Z_DAILY_REVENUE")})
+    plan = _plan(tmp_path)
+    assert plan.ok, plan.findings
+    assert [o.fqn for o in plan.objects] == [f"{FAD}.Z_DAILY_REVENUE", f"{FAD}.A_REGION_REVENUE"]
+    sql = plan.sql()
+    assert sql.index(f"DYNAMIC TABLE {FAD}.Z_DAILY_REVENUE") < sql.index(
+        f"VIEW {FAD}.A_REGION_REVENUE"
+    )
+
+
+def test_a_dependency_cycle_is_a_finding_on_every_member(tmp_path):
+    def reads(other: str) -> str:
+        return f"SELECT region, COUNT(*) AS n\nFROM {FAD}.{other}\nGROUP BY region"
+
+    write_app(tmp_path, "acme-a", {"V_ONE": view("V_ONE", reads("V_TWO"))})
+    write_app(tmp_path, "acme-b", {"V_TWO": view("V_TWO", reads("V_ONE"))})
+    plan = _plan(tmp_path)
+    assert not plan.ok and plan.sql() == ""
+    assert "dependency cycle" in _details(plan, "acme-a")
+    assert "dependency cycle" in _details(plan, "acme-b")
+
+
+def test_a_cycle_through_one_part_names_is_still_a_cycle(tmp_path):
+    """V_ONE reads V_TWO and V_TWO reads V_ONE, both unqualified: Snowflake resolves
+    them in the views' own schema, so the loader must see the cycle too."""
+
+    def reads(other: str) -> str:
+        return f"SELECT region, COUNT(*) AS n\nFROM {other}\nGROUP BY region"
+
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"V_ONE": view("V_ONE", reads("V_TWO")), "V_TWO": view("V_TWO", reads("V_ONE"))},
+    )
+    plan = _plan(tmp_path)
+    assert not plan.ok and plan.sql() == ""
+    assert _details(plan).count("dependency cycle") == 2
+
+
+def test_an_unqualified_name_no_app_declares_is_unknown(tmp_path):
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"REGION_REVENUE": view("REGION_REVENUE", REGION_BY_DAY.format(src="MISSING"))},
+    )
+    assert f"reads {FAD}.MISSING, which sits in app data but no app declares" in _details(
+        _plan(tmp_path)
+    )
+
+
+def test_an_unqualified_cte_name_is_not_a_dependency(tmp_path):
+    query = (
+        "WITH recent AS (SELECT * FROM ANALYTICS_DB.REPORTING.ORDERS)\n"
+        "SELECT region, COUNT(*) AS n\nFROM recent\nGROUP BY region"
+    )
+    write_app(tmp_path, "acme-sales", {"RECENT_ORDERS": view("RECENT_ORDERS", query)})
+    plan = _plan(tmp_path)
+    assert plan.ok, plan.findings
+    assert plan.objects[0].depends_on == ()
+
+
+def test_a_cte_inside_a_subquery_does_not_hide_the_outer_dependency(tmp_path):
+    """The outer V_TWO reads the app-data object; the inner one reads the subquery's
+    own CTE. The outer read must stay a dependency (here undeclared, so a finding)."""
+    query = (
+        "SELECT region, COUNT(*) AS n\nFROM V_TWO\n"
+        "WHERE EXISTS (WITH V_TWO AS (SELECT 1 AS x) SELECT * FROM V_TWO)\nGROUP BY region"
+    )
+    write_app(tmp_path, "acme-sales", {"V_ONE": view("V_ONE", query)})
+    assert f"reads {FAD}.V_TWO, which sits in app data but no app declares" in _details(
+        _plan(tmp_path)
+    )
+
+
+def test_two_files_resolving_to_one_name_are_both_findings(tmp_path):
+    """X.sql and x.sql name the same object once unquoted names fold to upper case:
+    the loader must say so, never pick one of them silently."""
+    app = write_app(tmp_path, "acme-sales", {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    lower = app / "sql_review" / OBJECTS_DIR / f"{FAD.lower()}.daily_revenue.sql"
+    lower.write_text(dynamic_table("DAILY_REVENUE"), encoding="utf-8")
+    if len(list((app / "sql_review" / OBJECTS_DIR).iterdir())) == 1:
+        pytest.skip("case-insensitive file system: two such files cannot coexist here")
+    plan = _plan(tmp_path)
+    assert _details(plan).count("resolve to the same object") == 2
+    assert plan.sql() == ""
+    assert plan.declared[f"{FAD}.DAILY_REVENUE"] == ("acme-sales", "")
+
+
+def test_an_index_whose_objects_did_not_load_marks_the_inventory_incomplete(tmp_path):
+    app = write_app(tmp_path, "acme-sales", {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    (app / "sql_review" / "index.yaml").write_text("objects: [\n", encoding="utf-8")
+    plan = _plan(tmp_path)
+    assert plan.incomplete == ["apps/acme-sales/sql_review/index.yaml"]
+    assert not plan.ok and "did not load in full" in _details(plan)
+    assert "not under objects:" not in _details(plan)  # one finding, not one per file
+
+
+def test_an_unknown_app_data_name_is_a_finding(tmp_path):
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "REGION_REVENUE": view(
+                "REGION_REVENUE", REGION_BY_DAY.format(src=f"{FAD}.MISSING_TABLE")
+            )
+        },
+    )
+    plan = _plan(tmp_path)
+    assert f"reads {FAD}.MISSING_TABLE, which sits in app data but no app declares" in _details(
+        plan
+    )
+
+
+def test_one_object_declared_by_two_apps_is_a_finding_on_both(tmp_path):
+    for slug in ("acme-sales", "acme-finance"):
+        write_app(tmp_path, slug, {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    plan = _plan(tmp_path)
+    assert not plan.ok
+    for slug in ("acme-sales", "acme-finance"):
+        assert "one app owns each app-data object" in _details(plan, slug)
+
+
+def test_an_undeclared_file_in_app_data_is_a_finding(tmp_path):
+    app = write_app(tmp_path, "acme-sales", {})
+    (app / "sql_review" / OBJECTS_DIR / f"{FAD}.STRAY.sql").write_text(
+        dynamic_table("STRAY"), encoding="utf-8"
+    )
+    assert "not under objects: in index.yaml" in _details(_plan(tmp_path))
+
+
+def test_a_declared_object_without_a_file_is_a_finding(tmp_path):
+    app = write_app(tmp_path, "acme-sales", {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    (app / "sql_review" / OBJECTS_DIR / f"{FAD}.DAILY_REVENUE.sql").unlink()
+    plan = _plan(tmp_path)
+    assert "has no DDL file" in _details(plan)
+    assert plan.declared[f"{FAD}.DAILY_REVENUE"] == ("acme-sales", "")
+
+
+def test_files_outside_app_data_stay_review_only(tmp_path):
+    app = write_app(tmp_path, "acme-sales", {})
+    legacy = "ANALYTICS_DB.REPORTING.LEGACY_SUMMARY"
+    (app / "sql_review" / OBJECTS_DIR / f"{legacy}.sql").write_text(
+        f"CREATE TABLE {legacy} (x INT);\nALTER TABLE {legacy} SET COMMENT = 'review only';\n",
+        encoding="utf-8",
+    )
+    plan = _plan(tmp_path)
+    assert plan.ok and plan.declared == {} and plan.sql() == ""
+
+
+@pytest.mark.parametrize(
+    ("source", "needle"),
+    [
+        ("FINANCE_DB.MARTS.LEDGER", "outside governance.sources"),
+        ("REPORTING.ORDERS", "does not name its database"),
+        ("ANALYTICS_DB.RAW.ORDERS", "denied schema"),
+    ],
+)
+def test_deployed_ddl_reads_only_sources_and_app_data(tmp_path, source, needle):
+    query = f"SELECT order_date, COUNT(*) AS n\nFROM {source}\nGROUP BY order_date"
+    write_app(tmp_path, "acme-sales", {"DAILY_ORDERS": dynamic_table("DAILY_ORDERS", query)})
+    assert needle in _details(_plan(tmp_path))
+
+
+def test_an_app_data_name_must_be_unquoted(tmp_path):
+    app = write_app(tmp_path, "acme-sales", {})
+    name = f'{FAD}."daily_revenue"'
+    (app / "sql_review" / OBJECTS_DIR / f"{name}.sql").write_text(
+        dynamic_table('"daily_revenue"'), encoding="utf-8"
+    )
+    index = app / "sql_review" / "index.yaml"
+    index.write_text(
+        index.read_text(encoding="utf-8").replace(
+            "objects: []", f"objects:\n- name: '{name}'\n  reason: performance"
+        ),
+        encoding="utf-8",
+    )
+    assert "three unquoted identifiers" in _details(_plan(tmp_path))
+
+
+def test_any_finding_empties_the_plan_sql_and_names_the_owning_app(tmp_path):
+    write_app(tmp_path, "acme-sales", {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    write_app(
+        tmp_path,
+        "acme-finance",
+        {"LEDGER_DAILY": dynamic_table("LEDGER_DAILY").replace("OR ALTER", "OR REPLACE")},
+    )
+    plan = _plan(tmp_path)
+    assert not plan.ok
+    assert plan.sql() == ""
+    assert {f["app"] for f in plan.findings} == {"acme-finance"}
+    assert plan.for_app("acme-sales") == []
