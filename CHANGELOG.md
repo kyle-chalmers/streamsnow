@@ -12,6 +12,11 @@ Most entries below come from a first end-to-end run of the plugin (onboard throu
 
 ### Added
 
+- **`streamsnow app-url <slug>`** prints the Snowsight URL of a deployed app (Snowflake's
+  app-builder form), built from the name the deploy SQL creates and the organization and
+  account your connection reports. `/ship-app` runs it after a green deploy and hands you
+  the link with a short click-through checklist, since CI cannot load the page. The URL
+  names your organization and account, so it is meant for your own terminal.
 - **`/onboard` offers to turn on GitHub's automatic deletion of merged branches.** In a repo
   with a GitHub remote it reads `delete_branch_on_merge` first, and when it is off asks yes or no
   before running `gh repo edit --delete-branch-on-merge`, so a squash-merged branch is not left
@@ -53,6 +58,13 @@ Most entries below come from a first end-to-end run of the plugin (onboard throu
 
 ### Changed
 
+- **`/migrate-app` finishes the app's documents the way `/build-app` does:** it rewrites
+  the app `AGENTS.md` starter Pages and Queries lines and adds the repo README Apps row,
+  so `validate-app`'s `starter-text` check no longer warns on a migrated app.
+- **`/ship-app` after-merge cleanup wording:** the remote tip is read from the exact
+  `refs/heads/<branch>` line of `git ls-remote` (a suffix match could hit another
+  branch), an approval means one given in the conversation (not a GitHub review), and the
+  step-4 path says `<branch>` is the spent branch, not the current one.
 - **The generated stage-copy deploy uploads the `stage-bundle` output** instead of the whole
   `apps/` tree, so internal docs and review logs no longer land on the stage. Run
   `streamsnow update --apply` to pick it up. The workflow calls a command added in this release,
@@ -83,6 +95,9 @@ Most entries below come from a first end-to-end run of the plugin (onboard throu
 
 ### Fixed
 
+- **`stage-bundle` names a link to the repo root for what it is.** Its target resolved to
+  `.` and was reported as a "tooling dot-directory"; it now reads "links to the repo
+  root".
 - **`streamsnow <group> <verb> --help`** shows the verb's own flags for `sql-review`,
   `review-gate`, `review-loop`, `migrate` and `preview` (it printed the group's text before).
 - **A failing sql-review session setup** (`USE ROLE` / `USE WAREHOUSE`) names the statements and

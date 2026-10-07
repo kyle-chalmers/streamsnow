@@ -459,6 +459,20 @@ def test_bundle_survives_a_directory_symlink_cycle(tmp_path):
     assert "cycle" in _reasons(result)["pages/loop/"]
 
 
+def test_bundle_excludes_a_directory_symlink_to_the_repo_root_with_its_own_reason(tmp_path):
+    """A link to the repo root resolves to `.`, which read as a dot-directory and
+    reported "tooling dot-directory", sending the user looking for a .git link."""
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    _link(app_dir / "whole_repo", repo)
+    out = tmp_path / "bundle"
+
+    result = build_bundle(repo, out)
+
+    assert not any(p.startswith("whole_repo/") for p in _shipped(out))
+    assert _reasons(result)["whole_repo/"] == "links to the repo root"
+
+
 def test_bundle_refuses_a_directory_symlink_that_escapes_the_repo(tmp_path):
     repo = _repo(tmp_path)
     app_dir = repo / "apps" / SLUG

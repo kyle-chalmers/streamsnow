@@ -1390,6 +1390,48 @@ def verify_deploy_cmd(
     raise typer.Exit(code=0 if result["ok"] else 1)
 
 
+@app.command(name="app-url")
+def app_url_cmd(
+    slug: str = typer.Argument(..., help="App slug (a directory under apps/)."),
+    connection: str = typer.Option(
+        None, "--connection", help="snow connection to ask (default: snowflake.connection_name)."
+    ),
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+    output_format: str = typer.Option("md", "--format", help="md | json"),
+) -> None:
+    """Print the Snowsight URL of a deployed app, so you can click through it yourself.
+
+    Builds Snowflake's app-builder URL from the app's deployed name (the same one
+    the deploy SQL creates) and the organization and account your connection reports
+    (one read-only SELECT). The URL names your organization and account: it is meant
+    for your own terminal, not a CI log or a public issue.
+
+    Exit codes: 0 the URL was printed, 2 a tool error (no or invalid config, an
+    unknown or invalid slug, a query that failed or returned no names).
+    """
+    from .app_url import AppUrlError, app_url, snow_run_query
+    from .sf_exec import SnowError
+
+    if output_format not in ("md", "json"):
+        _err(f"--format must be md or json, not {output_format!r}")
+        raise typer.Exit(2)
+    try:
+        cfg = load_config(Path(config) if config else None)
+    except ConfigError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    cfg_path = Path(config) if config else find_config()
+    app_dir = cfg_path.resolve().parent / "apps" / slug if cfg_path else None
+    try:
+        if app_dir is None or not app_dir.is_dir():
+            raise ValueError(f"unknown app {slug!r}: no apps/{slug}/ next to the config")
+        result = app_url(cfg, slug, snow_run_query(connection or cfg.snowflake.connection_name))
+    except (ValueError, AppUrlError, SnowError) as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    print(json.dumps(result, indent=2) if output_format == "json" else result["url"])
+
+
 @app.command()
 def update(
     directory: Path = typer.Option(Path("."), "--dir", help="Repo root."),
