@@ -350,6 +350,33 @@ def _inexact_severity_heading(raw: str, min_level: int = 1) -> bool:
     return level >= min_level and bool(_SEVERITY_WORD_RE.search(text)) and not _BUCKET_RE.match(raw)
 
 
+#: A severity word that opens a title, as a whole word (not `flag-tracker`, `Blocking`).
+_LEADING_SEVERITY_RE = re.compile(r"^(?:BLOCK|FLAG|NICE[- ]?TO[- ]?HAVE)(?=\s|$)", re.IGNORECASE)
+_TITLE_PREFIX_RE = re.compile(r"^[A-Za-z][\w ]*:\s*")
+_TITLE_NOISE_RE = re.compile(r"\s*\([^)]*\)\s*$|[*_:]|\b(?:items|findings)\b", re.IGNORECASE)
+
+
+def _severity_title(raw: str) -> bool:
+    """True for a level-1 or level-2 heading above the sections that names a bucket.
+
+    The parser starts at the first ``## <Dimension>``, so ``# BLOCK (critical)``
+    or ``# Block findings`` above it hides the findings under it. Markdown
+    emphasis, a trailing parenthetical, ``:`` and the words items/findings are
+    dropped, then the text (or the text after a ``Review:``-style prefix) must
+    open with a severity word. A title naming an app such as
+    ``# Review: acme-flag-tracker`` does not."""
+    text = raw.lstrip()
+    level = len(text) - len(text.lstrip("#"))
+    if level not in (1, 2):
+        return False
+    title = text[level:].strip()
+    for candidate in (title, _TITLE_PREFIX_RE.sub("", title, count=1)):
+        cleaned = " ".join(_TITLE_NOISE_RE.sub(" ", candidate).split())
+        if _LEADING_SEVERITY_RE.match(cleaned):
+            return True
+    return False
+
+
 def report_parse_problems(text: str) -> list[str]:
     """Forms in a report that ``parse_findings`` would silently skip.
 
@@ -365,9 +392,14 @@ def report_parse_problems(text: str) -> list[str]:
     sections = _split_sections(text)
     first = _DIMENSION_RE.search(text)
     for raw in text[: first.start() if first else len(text)].splitlines():
-        # Level 1 above the sections is the report title, which may name an app
-        # like `acme-flag-tracker`; a level-3 or deeper heading there is a bucket.
-        if _loose_severity_line(raw) or _inexact_severity_heading(raw, min_level=3):
+        # A level-3 or deeper heading there is a bucket. Level 1 or 2 may be the
+        # report title, which can name an app like `acme-flag-tracker`, so it
+        # counts only when it opens with a severity word.
+        if (
+            _loose_severity_line(raw)
+            or _inexact_severity_heading(raw, min_level=3)
+            or _severity_title(raw)
+        ):
             problems.append(f"severity line outside a '## <Dimension>' section: '{raw.strip()}'")
     if not any(
         _BUCKET_RE.search(body)

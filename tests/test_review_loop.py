@@ -596,3 +596,43 @@ def test_exact_headings_and_a_title_naming_a_flag_still_parse() -> None:
     report = REPORT.replace("# Review report", "# Review: acme-flag-tracker", 1)
     assert rl.report_parse_problems(report) == []
     assert rl.report_parse_problems(REPORT.replace("### FLAG\n", "### FLAG   \n", 1)) == []
+
+
+_TITLE_TAIL = "\n- [a.py:3] SQL injection -- bad\n\n" + (
+    "## SQL\n\n### BLOCK\n- _none_\n\n### FLAG\n- _none_\n\n### NICE-TO-HAVE\n- _none_\n"
+)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "# BLOCK (critical)",
+        "# Block findings",
+        "#  FLAG items",
+        "# Review: BLOCK",
+        "## **Nice to have**:",
+        "  # Block",
+    ],
+)
+def test_a_severity_title_above_the_first_section_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture, title: str
+) -> None:
+    """A level-1 or level-2 heading above the sections that names a severity hides
+    the finding under it: the parser starts at the first `## <Dimension>`."""
+    report = f"# Review\n\n{title}{_TITLE_TAIL}"
+    session = tmp_path / ".review"
+    session.mkdir()
+    (session / "review-20260831-090000.md").write_text(report, encoding="utf-8")
+    _, out = _open(capsys, str(session))
+    assert out["parsed"] is False
+    assert out["counts"] is None
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["# Review: acme-flag-tracker", "# Review: acme-blocklist", "# Blocking-issue tracker"],
+)
+def test_a_title_with_flag_or_block_inside_a_longer_token_still_parses(title: str) -> None:
+    report = REPORT.replace("# Review report — acme-sales-dashboard", title, 1)
+    assert title in report
+    assert rl.report_parse_problems(report) == []
