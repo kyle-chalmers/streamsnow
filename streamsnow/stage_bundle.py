@@ -138,6 +138,10 @@ def _repo_target_reason(repo_rel: str, repo: Path, is_dir: bool) -> str | None:
     from the repo root (the repo's README.md is a root-level doc), except that
     a shared ``.streamlit/config.toml`` is the one ``.streamlit`` file that ships.
     """
+    if repo_rel == ".":
+        # The whole repo (and this app inside it) never ships. `.` would read
+        # as a dot-directory below and blame a tooling folder that is not there.
+        return "links to the repo root"
     parts = repo_rel.split("/")
     if is_dir:
         return _first_dir_reason(parts)
