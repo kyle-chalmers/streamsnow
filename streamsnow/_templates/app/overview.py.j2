@@ -1,7 +1,7 @@
 """Overview page for {{ app_title }}. Scaffolded by StreamSnow ({{ runtime }} runtime).
 
 Replace the example metric with your real KPIs and repoint the query at a real
-table in an allowed schema ({{ schema_allow | join(', ') }}).
+table in a governance source ({{ sources | join(', ') }}).
 """
 
 import plotly.express as px
@@ -52,4 +52,4 @@ fig = px.bar(
 st.plotly_chart(fig, width="stretch")
 
 st.divider()
-st.caption("Sources: {{ gov_database }}.{{ schema_allow[0] }} (example)")
+st.caption("Sources: {{ sources[0] }} (example)")

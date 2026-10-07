@@ -20,7 +20,7 @@ that can:
 |---|---|
 | `SYSADMIN` | app database + schema (and the stage schema if different), an `XSMALL` warehouse (`AUTO_SUSPEND = 60`, `INITIALLY_SUSPENDED`) |
 | `USERADMIN` | `ci_role`, `viewer_role`, and a `TYPE = SERVICE` CI user with key-pair auth, no password (`RSA_PUBLIC_KEY` from `--public-key-file`, else a placeholder to paste) |
-| `SECURITYADMIN` | both roles to `SYSADMIN`; the viewer role to **you** (whoever runs the script, via `CURRENT_USER()`) and to each `--viewer-user`; each existing `--viewer-role` gets it in a last section of its own; `USAGE` on the database, schema and warehouse to both roles; `CREATE STREAMLIT` + `CREATE STAGE` on the schema to `ci_role`; `USAGE` + `SELECT` on each allowed governance schema |
+| `SECURITYADMIN` | both roles to `SYSADMIN`; the viewer role to **you** (whoever runs the script, via `CURRENT_USER()`) and to each `--viewer-user`; each existing `--viewer-role` gets it in a last section of its own; `USAGE` on the database, schema and warehouse to both roles; `CREATE STREAMLIT` + `CREATE STAGE` on the schema to `ci_role`; `USAGE` + `SELECT` on each governance source; `USAGE`, `CREATE VIEW` and `CREATE DYNAMIC TABLE` on the app-data schema to `ci_role` |
 | `ACCOUNTADMIN` | container runtime: the PyPI external access integration (Snowflake's managed `snowflake.external_access.pypi_rule`) and `USAGE` on it and on the compute pool to `ci_role`; `CREATE COMPUTE POOL` only when your pool is not `SYSTEM_COMPUTE_POOL_CPU`, which Snowflake pre-provisions in every account; git-repository: the API integration |
 | `ci_role` | the deploy-source objects it will own: the stage, or the secret + git repository |
 
@@ -58,9 +58,9 @@ the integration by hand are reset on each run, so manage it through this script.
 
 Two things to check before running it:
 
-- **Governance database grants.** The script grants `USAGE` plus `SELECT` on
-  every object type an app can read, current and future, on each
-  `governance.schema_allow` schema and never on a denied one: tables (hybrid
+- **Source grants.** The script grants `USAGE` on each source database once, then
+  `USAGE` plus `SELECT` on every object type an app can read, current and future,
+  on each `governance.sources` schema (and never on a denied one): tables (hybrid
   tables included), views, dynamic tables, materialized views, semantic views,
   Iceberg tables and external tables. Each type needs its own grant; a grant on
   tables does not reach dynamic tables. Event tables, streams, functions and
@@ -68,11 +68,20 @@ Two things to check before running it:
   database-level future grants of the same type for every role, so check
   `SHOW FUTURE GRANTS IN DATABASE <db>` before applying and repeat at schema
   level any that another role relies on. A **shared** database (a Marketplace or
-  data-share import such as `SNOWFLAKE_SAMPLE_DATA`) does not take those
-  grants; it needs `GRANT IMPORTED PRIVILEGES ON DATABASE ...` as
-  `ACCOUNTADMIN`, which covers the whole share. The script emits that form
-  automatically for `SNOWFLAKE_SAMPLE_DATA` and `SNOWFLAKE`, and as a commented
-  alternative otherwise.
+  data-share import) does not take those grants; it needs
+  `GRANT IMPORTED PRIVILEGES ON DATABASE ...` as `ACCOUNTADMIN`, which covers the
+  whole share. The script emits that form for every source database in
+  `governance.imported_databases`, plus `SNOWFLAKE_SAMPLE_DATA` and `SNOWFLAKE`, and
+  as a commented alternative for the others.
+- **App data.** The script creates `governance.app_data` (and its database, when it
+  is new) and grants the CI role `USAGE`, `CREATE VIEW` and `CREATE DYNAMIC TABLE`
+  there; never `CREATE TABLE`, because a plain table's `CREATE OR ALTER` can drop
+  column data. Dynamic tables refresh on the default warehouse; enable change
+  tracking on the source tables an incremental refresh reads (or use
+  `REFRESH_MODE = FULL`), and grant the CI role `OPERATE` on any upstream dynamic
+  table in a source. App data in an existing source database needs SYSADMIN to hold
+  `CREATE SCHEMA` there. `streamsnow ci-key verify` checks these grants with the
+  others.
 - **Viewer-role data grants are opt-in.** Deployed apps run with owner's rights
   (the CI role), so viewers only need `USAGE` on each app, and the script grants
   the viewer role no data access by default. The same data grants for the viewer
@@ -96,9 +105,11 @@ account-level objects: the PyPI external access integration, the configured
 compute pool unless it is `SYSTEM_COMPUTE_POOL_CPU` (stopped first), and the git API integration
 ([DROP INTEGRATION](https://docs.snowflake.com/en/sql-reference/sql/drop-integration)).
 Every statement uses `IF EXISTS`, so a partial teardown can be re-run. It keeps
-your governance database and its data, and `SYSTEM_COMPUTE_POOL_CPU`, and it
-refuses outright when `app_database` or `stage_database` is the governance
-database or a Snowflake-shared one, or a role is a Snowflake system role. Two
+every database that holds a source and its data, and `SYSTEM_COMPUTE_POOL_CPU`, and it
+refuses outright when `app_database` or `stage_database` holds a source or is a
+Snowflake-shared one, or a role is a Snowflake system role. App data in the app
+database goes with it; app data elsewhere gets its `DROP SCHEMA` printed commented,
+to run only if nothing else lives there. Two
 things to check: every object that could predate StreamSnow (the database,
 warehouse, integrations, a custom pool) carries a comment; delete that line if
 other work uses it. And the CI

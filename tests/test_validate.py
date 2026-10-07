@@ -514,12 +514,11 @@ def test_security_walk_skips_dotted_dirs(tmp_path):
 def test_schema_refs_use_statement_and_read_exceptions():
     from streamsnow.policy import SchemaPolicy as SP
 
-    policy = SP(database="DB", schema_allow=("ANALYTICS",), schema_deny=("RAW",))
+    policy = SP(sources=("DB.ANALYTICS",), schema_deny=("RAW",))
     assert find_denied_refs("USE SCHEMA RAW;", policy)
     assert find_denied_refs("use schema raw", policy)
     exc = SP(
-        database="DB",
-        schema_allow=("ANALYTICS",),
+        sources=("DB.ANALYTICS",),
         schema_deny=("RAW",),
         read_exceptions=("DB.RAW.SANCTIONED",),
     )
@@ -533,7 +532,7 @@ def test_schema_refs_use_statement_and_read_exceptions():
 def _deny_policy():
     from streamsnow.policy import SchemaPolicy as SP
 
-    return SP(database="DB", schema_allow=("ANALYTICS", "REPORTING"), schema_deny=("BRIDGE", "RAW"))
+    return SP(sources=("DB.ANALYTICS", "DB.REPORTING"), schema_deny=("BRIDGE", "RAW"))
 
 
 def test_schema_refs_flags_real_sql_and_python_query():
@@ -591,7 +590,7 @@ def test_schema_refs_check_paths_skips_dotted_dirs(tmp_path):
     from streamsnow.policy import SchemaPolicy as SP
     from streamsnow.tools.check_schema_refs import check_paths
 
-    policy = SP(database="DB", schema_allow=("ANALYTICS",), schema_deny=("BRIDGE",))
+    policy = SP(sources=("DB.ANALYTICS",), schema_deny=("BRIDGE",))
     # A real review artifact under a dotted dir (.review/) must be skipped.
     review = _write(tmp_path / "apps/x/.review/stub.sql", "SELECT * FROM BRIDGE.T\n")
     # A real query under apps/x/queries must still be flagged.
@@ -1559,7 +1558,7 @@ def test_schema_refs_scans_whatever_the_checkout_path_looks_like(tmp_path, shape
     from streamsnow.policy import SchemaPolicy as SP
     from streamsnow.tools.check_schema_refs import _iter_files, check_paths
 
-    policy = SP(database="DB", schema_allow=("ANALYTICS",), schema_deny=("BRIDGE",))
+    policy = SP(sources=("DB.ANALYTICS",), schema_deny=("BRIDGE",))
     repo = tmp_path / shape / "repo"
     (repo / "apps" / "x" / "queries").mkdir(parents=True)
     (repo / "apps" / "x" / "queries" / "q.sql").write_text(_DENIED, encoding="utf-8")
@@ -1611,7 +1610,7 @@ def test_schema_refs_cli_clean_run_does_not_crash(tmp_path, monkeypatch, capsys,
     assert rc == 0, out
     if fmt == "json":
         # The output contract includes `denylist`; consumers read it.
-        assert sorted(json.loads(out)) == ["denylist", "findings", "ok"]
+        assert sorted(json.loads(out)) == ["boundary", "denylist", "findings", "ok", "warnings"]
     else:
         assert "clean" in out
 
@@ -1623,6 +1622,22 @@ def test_schema_refs_cli_reports_a_violation(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(repo)
     rc = main(["apps"])
     assert rc == 1
+    assert "BLOCK" in capsys.readouterr().out
+
+
+def test_schema_refs_cli_exit_code_follows_the_boundary_mode(tmp_path, monkeypatch, capsys):
+    from streamsnow.tools.check_schema_refs import main
+
+    repo = _mini_repo(tmp_path, "-- q\nSELECT a FROM SALES_DB.PUBLIC.LEADS\n")
+    monkeypatch.chdir(repo)
+    assert main(["apps"]) == 0
+    assert "WARN" in capsys.readouterr().out
+    cfg = repo / "streamsnow.config.yaml"
+    cfg.write_text(
+        cfg.read_text(encoding="utf-8").replace("boundary: warn", "boundary: enforce"),
+        encoding="utf-8",
+    )
+    assert main(["apps"]) == 1
     assert "BLOCK" in capsys.readouterr().out
 
 
@@ -1664,6 +1679,8 @@ def test_fleet_fixture_app_passes_validate(slug):
     cfg = _fleet_cfg()
     res = validate_app(FLEET / "apps" / slug, SchemaPolicy.from_governance(cfg.governance), cfg)
     assert res["ok"], [c for c in res["checks"] if not c["ok"]]
+    refs = next(c for c in res["checks"] if c["name"] == "schema-refs")
+    assert refs["warnings"] == [], refs["warnings"]  # the fleet already uses three-part names
 
 
 def test_fleet_fixture_still_covers_the_migration_shapes():

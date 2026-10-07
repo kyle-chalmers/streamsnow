@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from streamsnow.deploy import (
     generate_admin_sql,
     generate_create_sql,
     generate_setup_sql,
+    generate_teardown_sql,
     stage_path,
     with_source,
 )
@@ -213,6 +215,48 @@ def _stmts(sql: str) -> str:
     return "\n".join(ln for ln in sql.splitlines() if not ln.lstrip().startswith("--"))
 
 
+def _app_data_cfg(app_data: str) -> Config:
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
+    data["governance"]["app_data"] = app_data
+    return Config.from_dict(data)
+
+
+def test_admin_sql_creates_app_data_and_lets_ci_build_views_and_dynamic_tables():
+    sql = generate_admin_sql(_cfg())
+    sec = _sections(sql)
+    ad = "STREAMSNOW_APPS.STREAMSNOW_REPORTING"
+    assert f"CREATE SCHEMA IF NOT EXISTS {ad};" in _stmts(sec["SYSADMIN"])
+    grants = _stmts(sec["SECURITYADMIN"])
+    for priv in ("USAGE", "CREATE VIEW", "CREATE DYNAMIC TABLE"):
+        assert f"GRANT {priv} ON SCHEMA {ad} TO ROLE STREAMSNOW_DEPLOY_ROLE;" in grants
+    assert f"CREATE TABLE ON SCHEMA {ad}" not in _stmts(sql)  # D3: no plain tables
+    viewer = (
+        f"--   GRANT SELECT ON FUTURE DYNAMIC TABLES IN SCHEMA {ad} TO ROLE STREAMSNOW_VIEWER_ROLE;"
+    )
+    assert viewer in sql
+    for line in _stmts(sql).splitlines():
+        if ad in line:
+            assert "STREAMSNOW_VIEWER_ROLE" not in line, line
+    assert "CHANGE_TRACKING" in sql and "OPERATE" in sql and "WAREHOUSE = STREAMSNOW_WH" in sql
+
+
+def test_admin_sql_app_data_in_a_new_database_creates_it():
+    stmts = _stmts(generate_admin_sql(_app_data_cfg("STREAMSNOW_DATA.REPORTING")))
+    assert "CREATE DATABASE IF NOT EXISTS STREAMSNOW_DATA;" in stmts
+    assert (
+        stmts.count("GRANT USAGE ON DATABASE STREAMSNOW_DATA TO ROLE STREAMSNOW_DEPLOY_ROLE;") == 1
+    )
+
+
+def test_admin_sql_app_data_in_a_source_database_never_recreates_it():
+    sql = generate_admin_sql(_app_data_cfg("ANALYTICS_DB.STREAMSNOW_REPORTING"))
+    stmts = _stmts(sql)
+    assert "CREATE DATABASE IF NOT EXISTS ANALYTICS_DB;" not in stmts
+    assert "CREATE SCHEMA IF NOT EXISTS ANALYTICS_DB.STREAMSNOW_REPORTING;" in stmts
+    assert stmts.count("GRANT USAGE ON DATABASE ANALYTICS_DB TO ROLE STREAMSNOW_DEPLOY_ROLE;") == 1
+    assert "SYSADMIN needs CREATE SCHEMA" in sql
+
+
 def test_admin_sql_creates_every_object_a_first_deploy_needs():
     sql = generate_admin_sql(_cfg())
     sec = _sections(sql)
@@ -300,7 +344,7 @@ def test_admin_sql_viewer_read_grants_are_commented_for_every_type():
 
 def test_admin_sql_shared_database_gets_no_per_type_grants():
     data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
-    data["governance"]["database"] = "SNOWFLAKE_SAMPLE_DATA"
+    data["governance"]["sources"] = ["SNOWFLAKE_SAMPLE_DATA.TPCH_SF1"]
     stmts = _stmts(generate_admin_sql(Config.from_dict(data)))
     assert "SELECT ON" not in stmts
     assert (
@@ -349,8 +393,7 @@ def test_admin_sql_warehouse_runtime_has_no_container_objects():
 
 def test_admin_sql_shared_database_uses_imported_privileges():
     data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
-    data["governance"]["database"] = "SNOWFLAKE_SAMPLE_DATA"
-    data["governance"]["schema_allow"] = ["TPCH_SF1"]
+    data["governance"]["sources"] = ["SNOWFLAKE_SAMPLE_DATA.TPCH_SF1"]
     sql = generate_admin_sql(Config.from_dict(data))
     stmts = _stmts(sql)
     assert (
@@ -482,7 +525,7 @@ def test_admin_sql_viewer_role_gets_no_data_grants_by_default():
 
 def test_admin_sql_shared_database_imported_privileges_ci_role_only():
     data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
-    data["governance"]["database"] = "SNOWFLAKE_SAMPLE_DATA"
+    data["governance"]["sources"] = ["SNOWFLAKE_SAMPLE_DATA.TPCH_SF1"]
     sql = generate_admin_sql(Config.from_dict(data))
     stmts = _stmts(sql)
     assert (
@@ -493,3 +536,55 @@ def test_admin_sql_shared_database_imported_privileges_ci_role_only():
         "IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE_SAMPLE_DATA TO ROLE STREAMSNOW_VIEWER_ROLE"
         not in stmts
     )
+
+
+def _with_sources(*sources: str, imported: tuple[str, ...] = (), **overrides) -> Config:
+    """The example config with these governance sources (and imported databases)."""
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
+    for k, v in overrides.items():
+        data[k] = v
+    data["governance"]["sources"] = list(sources)
+    data["governance"]["imported_databases"] = list(imported)
+    return Config.from_dict(data)
+
+
+def test_admin_sql_sources_across_databases_get_usage_once_per_database():
+    sources = ("ANALYTICS_DB.REPORTING", "FINANCE_DB.MARTS", "FINANCE_DB.FEES")
+    stmts = _stmts(generate_admin_sql(_with_sources(*sources)))
+    for db in ("ANALYTICS_DB", "FINANCE_DB"):
+        assert stmts.count(f"GRANT USAGE ON DATABASE {db} TO ROLE STREAMSNOW_DEPLOY_ROLE;") == 1
+    for fq in sources:
+        assert f"GRANT USAGE ON SCHEMA {fq} TO ROLE STREAMSNOW_DEPLOY_ROLE;" in stmts
+        for scope in ("ALL", "FUTURE"):
+            for kind in READ_OBJECT_TYPES:
+                grant = (
+                    f"GRANT SELECT ON {scope} {kind} IN SCHEMA {fq} TO ROLE STREAMSNOW_DEPLOY_ROLE;"
+                )
+                assert grant in stmts, grant
+    assert "ANALYTICS_DB.ANALYTICS" not in stmts
+
+
+def test_admin_sql_custom_imported_database_gets_imported_privileges_once():
+    sql = generate_admin_sql(
+        _with_sources(
+            "PARTNER_SHARE.SALES",
+            "PARTNER_SHARE.LEADS",
+            "ANALYTICS_DB.REPORTING",
+            imported=("PARTNER_SHARE",),
+        )
+    )
+    acct = _stmts(_sections(sql)["ACCOUNTADMIN"])
+    grant = "GRANT IMPORTED PRIVILEGES ON DATABASE PARTNER_SHARE TO ROLE STREAMSNOW_DEPLOY_ROLE;"
+    assert acct.count(grant) == 1
+    stmts = _stmts(sql)
+    assert "IN SCHEMA PARTNER_SHARE" not in stmts
+    assert "ON DATABASE PARTNER_SHARE TO ROLE STREAMSNOW_VIEWER_ROLE" not in stmts
+    assert "GRANT USAGE ON SCHEMA ANALYTICS_DB.REPORTING TO ROLE STREAMSNOW_DEPLOY_ROLE;" in stmts
+
+
+def test_teardown_refuses_an_app_database_that_holds_any_source():
+    cfg = _with_sources("ANALYTICS_DB.REPORTING", "FINANCE_DB.MARTS")
+    objects = dataclasses.replace(cfg.snowflake.objects, app_database="FINANCE_DB")
+    moved = dataclasses.replace(cfg, snowflake=dataclasses.replace(cfg.snowflake, objects=objects))
+    with pytest.raises(ConfigError, match="holds a governance source"):
+        generate_teardown_sql(moved)

@@ -103,8 +103,8 @@ a trial run), **extends** (domain-specific variant → keep, note it in AGENTS.m
 
 1. **Install the plugin** alongside the local skills (nothing breaks — same-named local skills
    shadow the plugin's until you delete them).
-2. **`streamsnow configure`** (≤5 questions) if the repo doesn't have `streamsnow.config.yaml` yet —
-   or run `/onboard` and let it inventory + configure + write `MIGRATION.md` for you.
+2. **`streamsnow configure`** (a short wizard, every answer prefilled) if the repo doesn't have
+   `streamsnow.config.yaml` yet, or run `/onboard` and let it inventory + configure + write `MIGRATION.md` for you.
 3. **Trial run:** take ONE real change through `/build-app → /preview-app → /validate-app →
    /review-app → /ship-app` with the plugin versions.
 4. **Delete the shadows** the trial proved covered; keep the extends with a one-line AGENTS.md note
@@ -138,8 +138,8 @@ defect — open an issue with the finding.
 - **`REQUIREMENTS.md` §11 is simpler:** a `Current phase` line plus an append-only Sessions log —
   no per-page status table. Existing specs keep working; the table just stops being maintained
   (page state is visible in the tree and git).
-- **`streamsnow configure` asks 5 questions**, writing everything else as commented defaults —
-  if your old flow asked more, the answers now live as editable lines in the config file.
+- **`streamsnow configure` asks only what it cannot detect**, writing everything else as commented
+  defaults: if your old flow asked more, the answers now live as editable lines in the config file.
 - **Missing config degrades instead of blocking:** review runs static-only without governance
   context, lineage marks rows unverified without a connection — each names the enabler instead of
   refusing.

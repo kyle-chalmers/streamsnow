@@ -25,16 +25,17 @@ Command and flag names are part of the stable surface
 
 | Command | What it does |
 |---|---|
-| `streamsnow doctor` | Checks the machine and repo for what StreamSnow needs: required `python`, `git`, `uv`; optional `snow`, a `snow` connection, `gh`, `pre-commit` and its hook, `node` (the browser tool), the config, repo files, git identity and CI secrets. Each sub-check reports `{name, ok, level, detail, hint}`; `level` is `required` or `optional`. `--format json` (or `--json`) prints `{"ok", "checks": [...]}`. Exits `1` only when a required check fails. |
-| `streamsnow configure` | Writes or edits `streamsnow.config.yaml` with a five-question wizard. Re-running prefills from the current file. |
+| `streamsnow doctor` | Checks the machine and repo for what StreamSnow needs: required `python`, `git`, `uv`; optional `snow`, a `snow` connection, `gh`, `pre-commit` and its hook, `node` (the browser tool), the config, repo files, git identity and CI secrets. Each sub-check reports `{name, ok, level, detail, hint}`; `level` is `required` or `optional`. `--format json` (or `--json`) prints `{"ok", "checks": [...]}`. Exits `1` only when a required check fails. `--live` adds the optional `source-access` check (each `governance.sources` schema and the app data visible to your connection's role; logs in). |
+| `streamsnow configure` | Writes or edits `streamsnow.config.yaml` with a short wizard whose every answer is prefilled; when a `snow` connection exists it checks each source live, read-only. Re-running prefills from the current file. |
 | `streamsnow init` | `configure`, then the governed repo files, then a starter app. |
 | `streamsnow update` | Re-renders the repo-level governance files from your config and the installed templates. Dry run unless `--apply`. It never rewrites app files (`review.py`, the glossary) or an existing `.sqlfluff`; see [Upgrading](getting-started.md#upgrading). |
 
-**Wizard answer flags** (shared by `configure` and `init`; giving all five skips the
+**Wizard answer flags** (shared by `configure` and `init`; giving all of them skips the
 prompts): `--runtime container|warehouse`, `--account <locator>` or
-`--connection <snow connection>`, `--database`, `--schemas` (comma-separated
-`schema_allow`), `--deploy-source stage-copy|git-repository`, plus optional
-`--deny-schemas` (default `RAW,STAGING`; `''` denies none).
+`--connection <snow connection>`, `--sources` (comma-separated `DATABASE.SCHEMA`, any
+databases), `--app-data` (`DATABASE.SCHEMA`, default `<app_database>.STREAMSNOW_REPORTING`),
+`--deploy-source stage-copy|git-repository`, plus optional `--deny-schemas` (`RAW` or
+`FINANCE.RAW` entries; default `RAW,STAGING`; `''` denies none).
 
 | Flag | Command | Meaning |
 |---|---|---|
@@ -106,7 +107,7 @@ extra keys listed below.
 
 | Check | Blocks | Extra flags | Extra JSON keys |
 |---|---|---|---|
-| `schema-refs` | References to denied schemas (`governance.schema_deny`, minus exact `read_exceptions`) | `--config` | |
+| `schema-refs` | References to denied schemas (`governance.schema_deny`: `RAW` in every database or `FINANCE.RAW`, minus exact `read_exceptions`); under `governance.boundary: enforce` also names outside `governance.sources` and app data, and two-part names (warnings under `warn`) | `--config` | `warnings`, `boundary`; findings carry `database`, `reason`, and `ref`/`detail` for boundary entries |
 | `security` | Egress, code execution, write SQL, dynamic SQL in app code. A DDL file directly in an app's `sql_review/app_specific_reporting_objects/` may use `CREATE`, `ALTER` and `GRANT` | | |
 | `caching` | Data-fetching functions without `@st.cache_data(ttl=...)` | | |
 | `bind-predicates` | The `:N IS NULL OR` Go-driver bind trap | | |
@@ -209,7 +210,7 @@ JSON for the skill to act on.
 `USE ROLE` sections, to hand a Snowflake admin), `--public-key-file <pem>` (with
 `--admin`: the CI user's public key), `--viewer-user <user>` (with `--admin`,
 repeatable), `--viewer-role <role>` (with `--admin`, repeatable: an existing role
-that gets the viewer role), `--teardown` (print the reverse of `--admin`; keeps the governance
+that gets the viewer role), `--teardown` (print the reverse of `--admin`; keeps every source
 database), `--source stage-copy|git-repository` (preview the other source),
 `--git-origin <url>`, `--github-auth pat|github-app|public`, `--config`. See
 [Deploy setup](deploy-setup.md).
@@ -237,7 +238,7 @@ verified again; `check tombstones` is what catches it, at PR time.
 |---|---|
 | `streamsnow ci-key create` | Creates (or reuses) the CI user's key pair and the five deploy secret files under `--dir` (default `~/.streamsnow-ci`, outside any repo). Never overwrites a key and never prints a secret. `--account`, `--config`. |
 | `streamsnow ci-key push` | Sets the five GitHub secrets from those files via `gh secret set` on stdin, `SNOWFLAKE_ACCOUNT` last. `--dir`, `--repo owner/name`. With `--config` (and `--account` if you overrode it in `create`), it first checks that the user, warehouse, role and account files match the config and refuses, by name, before any `gh` call. |
-| `streamsnow ci-key verify` | Signs in as the CI service user with those files, the way the deploy job does (`SNOWFLAKE_*` variables, key-pair auth, `--temporary-connection`), and runs read-only probes, each named by object: the CI role, `USE WAREHOUSE`, the app schema, every grant the admin script gives the CI role (`SHOW GRANTS TO ROLE`), and with `--object DB.SCHEMA.OBJECT` (an allowed governance schema only) a `LIMIT 0` read. The key, account and user never reach argv, the output or the JSON. It uses the production CI key from your machine: the sign-in shows in the CI user's login history, and a network policy that only admits the CI runners refuses it. Run it once after the admin setup. `--dir`, `--config`, `--format md\|json`. Exit 0 all pass, 1 a probe failed, 2 a tool error with no probe results printed: a missing or unreadable secret file, a file that differs from the config, a bad config or `--object`, no `snow`, or a `snow` call that could not start, timed out or printed unreadable output. |
+| `streamsnow ci-key verify` | Signs in as the CI service user with those files, the way the deploy job does (`SNOWFLAKE_*` variables, key-pair auth, `--temporary-connection`), and runs read-only probes, each named by object: the CI role, `USE WAREHOUSE`, the app schema, every grant the admin script gives the CI role (`SHOW GRANTS TO ROLE`), and with `--object DB.SCHEMA.OBJECT` (in a governance source or the app-data schema only) a `LIMIT 0` read. The key, account and user never reach argv, the output or the JSON. It uses the production CI key from your machine: the sign-in shows in the CI user's login history, and a network policy that only admits the CI runners refuses it. Run it once after the admin setup. `--dir`, `--config`, `--format md\|json`. Exit 0 all pass, 1 a probe failed, 2 a tool error with no probe results printed: a missing or unreadable secret file, a file that differs from the config, a bad config or `--object`, no `snow`, or a `snow` call that could not start, timed out or printed unreadable output. |
 
 How the key moves, and what Claude can and cannot see:
 [README](../README.md#what-claude-can-and-cant-see) and [Deploy setup](deploy-setup.md).

@@ -20,9 +20,9 @@ over it, never demand a rewrite.**
 
 ## 2 · Configure from observed reality
 
-Run `streamsnow configure` with the inventory supplying the recommended answer to each of its ≤5
-questions (account and database names from existing deploy scripts/CI, runtime from how apps
-currently connect). Each answer is still explained and asked under the question rule in
+Run `streamsnow configure` with the inventory supplying the recommended answer to each of its
+questions (account and source databases and schemas from existing deploy scripts/CI, runtime from
+how apps currently connect). Each answer is still explained and asked under the question rule in
 [SKILL.md](SKILL.md) Stage 2: an inference from the repo is the recommended option, never a
 confirmation.
 

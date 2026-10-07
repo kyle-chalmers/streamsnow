@@ -83,6 +83,7 @@ base-ref failure). Failing *toward* 2 on a missing base ref is deliberate:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import datetime as _dt
 import json
 import re
@@ -91,7 +92,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..config import Config, ConfigError, load_config, validate_fqn
+from ..config import Config, ConfigError, DeployCfg, SnowflakeObjects, load_config, validate_fqn
 from ..deploy import streamlit_fqn
 
 _KIND = "tombstones"
@@ -210,26 +211,35 @@ def worktree_identifiers(cfg, apps_dir: Path) -> dict[str, str]:
 
 
 def _base_config(cfg, base_commit: str) -> tuple[Config, list[str]]:
-    """The config AS OF the base commit, for deriving what was deployed THEN.
+    """The deploy identity AS OF the base commit, for deriving what was deployed THEN.
 
     A PR that moves ``app_database``/``app_schema`` re-derives every base FQN
-    into the NEW namespace if the current config is used on both sides — the
+    into the NEW namespace if the current config is used on both sides: the
     old objects silently orphan with no tombstone required. Deriving the base
-    inventory from the base commit's own config closes that. When the base
-    config is missing or unparseable (pre-adoption history, schema drift),
-    fall back to the current config with a note — a wrong-namespace nag beats
-    a silent orphan, and the note says why.
+    inventory from the base commit's own config closes that.
+
+    Only the deploy identity is read from the base (``snowflake.objects`` and
+    ``deploy``), because a Streamlit FQN depends on nothing else. Parsing the
+    whole base config meant any unrelated block this StreamSnow can no longer
+    read (a schema_version 1 governance block, say) fell back to the current
+    config: the exact silent orphan this function exists to prevent. When the
+    identity itself is missing or unparseable, fall back with a note: a
+    wrong-namespace nag beats a silent orphan, and the note says why.
     """
     try:
         raw = _git(["show", f"{base_commit}:streamsnow.config.yaml"])
     except ToolError:
-        return cfg, ["base commit has no streamsnow.config.yaml — using current config"]
+        return cfg, ["base commit has no streamsnow.config.yaml: using current config"]
     try:
         import yaml as _yaml
 
-        return Config.from_dict(_yaml.safe_load(raw) or {}), []
-    except Exception as exc:  # noqa: BLE001 — fall back rather than block
-        return cfg, [f"base config unparseable ({exc}) — using current config"]
+        data = _yaml.safe_load(raw) or {}
+        objects = SnowflakeObjects.from_dict(dict(data["snowflake"]["objects"]))
+        deploy = DeployCfg.from_dict(dict(data.get("deploy") or {}))
+    except Exception as exc:  # noqa: BLE001 (fall back rather than block)
+        return cfg, [f"base config unparseable ({exc}): using current config"]
+    snowflake = dataclasses.replace(cfg.snowflake, objects=objects)
+    return dataclasses.replace(cfg, snowflake=snowflake, deploy=deploy), []
 
 
 def base_identifiers(

@@ -4,8 +4,8 @@ How to find tables and columns in Snowflake when you're building a dashboard,
 and how to wire queries so they pass StreamSnow's governance checks. Table names
 are **not** hardcoded anywhere — `INFORMATION_SCHEMA` is the source of truth.
 
-Throughout, `<database>` is your `governance.database` and the schemas are your
-`governance.schema_allow` from `streamsnow.config.yaml`.
+Throughout, the schemas are your `governance.sources` from `streamsnow.config.yaml`
+(`DATABASE.SCHEMA` entries, possibly in several databases).
 
 ## The two queries you need
 
@@ -13,8 +13,8 @@ Throughout, `<database>` is your `governance.database` and the schemas are your
 
 ```sql
 SELECT table_schema, table_name, table_type, comment
-FROM <database>.INFORMATION_SCHEMA.TABLES
-WHERE table_schema IN ('ANALYTICS', 'REPORTING')   -- your schema_allow
+FROM <database>.INFORMATION_SCHEMA.TABLES   -- one source's schemas; repeat per source database
+WHERE table_schema IN ('REPORTING')
 ORDER BY table_schema, table_name;
 ```
 
@@ -33,23 +33,36 @@ doesn't appear, it's usually a role gap (see [below](#when-your-role-cant-see-a-
 
 ## How governance shapes what you can query
 
-StreamSnow enforces the schema **denylist** as an executable guardrail; the
-allowlist is the convention the scaffold and docs point at:
+The boundary is config, checked by `streamsnow check schema-refs` in pre-commit,
+`validate-app` and CI, and by the live SQL review before anything is sent:
 
-- **`schema_deny`** — schemas that are blocked outright (raw/landing/bridge
-  layers, ETL intermediates). This is the enforced part: `streamsnow check
-  schema-refs` flags any reference to them in committed `apps/**` SQL or Python,
-  and it runs in pre-commit, in `validate-app`, and in CI. Investigating a denied
-  schema in Snowsight is fine; shipping a query against one is not.
-- **`schema_allow`** — the schemas your apps are expected to read (the curated
-  marts). The scaffolded queries and these docs point at them, but the check does
-  not fail a reference to a schema that is merely absent from this list.
-- **`read_exceptions`** — specific fully-qualified objects (`DB.SCHEMA.OBJECT`)
-  sanctioned for direct reads even though their schema is on the deny list. The
-  match is exact: the rest of that schema stays blocked.
+- **`sources`**: the `DATABASE.SCHEMA` locations your apps read, in any databases.
+  `deploy-setup --admin` grants the CI role (which runs every deployed app) read on
+  exactly these. Name objects in full: `DATABASE.SCHEMA.OBJECT`.
+- **`app_data`**: the one schema per repo for views and dynamic tables built for the
+  apps. Query sources directly unless an object there earns its place.
+- **`schema_deny`**: schemas that are blocked outright (raw, landing, bridge layers).
+  `RAW` blocks a `RAW` schema in every database; `FINANCE.RAW` only in `FINANCE`.
+  A denied reference always fails.
+- **`read_exceptions`**: exact `DB.SCHEMA.OBJECT` names readable despite the deny
+  list; the rest of that schema stays blocked.
+- **`boundary`**: what happens to a name outside `sources` and `app_data`, or a
+  two-part `SCHEMA.OBJECT` name (it resolves against the session's database, which
+  differs between preview and the deployed app). `warn` (the default) reports it;
+  `enforce` fails it. A two-part name (for example after `USE DATABASE`) is only a
+  warning under `boundary: warn`, even when its schema matches a qualified deny entry,
+  so app SQL should use `DATABASE.SCHEMA.OBJECT`. Only names in relation position count
+  (after `FROM`, `JOIN`, `INTO`, `UPDATE`, the literal inside `IDENTIFIER('...')` or
+  `TABLE('...')`, after `USE`): `t.id` or `params.start_date` are columns, never
+  objects. Quoted names keep their case, as in Snowflake: `"analytics_db"."reporting"`
+  is not the source `ANALYTICS_DB.REPORTING`. `INFORMATION_SCHEMA` and `SNOWFLAKE.*`
+  are ignored.
+- **`imported_databases`**: shares that hold sources. They take `IMPORTED PRIVILEGES`
+  instead of per-schema grants (`SNOWFLAKE` and `SNOWFLAKE_SAMPLE_DATA` are built in).
 
-A reference to a denied schema (other than an exact `read_exceptions` object)
-fails the gate before it can merge.
+`streamsnow configure` and `streamsnow doctor --live` check, read-only, that each
+source is visible to your connection's role. That proves visibility, not SELECT, and
+it is your role, not the CI role.
 
 ## Rules of thumb
 
@@ -100,7 +113,7 @@ what you expect:
    to work around it. Roles are the enforcement mechanism.
 3. **For restricted (e.g. PII) schemas**, don't grant the app role access to the
    whole schema. Instead expose **only the columns you need** through a
-   passthrough view in an allowed schema (explicit column list, never `SELECT *`,
+   passthrough view in a governance source schema, not app data, which holds only objects the CI role owns (explicit column list, never `SELECT *`,
    so a future sensitive column can't leak), and point the app at that view.
 
 ## See also

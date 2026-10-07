@@ -40,7 +40,7 @@ except ImportError:  # pragma: no cover
 
 
 from ..config import Config, ConfigError, find_config, load_config
-from ..policy import SchemaPolicy
+from ..policy import BOUNDARY_VERDICTS, SchemaPolicy
 from . import (
     check_app_security,
     check_artifacts,
@@ -546,7 +546,14 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
 
     files = _walk_app_files(app_dir)
     sr = check_schema_refs.check_paths(files, policy)
-    checks.append({"name": "schema-refs", "ok": sr["ok"], "findings": sr["findings"]})
+    checks.append(
+        {
+            "name": "schema-refs",
+            "ok": sr["ok"],
+            "findings": sr["findings"],
+            "warnings": sr["warnings"],
+        }
+    )
     sec = check_app_security.scan_paths(files)
     checks.append({"name": "app-security", "ok": sec["ok"], "findings": sec["findings"]})
     bind = check_bind_predicates.scan_paths(files)
@@ -618,11 +625,13 @@ def _format_finding(f: object) -> str:
         elif line:
             loc = f"line {line}"
         # Prefer the most specific descriptor available.
-        parts = [
-            str(f[k])
-            for k in ("kind", "func", "schema", "token", "detail")
-            if f.get(k) not in (None, "")
-        ]
+        # A boundary entry is fully described by its detail sentence.
+        keys = (
+            ("detail",)
+            if f.get("reason") in BOUNDARY_VERDICTS
+            else ("kind", "func", "schema", "token", "detail")
+        )
+        parts = [str(f[k]) for k in keys if f.get(k) not in (None, "")]
         descriptor = " ".join(parts)
         if loc and descriptor:
             return f"{loc} — {descriptor}"

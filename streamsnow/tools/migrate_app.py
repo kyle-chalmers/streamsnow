@@ -29,7 +29,9 @@ scan-hardfails <source> [--config ...]
     ``check_schema_refs``), hardcoded credentials at module scope, and the
     *presence* of ``.streamlit/secrets.toml`` / ``.env`` (presence only — this
     tool never reads a secrets file's contents, so a secret can't leak into
-    JSON output or a transcript). Exit 0 on clean, 1 on blocks.
+    JSON output or a transcript). Relation names outside ``governance.sources``
+    and app data are reported as ``boundary_refs`` and block only under
+    ``governance.boundary: enforce``. Exit 0 on clean, 1 on blocks.
 
 translate-deps <source> --out <env.yml> [--offline]
     Translate the source's dependency manifest (requirements.txt /
@@ -56,7 +58,7 @@ scan-conformance <app-dir> [--config ...]
     The conform pass's worklist: uncached data-fetches, ``SELECT *`` literals,
     altair imports, a legacy pages/ layout (no ``st.navigation``), and the
     (database, schema) grants the app needs — split into schemas the CI role
-    already covers (``governance.database`` × ``schema_allow``) vs ones that
+    already covers (``governance.sources`` and ``app_data``) vs ones that
     need a DBA. Exit 0 always.
 
 scan-inline-sql <app-dir>
@@ -95,7 +97,7 @@ from ..policy import SchemaPolicy
 
 # The denied-schema detection itself lives in check_schema_refs — one
 # implementation consumed by pre-commit, validate-app, AND this scanner.
-from .check_schema_refs import find_denied_refs
+from .check_schema_refs import find_boundary_refs, find_denied_refs
 
 # --------------------------------------------------------------------------- #
 # Constants                                                                   #
@@ -565,16 +567,9 @@ def preflight(source: Path, target_slug: str, repo_root: Path) -> tuple[int, dic
 # --------------------------------------------------------------------------- #
 
 
-def _scan_schema_refs(source: Path, policy: SchemaPolicy) -> list[dict[str, Any]]:
-    """Denied-schema references in .py and .sql files under *source*.
-
-    Delegates to :func:`check_schema_refs.find_denied_refs` — the same
-    implementation pre-commit and validate-app run — so the migration scanner
-    can never drift from the enforcement the lifted app will face at commit
-    time. Python files get the AST scan (docstrings and prose excluded); .sql
-    files get the comment-stripping text scan.
-    """
-    refs: list[dict[str, Any]] = []
+def _scannable_files(source: Path) -> list[tuple[Path, str, str]]:
+    """``(path, posix path under source, text)`` for each .py/.sql file the scans read."""
+    out: list[tuple[Path, str, str]] = []
     root_resolved = source.resolve()
     for path in sorted(source.rglob("*")):
         if path.suffix not in (".py", ".sql") or not path.is_file():
@@ -587,9 +582,46 @@ def _scan_schema_refs(source: Path, policy: SchemaPolicy) -> list[dict[str, Any]
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        file_rel = _rel_posix(path, source)
+        out.append((path, _rel_posix(path, source), text))
+    return out
+
+
+def _scan_schema_refs(source: Path, policy: SchemaPolicy) -> list[dict[str, Any]]:
+    """Denied-schema references in .py and .sql files under *source*.
+
+    Delegates to :func:`check_schema_refs.find_denied_refs`, the same
+    implementation pre-commit and validate-app run, so the migration scanner
+    can never drift from the enforcement the lifted app will face at commit
+    time. Python files get the AST scan (docstrings and prose excluded); .sql
+    files get the comment-stripping text scan.
+    """
+    refs: list[dict[str, Any]] = []
+    for path, file_rel, text in _scannable_files(source):
         for line_no, schema in find_denied_refs(text, policy, is_python=path.suffix == ".py"):
             refs.append({"file": file_rel, "line": line_no, "schema": schema})
+    return refs
+
+
+def _scan_boundary_refs(source: Path, policy: SchemaPolicy) -> list[dict[str, Any]]:
+    """Relation names outside governance.sources and app data, and two-part names.
+
+    Reported for the scrub step either way. They block the lift only under
+    ``governance.boundary: enforce``, where the lifted app would fail
+    validate-app on its first commit; under ``warn`` the lift proceeds and the
+    same warnings follow the app into validate-app.
+    """
+    refs: list[dict[str, Any]] = []
+    for path, file_rel, text in _scannable_files(source):
+        for ref in find_boundary_refs(text, policy, is_python=path.suffix == ".py"):
+            refs.append(
+                {
+                    "file": file_rel,
+                    "line": ref.line,
+                    "ref": ref.ref,
+                    "reason": ref.verdict,
+                    "detail": ref.detail,
+                }
+            )
     return refs
 
 
@@ -637,13 +669,16 @@ def _scan_secrets_in_py(source: Path) -> list[dict[str, Any]]:
 
 def scan_hardfails(source: Path, policy: SchemaPolicy) -> tuple[int, dict[str, Any]]:
     schema_refs = _scan_schema_refs(source, policy)
+    boundary_refs = _scan_boundary_refs(source, policy)
     secrets_in_py = _scan_secrets_in_py(source)
     # IMPORTANT: presence-check only — never read a secrets file's contents.
     has_secrets_toml = (source / ".streamlit" / "secrets.toml").exists()
     has_env_file = (source / ".env").exists()
-    blocks = bool(schema_refs) or bool(secrets_in_py)
+    blocks = bool(schema_refs) or bool(secrets_in_py) or (policy.enforcing and bool(boundary_refs))
     result = {
         "schema_refs": schema_refs,
+        "boundary_refs": boundary_refs,
+        "boundary": policy.boundary,
         "secrets_in_py": secrets_in_py,
         "has_secrets_toml": has_secrets_toml,
         "has_env_file": has_env_file,
@@ -1230,8 +1265,8 @@ def _detect_required_grants(app_dir: Path, cfg: Config) -> list[dict[str, Any]]:
 
     Matches SQL-style ``FROM/JOIN db.schema.table`` substrings AND Snowpark
     ``session.table("db.schema.table")`` calls. A pair is default-granted when
-    it is ``governance.database`` × one of ``governance.schema_allow`` — the
-    single scoped grant the CI role holds for every repo app. Anything else
+    it is a ``governance.sources`` entry or ``governance.app_data``: the scoped
+    grants the CI role holds for every repo app. Anything else
     needs a DBA-run GRANT sequence before the deployed app can read it (an
     owner's-rights app runs as the CI role, so a schema the developer can read
     locally is NOT evidence the deployed app can).
@@ -1240,8 +1275,8 @@ def _detect_required_grants(app_dir: Path, cfg: Config) -> list[dict[str, Any]]:
     default-granted — so the skill can show an actionable confirmation line
     rather than a silent empty list.
     """
-    gov = cfg.governance
-    default_granted = {(gov.database.upper(), s.upper()) for s in gov.schema_allow}
+    granted = SchemaPolicy.from_governance(cfg.governance).boundary_schemas
+    default_granted = {tuple(s.split(".", 1)) for s in granted}
     ci_role = cfg.snowflake.roles.ci_role
 
     found: set[tuple[str, str]] = set()
@@ -1259,14 +1294,13 @@ def _detect_required_grants(app_dir: Path, cfg: Config) -> list[dict[str, Any]]:
     for db, schema in found:
         default = (db, schema) in default_granted
         reason = (
-            f"covered by {ci_role} default grants "
-            f"({gov.database}.{{{', '.join(gov.schema_allow)}}})"
+            f"covered by {ci_role} default grants (governance.sources and app_data)"
             if default
             else (
                 f"not covered by {ci_role} default grants: a DBA must GRANT "
                 "USAGE on the database + schema and GRANT SELECT on ALL and FUTURE "
-                f"{', '.join(READ_OBJECT_TYPES)} in the schema (or add it to "
-                "governance.schema_allow and re-run deploy-setup --admin)"
+                f"{', '.join(READ_OBJECT_TYPES)} in the schema (or add {db}.{schema} to "
+                "governance.sources and re-run deploy-setup --admin)"
             )
         )
         out.append(

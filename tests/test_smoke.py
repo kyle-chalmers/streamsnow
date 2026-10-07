@@ -49,7 +49,7 @@ def test_check_subcommands_are_registered():
 
 
 def test_schema_policy_denies_case_insensitively():
-    policy = SchemaPolicy(database="DEMO_DB", schema_allow=("ANALYTICS",), schema_deny=("BRIDGE",))
+    policy = SchemaPolicy(sources=("DEMO_DB.ANALYTICS",), schema_deny=("BRIDGE",))
     assert policy.is_denied("bridge") is True
     assert policy.is_denied("BRIDGE") is True
     assert policy.is_denied("analytics") is False

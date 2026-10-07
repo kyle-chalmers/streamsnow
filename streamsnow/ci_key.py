@@ -34,7 +34,7 @@ from pathlib import Path
 
 from .config import Config, ConfigError, quote_sql_literal, validate_identifier
 from .deploy import ci_user_name, expected_ci_grants
-from .policy import SchemaPolicy
+from .policy import SchemaPolicy, split_name
 
 KEY_BASENAME = "streamsnow_ci_rsa_key"
 PRIVATE_KEY_SECRET = "SNOWFLAKE_PRIVATE_KEY_RAW"
@@ -516,12 +516,14 @@ def _select_probe_sql(cfg: Config, obj: str) -> str:
             validate_identifier(part, "--object")
     except ConfigError as exc:
         raise CiKeyError(str(exc)) from None
-    db, schema, _ = parts
     policy = SchemaPolicy.from_governance(gov)
-    if db.upper() != gov.database.upper() or not policy.is_allowed(schema):
+    database, schema, _ = split_name(obj)
+    # Sources and app data only: the admin script grants nothing on read exceptions,
+    # so a LIMIT 0 read there would report a grant the setup never promised.
+    if not policy.in_boundary(database, schema) or policy.is_denied(schema, database):
         raise CiKeyError(
-            f"--object {obj} is outside the governance allowlist ({gov.database}, schemas "
-            f"{', '.join(gov.schema_allow)}); nothing was sent to Snowflake."
+            f"--object {obj} is outside the governance sources and app data "
+            f"({', '.join(policy.boundary_schemas)}); nothing was sent to Snowflake."
         )
     sql = f"SELECT * FROM {obj} LIMIT 0"
     try:
@@ -556,7 +558,7 @@ def verify(
     Everything that can be refused is refused before the first sign-in: a
     missing, empty, non-UTF-8 or NUL-containing secret file, a user, warehouse
     or role file that no longer matches the config, an ``obj`` outside the
-    governance allowlist, no ``snow`` on PATH. Then each probe is its own
+    governance sources and app data, no ``snow`` on PATH. Then each probe is its own
     ``snow sql`` call, with the SQL on stdin after ``USE SECONDARY ROLES NONE``
     (so another role the CI user holds cannot make a probe pass) and the
     secrets only in ``env=``:

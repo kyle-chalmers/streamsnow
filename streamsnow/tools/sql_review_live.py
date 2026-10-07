@@ -90,7 +90,7 @@ from pathlib import Path
 from .. import __version__
 from .. import sf_exec as sx
 from ..config import ConfigError, find_config, load_config
-from ..policy import SchemaPolicy
+from ..policy import BOUNDARY_VERDICTS, DENIED, SchemaPolicy
 from . import sql_review as sr
 from . import sql_review_index as sri
 
@@ -217,7 +217,7 @@ def run_batch(
     # Guard everything first: a refusal must stop the whole step before any
     # call, not just the item it is in (the per-item retry would send the rest).
     for stmt in flat:
-        sx.guard(stmt, ex.policy)
+        sx.guard(stmt, ex.policy, warned=ex.warned)
     try:
         results = ex.run(flat, result_cache=result_cache)
     except sx.SnowError as exc:
@@ -830,16 +830,27 @@ def cmd_probe(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
     ):
         objects[name] = split_fqn(name)
     denied: set[str] = set()
+    outside: set[str] = set()
     if st.policy is not None:
-        from .check_schema_refs import find_denied_refs  # noqa: PLC0415
-
-        denied = {n for n in objects if find_denied_refs(n, st.policy)}
+        for n in objects:
+            verdict = st.policy.classify(n)
+            if verdict == DENIED:
+                denied.add(n)
+            elif verdict in BOUNDARY_VERDICTS:
+                outside.add(n)
+    enforcing = st.policy is not None and st.policy.enforcing
+    if outside and not enforcing:
+        warnings.append(
+            "outside governance.sources and app_data (governance.boundary: warn), probed "
+            "anyway: " + ", ".join(sorted(outside))
+        )
+    blocked = denied | (outside if enforcing else set())
     items: list[tuple[str, list[str]]] = [("__session", [_SESSION_SQL])]
     for s in sections:
         if s.root not in _UNWRAPPABLE_ROOTS:
             items.append((f"col:{s.ref}", describe_sql(s.sql)))
     for name, (db, schema, obj) in objects.items():
-        if name not in denied:
+        if name not in blocked:
             bare, _ = _bare(obj)
             items.append(
                 (f"show:{name}", [f"SHOW OBJECTS LIKE {_lit(bare)} IN SCHEMA {db}.{schema}"])
@@ -873,7 +884,7 @@ def cmd_probe(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
     found: dict[str, dict] = {}
     items = []
     for name, (db, schema, obj) in objects.items():
-        if name in denied:
+        if name in blocked:
             continue
         got = step1.get(f"show:{name}")
         if isinstance(got, sx.SnowError) or got is None:
@@ -907,12 +918,18 @@ def cmd_probe(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
 
     for name in objects:
         entry: dict = {"id": f"probe:{name}", "object": name}
-        if name in denied:
+        if name in blocked:
             entry.update(
                 status="fail",
                 exists=None,
-                detail="reads a governance-denied schema; not queried (move the read or add "
-                "an exact read exception in streamsnow.config.yaml)",
+                detail=(
+                    "reads a governance-denied schema; not queried (move the read or add "
+                    "an exact read exception in streamsnow.config.yaml)"
+                    if name in denied
+                    else "outside governance.sources and app_data (governance.boundary: "
+                    "enforce); not queried (add its schema to governance.sources, or move "
+                    "the read)"
+                ),
             )
             results.append(entry)
             continue

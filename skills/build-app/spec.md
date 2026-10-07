@@ -18,9 +18,8 @@ document?
 
 ## Steps (new / ingest)
 
-1. **Read the governance config first.** `streamsnow.config.yaml` gives the schema allowlist
-   (`governance.schema_allow` / `schema_deny`, `governance.database`), default runtime, and deploy
-   source. Everything you write must fit it. If the repo isn't configured yet, keep going but mark
+1. **Read the governance config first.** `streamsnow.config.yaml` gives the data boundary
+   (`governance.sources`, `app_data`, `schema_deny`), default runtime, and deploy source. Everything you write must fit it. If the repo isn't configured yet, keep going but mark
    §3 unverified and point at `/onboard`. Read the house design guide `.streamsnow/design.md`
    too when it exists ([_shared/overlays.md](../_shared/overlays.md#house-design-guide)): its
    choices go in §2 `Style:`.
@@ -32,8 +31,8 @@ document?
 4. **Interview only for the gaps.** Extract what the user already gave; ask real questions only at
    genuine forks (runtime, a non-default TTL, an ambiguous page boundary). Otherwise propose a
    default and ask to confirm or redirect.
-5. **Resolve source schemas against the allowlist.** Every §3 object must live under an allowed
-   schema. If the user can't name exact objects, capture the *data domain* ("order line items") for
+5. **Resolve source schemas against `governance.sources`.** Every §3 object must live in a
+   source schema (or the app-data schema). If the user can't name exact objects, capture the *data domain* ("order line items") for
    discovery during SQL authoring — never invent table names.
 6. **Decide the runtime** per [_shared/runtime-decision.md](../_shared/runtime-decision.md); default
    to the repo's configured runtime, record any deviation with its reason in §9.

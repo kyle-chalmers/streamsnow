@@ -19,7 +19,7 @@ Names as the gate prints them. How to fix each: [fixing-checks.md](fixing-checks
 
 - **required-files, manifest, artifacts, naming:** the runtime's files exist, `snowflake.yml` is
   valid for that runtime, its `artifacts:` list matches disk, and the slug is lowercase-hyphenated.
-- **schema-refs:** no reference into a `governance.schema_deny` schema (exact `read_exceptions` aside).
+- **schema-refs:** no reference into a `governance.schema_deny` schema (exact `read_exceptions` aside). Names outside `governance.sources` and app data, and two-part `SCHEMA.OBJECT` names, are warnings under `governance.boundary: warn` and failures under `enforce`.
 - **app-security:** no network egress, code execution, write SQL or string-built SQL. Apps are
   read-only by contract; maintained DDL in `sql_review/app_specific_reporting_objects/` is exempt.
 - **bind-predicates:** none of the `:N IS NULL OR` deployed-driver trap.
@@ -57,7 +57,7 @@ Names as the gate prints them. How to fix each: [fixing-checks.md](fixing-checks
 - **Per-app, deterministic, offline:** it catches contract violations, not slow SQL, wrong numbers
   or awkward UI. Quality is `/review-app`; numbers against live Snowflake are `/sql-review`.
 - **Never "fix" by weakening governance.** Editing the deny list, deleting a check, or
-  string-escaping past the dynamic-SQL rule is a regression. Route through allowed schemas,
+  string-escaping past the dynamic-SQL rule is a regression. Route through governance sources,
   parameterize, or remove the capability.
 - **Local PASS is necessary, not final:** CI is authoritative and re-runs after push.
 - **Trust the aggregate for the verdict.** A focused check can pass while the gate fails: four checks
@@ -69,8 +69,7 @@ Names as the gate prints them. How to fix each: [fixing-checks.md](fixing-checks
 - **`no app at apps/<slug>` (exit 2):** the slug must be a directory under `apps/`; run from the
   repo root or pass `--dir` (and `--config <path>` when the config is elsewhere). An ungoverned
   repo is an `/onboard` problem, not a validate problem.
-- **Schema looks allowed but fails:** only `governance.schema_deny` and exact `read_exceptions`
-  count; a fully-qualified name resolving into a denied schema still trips it.
+- **Schema looks allowed but fails:** a denied schema fails whatever the boundary. A bare deny entry (`RAW`) blocks every database, a qualified one (`FINANCE.RAW`) only its own; a three-part name outside the sources fails only under `governance.boundary: enforce`. Quoted names keep their case: `"analytics_db"."reporting"` is not the source `ANALYTICS_DB.REPORTING`.
 - **Checks disagree with reality after a config change:** the gate reads config live, so re-run it.
 
 ## Optional UI smoke

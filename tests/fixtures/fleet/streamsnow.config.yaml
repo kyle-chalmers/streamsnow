@@ -3,7 +3,7 @@
 # session fallback, brace-less token headers, nested page packages).
 # tests/test_validate.py::test_fleet_fixture_app_passes_validate is the
 # regression net for 'faithful to a real fleet'.
-schema_version: 1
+schema_version: 2
 runtime: container
 project:
   name: Acme Fleet
@@ -26,15 +26,16 @@ snowflake:
     ci_role: STREAMSNOW_DEPLOY_ROLE
     viewer_role: STREAMSNOW_VIEWER_ROLE
 governance:
-  database: ANALYTICS_DB
-  schema_allow:
-  - ANALYTICS
-  - REPORTING
+  sources:
+  - ANALYTICS_DB.ANALYTICS
+  - ANALYTICS_DB.REPORTING
+  app_data: STREAMSNOW_APPS.STREAMSNOW_REPORTING
   schema_deny:
   - RAW
   - STAGING
   - BRIDGE
   read_exceptions: []
+  boundary: warn
 deploy:
   source: stage-copy
   artifact_exclude:

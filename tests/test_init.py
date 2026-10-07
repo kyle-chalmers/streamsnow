@@ -89,6 +89,7 @@ def test_init_container_scaffolds_a_working_repo(tmp_path):
     policy = SchemaPolicy.from_governance(cfg.governance)
     report = check_paths(list((tmp_path / "apps").rglob("*")), policy)
     assert report["ok"], report["findings"]
+    assert report["warnings"] == [], report["warnings"]
 
     # Every governance hook the checks ship is wired into the generated pre-commit.
     hooks = (tmp_path / ".pre-commit-config.yaml").read_text(encoding="utf-8")
@@ -103,6 +104,9 @@ def test_init_container_scaffolds_a_working_repo(tmp_path):
         "artifacts",
     ):
         assert f"streamsnow-{hook}" in hooks, f"missing hook: {hook}"
+    assert "STREAMSNOW_APPS.STREAMSNOW_REPORTING" in (tmp_path / "AGENTS.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_init_warehouse_runtime(tmp_path):
@@ -122,9 +126,7 @@ def test_init_warehouse_runtime(tmp_path):
 
 
 def test_schema_refs_guardrail_blocks_denied_schema():
-    policy = SchemaPolicy(
-        database="ANALYTICS_DB", schema_allow=("ANALYTICS",), schema_deny=("RAW", "BRIDGE")
-    )
+    policy = SchemaPolicy(sources=("ANALYTICS_DB.ANALYTICS",), schema_deny=("RAW", "BRIDGE"))
     # denied
     assert find_denied_refs("SELECT * FROM RAW.events", policy)
     assert find_denied_refs("FROM mydb.BRIDGE.t", policy)
@@ -173,7 +175,7 @@ def test_init_reuses_existing_config_for_multiple_apps(tmp_path):
 
 
 def test_schema_refs_catches_quoted_and_whitespaced_refs():
-    policy = SchemaPolicy(database="DB", schema_allow=("ANALYTICS",), schema_deny=("BRIDGE",))
+    policy = SchemaPolicy(sources=("DB.ANALYTICS",), schema_deny=("BRIDGE",))
     assert find_denied_refs('FROM "BI"."BRIDGE"."T"', policy)  # quoted identifiers
     assert find_denied_refs("FROM BI . BRIDGE . T", policy)  # whitespace around dots
     assert not find_denied_refs("FROM BI.ANALYTICS.T", policy)
@@ -1238,3 +1240,23 @@ def test_deploy_workflows_log_that_secrets_were_found_when_they_deploy(tmp_path)
         assert "Deploy secrets not set" in skip, name
         assert "Deploy secrets found: deploying" not in skip, name
         assert "Deploy secrets found: deploying" in deploy, name
+
+
+def test_scaffold_targets_the_first_source_in_any_database(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+    data["governance"]["sources"] = ["FINANCE_DB.MARTS", "ANALYTICS_DB.REPORTING"]
+    scaffold(Config.from_dict(data), tmp_path, "fin-app")
+    a = tmp_path / "apps" / "fin-app"
+    query = (a / "queries" / "example_metric.sql").read_text(encoding="utf-8")
+    assert "FROM FINANCE_DB.MARTS.YOUR_TABLE" in query
+    assert "FINANCE_DB.MARTS.YOUR_TABLE" in (a / "sql_review" / "index.yaml").read_text(
+        encoding="utf-8"
+    )
+    secrets = (a / ".streamlit" / "secrets.toml.example").read_text(encoding="utf-8")
+    assert 'database = "FINANCE_DB"' in secrets and 'schema = "MARTS"' in secrets
+    assert "FINANCE_DB.MARTS, ANALYTICS_DB.REPORTING" in (a / "AGENTS.md").read_text(
+        encoding="utf-8"
+    )
+    rules = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "FINANCE_DB.MARTS, ANALYTICS_DB.REPORTING" in rules
+    assert "DATABASE.SCHEMA.OBJECT" in rules
