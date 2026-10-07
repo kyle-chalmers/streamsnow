@@ -1610,7 +1610,7 @@ def test_schema_refs_cli_clean_run_does_not_crash(tmp_path, monkeypatch, capsys,
     assert rc == 0, out
     if fmt == "json":
         # The output contract includes `denylist`; consumers read it.
-        assert sorted(json.loads(out)) == ["denylist", "findings", "ok"]
+        assert sorted(json.loads(out)) == ["boundary", "denylist", "findings", "ok", "warnings"]
     else:
         assert "clean" in out
 
@@ -1663,6 +1663,8 @@ def test_fleet_fixture_app_passes_validate(slug):
     cfg = _fleet_cfg()
     res = validate_app(FLEET / "apps" / slug, SchemaPolicy.from_governance(cfg.governance), cfg)
     assert res["ok"], [c for c in res["checks"] if not c["ok"]]
+    refs = next(c for c in res["checks"] if c["name"] == "schema-refs")
+    assert refs["warnings"] == [], refs["warnings"]  # the fleet already uses three-part names
 
 
 def test_fleet_fixture_still_covers_the_migration_shapes():

@@ -89,6 +89,7 @@ def test_init_container_scaffolds_a_working_repo(tmp_path):
     policy = SchemaPolicy.from_governance(cfg.governance)
     report = check_paths(list((tmp_path / "apps").rglob("*")), policy)
     assert report["ok"], report["findings"]
+    assert report["warnings"] == [], report["warnings"]
 
     # Every governance hook the checks ship is wired into the generated pre-commit.
     hooks = (tmp_path / ".pre-commit-config.yaml").read_text(encoding="utf-8")
