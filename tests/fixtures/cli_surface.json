@@ -7,6 +7,16 @@
       ],
       "arguments": []
     },
+    "app-url": {
+      "options": [
+        "--config",
+        "--connection",
+        "--format"
+      ],
+      "arguments": [
+        "slug"
+      ]
+    },
     "check": {
       "options": [],
       "arguments": []

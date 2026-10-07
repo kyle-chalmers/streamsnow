@@ -14,17 +14,19 @@ Two things start it:
   step 4 says: a fresh `ship/...` branch off `main`, with the edits copied or the commits
   cherry-picked. Run the steps below only after `/ship-app` step 6 has committed the work on the
   new branch, which is when the tree is clean again. This path stays on the new branch (skip step
-  5 below). Any stop below ends the cleanup only: leave the spent branch in place, say why, and
-  continue the ship at `/ship-app` step 7.
+  5 below), so on it `<branch>` in every step below is the spent branch, not the current one.
+  Any stop below ends the cleanup only: leave the spent branch in place, say why, and continue
+  the ship at `/ship-app` step 7.
 
 ## Whether to ask first
 
-Approval in this run means that during this `/ship-app` run the user explicitly approved the PR
-merging, merged it themselves and said so, or told you to let it merge and the watch then saw
-`MERGED`. With that approval, skip the question in step 4 below and report the cleanup afterward:
-approving the merge already means the branch is done, and deleting a merged branch is recoverable
-(its commits are in `main`, GitHub's Restore branch button, the reflog). The step-4 trigger, or a
-merge the watch saw without the user's say-so, has no approval: ask once.
+Approval in this run means that during this `/ship-app` run the user explicitly approved in this
+conversation (not a GitHub review approval) the PR merging, merged it themselves and said so, or
+told you to let it merge and the watch then saw `MERGED`. With that approval, skip the question in
+step 4 below and report the cleanup afterward: approving the merge already means the branch is
+done, and deleting a merged branch is recoverable (its commits are in `main`, GitHub's Restore
+branch button, the reflog). The step-4 trigger, or a merge the watch saw without the user's
+say-so, has no approval: ask once.
 
 Steps 1 to 3 run on both paths, before anything is deleted.
 
@@ -37,8 +39,10 @@ Steps 1 to 3 run on both paths, before anything is deleted.
 3. **Check the branch holds nothing newer than the merge.** A later run can find commits made
    after the PR merged, and `-D` would destroy them. Both tips must equal `headRefOid`:
    - the local tip, `git rev-parse <branch>`;
-   - the remote tip, from `git ls-remote --heads origin <branch>` (no line means the remote
-     branch is already gone, which is fine).
+   - the remote tip, from `git ls-remote --heads origin <branch>`: the first field of the line
+     whose ref is exactly `refs/heads/<branch>`, never a line that only ends in `<branch>` (that
+     suffix also matches `refs/heads/x/<branch>`). No such line means the remote branch is
+     already gone, which is fine.
 
    On any mismatch, stop and delete nothing. Name the extra commits with
    `git log --oneline <headRefOid>..<branch>` (or against `origin/<branch>` for the remote tip)
