@@ -366,7 +366,7 @@ lines, with depth in per-skill reference files:
 | `/validate-app` | The pass/fail check that must be clean before shipping |
 | `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` runs `/sql-review` |
 | `/sql-review` | Proves an app's numbers against live Snowflake: page files, objects, grants and drift, every section run as aggregates, reviewer agents with a verifier, and a committed review log a person signs |
-| `/ship-app` | Validate-gated stage → commit → push → PR → watch CI |
+| `/ship-app` | Validate-gated stage → commit → push → PR → watch CI. You type it; the agent cannot start it, and it never merges |
 | `/migrate-app` | Port an external Streamlit app in: lift it, then conform it through `/build-app`'s phases |
 
 ## Use with other agents

@@ -51,7 +51,10 @@ its aliases, ``FLOAT``/``DOUBLE``/``REAL``, ``DECFLOAT``), keyed by the column
 name as Snowflake reports it (``DESCRIBE RESULT`` de-duplicates repeats as
 ``NAME_1``). A sum over no non-null values is ``null``. ``FLOAT`` columns are
 listed in ``float_columns``: their sums depend on evaluation order, so compare
-them with a tolerance.
+them with a tolerance. ``distinct`` (when present) holds ``{COLUMN: int}``, the
+count of distinct non-null values of each text, date, time or boolean column:
+``compare`` uses it to tell a page that groups the result from one that slices
+it. A count, never a value.
 
 Bench
 -----
@@ -106,6 +109,13 @@ _NUMERIC_TYPE_RE = re.compile(
     re.IGNORECASE,
 )
 _FLOAT_TYPE_RE = re.compile(r"^(FLOAT|FLOAT4|FLOAT8|DOUBLE|REAL)\b", re.IGNORECASE)
+#: Columns a page can group by, whose distinct values ``run`` counts. Semi-structured
+#: and spatial types are left out: they are not keys, and DISTINCT may not apply.
+_KEY_TYPE_RE = re.compile(
+    r"^(VARCHAR|CHAR|CHARACTER|NCHAR|NVARCHAR|NVARCHAR2|STRING|TEXT|DATE|DATETIME|"
+    r"TIME|TIMESTAMP|TIMESTAMP_LTZ|TIMESTAMP_NTZ|TIMESTAMP_TZ|BOOLEAN)\b",
+    re.IGNORECASE,
+)
 _UNWRAPPABLE_ROOTS = frozenset({"SHOW", "DESCRIBE", "DESC", "EXPLAIN"})
 _PLACEHOLDER_RE = re.compile(r"\bYOUR_TABLE\b")
 #: Committed-log totals: a single all-numeric row (a KPI) or at least this many rows.
@@ -222,7 +232,10 @@ def run_batch(
         if session:
             # The session prefix (role, warehouse) runs before every item: if it
             # alone fails, every item would, so this too is "nothing ran".
-            out["__session"] = ex.run(session[0], result_cache=result_cache)
+            try:
+                out["__session"] = ex.run(session[0], result_cache=result_cache)
+            except sx.SnowError as setup:
+                raise sx.SnowError(_session_setup_message(ex, setup)) from setup
         if len(items) == 1:
             return {items[0][0]: exc}
         for key, stmts in items:
@@ -239,6 +252,22 @@ def run_batch(
         out[key] = results[i : i + len(stmts)]
         i += len(stmts)
     return out
+
+
+def _session_setup_message(ex: sx.SnowExec, exc: sx.SnowError) -> str:
+    """Name the session statements that just failed, and the flags that change them.
+
+    Snowflake reports a ``USE WAREHOUSE`` the role cannot see as a bare
+    ``002043 Object does not exist``, which reads like a problem with the
+    reviewed SQL. The statements come from validated config or flag values, so
+    quoting them is safe.
+    """
+    s = ex.session
+    stmts = [f"USE ROLE {s.role}"] if s.role else []
+    if s.warehouse:
+        stmts.append(f"USE WAREHOUSE {s.warehouse}")
+    ran = "; ".join(stmts) or "the connection's default role and warehouse"
+    return f"session setup failed ({ran}): {exc}; pass --role / --warehouse to change them"
 
 
 #: A Snowflake statement error carries its code and SQLSTATE: `002003 (42S02): ...`.
@@ -524,6 +553,10 @@ class Column:
     def is_float(self) -> bool:
         return bool(_FLOAT_TYPE_RE.match(self.type))
 
+    @property
+    def is_key(self) -> bool:
+        return bool(_KEY_TYPE_RE.match(self.type))
+
 
 def parse_columns(result: sx.ResultSet) -> list[Column]:
     return [
@@ -532,13 +565,23 @@ def parse_columns(result: sx.ResultSet) -> list[Column]:
     ]
 
 
-def measure_sql(section_sql: str, columns: list[Column], *, sums: bool = True) -> str:
+def measure_sql(
+    section_sql: str, columns: list[Column], *, sums: bool = True, distinct: bool = False
+) -> str:
     """One row of aggregates: row count, order-insensitive hash, column totals.
 
     Positional references (``$n``) keep duplicate column names unambiguous;
     the hash takes columns sorted by name, so a reordered projection hashes the
     same. Everything is cast to text in Snowflake so no precision is lost on
     the way through JSON.
+
+    With ``distinct``, each key-shaped column (text, date, time, boolean) also
+    gets its count of distinct non-null values. ``compare`` trusts a page that
+    groups this result only when the grouping keeps every one of them: a head
+    or filtered slice whose dropped rows sum to zero keeps the totals but
+    loses keys. The distinct counts add warehouse time to every measured
+    section, so ``run`` retries a failed measure without them before it gives
+    up on totals.
     """
     ordered = sorted(columns, key=lambda c: (c.name, c.position))
     parts = ['COUNT(*) AS "__ROWS"']
@@ -550,6 +593,10 @@ def measure_sql(section_sql: str, columns: list[Column], *, sums: bool = True) -
             if c.numeric:
                 parts.append(f'COUNT(${c.position}) AS "__C{c.position}_N"')
                 parts.append(f'TO_VARCHAR(SUM(${c.position})) AS "__C{c.position}_SUM"')
+    if distinct:
+        for c in columns:
+            if c.is_key:
+                parts.append(f'COUNT(DISTINCT ${c.position}) AS "__C{c.position}_DISTINCT"')
     select = ",\n    ".join(parts)
     return f"SELECT\n    {select}\nFROM (\n{section_sql}\n)"
 
@@ -635,12 +682,22 @@ def parse_measure(row: dict, columns: list[Column]) -> dict:
             name = f"{name}#{seen[name]}"
         value = row.get(key)
         totals[name] = None if value in (None, "") else str(value)
-    return {
+    out = {
         "rows": _int(row.get("__ROWS")),
         "hash": None if row.get("__HASH") in (None, "") else str(row.get("__HASH")),
         "totals": totals,
         "float_columns": [c.name for c in columns if c.is_float],
     }
+    distinct: dict[str, int] = {}
+    named: dict[str, int] = {}
+    for c in columns:
+        named[c.name] = named.get(c.name, 0) + 1
+        count = _int(row.get(f"__C{c.position}_DISTINCT"))
+        if count is not None:
+            distinct[c.name if named[c.name] == 1 else f"{c.name}#{named[c.name]}"] = count
+    if distinct:
+        out["distinct"] = distinct
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -965,7 +1022,8 @@ def measure_sections(
             out[s.ref] = {"status": "fail", "detail": str(got)}
         else:
             columns[s.ref] = parse_columns(got[1])
-            measures.append((s.ref, [measure_sql(s.sql, columns[s.ref]), _LAST_QID_SQL]))
+            measure = measure_sql(s.sql, columns[s.ref], distinct=True)
+            measures.append((s.ref, [measure, _LAST_QID_SQL]))
     if not measures:
         return out, session, []
     try:
@@ -977,17 +1035,26 @@ def measure_sections(
         got = got_all.get(ref)
         section = next(s for s in sections if s.ref == ref)
         overflow = False
-        if isinstance(got, sx.SnowError):
-            # A SUM can overflow NUMBER(38); retry once without totals.
+        # A failed measure steps down a ladder instead of giving up. First drop
+        # the distinct counts: they add warehouse time that can push a section
+        # over its timeout, and COUNT(DISTINCT) rejects some column types. That
+        # is the query `run` used before distinct counts existed, so totals stay
+        # and only the aggregated rule loses its key check. If that fails too, a
+        # SUM overflowed NUMBER(38): retry once more without totals.
+        for sums in (True, False):
+            if not isinstance(got, sx.SnowError):
+                break
             try:
                 got = ex.run(
-                    [measure_sql(section.sql, columns[ref], sums=False), _LAST_QID_SQL],
+                    [measure_sql(section.sql, columns[ref], sums=sums), _LAST_QID_SQL],
                     result_cache=False,
                 )
-                overflow = True
+                overflow = not sums
             except sx.SnowError as exc:
-                out[ref] = {"status": "fail", "detail": str(exc)}
-                continue
+                got = exc
+        if isinstance(got, sx.SnowError):
+            out[ref] = {"status": "fail", "detail": str(got)}
+            continue
         row = sx.first_row(got[0])
         qids[ref] = str(sx.first_row(got[1]).get("QUERY_ID") or "") or None
         entry = {"status": "pass", **parse_measure(row, columns[ref])}
@@ -1022,6 +1089,7 @@ def cmd_run(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
         entry["slow"] = bool(ms is not None and ms > args.slow_s * 1000)
         by_page.setdefault(entry["page"], []).append(entry)
     all_results: list[dict] = []
+    files: list[str] = []
     for page, results in sorted(by_page.items()):
         data = {
             "verb": "run",
@@ -1031,7 +1099,9 @@ def cmd_run(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
             "results": results,
             "warnings": warnings,
         }
-        write_json(run_dir / f"run-{page}.json", data)
+        path = run_dir / f"run-{page}.json"
+        write_json(path, data)
+        files.append(path.relative_to(repo).as_posix())
         all_results += results
     print(
         json.dumps(
@@ -1041,6 +1111,7 @@ def cmd_run(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
                 "app": app.name,
                 "results": all_results,
                 "warnings": warnings,
+                "files": files,
             },
             indent=2,
         )
@@ -1442,7 +1513,9 @@ def _screen_cells(run_dir: Path) -> dict[str, str]:
 
     A page whose ``run-NN.json`` changed after the compare (a reviewer re-ran
     it) is ``stale``: its comparison no longer describes these results. The
-    browser walk never shows here; it is a cross-check, not evidence.
+    browser walk never shows here; it is a cross-check, not evidence. A match
+    on the ``aggregated`` rule reads ``match (aggregated)``, so a reader can
+    tell a page that grouped the SQL's rows from one that showed them as is.
     """
     data = _compare_results(run_dir)
     if data is None:
@@ -1454,7 +1527,10 @@ def _screen_cells(run_dir: Path) -> dict[str, str]:
         if digests.get(page) != run_digest(run_dir / f"run-{page}.json"):
             cells[str(r.get("id"))] = "stale"
         else:
-            cells[str(r.get("id"))] = _SCREEN_WORDS.get(str(r.get("status")), "n/a")
+            word = _SCREEN_WORDS.get(str(r.get("status")), "n/a")
+            if word == "match" and "aggregated" in str(r.get("rule") or "").split("+"):
+                word = "match (aggregated)"
+            cells[str(r.get("id"))] = word
     return cells
 
 

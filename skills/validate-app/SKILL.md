@@ -33,7 +33,7 @@ Names as the gate prints them. How to fix each: [fixing-checks.md](fixing-checks
 - **requirements:** the §11 Build Progress block in `REQUIREMENTS.md` that `/build-app` resumes from.
 - **sql-review (coverage policy: warn|fail):** the offline `streamsnow sql-review check` of
   `sql_review/`. Coverage gates only under `sql_review.coverage: fail`; `advisory` never gates.
-- **placeholders:** no scaffold `YOUR_TABLE` or starter sample block. A fresh scaffold fails it on purpose.
+- **placeholders:** no scaffold `YOUR_TABLE` or starter sample block. A fresh scaffold fails it on purpose. **starter-text** only warns (`!`): an app `AGENTS.md` still describing the starter, or a repo README Apps table with no row for the app.
 
 ## Steps
 

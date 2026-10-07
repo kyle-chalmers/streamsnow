@@ -10,6 +10,9 @@ from branding import apply_branding
 st.set_page_config(page_title="{{ app_title }}", page_icon="📊", layout="wide")
 apply_branding()
 
+# Until st.navigation runs, Streamlit shows its fallback menu: every file under pages/,
+# underscore helpers included. Keep that window short. No data call or widget may run
+# before st.navigation. Put filters after `nav`, or inside the pages, so they do not stretch it.
 nav = st.navigation(
     [
         st.Page("pages/overview.py", title="Overview", icon="📈", default=True),

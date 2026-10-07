@@ -1,7 +1,7 @@
 ---
 name: sql-review
 description: Prove an app's numbers against live Snowflake and leave a record a person signs. Builds or repairs the app's sql_review/ page files, checks objects, grants and DDL drift, runs every section as aggregates, has reviewer agents judge the logic, drops findings the evidence does not support, and writes the committed review log. Use when the user says "review the SQL", "are these numbers right", "trace the data", "audit the lineage", before a release or deploy, or from /review-app --sql. It spends warehouse credits, so run it when asked, not on your own initiative.
-argument-hint: "<slug> [--page NN] [--offline] [--optimize] [--no-screen] [--role ROLE] [--connection NAME]"
+argument-hint: "<slug> [--page NN] [--offline] [--optimize] [--no-screen] [--role ROLE] [--warehouse WH] [--connection NAME]"
 allowed-tools: [Bash, Read, Edit, Write, Glob, Grep, Task]
 ---
 
@@ -24,7 +24,8 @@ fails a ship. Run it on request and before a release or deploy.
 3. **Connection:** `streamsnow doctor`. None → stop after step 2 and name the enabler
    (`streamsnow configure`, then `snow connection add`); never invent results. The live commands
    run as `snowflake.roles.ci_role` (the deployed app's role) with secondary roles off; if the
-   user does not hold it, ask which role to use and pass `--role`.
+   user does not hold it, ask which role to use and pass `--role`. The commands also use
+   `objects.default_warehouse`; if that role cannot use it, pass `--warehouse` with one it can.
 
 ## Facts (JSON only)
 

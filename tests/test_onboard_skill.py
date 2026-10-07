@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
 
@@ -171,6 +172,40 @@ def test_onboard_asks_which_roles_get_the_viewer_role():
     assert ask < admin_file  # asked before the script is written, so it carries the grants
 
 
+def _secret_guard():
+    spec = importlib.util.spec_from_file_location(
+        "secret_guard", REPO_ROOT / "hooks" / "secret_guard.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_admin_file_commands_run_one_at_a_time_so_the_key_guard_allows_them():
+    """The CI key guard denies any command naming ~/.streamsnow-ci unless it starts with
+    `streamsnow ci-key` or `streamsnow deploy-setup` and has no chaining. So `mkdir` and the
+    gitignore check cannot share a command with the deploy-setup line. The guard itself
+    judges the documented line, so a guard or doc change cannot drift apart silently."""
+    guard = _secret_guard()
+    step = SETUP.split("4. **The admin file.**")[1].split("5. **Hand it off.**")[0]
+    commands = re.findall(r"^ +\d\. `([^`]+)`", step, flags=re.M)
+    assert commands[0] == "mkdir -p .internal"
+    assert commands[1].startswith(
+        "streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/"
+    )
+    assert commands[2].startswith("git check-ignore -q .internal/admin-setup.sql")
+    assert guard.allowed_command(commands[1]), commands[1]
+    assert guard.allowed_command(commands[1] + " --viewer-role ANALYST_ROLE")
+    for command in commands:
+        assert not guard._CHAINING.search(command), command
+    # The shapes the doc forbids really are denied by the guard.
+    assert not guard.allowed_command("mkdir -p .internal && " + commands[1])
+    assert not guard.allowed_command("(" + commands[1] + ")")
+    flat = _flat(step)
+    assert "with no chaining, piping or grouping" in flat
+    assert "make `.internal/` first" not in flat
+
+
 def test_delete_branch_on_merge_is_read_then_offered_never_assumed():
     section = _flat(SETUP.split("## 2e ·")[1].split("## 3 ·")[0])
     read = section.index("--jq .delete_branch_on_merge")
@@ -180,3 +215,34 @@ def test_delete_branch_on_merge_is_read_then_offered_never_assumed():
     assert "only a repo admin" in section  # no admin rights: say so and move on
     stage4 = _flat(SKILL.split("## Stage 4")[1].split("## Done when")[0])
     assert "deletes merged branches" in stage4 and "setup.md §2e" in stage4
+
+
+def test_ci_key_verify_is_offered_before_the_push_turns_the_deploy_on():
+    """`ci-key push` sets SNOWFLAKE_ACCOUNT, which switches the deploy job on. A bad
+    CI identity found by `verify` after that has already cost a failed deploy."""
+    raw = SETUP.split("## 2e ·")[1].split("## 3 ·")[0]
+    section = _flat(raw)
+    verify = section.index("**Prove what CI will see")
+    push = section.index("**Deploy secrets on GitHub.**")
+    branches = section.index("**Delete merged branches on GitHub.**")
+    assert verify < push < branches
+    assert section.index("streamsnow ci-key verify --object") < section.index(
+        "Otherwise run `streamsnow ci-key push`"
+    )
+    assert "before `streamsnow ci-key push`" in section
+    assert "On a no,\nskip" not in raw  # one sentence, not split across a stray break
+    assert "On a no, skip it" in section
+    stage4 = _flat(SKILL.split("## Stage 4")[1].split("## Done when")[0])
+    assert stage4.index("ci-key verify") < stage4.index("ci-key push")
+
+
+def test_a_refused_secret_file_is_replaced_with_the_user_not_for_them():
+    """`ci-key push` refuses an unusable secret file by name. The key guard keeps the agent
+    out of ~/.streamsnow-ci, so the skill walks the user through the delete and then rebuilds
+    the value from the config; the private key file is never replaced this way."""
+    flat = _flat(SETUP)
+    walk = flat.split("If `ci-key push` refuses a secret file by name")[1].split("## 2e")[0]
+    assert "offer to walk the user through replacing it" in walk
+    assert "rm ~/.streamsnow-ci/secrets/<NAME>" in walk
+    assert walk.index("streamsnow ci-key create") < walk.index("streamsnow ci-key push")
+    assert "SNOWFLAKE_PRIVATE_KEY_RAW" in walk and "stop instead" in walk

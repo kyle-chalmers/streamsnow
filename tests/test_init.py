@@ -416,6 +416,9 @@ def _run_with_stub_snow(
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "SNOW_LOG": str(log),
         "GITHUB_SHA": "0123456789abcdef0123456789abcdef01234567",
+        # The stage-copy step builds its bundle under $RUNNER_TEMP (GitHub sets it
+        # per job); keep each test's bundle in its own tmp dir.
+        "RUNNER_TEMP": str(bin_dir.parent),
     }
     proc = subprocess.run(
         ["bash", "-e", "-c", script],
@@ -471,8 +474,23 @@ def test_stage_copy_deploy_step_still_copies_when_an_app_exists(tmp_path):
     )
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
     copies = [c for c in calls.splitlines() if c.startswith("stage copy")]
-    assert any(" apps/ " in f" {c} " for c in copies), calls
-    assert any("apps/acme-sales/.streamlit/config.toml" in c for c in copies), calls
+    bundle = tmp_path / "ss-bundle"
+    # The upload is the per-app bundle, not the whole apps/ tree (#22).
+    assert not any(" apps/ " in f" {c} " for c in copies), calls
+    assert any(f" {bundle.as_posix()}/ " in f" {c} " and "--recursive" in c for c in copies), calls
+    cfg_copies = [c for c in copies if "ss-bundle/acme-sales/.streamlit/config.toml" in c]
+    assert cfg_copies, calls
+    # Pin the destination too: `stage copy --temporary-connection <src> <dest> ...`.
+    (cfg_copy,) = cfg_copies
+    dest = cfg_copy.split()[4]
+    assert "/apps/acme-sales/.streamlit/" in dest, cfg_copy
+    assert dest.endswith(
+        "/commits/0123456789abcdef0123456789abcdef01234567/apps/acme-sales/.streamlit/"
+    )
+    # The bundle holds the app, never its agent docs or review trail.
+    assert (bundle / "acme-sales" / "streamlit_app.py").is_file()
+    assert not (bundle / "acme-sales" / "AGENTS.md").exists()
+    assert not (bundle / "acme-sales" / "sql_review").exists()
     assert any(c.startswith("sql") and "/tmp/ss-acme-sales.sql" in c for c in calls.splitlines())
 
 
@@ -940,14 +958,50 @@ def test_build_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
     assert sql_review.main(["generate", "sales-trends", "--dir", str(tmp_path)]) == 0
     assert not (a / "sql_review/01_overview.sql").exists()  # generate removed the stale page
     assert (a / "sql_review/01_sales_trend.sql").is_file()
+    # pages.md's documented check for this end state is validate-app. It once said
+    # `grep -rn YOUR_TABLE apps/<slug>` must print nothing, but the app's own AGENTS.md
+    # names the token in its instructions, so this correct app failed that check.
+    agents = (a / "AGENTS.md").read_text(encoding="utf-8")
+    assert "YOUR_TABLE" in agents
+
+    # The documented end state also rewrites the app AGENTS.md's starter lines and adds the
+    # app's row to the repo README's Apps table. Until then starter-text warns (and only warns).
+    warned = runner.invoke(app, ["validate-app", "sales-trends", "--format", "json"])
+    assert warned.exit_code == 0, warned.output
+    starter = next(c for c in _json.loads(warned.output)["checks"] if c["name"] == "starter-text")
+    assert {w["file"] for w in starter["warnings"]} == {"AGENTS.md", "README.md"}
+
+    agents = agents.replace(
+        "- **Overview** (`pages/overview.py`): starter page with sample numbers; "
+        "replace it with your real pages.",
+        "- **Sales trend** (`pages/sales_trend.py`): daily net paid sales.",
+    )
+    agents, n = re.subn(
+        r"- `queries/example_metric\.sql`: placeholder;.*?reads `YOUR_TABLE`\.\n",
+        "- `queries/daily_sales.sql`: net paid per sold date, feeds the Sales trend page.\n",
+        agents,
+        flags=re.S,
+    )
+    assert n == 1
+    agents = agents.replace(
+        "- _None recorded yet._",
+        "- `net_paid` is the sum of net paid per sold date; the source loads nightly.",
+    )
+    (a / "AGENTS.md").write_text(agents, encoding="utf-8")
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8").replace(
+            "| _(none yet)_ | `streamsnow new <domain> <function>` adds one |",
+            "| Sales Trends | `apps/sales-trends/` |",
+        ),
+        encoding="utf-8",
+    )
+    assert "apps/sales-trends/" in readme.read_text(encoding="utf-8")
+
     result = runner.invoke(app, ["validate-app", "sales-trends", "--format", "json"])
     assert result.exit_code == 0, result.output
     assert not [w for c in _json.loads(result.output)["checks"] for w in c.get("warnings", [])]
 
-    # pages.md's documented check for this end state is validate-app. It once said
-    # `grep -rn YOUR_TABLE apps/<slug>` must print nothing, but the app's own AGENTS.md
-    # names the token in its instructions, so this correct app failed that check.
-    assert "YOUR_TABLE" in (a / "AGENTS.md").read_text(encoding="utf-8")
     pages = (REPO_ROOT / "skills/build-app/pages.md").read_text(encoding="utf-8")
     assert "grep -rn YOUR_TABLE" not in pages
     assert "Then `streamsnow validate-app <slug>` must PASS" in pages
@@ -1148,3 +1202,39 @@ def test_generated_gitignore_ignores_internal_notes(tmp_path):
         ["git", "check-ignore", "-q", ".internal/notes.md"], cwd=tmp_path, check=False
     )
     assert proc.returncode == 0  # ignored
+
+
+def test_every_filename_precommit_hook_runs_serially(tmp_path):
+    """Without require_serial, pre-commit splits the staged files into parallel batches and
+    each clean batch prints its own "clean" line, so a single BLOCK looked like a pass."""
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    parsed = yaml.safe_load((tmp_path / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
+    hooks = [
+        h
+        for repo in parsed["repos"]
+        for h in repo["hooks"]
+        if h["id"].startswith("streamsnow-") and h.get("pass_filenames")
+    ]
+    assert len(hooks) == 10
+    assert [h["id"] for h in hooks if h.get("require_serial") is not True] == []
+
+
+def test_sqlfluff_comment_points_at_sql_review_check_not_the_placeholder_templater(tmp_path):
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+    scaffold(Config.from_dict(data), tmp_path, "acme-sales-dashboard")
+    text = (tmp_path / ".sqlfluff").read_text(encoding="utf-8")
+    assert "streamsnow sql-review check <slug>" in text
+    assert "{TOKEN}" in text  # says why a bare sqlfluff run cannot parse the query files
+    assert "sqlfluff lint apps/<slug>/queries --templater placeholder" not in text
+
+
+def test_deploy_workflows_log_that_secrets_were_found_when_they_deploy(tmp_path):
+    """Actions echoes the whole run: script in the step header, so the skip text appears on
+    runs that deploy too. A line only the deploy branch prints tells the two apart."""
+    for name, workflow in _render_deploy_workflows(tmp_path).items():
+        gate = next(s["run"] for s in workflow["jobs"]["deploy"]["steps"] if s.get("id") == "gate")
+        skip, _, deploy = gate.partition("else")
+        assert "Deploy secrets not set" in skip, name
+        assert "Deploy secrets found: deploying" not in skip, name
+        assert "Deploy secrets found: deploying" in deploy, name

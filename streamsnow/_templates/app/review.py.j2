@@ -14,8 +14,9 @@ nothing else: no query, no file, no import.
 Review preview mode (``streamsnow preview start <slug> --review-capture DIR``)
 records what each visual received, so ``streamsnow sql-review compare`` can
 hold the screen to the reviewed SQL: one small JSON file per marked visual,
-``<page>__<key>.json``, holding the row count, the column totals and hashed
-column names. Never a row, never a column name in clear. Capture problems are
+``<page>__<key>.json``, holding the row count, the column totals, hashed
+column names and, for columns without a total, distinct counts. Never a row,
+never a value of a key, never a column name in clear. Capture problems are
 logged and never break the page. Streamlit in Snowflake gives an app no way to
 set environment variables, so capture never runs there.
 """
@@ -34,6 +35,8 @@ _DISPLAY = (
     r"(?:\d{1,3}(?:,\d{3})+|\d{1,15})?(?:\.\d+)?\s?[kKmMbBtT%]?\)?$"
 )
 _DISPLAY_MAX = 40
+# Key counts walk every key cell; a grouped visual is far smaller than this.
+_KEY_ROWS_MAX = 50000
 # The index's metric key shape: it never contains "__", so file names split cleanly.
 _KEY = r"^[a-z][a-z0-9]*(?:_[a-z0-9]+){0,4}$"
 
@@ -171,12 +174,50 @@ def _frame(df):
             values = series.dropna()
             if len(values) and all(type(v) is decimal.Decimal for v in values):
                 totals[digest] = _number(sum(values, decimal.Decimal(0)))
+    headline = {"totals": totals, "float_columns": floats, "collided": collided}
+    headline.update(_keys(df, names, totals))
     return {
         "kind": "frame",
         "row_count": len(df),
         "columns": [_digest(n) for n in names],
-        "headline": {"totals": totals, "float_columns": floats, "collided": collided},
+        "headline": headline,
     }
+
+
+def _keys(df, names, totals):
+    """Counts for the columns without a total (a frame's group keys): how many
+    distinct values each holds, and whether any key row repeats.
+
+    A page that groups the reviewed result has one row per key and keeps every
+    key; a slice of it usually does neither, even when its dropped rows sum to
+    zero. Counts only, never a value. A cell that cannot be a key (a VARIANT
+    as a dict) or a frame too large to walk leaves both out.
+    """
+    positions = [i for i, name in enumerate(names) if _digest(name) not in totals]
+    if len(df) > _KEY_ROWS_MAX:
+        return {}
+    try:
+        columns = [[_key(v) for v in df.iloc[:, i]] for i in positions]
+    except TypeError:
+        return {}
+    distinct = {
+        _digest(names[i]): len({v for v in column if v is not None})
+        for i, column in zip(positions, columns)
+    }
+    rows = list(zip(*columns))
+    return {"key_distinct": distinct, "key_rows_unique": len(set(rows)) == len(rows)}
+
+
+def _key(value):
+    """A key cell as a hashable value, None for a null (as COUNT(DISTINCT) skips them)."""
+    import math
+
+    if value is None or type(value).__name__ in ("NAType", "NaTType"):
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    hash(value)  # TypeError for a dict or a list: not a key
+    return value
 
 
 def _normal(name):

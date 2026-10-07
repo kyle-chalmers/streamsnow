@@ -22,7 +22,8 @@ Schema (``schema_version: 2``)::
 
     schema_version: 2
     app: <slug>
-    review_window:                     # one params CTE per section
+    review_window:                     # one params CTE per section; omit it when no bind
+                                       # uses params.*
       start_date: "DATEADD(day, -30, CURRENT_DATE())"
       end_date: "CURRENT_DATE()"
     pages:
@@ -30,7 +31,7 @@ Schema (``schema_version: 2``)::
         metrics:
           - key: total_revenue         # snake_case, five words or fewer
             query: queries/total_revenue.sql
-            tokens: {REGION_FILTER: "AND region = 'West'"}
+            tokens: {REGION_FILTER: ""}    # mirrors the page default: "All" renders as ""
             binds: {"1": params.start_date, "2": params.end_date}
             notes: "Excludes refunds; booked date, not ship date."
             reads: [ANALYTICS.REPORTING.APP_REVENUE_DAILY]

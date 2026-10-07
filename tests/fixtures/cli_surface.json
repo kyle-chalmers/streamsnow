@@ -138,8 +138,19 @@
     },
     "ci-key push": {
       "options": [
+        "--account",
+        "--config",
         "--dir",
         "--repo"
+      ],
+      "arguments": []
+    },
+    "ci-key verify": {
+      "options": [
+        "--config",
+        "--dir",
+        "--format",
+        "--object"
       ],
       "arguments": []
     },
@@ -230,6 +241,16 @@
       "arguments": [
         "domain",
         "function"
+      ]
+    },
+    "stage-bundle": {
+      "options": [
+        "--dir",
+        "--format",
+        "--out"
+      ],
+      "arguments": [
+        "slugs"
       ]
     },
     "stage-path": {
@@ -331,6 +352,7 @@
       "arguments": [
         "--apps-dir",
         "--base-ref",
+        "--expect-baseline",
         "--format",
         "--payload",
         "--slug",
@@ -343,6 +365,7 @@
         "dedup-findings",
         "exit-condition",
         "merge-findings",
+        "open-findings",
         "parse-findings",
         "write-resolutions"
       ],
@@ -358,6 +381,7 @@
         "--max-walk-reentries",
         "--new",
         "--out-of-scope",
+        "--report",
         "--walk-findings-new",
         "--walk-not-clean",
         "--walk-reentries",

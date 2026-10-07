@@ -236,3 +236,117 @@ def test_plugin_agents_are_the_sql_review_briefs_word_for_word():
         assert body.lstrip("\n") == brief.read_text(encoding="utf-8"), agent.name
         # No relative links: the agents/ copy has no neighbours to point at.
         assert not _LINK_RE.search(body), agent.name
+
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def test_build_app_checkpoint_3_has_the_user_type_ship_app():
+    """/ship-app is human-only (disable-model-invocation), so a skill that says
+    "run /ship-app" sends the agent at a command it cannot start."""
+    skill = _flat((SKILLS_DIR / "build-app" / "SKILL.md").read_text(encoding="utf-8"))
+    cp3 = skill[skill.index("**CP3:**") :]
+    assert "ask the user to type `/ship-app <slug>`" in cp3
+    assert "the agent cannot start it" in cp3
+    feedback = _flat((SKILLS_DIR / "build-app" / "feedback.md").read_text(encoding="utf-8"))
+    assert "ask the user to type `/ship-app <slug>`" in feedback
+    assert "cannot start it" in feedback
+
+
+def test_preview_app_pins_the_ci_roles_data_reads_not_the_deployed_viewer_role():
+    """The viewer role has no data grants by default, so "preview as the deployed
+    viewer role" yields empty pages. Every doc names the CI role's data reads."""
+    text = _flat((SKILLS_DIR / "preview-app" / "SKILL.md").read_text(encoding="utf-8"))
+    assert "deployed viewer role" not in text
+    assert text.count("data reads match the CI role's") >= 2  # step 4 and "Done when"
+    setup = _flat((SKILLS_DIR / "onboard" / "setup.md").read_text(encoding="utf-8"))
+    assert "deployed viewer role" not in setup
+    assert "what people viewing an app, and local preview, run as" not in setup
+
+
+def test_ship_app_cleans_up_after_merge_and_checks_merged_before_deleting():
+    ship = SKILLS_DIR / "ship-app"
+    skill = (ship / "SKILL.md").read_text(encoding="utf-8")
+    assert "## After merge" in skill
+    assert "(after-merge.md)" in skill
+    steps = _flat((ship / "after-merge.md").read_text(encoding="utf-8"))
+    order = [
+        "git status --short",  # clean tree first
+        "gh pr view <num> --json state,headRefOid",
+        "must read `MERGED`",
+        "git rev-parse <branch>",  # tip check, before anything is asked or deleted
+        "git ls-remote --heads origin <branch>",
+        "git log --oneline <headRefOid>..<branch>",
+        "Ask the user once",
+        "git switch main",
+        "git pull --ff-only",
+        "git branch -D <branch>",
+        "git push origin --delete <branch>",
+        "git fetch --prune",
+    ]
+    positions = [steps.index(token) for token in order]
+    assert positions == sorted(positions), "after-merge steps are out of order"
+    # A branch with commits made after the merge must survive: both tips are compared to the
+    # PR's merged head, and the mismatch path deletes nothing.
+    tip_check = steps[
+        steps.index("Check the branch holds nothing newer") : steps.index("Ask the user once")
+    ]
+    assert tip_check.count("headRefOid") >= 2
+    assert "On any mismatch, stop and delete nothing" in tip_check
+    assert "unmerged work" in tip_check
+    assert steps.index("headRefOid") < steps.index("git branch -D <branch>")
+    assert steps.index("git ls-remote --heads origin <branch>") < steps.index(
+        "git push origin --delete <branch>"
+    )
+    assert "a squash merge" in steps and "`git branch -d` refuses" in steps
+    # Both triggers are named, and the PR-open outcome says what "done" means.
+    assert "step 4" in steps and "watch" in steps
+    assert "never merges" in _flat(skill)
+    assert "spent branch removed" in _flat(skill)
+
+
+def test_ship_app_asks_before_cleanup_only_without_a_merge_approval_in_this_run():
+    """A merge the user approved in this run already says the branch is done, so
+    the cleanup runs and is reported; with no approval it asks once. The clean
+    tree, MERGED and tip checks precede `-D` on both paths."""
+    ship = SKILLS_DIR / "ship-app"
+    steps = _flat((ship / "after-merge.md").read_text(encoding="utf-8"))
+    assert "Ask the user once, only when there was no approval in this run" in steps
+    assert "approved the PR merging" in steps and "merged it themselves and said so" in steps
+    assert "Restore branch" in steps and "reflog" in steps  # why skipping the question is safe
+    assert "Cleaned up: deleted `<branch>` locally" in steps
+    shared = steps.index("Steps 1 to 3 run on both paths")
+    assert shared < steps.index("git branch -D <branch>")
+    for check in ("git status --short", "must read `MERGED`", "git rev-parse <branch>"):
+        assert steps.index(check) < steps.index("Ask the user once")
+    assert "never merges" in steps
+
+
+def test_ship_app_cleans_up_a_spent_branch_after_the_work_moved():
+    """Step 1 needs app changes, so the step-4 trigger always found a dirty tree
+    or a moved tip and could never finish. The cleanup waits until the work is
+    committed on the fresh branch, and a stop in it does not end the ship."""
+    ship = SKILLS_DIR / "ship-app"
+    skill = _flat((ship / "SKILL.md").read_text(encoding="utf-8"))
+    steps = _flat((ship / "after-merge.md").read_text(encoding="utf-8"))
+    step4 = skill[skill.index("**Branch hygiene.**") : skill.index("**Stage only the app:**")]
+    assert "after step 6" in step4 and "never ends the ship" in step4
+    assert "after `/ship-app` step 6 has committed the work" in steps
+    assert "continue the ship at `/ship-app` step 7" in steps
+    assert "stays on the new branch" in steps
+
+
+def test_ship_app_resaves_review_state_after_a_review_first_pass():
+    skill = _flat((SKILLS_DIR / "ship-app" / "SKILL.md").read_text(encoding="utf-8"))
+    gate = skill[skill.index("**Preflight 0") : skill.index("**Hard gate:**")]
+    assert "review first" in gate
+    assert "re-run these saves" in gate
+
+
+def test_ship_app_has_a_fallback_when_the_host_forbids_polling_ci():
+    skill = _flat((SKILLS_DIR / "ship-app" / "SKILL.md").read_text(encoding="utf-8"))
+    assert "forbids polling CI" in skill
+    assert "gh pr checks <num> --watch" in skill
+    assert "PR open, checks pending" in skill
+    assert skill.count("PR open, checks pending") >= 2  # the step and "Done when"

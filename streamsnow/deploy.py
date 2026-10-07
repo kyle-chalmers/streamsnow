@@ -666,3 +666,41 @@ def generate_teardown_sql(cfg: Config) -> str:
         ]
     out += account or ["-- Nothing account-level for this configuration."]
     return "\n".join(out)
+
+
+@dataclasses.dataclass(frozen=True)
+class CiGrant:
+    """One grant the admin script gives the CI role, as ``SHOW GRANTS TO ROLE`` lists it."""
+
+    privilege: str
+    granted_on: str
+    name: str
+
+
+_GRANT_TO_ROLE_RE = re.compile(r"^GRANT (?P<priv>.+?) ON (?P<target>.+) TO ROLE (?P<role>\S+);$")
+
+
+def expected_ci_grants(cfg: Config) -> list[CiGrant]:
+    """The grants ``generate_admin_sql`` gives the CI role that one ``SHOW GRANTS`` row proves.
+
+    ``ci-key verify`` checks these against what the CI role really holds. They are
+    read back out of the admin script itself, never kept as a second list: a
+    grant added to (or dropped from) the script changes what verify expects in
+    the same commit, so the two cannot drift apart and report a working setup as
+    broken, or a broken one as working. Commented lines (the viewer opt-in, the
+    shared-database alternative) are skipped. ``ALL``/``FUTURE`` grants are
+    skipped too: they show up as one row per object, or not at all, so verify's
+    ``LIMIT 0`` read is what proves the data grants.
+    """
+    ci = cfg.snowflake.roles.ci_role
+    out: dict[CiGrant, None] = {}
+    for line in generate_admin_sql(cfg).splitlines():
+        m = _GRANT_TO_ROLE_RE.match(line.strip())
+        if not m or m["role"].upper() != ci.upper():
+            continue
+        target = m["target"]
+        if target.startswith(("ALL ", "FUTURE ")):
+            continue
+        kind, _, name = target.rpartition(" ")
+        out[CiGrant(privilege=m["priv"], granted_on=kind, name=name)] = None
+    return list(out)

@@ -18,8 +18,9 @@ Nothing (read-only).
 ## Steps
 
 1. Per page: uncached or wrongly keyed loaders, aggregation in pandas that belongs in SQL,
-   uncapped detail queries, `SELECT *`, filters outside a form, heavy views in tabs or expanders
-   that still run on every rerun.
+   uncapped detail queries, `SELECT *`, heavy views in tabs or expanders that still run on every
+   rerun, and filters outside an `st.form` when each rerun is expensive. Over cached data
+   plain widgets are fine, and a missing form is at most nice-to-have.
 2. **Cross-page pass** over the whole app: duplicate or near-duplicate SQL across
    `queries/*.sql`, the same object scanned at the same grain by several queries, loaders that
    belong in `pages/_data.py`, `shared_data` entries the pages ignored.

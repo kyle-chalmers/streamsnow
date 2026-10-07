@@ -20,8 +20,8 @@ confirmation, safe secrets provisioning, URL surfacing, triage.
 - `streamsnow preview start <slug>` (bare `streamsnow preview <slug>` is shorthand for `start`) —
   verifies the entrypoint and port, launches `streamlit run` detached with output to a log, then
   polls the health endpoint until it answers or the timeout expires. `--port N` (`0`: any free),
-  `--json`, `--review-capture DIR` (/sql-review). Exit 0 = serving; on exit 1 the log tail was **classified**
-  (missing `secrets.toml`, bad account locator, missing package, port collision,
+  `--json`, `--review-capture DIR` (/sql-review). Exit 0 = serving; on exit 1 the log tail was
+  **classified** (missing `secrets.toml`, bad account locator, missing package, port collision,
   session-outside-Snowflake) into an actionable hint — read it before improvising.
 - `streamsnow preview status <slug>` — running/not-running + live health probe; stale state from a
   crashed preview is cleaned up silently, so a dead run never wedges the next `start`.
@@ -42,8 +42,9 @@ first script run finishes; data errors surface in the browser and in `logs`, not
    add … --default` line from `streamsnow configure`. Only when an app needs a different role or
    warehouse: copy `secrets.toml.example` and fill `[connections.snowflake]` from config
    (`streamsnow config-get <path>`), **show the values and confirm before writing**, never commit.
-4. **Pin the query role to the deployed viewer role** (from config), not a broad personal role —
-   a wide role hides missing grants, so the app looks fine locally and ships with empty KPIs.
+4. **Pin the query role to one whose data reads match the CI role's** (the viewer role with its
+   opt-in data grants uncommented, or a developer role with the same reads), never a broad
+   personal role: it hides missing grants, and the app ships with empty KPIs.
 5. **Launch:** `streamsnow preview start <slug>`. Success prints the URL — open it **verbatim, at
    the root** (see Gotchas). Failure → relay the classified hint; only fall back to
    `streamsnow preview logs <slug>` triage when the classifier had no match.
@@ -59,8 +60,7 @@ first script run finishes; data errors surface in the browser and in `logs`, not
   not a code bug — see [_shared/runtime-decision.md](../_shared/runtime-decision.md); point at the
   app's commented local-parity fallback (revert before the PR) or verify in Snowsight.
 - **A SQL edit that "has no effect":** hot-reload picks up `.py` changes but can serve cached
-  results of the old SQL text — `streamsnow preview stop <slug>` then `start` before concluding a
-  query change failed.
+  results of the old SQL text; `streamsnow preview stop <slug>` then `start` before concluding it failed.
 - **Don't run deploys locally** — `deploy-setup` / `deploy-sql` feed the CI workflow; preview is the
   only local-run path. `.streamsnow/` (preview state + logs) belongs in `.gitignore`.
 
@@ -74,13 +74,13 @@ first script run finishes; data errors surface in the browser and in `logs`, not
 
 ## Optional smoke walkthrough
 
-For a hands-off pass, enumerate the app's pages with `streamsnow nav <slug>` (one JSON object per
-page — title, path, group; `--json-array` for one payload) and drive a Playwright browser across
-each per [_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md) — advisory only,
-silent skip without the CLI. The nav list is the loop input; never guess page URLs from filenames.
+For a hands-off pass, enumerate the pages with `streamsnow nav <slug>` (one JSON object per page:
+title, path, group; `--json-array` for one payload) and drive Playwright across each per
+[_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md): advisory, silent skip
+without the CLI. The nav list is the loop input; never guess page URLs from filenames.
 
 ## Done when
 
-The app serves at the reported root URL with live data, queried as the deployed viewer role, with
-no startup errors — next step /validate-app, then /ship-app. On "stop the preview", run
-`streamsnow preview stop <slug>` and confirm.
+The app serves at the reported root URL with live data, queried as a role whose data reads match
+the CI role's, with no startup errors. Next step: /validate-app, then /ship-app. On "stop the
+preview", run `streamsnow preview stop <slug>` and confirm.

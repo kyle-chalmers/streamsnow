@@ -5,6 +5,11 @@ back to whoever owns the file; nothing here is a gate (`streamsnow validate-app`
 with its brief ([briefs/](briefs/)); without subagents, run them yourself one after another
 ([_shared/other-agents.md](../_shared/other-agents.md)).
 
+These three reviewers are the build loop: /build-app dispatches them and routes their findings to
+the page-builders before checkpoint 2. `/review-app` is the separate pre-ship pass, with its own
+five reviewers (SQL, data, UI, runtime, docs), run after `validate-app` passes and before
+checkpoint 3. Outside /build-app, run `/review-app` only.
+
 ## Round
 
 1. Start the preview (`streamsnow preview start <slug>`) and run the UI walkthrough

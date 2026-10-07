@@ -26,9 +26,10 @@ that can:
 
 ```bash
 streamsnow ci-key create                            # CI key pair + secret files, outside the repo
+mkdir -p .internal                                  # run on its own, not chained with the next command
 streamsnow deploy-setup --admin \
-  --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > admin-setup.sql
-snow sql -f admin-setup.sql -c <admin-connection>   # or run it in a Snowsight worksheet
+  --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > .internal/admin-setup.sql
+snow sql -f .internal/admin-setup.sql -c <admin-connection>   # or run it in a Snowsight worksheet
 ```
 
 With `--public-key-file` the script needs no edits (stage-copy source; a private

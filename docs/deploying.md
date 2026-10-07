@@ -38,6 +38,12 @@ On merge to `main`, the workflow:
    reason, and the summary line counts it apart from the passes
    (`PASS: store-sales (3 passed; 1 skipped: service-logs)`). Skips never fail
    the run; the container service-log scan is best-effort and often skips.
+   With the **stage-copy** source, `verify-deploy` also lists the staged files
+   for the commit (`stage-files`): it warns for each file `stage-bundle` would
+   ship for the app that is missing from the stage, and for each staged file
+   the deploy bundle leaves out (see [What the stage-copy upload ships](#what-the-stage-copy-upload-ships)).
+   It is warn-only: it prints `! stage-files (warning)` and counts
+   `1 warned: stage-files` in the summary, and the run still passes.
 
 The scaffolded checks workflow runs `validate-app` on every PR, but nothing
 wires it to the deploy job: `checks.yml` and `deploy.yml` are independent
@@ -59,6 +65,52 @@ Before a release or a deploy that changes an app's SQL, run `/sql-review <slug>`
 it checks the app's objects, grants and sections against live Snowflake and
 commits a review log under `sql_review/review_log/` for a person to sign off.
 It is recommended, never required: nothing in the deploy path waits on it.
+
+## What the stage-copy upload ships
+
+The stage-copy workflow does not upload the `apps/` tree as it sits in the
+repo. It first runs `streamsnow stage-bundle --out "$RUNNER_TEMP/ss-bundle"`,
+which copies each app into a bundle without the files the running app never
+reads, then uploads the bundle to `@<stage>/commits/<sha>/apps/`. The bundle
+leaves out:
+
+- root-level `*.md` files (`AGENTS.md`, `CLAUDE.md`, `REQUIREMENTS.md`,
+  `README.md`), unless an `artifacts:` entry in the app's `snowflake.yml`
+  declares one, as an app that renders its own `help.md` would;
+- `sql_review/`, including `review_log/`;
+- dot-directories other than `.streamlit`, and `__pycache__`;
+- everything in `.streamlit/` except `config.toml`, so a local `secrets.toml`
+  never ships;
+- `.env` and `.env.*` files anywhere in the app, even when declared, because
+  Streamlit in Snowflake never reads one and a committed one usually holds
+  credentials;
+- any file named `secrets.toml`, at any depth and under any link, because
+  Streamlit in Snowflake does not read it and a local copy holds connection
+  credentials;
+- symlinks whose target is itself left out, judged at the path the target has
+  in the repo (a `runtime.txt` link to `../../shared/.env` stays out with
+  `.env`).
+
+Symlinks that resolve anywhere inside the repo are followed, as
+`snow stage copy apps/ --recursive` did. An app can share a helper with
+`apps/acme/helpers.py -> ../../shared/helpers.py`, or a theme with a link to a
+shared `.streamlit/config.toml`, and `.streamlit -> config/` still ships
+`.streamlit/config.toml`. A symlink that resolves outside the repo fails the
+bundle with exit 2 and a message naming the link, before anything is written,
+so the deploy stops before the upload instead of shipping an app that is
+missing a file. Move the target into the repo or replace the link with a copy.
+The repo is the `--dir` folder (default: the current directory).
+
+`streamsnow stage-bundle --out <empty dir>` prints each file it left out and
+why, so you can run it locally to see what a deploy will upload. A repo whose
+`deploy.yml` predates the bundle still uploads all of `apps/`; the
+`stage-files` warning in `verify-deploy` names the files that should not be
+there, and `streamsnow update --apply` re-renders the workflow. Files already
+staged under earlier commits stay there until you clean the stage.
+
+The **git-repository** source cannot use the bundle: Snowflake builds each app
+from the committed repo folder, so committed docs are part of what it reads.
+See [Switching to the Git repository deploy source](git-repository.md#should-you-switch).
 
 ## Retiring or renaming an app
 
@@ -141,7 +193,8 @@ streamsnow deploy-sql <slug> --sha <sha>     # pin a specific commit (stage-copy
 ```
 
 `streamsnow stage-path` prints the stage base path (`@DB.SCHEMA.STAGE`) the
-stage-copy upload targets.
+stage-copy upload targets, and `streamsnow stage-bundle --out <dir>` builds the
+per-app bundle that upload copies.
 
 ## Runtime notes
 

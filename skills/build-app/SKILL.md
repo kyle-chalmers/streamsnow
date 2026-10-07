@@ -65,8 +65,8 @@ It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume and never skips a checkpoi
 
 8. `streamsnow validate-app <slug>` until PASS (`/validate-app` explains each FAIL); then follow
    `/review-app`'s instructions in full and present its verdict.
-9. **CP3:** validation passes, review is clean, user is ready → `/ship-app <slug>` (a first deploy
-   may need admin DDL from `streamsnow deploy-setup --admin`: surface it, don't run it).
+9. **CP3:** validation passes, review is clean → ask the user to type `/ship-app <slug>`; the agent
+   cannot start it. A first deploy may need admin DDL (`deploy-setup --admin`): surface, don't run.
 
 ## State — §11 Build Progress
 

@@ -34,6 +34,14 @@ Check these before switching:
   this path. GitHub Enterprise Cloud repos on github.com work.
 - **Size.** Repositories over 2 GB, and submodules, are not supported
   ([Git limitations](https://docs.snowflake.com/en/developer-guide/git/git-limitations)).
+- **Committed docs are visible.** The stage-copy workflow uploads a bundle from
+  `streamsnow stage-bundle` that leaves out each app's root-level docs
+  (`AGENTS.md`, `REQUIREMENTS.md` and the like) and `sql_review/`. The Git
+  repository mirrors the whole repo instead, and each app is built from its
+  committed folder, so anyone who can read the `GIT REPOSITORY` object can read
+  those files. Keep anything that should not be visible in Snowflake out of the
+  repo. The `stage-files` check in `verify-deploy` does not apply to this
+  source and reports itself as skipped.
 
 ## 1. Preview the setup SQL
 

@@ -168,6 +168,18 @@ def test_a_failure_carries_the_snowflake_message_and_a_role_hint() -> None:
     assert "003013" in msg and "pass --role" in msg and "╭" not in msg
 
 
+def test_a_warehouse_error_carries_a_warehouse_hint() -> None:
+    rec = Recorder(
+        code=1,
+        err="002043 (02000): SQL compilation error: Warehouse ACME_WH does not exist or not "
+        "authorized.",
+    )
+    with pytest.raises(sx.SnowError) as err:
+        _exec(rec, warehouse="ACME_WH").run(["SELECT 1"])
+    msg = str(err.value)
+    assert "002043" in msg and "USE WAREHOUSE ACME_WH" in msg and "pass --warehouse" in msg
+
+
 def test_default_runner_explains_a_missing_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*a, **k):
         raise FileNotFoundError("snow")

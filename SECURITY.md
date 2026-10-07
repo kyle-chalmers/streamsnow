@@ -95,9 +95,11 @@ reads named keys through a filter instead.
 `snow sql -f`), and any sign-in that needs your password.
 
 **Rotating the key.** Move `~/.streamsnow-ci/streamsnow_ci_rsa_key.p8` and
-`.pub` aside, run `streamsnow ci-key create`, regenerate the admin file with
-`streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > admin-setup.sql`,
-have the admin run its `ALTER USER` statement, then run `streamsnow ci-key push`.
+`.pub` aside, run `streamsnow ci-key create`, then `mkdir -p .internal` as its own command,
+regenerate the admin file with
+`streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > .internal/admin-setup.sql`
+(run on its own: the CI key guard refuses it chained with anything else), have the admin run
+its `ALTER USER` statement, then run `streamsnow ci-key push`.
 
 ## Everything else
 

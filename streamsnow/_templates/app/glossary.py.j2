@@ -49,5 +49,9 @@ def glossary_lines(*keys: str) -> list[str]:
 
 
 def hover_definition(key: str) -> str:
-    """The definition, %-escaped for a Plotly hovertemplate."""
-    return metric_help(key).replace("%", "%%")
+    """The definition for a Plotly hovertemplate, unchanged.
+
+    plotly.js does not unescape a doubled percent sign, so a lone ``%`` renders as written.
+    Only ``%{...}`` is a placeholder, and a definition does not contain one.
+    """
+    return metric_help(key)

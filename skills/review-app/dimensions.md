@@ -27,7 +27,8 @@ layering), consult [_shared/production-gotchas.md](../_shared/production-gotchas
 Read the house design guide `.streamsnow/design.md` first when it exists
 ([overlays.md](../_shared/overlays.md#house-design-guide)): its rules beat the defaults below.
 `st.set_page_config` first and called once; `st.navigation` + `st.Page` for multipage; branding
-applied in the entrypoint; multi-filter pages batched in `st.form` (one rerun, not one per widget);
+applied in the entrypoint; a multi-filter page uses `st.form` only when each rerun is expensive (over cached data, plain
+widgets are fine, and a missing form is at most nice-to-have);
 consistent chart library; number/`column_config` formatting. Judge chart form, layout, color and
 copy against [visualization-guide.md](../_shared/visualization-guide.md) and
 [explainability.md](../_shared/explainability.md), and load paths against

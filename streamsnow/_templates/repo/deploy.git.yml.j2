@@ -45,6 +45,7 @@ jobs:
             echo "Deploy secrets not set — skipping (see https://github.com/kyle-chalmers/streamsnow/blob/main/docs/deploy-setup.md)."
             echo "go=false" >> "$GITHUB_OUTPUT"
           else
+            echo "Deploy secrets found: deploying."
             echo "go=true" >> "$GITHUB_OUTPUT"
           fi
 

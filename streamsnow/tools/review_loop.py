@@ -44,6 +44,24 @@ it already resolved. Subcommands:
         agent, mark ``(also flagged by X)`` when ≥2 agents flagged the same
         tuple. Output: a single combined merged report on stdout.
 
+    open-findings <session-dir> [--report=<report.md>]
+        Count what a review left open: the newest report's findings (or
+        ``--report``) minus those its own ``### Applied`` block records as
+        fixed. Applied blocks in other reports do not count: a finding a newer
+        report re-flags after an older fix is still open. Output JSON
+        ``{report, parsed, counts, open_block, applied, stamped}``, where
+        ``stamped`` says the report carries a ``Reviewed-baseline:`` line
+        (`.review/` outlives a ship, so an unstamped newest report may belong
+        to an earlier change). `/ship-app` writes
+        ``counts.BLOCK`` into the PR body, because a review stamps the gate
+        even with critical findings open (reviewed means reviewed, not clean)
+        and the approver needs to see that number. A report with no
+        ``## <Dimension>`` / ``### BLOCK|FLAG|NICE-TO-HAVE`` structure, or with
+        any part the parser would skip (a decorated severity heading, a
+        numbered item under a bucket), gives ``parsed: false`` with null
+        counts, never 0: a heading drift must not read as a clean review. No
+        report at all exits 2.
+
 All output is JSON unless explicitly noted. Exit code 2 = tool error.
 
 Design notes:
@@ -300,6 +318,142 @@ def _is_review_report(path: Path) -> bool:
     return name.endswith(".md") and name.startswith(("review-", "loop-"))
 
 
+#: The ``Reviewed-baseline:`` line `review-gate stamp` writes into a report.
+_STAMP_RE = re.compile(r"^Reviewed-baseline:[ \t]*[0-9a-f]+[ \t]*$", re.MULTILINE)
+
+
+#: Severity words, matched loosely to spot headings the exact bucket regex skips.
+_SEVERITY_WORD_RE = re.compile(r"BLOCK|FLAG|NICE[- ]?TO[- ]?HAVE", re.IGNORECASE)
+#: Item shapes the parser does not read: numbered (``1.`` / ``2)``) or ``+`` bullets.
+_UNREAD_ITEM_RE = re.compile(r"^(?:\d+[.)]|\+)\s+\S")
+#: Markup stripped before asking whether a line is nothing but a severity word.
+_LOOSE_MARKUP_RE = re.compile(r"[#*_:\s]+")
+_SEVERITY_WORDS = frozenset({"BLOCK", "FLAG", "NICE-TO-HAVE", "NICETOHAVE"})
+
+
+def _loose_severity_line(raw: str) -> bool:
+    """True for a line that is only a severity word (``**BLOCK**``, ``   ### BLOCK``,
+    ``Block:``) but not the exact ``### X`` heading the parser reads."""
+    word = _LOOSE_MARKUP_RE.sub("", raw).upper()
+    return word in _SEVERITY_WORDS and not _BUCKET_RE.match(raw)
+
+
+def _inexact_severity_heading(raw: str, min_level: int = 1) -> bool:
+    """True for any markdown heading (indented or not, any level from ``min_level``)
+    that names a severity but is not the exact column-0 ``### X`` heading.
+
+    The parser's heading regex is anchored at column 0 and takes nothing after
+    the word, so ``   ### BLOCK (critical)`` or ``#### BLOCK`` files its items
+    under the previous bucket."""
+    text = raw.lstrip()
+    level = len(text) - len(text.lstrip("#"))
+    return level >= min_level and bool(_SEVERITY_WORD_RE.search(text)) and not _BUCKET_RE.match(raw)
+
+
+#: A severity word that opens a title, as a whole word (not `flag-tracker`, `Blocking`).
+_LEADING_SEVERITY_RE = re.compile(r"^(?:BLOCK|FLAG|NICE[- ]?TO[- ]?HAVE)(?=\s|$)", re.IGNORECASE)
+_TITLE_PREFIX_RE = re.compile(r"^[A-Za-z][\w ]*:\s*")
+_TITLE_NOISE_RE = re.compile(r"\s*\([^)]*\)\s*$|[*_:]|\b(?:items|findings)\b", re.IGNORECASE)
+
+
+def _severity_title(raw: str) -> bool:
+    """True for a level-1 or level-2 heading above the sections that names a bucket.
+
+    The parser starts at the first ``## <Dimension>``, so ``# BLOCK (critical)``
+    or ``# Block findings`` above it hides the findings under it. Markdown
+    emphasis, a trailing parenthetical, ``:`` and the words items/findings are
+    dropped, then the text (or the text after a ``Review:``-style prefix) must
+    open with a severity word. A title naming an app such as
+    ``# Review: acme-flag-tracker`` does not."""
+    text = raw.lstrip()
+    level = len(text) - len(text.lstrip("#"))
+    if level not in (1, 2):
+        return False
+    title = text[level:].strip()
+    for candidate in (title, _TITLE_PREFIX_RE.sub("", title, count=1)):
+        cleaned = " ".join(_TITLE_NOISE_RE.sub(" ", candidate).split())
+        if _LEADING_SEVERITY_RE.match(cleaned):
+            return True
+    return False
+
+
+def report_parse_problems(text: str) -> list[str]:
+    """Forms in a report that ``parse_findings`` would silently skip.
+
+    ``parse_findings`` drops whatever it does not recognize, so a report that is
+    only partly in the expected shape (a ``### **BLOCK**`` heading, an indented,
+    annotated or other-level one such as ``   ### BLOCK (critical)`` or
+    ``#### BLOCK``, a bare ``**BLOCK**`` line, numbered items under
+    ``### BLOCK``) parses its valid buckets and loses the rest. A
+    lost critical finding then reads as zero open. Any problem here makes the
+    report unparsed, which callers must render as unknown, never 0.
+    """
+    problems: list[str] = []
+    sections = _split_sections(text)
+    first = _DIMENSION_RE.search(text)
+    for raw in text[: first.start() if first else len(text)].splitlines():
+        # A level-3 or deeper heading there is a bucket. Level 1 or 2 may be the
+        # report title, which can name an app like `acme-flag-tracker`, so it
+        # counts only when it opens with a severity word.
+        if (
+            _loose_severity_line(raw)
+            or _inexact_severity_heading(raw, min_level=3)
+            or _severity_title(raw)
+        ):
+            problems.append(f"severity line outside a '## <Dimension>' section: '{raw.strip()}'")
+    if not any(
+        _BUCKET_RE.search(body)
+        for title, body in sections.items()
+        if title.lower() != "resolutions"
+    ):
+        problems.append("no '## <Dimension>' section with a '### BLOCK|FLAG|NICE-TO-HAVE' heading")
+    for title, body in sections.items():
+        if title.lower() == "resolutions":
+            continue
+        if _SEVERITY_WORD_RE.search(title):
+            problems.append(f"severity used as a section: '## {title}'")
+        in_bucket = False
+        for raw in body.splitlines():
+            line = raw.strip()
+            if _inexact_severity_heading(raw):
+                problems.append(f"severity heading not in the exact form: '{line}'")
+                continue
+            if raw.startswith("###"):
+                in_bucket = bool(_BUCKET_RE.match(raw))
+                continue
+            if _loose_severity_line(raw):
+                problems.append(f"severity line not in the exact '### X' form: '{line}'")
+                continue
+            if in_bucket and _UNREAD_ITEM_RE.match(line):
+                problems.append(f"item not written as a '- ' bullet: '{line[:60]}'")
+    return problems
+
+
+def report_is_parseable(text: str) -> bool:
+    """True when every finding-shaped line in the report is one the parser reads.
+
+    ``parse_findings`` returns [] both for a clean report and for one written in
+    a heading format it does not know. Only the first is a real zero. See
+    ``report_parse_problems`` for what fails closed.
+    """
+    return not report_parse_problems(text)
+
+
+def newest_review_report(session_dir: Path) -> Path | None:
+    """Most recently modified review report in session_dir (name breaks ties)."""
+    if not session_dir.is_dir():
+        return None
+    found: list[tuple[float, str, Path]] = []
+    for path in session_dir.iterdir():
+        if not path.is_file() or not _is_review_report(path):
+            continue
+        try:
+            found.append((path.stat().st_mtime, path.name, path))
+        except OSError:
+            continue
+    return max(found)[2] if found else None
+
+
 def collect_resolution_tuples(
     session_dir: Path,
     window_days: int = 7,
@@ -371,6 +525,55 @@ def cmd_dedup_findings(args: argparse.Namespace) -> int:
         )
     else:
         print(json.dumps([asdict(f) for f in kept], indent=2))
+    return 0
+
+
+def cmd_open_findings(args: argparse.Namespace) -> int:
+    """Open findings per severity in the newest (or given) review report."""
+    session_dir = Path(args.session_dir)
+    report = Path(args.report) if args.report else newest_review_report(session_dir)
+    result: dict[str, Any] = {
+        "report": str(report) if report else None,
+        "parsed": False,
+        "counts": None,
+        "open_block": None,
+        "applied": None,
+        "stamped": False,
+    }
+    if report is None or not report.is_file():
+        result["error"] = (
+            f"no review report in {session_dir}" if report is None else f"not a file: {report}"
+        )
+        print(json.dumps(result, indent=2))
+        return 2
+    text = report.read_text(encoding="utf-8")
+    # `.review/` outlives a ship, so the newest report may belong to an earlier
+    # change. /ship-app only trusts the count from the stamped report.
+    result["stamped"] = bool(_STAMP_RE.search(text))
+    problems = report_parse_problems(text)
+    if problems:
+        result["reason"] = "; ".join(problems[:5]) + "; open findings unknown"
+        print(json.dumps(result, indent=2))
+        return 0
+    # Only the counted report's own Applied block closes a finding. Writing
+    # Resolutions makes the report that recorded a fix the newest one, so the
+    # session union adds nothing legitimate, and it would close a critical a
+    # newer report re-flags after an older fix (the no-convergence case).
+    applied = parse_applied_tuples(text)
+    findings = parse_findings(text)
+    open_findings = [
+        f for f in findings if (f.citation, normalize_summary(f.summary)) not in applied
+    ]
+    counts = {s.value: 0 for s in Severity}
+    for f in open_findings:
+        counts[f.severity] = counts.get(f.severity, 0) + 1
+    result.update(
+        parsed=True,
+        counts=counts,
+        open_block=[asdict(f) for f in open_findings if f.severity == Severity.BLOCK.value],
+        applied=len(findings) - len(open_findings),
+    )
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -678,6 +881,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Comma-separated agent:path pairs (e.g. claude:a.md,other:b.md)",
     )
 
+    p = sub.add_parser("open-findings", help="Open findings per severity after applied fixes.")
+    p.add_argument("session_dir", help="Directory of review reports (apps/<slug>/.review/)")
+    p.add_argument("--report", default=None, help="Report to count (default: the newest)")
+
     return parser
 
 
@@ -690,6 +897,7 @@ def main(argv: list[str] | None = None) -> int:
         "write-resolutions": cmd_write_resolutions,
         "exit-condition": cmd_exit_condition,
         "merge-findings": cmd_merge_findings,
+        "open-findings": cmd_open_findings,
     }
     return dispatch[args.cmd](args)
 

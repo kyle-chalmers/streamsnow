@@ -291,6 +291,13 @@ class SnowExec:
                     f" (this review runs as role {self.session.role}; pass --role with a role "
                     "you hold that the app's grants reach)"
                 )
+            elif self.session.warehouse and re.search(
+                r"warehouse .*(does not exist|not authorized)", detail, re.I
+            ):
+                hint = (
+                    f" (this session runs USE WAREHOUSE {self.session.warehouse}; pass "
+                    "--warehouse with a warehouse the role can use)"
+                )
             raise SnowError(f"`snow sql` failed: {detail}{hint}")
         results = parse_output(out, len(prefix) + len(statements))
         return results[len(prefix) :]

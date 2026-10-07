@@ -92,6 +92,7 @@ entry also carries `warnings` (coverage under `warn`, and advisories), and the
 | `requirements` | `REQUIREMENTS.md` §11 build state is malformed (see the `check requirements` row below) |
 | `sql-review (coverage policy: warn\|fail)` | The `sql-review check` finding kinds `index`, `provenance`, `marker`, `objects`, `lint`, `comments`, `readonly` and `bind`; uncovered pages or queries (`coverage`) fail only under `fail` |
 | `placeholders` | The starter's `YOUR_TABLE` or sample numbers are still there |
+| `starter-text` | Warn-only. The app `AGENTS.md` still has the scaffold's starter lines, or the repo README's Apps table has no row for the app |
 
 A freshly scaffolded app **fails** `placeholders` on purpose until you repoint the
 starter query and review window; every other step passing is what proves the scaffold
@@ -154,11 +155,27 @@ See [Auditing a visual](auditing-a-visual.md) for the file format and the live r
 
 | Command | What it does |
 |---|---|
-| `streamsnow review-gate classify [<slug>]` | Does this change need a review before shipping? Classifies each changed app's diff as trivial or needing the review loop (no slug: every changed app). `--base-ref`, `--format md\|json`. `/ship-app` runs it. |
+| `streamsnow review-gate classify [<slug>]` | Does this change need a review before shipping? Classifies each changed app's diff as trivial or needing the review loop (no slug: every changed app). `--base-ref`, `--format md\|json`. `/ship-app` runs it. See "Reading `classify`" below. |
 | `streamsnow review-gate baseline <slug>` | Prints the app's current baseline digest. |
-| `streamsnow review-gate stamp <artifact> --slug <slug>` | Writes or refreshes the `Reviewed-baseline` and `Reviewed-files` lines in a review artifact (`--base-ref`). |
+| `streamsnow review-gate stamp <artifact> --slug <slug>` | Writes or refreshes the `Reviewed-baseline`, `Reviewed-files` and `Reviewed-head` lines in a review artifact (`--base-ref`). `--expect-baseline <digest>`: the `baseline` captured when the review was dispatched; if the app has changed since, it exits 2 ("app changed since dispatch") and writes nothing. |
 | `streamsnow review-gate stop-hook` | The plugin's warn-only Stop-hook nudge (`--payload both\|system-only`). |
 | `streamsnow review-loop <verb>` | Deterministic bookkeeping for `/review-app --auto`: `parse-findings`, `dedup-findings`, `merge-findings`, `write-resolutions`, `exit-condition`. Called by the skill, not by hand. |
+| `streamsnow review-loop open-findings <dir>` | Counts the findings a review left open in the newest report under `<dir>` (`--report <file>` picks one), after subtracting those the same report's `### Applied` block records as fixed. Applied blocks in other reports do not count, so a finding re-flagged after an older fix stays open. Prints `counts` per severity, the open BLOCK list, `parsed`, and `stamped` (the report carries a `Reviewed-baseline` line); a report it cannot parse gives `parsed: false` and null counts, never 0. Exits 2 when there is no report. `/ship-app` writes the open BLOCK count into the PR body only when the counted report is the stamped one and the change needs no review. |
+
+**Reading `classify`.** `needs_review` is the decision: true means a substantive change has no
+review covering its current content and no skip marker. `verdict` is review depth only: `loop`
+means the diff is substantive enough for the full review loop, and it stays `loop` after a review
+covers it. Gate on `needs_review`, never on `verdict`.
+
+Each app in the JSON also carries `reviewed_head` (the commit the newest stamp recorded),
+`reviewed_head_status` (`none` when no stamp recorded one, `ancestor` when it is in the current
+history, `not-ancestor` after a rebase or amend) and `commits_since_review` (`[{sha, subject}]`,
+oldest first, for commits that touched the app after that head; empty unless the status is
+`ancestor`, so check the status before reading an empty list as "none").
+
+The default `/review-app` pass stamps its report with `--expect-baseline`, and `--auto` stamps once
+at the end of its loop. A stamp means the code was reviewed, not that it is clean: it is written
+even when critical findings are open.
 
 ## Migrate
 
@@ -181,9 +198,10 @@ JSON for the skill to act on.
 |---|---|
 | `streamsnow deploy-setup` | Prints the one-time Snowflake DDL for your deploy source; review it, then run it. Never runs anything itself. |
 | `streamsnow deploy-sql <slug>` | Prints the `CREATE OR REPLACE STREAMLIT` SQL for one app (`--sha`, `--config`). The deploy job runs it. |
-| `streamsnow verify-deploy <slug>` | Checks that a deployed app actually serves: the object exists, a live version is set, the version source matches `--sha`, and container logs show no crash loop. A check that cannot run is reported as skipped, never as a pass. |
+| `streamsnow verify-deploy <slug>` | Checks that a deployed app actually serves: the object exists, a live version is set, the version source matches `--sha`, and container logs show no crash loop. A check that cannot run is reported as skipped, never as a pass. With stage-copy and `--sha`, the warn-only `stage-files` check also compares the staged files, file by file, with what `stage-bundle` would ship for the app. |
 | `streamsnow config-get <key>` | Prints one config value by dotted path, e.g. `deploy.git_repository_fqn`. |
 | `streamsnow stage-path` | Prints the stage-copy base path, `@DB.SCHEMA.STAGE`. |
+| `streamsnow stage-bundle --out <dir> [<slug>...]` | Copies each app (default: every app under `apps/`) into `<dir>/<slug>/` without root-level docs an `artifacts:` entry does not declare, `sql_review/`, tooling dot-directories, anything in `.streamlit/` but `config.toml`, `.env` and `secrets.toml` files, and symlinks to any of those. Symlinks that resolve inside the repo (`--dir`) are followed; one that resolves outside it exits 2, naming the link, before anything is written. The stage-copy deploy job uploads this bundle. |
 
 `deploy-setup` flags: `--admin` (the full bootstrap a first deploy needs, in
 `USE ROLE` sections, to hand a Snowflake admin), `--public-key-file <pem>` (with
@@ -198,6 +216,15 @@ database), `--source stage-copy|git-repository` (preview the other source),
 default 20) to absorb a cold start, `--temporary-connection` (connect from
 `SNOWFLAKE_*` environment variables, as CI does), `--config`, `--format md|json`.
 
+`verify-deploy` runs `stage-files` only for a stage-copy source, a full commit
+`--sha` (40 or more characters), and an `apps/<slug>/` directory next to the config. Each check in the JSON
+output carries `level`: a failed `block` check fails the run, a failed `warn` check
+(`stage-files`) prints `!` and `(warning)` and the run still exits 0.
+
+`stage-bundle` flags: `--out <dir>` (required; must be empty or missing, and outside
+`apps/`), `--dir` (repo root, default `.`), `--format md|json`. It exits 2 on an
+invalid slug, an app directory that does not exist, or an unusable `--out`.
+
 `verify-deploy` checks only the app you name. The deploy workflow runs it for every
 directory under `apps/`, so an app whose directory was renamed or removed is never
 verified again; `check tombstones` is what catches it, at PR time.
@@ -207,7 +234,8 @@ verified again; `check tombstones` is what catches it, at PR time.
 | Command | What it does |
 |---|---|
 | `streamsnow ci-key create` | Creates (or reuses) the CI user's key pair and the five deploy secret files under `--dir` (default `~/.streamsnow-ci`, outside any repo). Never overwrites a key and never prints a secret. `--account`, `--config`. |
-| `streamsnow ci-key push` | Sets the five GitHub secrets from those files via `gh secret set` on stdin, `SNOWFLAKE_ACCOUNT` last. `--dir`, `--repo owner/name`. |
+| `streamsnow ci-key push` | Sets the five GitHub secrets from those files via `gh secret set` on stdin, `SNOWFLAKE_ACCOUNT` last. `--dir`, `--repo owner/name`. With `--config` (and `--account` if you overrode it in `create`), it first checks that the user, warehouse, role and account files match the config and refuses, by name, before any `gh` call. |
+| `streamsnow ci-key verify` | Signs in as the CI service user with those files, the way the deploy job does (`SNOWFLAKE_*` variables, key-pair auth, `--temporary-connection`), and runs read-only probes, each named by object: the CI role, `USE WAREHOUSE`, the app schema, every grant the admin script gives the CI role (`SHOW GRANTS TO ROLE`), and with `--object DB.SCHEMA.OBJECT` (an allowed governance schema only) a `LIMIT 0` read. The key, account and user never reach argv, the output or the JSON. It uses the production CI key from your machine: the sign-in shows in the CI user's login history, and a network policy that only admits the CI runners refuses it. Run it once after the admin setup. `--dir`, `--config`, `--format md\|json`. Exit 0 all pass, 1 a probe failed, 2 a tool error with no probe results printed: a missing or unreadable secret file, a file that differs from the config, a bad config or `--object`, no `snow`, or a `snow` call that could not start, timed out or printed unreadable output. |
 
 How the key moves, and what Claude can and cannot see:
 [README](../README.md#what-claude-can-and-cant-see) and [Deploy setup](deploy-setup.md).

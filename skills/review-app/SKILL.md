@@ -14,11 +14,16 @@ Judgment-tier review of `apps/<slug>` — it surfaces what a senior reviewer wou
 is `streamsnow validate-app` (/validate-app), run first so reviewers spend judgment on what the gate
 can't catch.
 
+This is the pre-ship pass. Inside /build-app, the perf-reviewer, viz-critic and cold-reader
+([verify.md](../build-app/verify.md)) already ran as the build loop, with their findings routed to
+the page-builders before checkpoint 2; they do not replace this pass. Outside /build-app, run
+/review-app only.
+
 ## Modes
 
 - **Default** — one review pass. Report only; offer `--fix` next.
 - **`--fix`** — apply the latest report: mechanical findings auto-commit one-by-one, judgment calls
-  are walked interactively. Follow [fixes.md](fixes.md).
+  are walked interactively. Follow [fixes.md](fixes.md). It never stamps the review gate.
 - **`--auto`** — loop review → fix → re-review until no new mechanical findings remain, then a
   render smoke. Follow [auto-loop.md](auto-loop.md). Warn it takes minutes (and Snowflake credits
   when the lineage pass joins); `--no-lineage` keeps it static-only.
@@ -34,6 +39,7 @@ can't catch.
 2. **Read context before dispatch:** `streamsnow.config.yaml` (governance lists, caching defaults,
    `review.cross_agent`), the app's `AGENTS.md`, and `REQUIREMENTS.md`. If config is missing, say
    so and continue with what the code alone can show — governance findings just go unverified.
+   Then keep the digest from `streamsnow review-gate baseline <slug>`: the tree reviewers will read.
 3. **Detect the runtime** — anchored `runtime_name:` key in `snowflake.yml`, never a comment grep
    (see [_shared/runtime-decision.md](../_shared/runtime-decision.md)). Reviewers branch on it.
 4. **Run the gate first:** `streamsnow validate-app <slug>` — reviewers must not re-report what it
@@ -50,10 +56,15 @@ can't catch.
    **critical** (BLOCK) — a violated governance rule or confirmed breakage; **should-fix** (FLAG) —
    real but not ship-stopping; **nice-to-have** — polish. When unsure, downgrade — over-blocking
    trains users to ignore the review.
-8. **Write the report** to `apps/<slug>/.review/review-<ts>.md` (gitignored) with slug, timestamp,
-   runtime, scope, and a top-3 summary. Print a plain-English stdout summary — critical /
-   should-fix / nice-to-have counts and the top items — so nobody has to open the file to know
-   where they stand.
+8. **Write the report** to `apps/<slug>/.review/review-<ts>.md` (gitignored): slug, timestamp,
+   runtime, scope and a top-3 summary up top, then per dimension `## <Dimension>` with `### BLOCK`,
+   `### FLAG` and `### NICE-TO-HAVE`, each holding `- [file:line] <summary> -- <why>` lines or
+   `- _none_` ([report-and-stamp.md](report-and-stamp.md)). Print the critical / should-fix /
+   nice-to-have counts and top items so nobody has to open the file to know where they stand.
+   - **8b. Stamp the gate** (not in `--fix` or inside `--auto` cycles; `--auto` stamps at its end):
+     `streamsnow review-gate stamp <report> --slug <slug> --expect-baseline <step 2 digest>`, even
+     with critical findings open: reviewed means reviewed, not clean. Exit 2 means the app changed
+     mid-review, so the review is stale and nothing was stamped: say so and offer to re-run.
 9. **Offer the next step:** mechanically fixable findings → `--fix`; findings that hinge on live
    data (row counts, real columns, filter semantics) → `/sql-review <slug>` rather than guessing.
 10. **With `--sql`:** run `/sql-review <slug>` now, following its SKILL.md from preflight.
@@ -71,5 +82,5 @@ can't catch.
 
 ## Done when
 
-The merged report is written under `.review/`, the plain-English summary is printed, and the user
-has a clear next step (`--fix`, `/sql-review`, or ship via /validate-app → /ship-app).
+The merged report is written under `.review/` and stamped (or reported stale), the summary is
+printed, and the user has a clear next step (`--fix`, `/sql-review`, or ship via /validate-app → /ship-app).

@@ -443,3 +443,159 @@ def test_module_runs_standalone_by_path(repo: Path) -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip()
+
+
+# ---------------------------------------------------------------------------
+# stamp --expect-baseline, Reviewed-head, commits since review
+# ---------------------------------------------------------------------------
+
+
+def _new_artifact(repo: Path, name: str = "review-20260901-120000.md") -> Path:
+    review_dir = repo / "apps" / SLUG / ".review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    artifact = review_dir / name
+    artifact.write_text("# Review report\n\n## SQL\n\n### BLOCK\n- _none_\n", encoding="utf-8")
+    return artifact
+
+
+def _head(repo: Path) -> str:
+    return _git(repo, "rev-parse", "HEAD").strip()
+
+
+def _commit_all(repo: Path, message: str) -> str:
+    # Review artifacts are gitignored in a real repo; keep them out of commits here too.
+    _git(repo, "add", "-A", "--", "apps", "streamsnow.config.yaml", ":(exclude)apps/*/.review")
+    _git(repo, "commit", "-q", "-m", message)
+    return _head(repo)
+
+
+def test_stamp_expect_baseline_mismatch_exits_2_and_writes_nothing(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.chdir(repo)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
+    dispatched = rg.compute_baseline(repo, SLUG)
+    artifact = _new_artifact(repo)
+    before = artifact.read_text(encoding="utf-8")
+    # The app changes while the reviewers are still reading the old tree.
+    _overview(repo).write_text(PAGE_V2.replace('"Orders"', '"Units"'), encoding="utf-8")
+    code = rg.main(["stamp", str(artifact), "--slug", SLUG, "--expect-baseline", dispatched])
+    assert code == 2
+    assert "app changed since dispatch" in capsys.readouterr().err
+    assert artifact.read_text(encoding="utf-8") == before
+    assert rg.classify(repo, SLUG, "main")[0].needs_review
+
+
+def test_stamp_expect_baseline_match_stamps(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.chdir(repo)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
+    dispatched = rg.compute_baseline(repo, SLUG)
+    artifact = _new_artifact(repo)
+    code = rg.main(["stamp", str(artifact), "--slug", SLUG, "--expect-baseline", dispatched])
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["baseline"] == dispatched
+    assert out["reviewed_head"] == _head(repo)
+    assert not rg.classify(repo, SLUG, "main")[0].needs_review
+
+
+def test_stamp_writes_head_after_the_fence(repo: Path) -> None:
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
+    artifact = _new_artifact(repo)
+    blobs = rg.app_substantive_blobs(repo, SLUG, "main")
+    rg.stamp_artifact(artifact, rg.compute_baseline(repo, SLUG), blobs, head="a" * 40)
+    lines = artifact.read_text(encoding="utf-8").splitlines()
+    fence = lines.index(rg.FILES_END)
+    assert lines[fence + 1] == f"{rg.HEAD_HEADER} {'a' * 40}"
+    # The head line sits outside the fence, so it never reads as coverage.
+    assert all(key != "a" * 40 for _, key in rg.stored_file_coverage(repo, SLUG, "apps"))
+
+
+def test_restamp_replaces_head(repo: Path) -> None:
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
+    artifact = _new_artifact(repo)
+    blobs = rg.app_substantive_blobs(repo, SLUG, "main")
+    baseline = rg.compute_baseline(repo, SLUG)
+    rg.stamp_artifact(artifact, baseline, blobs, head="a" * 40)
+    rg.stamp_artifact(artifact, baseline, blobs, head="b" * 40)
+    text = artifact.read_text(encoding="utf-8")
+    assert text.count(rg.HEAD_HEADER) == 1
+    assert f"{rg.HEAD_HEADER} {'b' * 40}" in text
+    assert text.count(rg.BASELINE_HEADER) == 1
+    assert text.count(rg.FILES_END) == 1
+    # A stamp with no files block (nothing substantive) still replaces cleanly.
+    rg.stamp_artifact(artifact, baseline, {}, head="c" * 40)
+    rg.stamp_artifact(artifact, baseline, {}, head="d" * 40)
+    text = artifact.read_text(encoding="utf-8")
+    assert text.count(rg.HEAD_HEADER) == 1
+    assert f"{rg.HEAD_HEADER} {'d' * 40}" in text
+    assert text.count(rg.BASELINE_HEADER) == 1
+    assert "## SQL" in text
+
+
+def test_classify_without_head_reports_none(repo: Path) -> None:
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
+    _stamp_current(repo, "review-1.md")  # no head: written before head tracking
+    v = rg.classify(repo, SLUG, "main")[0]
+    assert v.reviewed_head == ""
+    assert v.reviewed_head_status == "none"
+    assert v.commits_since_review == []
+
+
+def test_classify_lists_commits_since_review(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.chdir(repo)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
+    reviewed = _commit_all(repo, "feat: orders metric")
+    artifact = _new_artifact(repo)
+    assert rg.main(["stamp", str(artifact), "--slug", SLUG]) == 0
+    capsys.readouterr()
+    # One commit touches the app after the review, one does not.
+    _overview(repo).write_text(PAGE_V2.replace('"Orders"', '"Units"'), encoding="utf-8")
+    after = _commit_all(repo, "feat: units metric")
+    (repo / "streamsnow.config.yaml").write_text("project:\n  name: Acme Co\n", encoding="utf-8")
+    _commit_all(repo, "chore: rename project")
+
+    v = rg.classify(repo, SLUG, "main")[0]
+    assert v.reviewed_head == reviewed
+    assert v.reviewed_head_status == "ancestor"
+    assert v.commits_since_review == [{"sha": after, "subject": "feat: units metric"}]
+
+
+def test_classify_reports_not_ancestor_after_rebase(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.chdir(repo)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
+    reviewed = _commit_all(repo, "feat: orders metric")
+    artifact = _new_artifact(repo)
+    assert rg.main(["stamp", str(artifact), "--slug", SLUG]) == 0
+    capsys.readouterr()
+    # main moves on; rebasing the feature branch rewrites the reviewed commit.
+    _git(repo, "checkout", "-q", "main")
+    (repo / "README.md").write_text("# Acme\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-q", "-m", "docs: readme")
+    _git(repo, "checkout", "-q", "feature")
+    _git(repo, "rebase", "-q", "main")
+
+    v = rg.classify(repo, SLUG, "main")[0]
+    assert v.reviewed_head == reviewed
+    assert v.reviewed_head_status == "not-ancestor"
+    # The range is unknowable, so the list stays empty and the status says why.
+    assert v.commits_since_review == []
+
+
+def test_classify_json_carries_review_head_fields(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.chdir(repo)
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
+    rg.main(["classify", SLUG, "--format", "json", "--base-ref", "main"])
+    app = json.loads(capsys.readouterr().out)["apps"][0]
+    assert app["reviewed_head"] == ""
+    assert app["reviewed_head_status"] == "none"
+    assert app["commits_since_review"] == []

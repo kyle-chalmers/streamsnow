@@ -227,6 +227,29 @@ def test_run_reports_aggregates_with_stable_ids(repo: Path, capsys: pytest.Captu
     assert "USE_CACHED_RESULT = FALSE" in fake.calls[1][1]  # a cached rerun reads as instant
 
 
+def test_run_records_distinct_counts_of_key_columns(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    fake = FakeSnow()
+    fake.measures["REGION_ROLLUP"]["__C1_DISTINCT"] = "4"
+    assert _live(repo, fake, "run") == 0
+    by_id = {r["id"]: r for r in _out(capsys)["results"]}
+    assert by_id["run:02#1"]["distinct"] == {"REGION": 4}
+    assert 'COUNT(DISTINCT $1) AS "__C1_DISTINCT"' in fake.calls[1][1]
+    assert "COUNT(DISTINCT $2)" not in fake.calls[1][1]  # N is a number: a total, not a key
+
+
+def test_run_output_lists_every_file_it_wrote(repo: Path, capsys: pytest.CaptureFixture) -> None:
+    assert _live(repo, FakeSnow(), "run") == 0
+    out = _out(capsys)
+    run_dir = _run_dir(repo)
+    assert out["files"] == [
+        (run_dir / "run-01.json").relative_to(repo).as_posix(),
+        (run_dir / "run-02.json").relative_to(repo).as_posix(),
+    ]
+    assert all((repo / f).is_file() for f in out["files"])
+
+
 def test_run_files_are_per_page_and_ignored_by_git(
     repo: Path, capsys: pytest.CaptureFixture
 ) -> None:
@@ -377,6 +400,25 @@ def test_measure_uses_positions_and_a_name_sorted_hash() -> None:
     )
     assert parsed["totals"] == {"B": "5", "B#2": None}
     assert parsed["float_columns"] == ["B"]
+    assert "DISTINCT" not in sql and "distinct" not in parsed
+
+
+def test_measure_counts_distinct_values_of_key_shaped_columns() -> None:
+    """compare trusts a grouped frame only if it keeps every distinct key: the
+    run counts them for text, date, time and boolean columns (never a value)."""
+    cols = [
+        live.Column(1, "REGION", "VARCHAR(16777216)"),
+        live.Column(2, "REVENUE", "NUMBER(38,2)"),
+        live.Column(3, "DAY", "DATE"),
+        live.Column(4, "PAYLOAD", "VARIANT"),
+        live.Column(5, "REGION", "TEXT"),
+    ]
+    sql = live.measure_sql("SELECT 1", cols, distinct=True)
+    assert 'COUNT(DISTINCT $1) AS "__C1_DISTINCT"' in sql
+    assert 'COUNT(DISTINCT $3) AS "__C3_DISTINCT"' in sql
+    assert "DISTINCT $2" not in sql and "DISTINCT $4" not in sql
+    row = {"__ROWS": "72", "__C1_DISTINCT": "6", "__C3_DISTINCT": "12", "__C5_DISTINCT": "2"}
+    assert live.parse_measure(row, cols)["distinct"] == {"REGION": 6, "DAY": 12, "REGION#2": 2}
 
 
 def test_split_page_reads_each_tagged_section(repo: Path) -> None:
@@ -811,6 +853,43 @@ def test_a_role_the_user_does_not_hold_is_exit_2(repo: Path) -> None:
     assert len(fake.calls) == 2  # the batch, then the session alone; never every section
 
 
+class WarehouseInvisible(FakeSnow):
+    """The session's ``USE WAREHOUSE`` fails the way a role that cannot see it does."""
+
+    def __call__(self, argv: list[str], stdin: str, timeout: float) -> tuple[int, str, str]:
+        self.calls.append((argv, stdin))
+        if "USE WAREHOUSE STREAMSNOW_WH" in stdin:
+            return (
+                1,
+                "",
+                "╭─ Error ─╮\n│ Error 002043 (02000): 01c00000-0000-0000-0000-000000000001: "
+                "SQL compilation error: Object does not exist, or operation cannot be "
+                "performed. │\n╰─╯",
+            )
+        return super().__call__(argv, stdin, timeout)
+
+
+@pytest.mark.parametrize("verb", ["probe", "run"])
+def test_a_session_setup_failure_names_the_statements_and_the_flags(repo: Path, verb: str) -> None:
+    fake = WarehouseInvisible()
+    with pytest.raises(live.ToolError) as err:
+        _live(repo, fake, verb, "--role", "ACME_AGENT")
+    msg = str(err.value)
+    assert "session setup failed" in msg
+    assert "USE ROLE ACME_AGENT" in msg and "USE WAREHOUSE STREAMSNOW_WH" in msg
+    assert "--role" in msg and "--warehouse" in msg
+    assert "002043" in msg  # the Snowflake detail is kept
+    assert len(fake.calls) == 2  # the batch, then the session alone; never every section
+
+
+def test_passing_a_visible_warehouse_clears_the_session_failure(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    fake = WarehouseInvisible()
+    assert _live(repo, fake, "run", "--warehouse", "ACME_AGENT_WH") == 0
+    assert "USE WAREHOUSE ACME_AGENT_WH" in fake.calls[0][1]
+
+
 class NoHistory(FakeSnow):
     def answer(self, stmt: str) -> list[dict]:
         if "QUERY_HISTORY_BY_USER" in stmt:
@@ -851,6 +930,35 @@ def test_a_sum_overflow_keeps_the_count_and_says_totals_are_missing(
     entry = {r["id"]: r for r in _out(capsys)["results"]}["run:02#1"]
     assert entry["rows"] == 4 and entry["totals"] is None and "overflowed" in entry["totals_detail"]
     assert "not computed" in live.headline(entry)
+
+
+class DistinctRefused(FakeSnow):
+    """Only the distinct-count measure fails: a timeout the extra aggregates
+    pushed over, or a column type COUNT(DISTINCT) rejects."""
+
+    def __call__(self, argv: list[str], stdin: str, timeout: float) -> tuple[int, str, str]:
+        if "COUNT(DISTINCT" in stdin and "REGION_ROLLUP" in stdin:
+            self.calls.append((argv, stdin))
+            return 1, "", "000630 (57014): Statement reached its statement or warehouse timeout"
+        return super().__call__(argv, stdin, timeout)
+
+
+def test_a_failed_distinct_measure_keeps_the_totals(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    fake = DistinctRefused()
+    assert _live(repo, fake, "run") == 0
+    entry = {r["id"]: r for r in _out(capsys)["results"]}["run:02#1"]
+    assert entry["status"] == "pass"
+    assert entry["rows"] == 4 and entry["totals"], entry
+    assert "totals_detail" not in entry
+    assert "distinct" not in entry
+    retries = [
+        c[1]
+        for c in fake.calls
+        if '"__ROWS"' in c[1] and "REGION_ROLLUP" in c[1] and "COUNT(DISTINCT" not in c[1]
+    ]
+    assert len(retries) == 1 and "SUM($2)" in retries[0]  # the pre-distinct query
 
 
 def test_agent_written_files_cannot_mint_evidence(
