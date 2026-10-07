@@ -55,11 +55,9 @@ Extras StreamSnow keeps over the source: config-driven denylist, exact-FQN
 ``read_exceptions`` bypass, quoted-identifier + whitespace normalization, and
 ``USE SCHEMA`` detection.
 
-Only the **schema-position** segment is tested against the denylist, matching
-the source (which flags a denied name only when it is followed by a dot):
-2-part ``SCHEMA.OBJECT`` tests ``SCHEMA`` (the first segment), 3-part
-``DB.SCHEMA.OBJECT`` tests the middle segment. A denied name in the database or
-trailing-object position (e.g. ``DB.BRIDGE``) is not flagged.
+Only the **schema-position** segment is tested against the denylist: see the
+deny-list bullet above. A denied name in the database or trailing-object
+position (e.g. ``DB.BRIDGE``) is not flagged.
 
 The file-walk skips dotted directories (``.review/``, ``.git/``, ...) so review
 artifacts and VCS metadata are never scanned as app code.
@@ -184,9 +182,10 @@ def _call_name(func: ast.AST) -> str:
 
 
 # Streamlit text elements: their string arguments are prose about data, never SQL.
+# ``text`` is not one of them: ``st.text`` is rare, while ``sqlalchemy.text`` wraps SQL.
 _PROSE_CALL_NAMES = frozenset(
     {
-        "markdown", "caption", "write", "text", "title", "header", "subheader",
+        "markdown", "caption", "write", "title", "header", "subheader",
         "info", "warning", "error", "success", "toast", "metric",
     }
 )  # fmt: skip
@@ -204,6 +203,20 @@ def _collect_call_arg_ids(tree: ast.AST, names: frozenset[str]) -> set[int]:
     return ids
 
 
+def _collect_enclosed_string_ids(tree: ast.AST, names: frozenset[str]) -> set[int]:
+    """``id()`` of every string literal anywhere inside the arguments of a call named
+    *names*, so ``conn.execute(text("SELECT ..."))`` counts as an argument to ``execute``."""
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _call_name(node.func) not in names:
+            continue
+        for arg in list(node.args) + [kw.value for kw in node.keywords]:
+            for inner in ast.walk(arg):
+                if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+                    ids.add(id(inner))
+    return ids
+
+
 def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list[tuple[int, str]]:
     """``(first line, sql)`` pieces to scan: the whole text for ``.sql``; for
     ``.py``, the SQL-looking string literals (query-call args, or containing a
@@ -216,8 +229,10 @@ def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list
     except SyntaxError:
         return []
     docstrings = _collect_docstring_ids(tree)
-    queries = _collect_call_arg_ids(tree, _QUERY_CALL_NAMES)
-    prose = _collect_call_arg_ids(tree, _PROSE_CALL_NAMES) if skip_prose else set()
+    queries = _collect_enclosed_string_ids(tree, _QUERY_CALL_NAMES)
+    # A query call wins over prose: a literal under execute()/query() is SQL even
+    # when it is also an argument of a call named like a text element.
+    prose = _collect_call_arg_ids(tree, _PROSE_CALL_NAMES) - queries if skip_prose else set()
     chunks: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
@@ -267,6 +282,9 @@ _CLAUSE_END = frozenset(
         "START", "RETURNING",
     }
 )  # fmt: skip
+# Non-reserved clause words that are also plain identifiers: inside a JOIN's ON
+# expression `offset = b.off` is a column, so they end the FROM list only outside one.
+_SOFT_CLAUSE_END = frozenset({"LIMIT", "OFFSET", "FETCH"})
 # Words after a relation that modify it (time travel, sampling, pivots); a
 # parenthesized group follows, and the alias may come after that.
 _RELATION_MODIFIERS = frozenset(
@@ -355,6 +373,11 @@ class _Frame:
     state: str = ""  # "" | "expect" (a relation comes next) | "after" (one was just read)
     from_clause: bool = False  # inside a FROM clause: a top-level comma starts a relation
     alias: bool = False  # the relation's alias has been read
+    merge: bool = False  # a MERGE statement is open at this depth
+    delete: bool = False  # a DELETE statement is open at this depth
+    using_ok: bool = False  # the next USING introduces a source relation (MERGE / DELETE)
+    values: bool = False  # the current FROM item is a VALUES list: commas between rows
+    in_on: bool = False  # inside a JOIN's ON / USING expression
 
 
 def _relation_names(sql: str) -> list[tuple[int, tuple[str, ...], str]]:
@@ -393,9 +416,13 @@ def _relation_names(sql: str) -> list[tuple[int, tuple[str, ...], str]]:
             frames, prev = [_Frame()], ""
             continue
         if tok == "(":
+            stay = False
             if f.state == "expect":
                 f.state, f.alias = "after", False  # a subquery stands where a relation would
-            frames.append(_Frame())
+                # ... unless the parenthesis groups a join: FROM (A a JOIN B b ON ...), where
+                # the first relation follows the parenthesis directly.
+                stay = not (peek(i)[0] == "name" and peek(i)[1].upper() in ("SELECT", "WITH"))
+            frames.append(_Frame(state="expect" if stay else ""))
             prev = tok
             continue
         if tok == ")":
@@ -404,7 +431,10 @@ def _relation_names(sql: str) -> list[tuple[int, tuple[str, ...], str]]:
             prev = tok
             continue
         if tok == "," and f.from_clause and f.state in ("", "after"):
-            f.state = "expect"
+            if f.values and peek(i)[1] == "(":
+                prev = tok  # a comma between the rows of a VALUES list, not a new relation
+                continue
+            f.state, f.values, f.in_on = "expect", False, False
             prev = tok
             continue
         if f.state == "expect":
@@ -418,6 +448,10 @@ def _relation_names(sql: str) -> list[tuple[int, tuple[str, ...], str]]:
                     if parts:
                         found.append((line_of(inner[2]), parts, "object"))
                 f.state, f.alias = "after", False
+                prev = tok
+                continue
+            if kind == "name" and up == "VALUES":
+                f.state, f.alias, f.values = "after", False, True  # VALUES (...) v(x) is a relation
                 prev = tok
                 continue
             if kind == "name" and up not in _NOT_ALIAS:
@@ -444,15 +478,24 @@ def _relation_names(sql: str) -> list[tuple[int, tuple[str, ...], str]]:
             prev = tok
             continue
         if up == "FROM" and prev.upper() != "DISTINCT" and (len(frames) == 1 or f.select):
-            f.state, f.from_clause = "expect", True
+            f.state, f.from_clause, f.in_on = "expect", True, False
+            f.using_ok = f.delete  # DELETE FROM t USING source
         elif up == "JOIN":
-            f.state = "expect"  # the FROM list stays open: a comma after ON continues it
+            f.state, f.in_on = "expect", False  # the list stays open: a comma after ON continues it
         elif up in ("INTO", "UPDATE"):
             f.state, f.from_clause = "expect", False
+            f.using_ok = f.merge and up == "INTO"  # MERGE INTO t USING source
+        elif up == "MERGE":
+            f.merge = True
         elif up in ("SELECT", "DELETE"):
             f.select, f.from_clause = True, False
-        elif up in _CLAUSE_END:
-            f.from_clause = False
+            f.delete = f.delete or up == "DELETE"
+        elif up == "USING" and f.using_ok:
+            f.state, f.using_ok = "expect", False  # a later JOIN ... USING (cols) is not a source
+        elif up in ("ON", "USING"):
+            f.in_on = f.in_on or f.from_clause
+        elif up in _CLAUSE_END and not (up in _SOFT_CLAUSE_END and f.in_on):
+            f.from_clause = f.in_on = f.using_ok = False
         elif up == "USE":
             what, j = "database", i
             head = peek(i)[1].upper() if peek(i)[0] == "name" else ""

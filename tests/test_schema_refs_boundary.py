@@ -328,3 +328,88 @@ def test_four_part_names_keep_their_deny_coverage(tmp_path):
     )
     split = "SELECT 1 FROM FINANCE_DB\n  .STAGING\n  .T\n  .COL"
     assert find_denied_refs(split, POLICY) == [(1, "STAGING")]
+
+
+@pytest.mark.parametrize(
+    ("src", "hits"),
+    [
+        ("conn.execute(text('SELECT * FROM RAW.EVENTS'))", [(3, "denied", "RAW")]),
+        ("df = sa.text('SELECT id FROM ANY_DB.RAW.EVENTS')", [(3, "denied", "RAW")]),
+        ("t = text('SELECT id FROM RAW.EVENTS')", [(3, "denied", "RAW")]),
+        ("st.write('SELECT * FROM RAW.EVENTS')", []),  # Streamlit prose stays unread
+    ],
+)
+def test_sql_in_text_calls_is_scanned_but_streamlit_prose_is_not(tmp_path, src, hits):
+    code = f"import streamlit as st\nimport sqlalchemy as sa\n{src}\n"
+    assert _check(tmp_path, code, suffix=".py")[0] == hits
+
+
+SOURCES = SchemaPolicy(sources=("ANALYTICS_DB.REPORTING", "FINANCE_DB.MARTS"))
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        # MERGE and DELETE sources follow USING, not FROM or JOIN.
+        (
+            "MERGE INTO ANALYTICS_DB.REPORTING.T t USING SALES_DB.PUBLIC.SRC s ON t.id = s.id "
+            "WHEN MATCHED THEN UPDATE SET x = 1",
+            [(1, "SALES_DB.PUBLIC.SRC", "outside_boundary")],
+        ),
+        (
+            "DELETE FROM ANALYTICS_DB.REPORTING.A USING SALES_DB.PUBLIC.Z z WHERE A.id = z.id",
+            [(1, "SALES_DB.PUBLIC.Z", "outside_boundary")],
+        ),
+        (
+            "MERGE INTO ANALYTICS_DB.REPORTING.T t USING (SELECT * FROM SALES_DB.PUBLIC.S) s "
+            "ON t.id = s.id WHEN MATCHED THEN DELETE",
+            [(1, "SALES_DB.PUBLIC.S", "outside_boundary")],
+        ),
+        # A JOIN's USING (cols) is a column list, in a MERGE source too.
+        (
+            "MERGE INTO ANALYTICS_DB.REPORTING.T t USING FINANCE_DB.MARTS.A a "
+            "JOIN FINANCE_DB.MARTS.B b USING (id) ON t.id = a.id WHEN MATCHED THEN DELETE",
+            [],
+        ),
+        (
+            "INSERT INTO ANALYTICS_DB.REPORTING.T SELECT * FROM FINANCE_DB.MARTS.A a "
+            "JOIN FINANCE_DB.MARTS.B b USING (id, k)",
+            [],
+        ),
+        # The first relation inside a parenthesized join.
+        (
+            "SELECT * FROM (SALES_DB.PUBLIC.X x JOIN ANALYTICS_DB.REPORTING.A a ON x.id = a.id)",
+            [(1, "SALES_DB.PUBLIC.X", "outside_boundary")],
+        ),
+        ("SELECT * FROM (SELECT 1 AS id FROM ANALYTICS_DB.REPORTING.A) s", []),
+        ("WITH c AS (SELECT 1) SELECT * FROM (WITH d AS (SELECT 2) SELECT * FROM d) s", []),
+        # VALUES is a relation that keeps the FROM list open.
+        (
+            "SELECT * FROM VALUES (1), (2) v(x), SALES_DB.PUBLIC.X",
+            [(1, "SALES_DB.PUBLIC.X", "outside_boundary")],
+        ),
+        (
+            "SELECT * FROM ANALYTICS_DB.REPORTING.A a, VALUES (1, 2), (3, 4) v(p, q), "
+            "SALES_DB.PUBLIC.X",
+            [(1, "SALES_DB.PUBLIC.X", "outside_boundary")],
+        ),
+        ("SELECT * FROM VALUES (a), (b) v(x)", []),
+        # OFFSET / LIMIT / FETCH are columns inside an ON expression.
+        (
+            "SELECT * FROM ANALYTICS_DB.REPORTING.A a JOIN FINANCE_DB.MARTS.B b "
+            "ON offset = b.off, SALES_DB.PUBLIC.X",
+            [(1, "SALES_DB.PUBLIC.X", "outside_boundary")],
+        ),
+        (
+            "SELECT * FROM ANALYTICS_DB.REPORTING.A a JOIN FINANCE_DB.MARTS.B b "
+            "ON a.limit = b.fetch, SALES_DB.PUBLIC.X",
+            [(1, "SALES_DB.PUBLIC.X", "outside_boundary")],
+        ),
+        # A real clause still ends the list.
+        ("SELECT * FROM ANALYTICS_DB.REPORTING.A a ORDER BY a.x LIMIT 5, 10", []),
+    ],
+)
+def test_using_parenthesized_and_values_relations_are_in_relation_position(sql, expected):
+    assert _refs(sql, SOURCES) == expected
+    enforced = dataclasses.replace(SOURCES, boundary="enforce")
+    assert [(r.line, r.ref, r.verdict) for r in find_boundary_refs(sql, enforced)] == expected
