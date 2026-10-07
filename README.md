@@ -351,6 +351,20 @@ streamsnow update --apply                # re-render AGENTS.md, CLAUDE.md, hooks
 
 Generated CI and deploy workflows pin `streamsnow>=0.10.1,<0.11`; bump the pin with
 `update --apply` when you move to a new minor release (before 1.0, minors can break).
+
+`update` stops at the repo-level governance files. It never rewrites app files
+(`apps/<slug>/review.py`, `pages/_glossary.py`) and never rewrites an existing `.sqlfluff`.
+Refresh a stale `review.py` with `streamsnow sql-review helper <slug> --apply` (a dry run
+without `--apply`; `--force` as well when it reports `modified`).
+
+Two small template fixes reach new repos only, so an existing repo makes them by hand:
+
+- In `apps/<slug>/pages/_glossary.py`, change the last line of `hover_definition` from
+  `return metric_help(key).replace("%", "%%")` to `return metric_help(key)`.
+- In `.sqlfluff`, change the comment line `#   sqlfluff lint apps/<slug>/queries --templater placeholder`
+  to `#   streamsnow sql-review check <slug>`.
+
+A plugin update does not apply to a session that is already running: restart the session (or run `/reload-plugins`) before relying on the new skill text.
 `claude plugin details streamsnow@streamsnow` lists the 8 skills below.
 
 ## The skills

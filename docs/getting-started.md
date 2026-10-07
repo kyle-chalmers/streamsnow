@@ -411,6 +411,20 @@ streamsnow update            # dry-run: what the new templates would change
 streamsnow update --apply    # re-render AGENTS.md, CLAUDE.md, hooks, CI, deploy.yml
 ```
 
+`update` stops at the repo-level governance files. It never rewrites app files
+(`apps/<slug>/review.py`, `pages/_glossary.py`) and never rewrites an existing `.sqlfluff`.
+Refresh a stale `review.py` with `streamsnow sql-review helper <slug> --apply` (a dry run
+without `--apply`; `--force` as well when it reports `modified`).
+
+Two small template fixes reach new repos only, so an existing repo makes them by hand:
+
+- In `apps/<slug>/pages/_glossary.py`, change the last line of `hover_definition` from
+  `return metric_help(key).replace("%", "%%")` to `return metric_help(key)`.
+- In `.sqlfluff`, change the comment line `#   sqlfluff lint apps/<slug>/queries --templater placeholder`
+  to `#   streamsnow sql-review check <slug>`.
+
+A plugin update does not apply to a session that is already running: restart the session (or run `/reload-plugins`) before relying on the new skill text.
+
 ## The config file
 
 `streamsnow.config.yaml` is the single source of truth the CLI, the checks, CI,
