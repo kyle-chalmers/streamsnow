@@ -6,11 +6,13 @@ and that config drives the output + guardrails.
 
 from __future__ import annotations
 
+import dataclasses
 import py_compile
 import re
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -1237,3 +1239,30 @@ def test_deploy_workflows_log_that_secrets_were_found_when_they_deploy(tmp_path)
         assert "Deploy secrets not set" in skip, name
         assert "Deploy secrets found: deploying" not in skip, name
         assert "Deploy secrets found: deploying" in deploy, name
+
+
+def test_scaffold_targets_the_first_source_in_any_database(tmp_path):
+    base = Config.from_dict(yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8")))
+    gov = SimpleNamespace(
+        sources=("FINANCE_DB.MARTS", "ANALYTICS_DB.REPORTING"),
+        app_data="",
+        imported_databases=(),
+        schema_deny=("RAW",),
+        read_exceptions=(),
+        boundary="warn",
+    )
+    scaffold(dataclasses.replace(base, governance=gov), tmp_path, "fin-app")
+    a = tmp_path / "apps" / "fin-app"
+    query = (a / "queries" / "example_metric.sql").read_text(encoding="utf-8")
+    assert "FROM FINANCE_DB.MARTS.YOUR_TABLE" in query
+    assert "FINANCE_DB.MARTS.YOUR_TABLE" in (a / "sql_review" / "index.yaml").read_text(
+        encoding="utf-8"
+    )
+    secrets = (a / ".streamlit" / "secrets.toml.example").read_text(encoding="utf-8")
+    assert 'database = "FINANCE_DB"' in secrets and 'schema = "MARTS"' in secrets
+    assert "FINANCE_DB.MARTS, ANALYTICS_DB.REPORTING" in (a / "AGENTS.md").read_text(
+        encoding="utf-8"
+    )
+    rules = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "FINANCE_DB.MARTS, ANALYTICS_DB.REPORTING" in rules
+    assert "DATABASE.SCHEMA.OBJECT" in rules

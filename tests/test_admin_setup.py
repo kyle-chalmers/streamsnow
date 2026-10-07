@@ -358,7 +358,8 @@ def test_teardown_never_touches_governance_data_or_the_system_pool(cfg):
     sql = generate_teardown_sql(cfg)
     for stmt in _drops(sql):
         assert re.match(r"^(DROP [A-Z ]+ IF EXISTS|ALTER COMPUTE POOL IF EXISTS) ", stmt), stmt
-        assert cfg.governance.database not in stmt
+        for source in cfg.governance.sources:
+            assert source.split(".", 1)[0] not in stmt, stmt
         assert SYSTEM_POOL not in stmt
 
 

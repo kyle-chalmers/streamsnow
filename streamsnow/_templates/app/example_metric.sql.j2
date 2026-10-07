@@ -1,12 +1,12 @@
 -- Query: example_metric
 -- Feeds: Overview page (example metric + trend)
--- Schemas: {{ gov_database }}.{{ schema_allow[0] }}
+-- Schemas: {{ sources[0] }}
 -- Params: :1 start_date, :2 end_date
 SELECT
     metric_date AS dt,
     COUNT(*) AS n,
     SUM(amount) AS total
-FROM {{ gov_database }}.{{ schema_allow[0] }}.YOUR_TABLE  -- TODO: replace YOUR_TABLE
+FROM {{ sources[0] }}.YOUR_TABLE  -- TODO: replace YOUR_TABLE
 -- BETWEEN is inclusive at both ends, so the window's end date counts as a full day.
 WHERE metric_date BETWEEN :1 AND :2
 GROUP BY metric_date

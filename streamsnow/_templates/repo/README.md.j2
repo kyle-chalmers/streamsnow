@@ -5,7 +5,7 @@ Streamlit-in-Snowflake apps, scaffolded and governed with
 
 - **Runtime:** {{ runtime }}
 - **Deploy source:** {{ deploy_source }}
-- **Data:** queries `{{ gov_database }}` (schemas: {{ schema_allow | join(', ') }})
+- **Data:** reads {{ sources | join(', ') }} (governance.sources)
 
 ## Apps
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -13,6 +15,7 @@ from streamsnow.deploy import (
     generate_admin_sql,
     generate_create_sql,
     generate_setup_sql,
+    generate_teardown_sql,
     stage_path,
     with_source,
 )
@@ -493,3 +496,61 @@ def test_admin_sql_shared_database_imported_privileges_ci_role_only():
         "IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE_SAMPLE_DATA TO ROLE STREAMSNOW_VIEWER_ROLE"
         not in stmts
     )
+
+
+def _with_sources(*sources: str, imported: tuple[str, ...] = (), **overrides) -> Config:
+    """The example config with these governance sources. Until the schema_version 2
+    model lands (PR 2 Task 6) a v1 config cannot hold several databases, so the
+    governance block is swapped for an object with the fields the generators read."""
+    cfg = _cfg(**overrides)
+    gov = SimpleNamespace(
+        sources=tuple(sources),
+        imported_databases=imported,
+        app_data="",
+        schema_deny=("RAW",),
+        read_exceptions=(),
+        boundary="warn",
+    )
+    return dataclasses.replace(cfg, governance=gov)
+
+
+def test_admin_sql_sources_across_databases_get_usage_once_per_database():
+    sources = ("ANALYTICS_DB.REPORTING", "FINANCE_DB.MARTS", "FINANCE_DB.FEES")
+    stmts = _stmts(generate_admin_sql(_with_sources(*sources)))
+    for db in ("ANALYTICS_DB", "FINANCE_DB"):
+        assert stmts.count(f"GRANT USAGE ON DATABASE {db} TO ROLE STREAMSNOW_DEPLOY_ROLE;") == 1
+    for fq in sources:
+        assert f"GRANT USAGE ON SCHEMA {fq} TO ROLE STREAMSNOW_DEPLOY_ROLE;" in stmts
+        for scope in ("ALL", "FUTURE"):
+            for kind in READ_OBJECT_TYPES:
+                grant = (
+                    f"GRANT SELECT ON {scope} {kind} IN SCHEMA {fq} TO ROLE STREAMSNOW_DEPLOY_ROLE;"
+                )
+                assert grant in stmts, grant
+    assert "ANALYTICS_DB.ANALYTICS" not in stmts
+
+
+def test_admin_sql_custom_imported_database_gets_imported_privileges_once():
+    sql = generate_admin_sql(
+        _with_sources(
+            "PARTNER_SHARE.SALES",
+            "PARTNER_SHARE.LEADS",
+            "ANALYTICS_DB.REPORTING",
+            imported=("PARTNER_SHARE",),
+        )
+    )
+    acct = _stmts(_sections(sql)["ACCOUNTADMIN"])
+    grant = "GRANT IMPORTED PRIVILEGES ON DATABASE PARTNER_SHARE TO ROLE STREAMSNOW_DEPLOY_ROLE;"
+    assert acct.count(grant) == 1
+    stmts = _stmts(sql)
+    assert "IN SCHEMA PARTNER_SHARE" not in stmts
+    assert "ON DATABASE PARTNER_SHARE TO ROLE STREAMSNOW_VIEWER_ROLE" not in stmts
+    assert "GRANT USAGE ON SCHEMA ANALYTICS_DB.REPORTING TO ROLE STREAMSNOW_DEPLOY_ROLE;" in stmts
+
+
+def test_teardown_refuses_an_app_database_that_holds_any_source():
+    cfg = _with_sources("ANALYTICS_DB.REPORTING", "FINANCE_DB.MARTS")
+    objects = dataclasses.replace(cfg.snowflake.objects, app_database="FINANCE_DB")
+    moved = dataclasses.replace(cfg, snowflake=dataclasses.replace(cfg.snowflake, objects=objects))
+    with pytest.raises(ConfigError, match="holds a governance source"):
+        generate_teardown_sql(moved)

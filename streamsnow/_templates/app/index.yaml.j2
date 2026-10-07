@@ -10,8 +10,8 @@ app: {{ app_slug }}
 # the data's latest date, so a section returns rows even when the data stops in
 # the past (a window ending at CURRENT_DATE returns nothing on stale data).
 review_window:
-  start_date: "(SELECT DATEADD('year', -1, MAX(metric_date)) FROM {{ gov_database }}.{{ schema_allow[0] }}.YOUR_TABLE)::DATE"
-  end_date: "(SELECT MAX(metric_date) FROM {{ gov_database }}.{{ schema_allow[0] }}.YOUR_TABLE)::DATE"
+  start_date: "(SELECT DATEADD('year', -1, MAX(metric_date)) FROM {{ sources[0] }}.YOUR_TABLE)::DATE"
+  end_date: "(SELECT MAX(metric_date) FROM {{ sources[0] }}.YOUR_TABLE)::DATE"
 pages:
   - path: pages/overview.py
     metrics:
@@ -19,7 +19,7 @@ pages:
         query: queries/example_metric.sql
         binds: {"1": params.start_date, "2": params.end_date}
         notes: "Starter metric. Repoint YOUR_TABLE here and in queries/example_metric.sql."
-        reads: [{{ gov_database }}.{{ schema_allow[0] }}.YOUR_TABLE]
+        reads: [{{ sources[0] }}.YOUR_TABLE]
   - path: pages/about.py   # documents the app; it shows no data of its own
     metrics: []
 # Objects created to make this app work (views, dynamic tables); each needs a

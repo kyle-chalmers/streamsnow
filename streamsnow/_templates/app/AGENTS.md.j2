@@ -3,7 +3,7 @@
 App-specific context. Inherits the repo rulebook in the top-level `AGENTS.md`.
 
 - **Runtime:** {{ runtime }} · **Query warehouse:** `{{ default_warehouse }}`
-- **Data sources:** `{{ gov_database }}` (schemas: {{ schema_allow | join(', ') }})
+- **Data sources:** {{ sources | join(', ') }} (governance.sources; name objects in full, DATABASE.SCHEMA.OBJECT)
 - **Caching strategy:** default TTL {{ cache_ttl }}s. Note any per-query deviations here with a reason.
 
 ## Pages
