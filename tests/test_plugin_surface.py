@@ -294,6 +294,9 @@ def test_ship_app_cleans_up_after_merge_and_checks_merged_before_deleting():
     ]
     assert tip_check.count("headRefOid") >= 2
     assert "On any mismatch, stop and delete nothing" in tip_check
+    # The remote tip is read from the exact ref line: a suffix match also hits
+    # refs/heads/x/<branch>.
+    assert "exactly `refs/heads/<branch>`" in tip_check and "first field" in tip_check
     assert "unmerged work" in tip_check
     assert steps.index("headRefOid") < steps.index("git branch -D <branch>")
     assert steps.index("git ls-remote --heads origin <branch>") < steps.index(
@@ -313,7 +316,8 @@ def test_ship_app_asks_before_cleanup_only_without_a_merge_approval_in_this_run(
     ship = SKILLS_DIR / "ship-app"
     steps = _flat((ship / "after-merge.md").read_text(encoding="utf-8"))
     assert "Ask the user once, only when there was no approval in this run" in steps
-    assert "approved the PR merging" in steps and "merged it themselves and said so" in steps
+    assert "explicitly approved in this conversation (not a GitHub review approval)" in steps
+    assert "the PR merging" in steps and "merged it themselves and said so" in steps
     assert "Restore branch" in steps and "reflog" in steps  # why skipping the question is safe
     assert "Cleaned up: deleted `<branch>` locally" in steps
     shared = steps.index("Steps 1 to 3 run on both paths")
@@ -335,6 +339,29 @@ def test_ship_app_cleans_up_a_spent_branch_after_the_work_moved():
     assert "after `/ship-app` step 6 has committed the work" in steps
     assert "continue the ship at `/ship-app` step 7" in steps
     assert "stays on the new branch" in steps
+    assert "`<branch>` in every step below is the spent branch, not the current one" in steps
+
+
+def test_migrate_app_finishes_the_starter_documents_like_build_app():
+    """/build-app rewrites the app AGENTS.md starter lines and adds the README Apps
+    row; a migrated app skipped both, so validate-app's starter-text check warned."""
+    skill = _flat((SKILLS_DIR / "migrate-app" / "SKILL.md").read_text(encoding="utf-8"))
+    step = skill[skill.index("10. Check `snowflake.yml`") : skill.index("11. **Verify:**")]
+    assert "starter Pages and Queries lines" in step
+    assert "README Apps row" in step and "`apps/<slug>/`" in step
+    assert "`starter-text`" in step
+
+
+def test_ship_app_hands_over_the_app_link_after_a_green_deploy():
+    """CI cannot load the page (key-pair sign-in), so the ship ends with the user
+    clicking through it from the link `streamsnow app-url` prints."""
+    skill = _flat((SKILLS_DIR / "ship-app" / "SKILL.md").read_text(encoding="utf-8"))
+    merged = skill[skill.index("**Merged**") : skill.index("## After merge")]
+    assert "streamsnow app-url <slug>" in merged and "(click-through.md)" in merged
+    ref = _flat((SKILLS_DIR / "ship-app" / "click-through.md").read_text(encoding="utf-8"))
+    for item in ("open every page", "change each filter once", "match what preview showed"):
+        assert item in ref
+    assert "Projects » Streamlit" in ref and "Exit 2" in ref
 
 
 def test_ship_app_resaves_review_state_after_a_review_first_pass():

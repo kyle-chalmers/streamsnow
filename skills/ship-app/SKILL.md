@@ -58,7 +58,7 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
   differ by runtime — see [_shared/runtime-decision.md](../_shared/runtime-decision.md)); stop.
 - **Green but unmerged** → it's waiting on a teammate's approval (you can't approve your own PR) —
   say so plainly rather than looping on the checks. /ship-app never merges; it stops here.
-- **Merged** → confirm, report the deploy run's outcome, then run [After merge](#after-merge).
+- **Merged** → confirm, report the deploy run's outcome; when it succeeded, run `streamsnow app-url <slug>` and hand the user the link with a click-through checklist per [click-through.md](click-through.md). Then run [After merge](#after-merge).
 
 ## After merge
 
