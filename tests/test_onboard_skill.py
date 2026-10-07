@@ -246,3 +246,28 @@ def test_a_refused_secret_file_is_replaced_with_the_user_not_for_them():
     assert "rm ~/.streamsnow-ci/secrets/<NAME>" in walk
     assert walk.index("streamsnow ci-key create") < walk.index("streamsnow ci-key push")
     assert "SNOWFLAKE_PRIVATE_KEY_RAW" in walk and "stop instead" in walk
+
+
+_RETIRED_COUNTS = ("at most 5", "five questions", "all five", "five setup answers", "≤5")
+
+
+def test_setup_asks_for_sources_and_app_data_never_database_or_schemas():
+    flat = _flat(SETUP)
+    assert "--sources" in flat and "--app-data" in flat
+    assert "--database" not in flat and "--schemas " not in flat
+    assert not any(phrase in flat for phrase in _RETIRED_COUNTS)
+    assert "imported_databases" in flat
+    stage2 = _flat(SKILL.split("## Stage 2")[1].split("## Stage 3")[0])
+    assert "sources, app-data schema" in stage2
+
+
+def test_no_doc_promises_a_fixed_number_of_setup_questions():
+    for path in (
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "docs" / "getting-started.md",
+        REPO_ROOT / "docs" / "cli-reference.md",
+        REPO_ROOT / "docs" / "migrating-a-consumer-repo.md",
+        SKILLS / "onboard" / "adopt.md",
+    ):
+        flat = _flat(path.read_text(encoding="utf-8"))
+        assert not any(phrase in flat for phrase in _RETIRED_COUNTS), path.name

@@ -53,7 +53,7 @@ returns their inputs instead of editing shared files.
    ```sql
    -- Query: <name>
    -- Feeds: <Page title> (<sections>)
-   -- Schemas: <TODO: fill from §3 — must be on governance.schema_allow>
+   -- Schemas: <TODO: fill from §3, each a governance.sources entry>
    -- Params: <TODO: :1 start_date … — or omit>
    -- Tokens: TOKEN_NAME (what it filters), no braces; omit the line when there are none
    SELECT 1 AS placeholder;

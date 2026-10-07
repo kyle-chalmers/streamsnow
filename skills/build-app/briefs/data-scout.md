@@ -9,8 +9,8 @@ writes, and never widen a grant.
 ## Inputs
 
 - `slug`, and `apps/<slug>/REQUIREMENTS.md` §2–§7 (what the app must show).
-- `streamsnow.config.yaml`: `governance.database`, `schema_allow`, `schema_deny`,
-  `read_exceptions`, and the connection name.
+- `streamsnow.config.yaml`: `governance.sources` (each `DATABASE.SCHEMA` the app may read),
+  `app_data`, `schema_deny`, `read_exceptions`, and the connection name.
 - [docs/data-discovery.md](../../../docs/data-discovery.md) for the two `INFORMATION_SCHEMA` queries.
 
 ## Owns
@@ -19,8 +19,9 @@ Nothing. Return the profile; the orchestrator writes §3.
 
 ## Steps
 
-1. List candidate objects in the allowed schemas (`INFORMATION_SCHEMA.TABLES`, with comments),
-   run through `snow sql` on the configured connection. Skip anything under `schema_deny`.
+1. List candidate objects in each source schema (`<DB>.INFORMATION_SCHEMA.TABLES` per source
+   database, with comments), run through `snow sql` on the configured connection. Skip anything
+   under `schema_deny`.
 2. For each object the spec needs: columns and types (`INFORMATION_SCHEMA.COLUMNS`), the grain
    (what one row is), the date column with `MIN`/`MAX`, the row count (`ROW_COUNT` for tables;
    for views, a `COUNT(*)` over the last 30 days of the date column, never a full scan).

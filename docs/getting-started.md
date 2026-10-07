@@ -128,8 +128,8 @@ If `/onboard` isn't listed, run `/reload-plugins` (no restart needed) and try ag
    Claude settings so teammates are offered it.
 2. **One round of questions.** Clickable choices, each explained first so you
    learn what is being set up. Whether to set up your Snowflake connection for
-   you or guide you through it, then one question each for the five setup answers
-   (runtime, the database apps query, allowed schemas, schemas apps may not
+   you or guide you through it, then one question each for the setup answers
+   (runtime, the sources apps read, the app-data schema, schemas apps may not
    query, deploy source), a bulleted explanation of the defaults it does not ask
    about followed by one keep-or-change question, your git name and email if
    they are missing, and who runs the Snowflake admin script, which it describes
@@ -204,7 +204,7 @@ streamsnow init              # scaffolds into the current directory — cd to yo
 
 `init` runs an interactive wizard that writes
 [`streamsnow.config.yaml`](#the-config-file) (your Snowflake account, objects,
-roles, governance schemas, runtime, and deploy source), then scaffolds a
+roles, governance sources, runtime, and deploy source), then scaffolds a
 governed repo with a starter app under `apps/<slug>/`. To split the steps, run
 `streamsnow configure` first (config only), then `streamsnow init` to scaffold.
 `streamsnow init --no-starter-app` writes the repo files without the example
@@ -448,7 +448,7 @@ secrets / `secrets.toml`). The load-bearing sections:
 | `snowflake.account`, `snowflake.connection_name` | the account locator (not the full hostname) and the `snow` CLI connection the CLI and preview use |
 | `snowflake.objects` | where apps deploy (app database/schema), the stage for stage-copy deploys, the warehouse, and container `compute_pool` (default `SYSTEM_COMPUTE_POOL_CPU`, which Snowflake pre-provisions) + `external_access_integration`; optional `runtime_name` (default `SYSTEM$ST_CONTAINER_RUNTIME_PY3_11`) and `container_python` (default `3.11`) |
 | `snowflake.roles` | `ci_role` (deploys and owns the apps, reads the data) and `viewer_role` (opens deployed apps; data reads are opt-in) |
-| `governance` | `database`, `schema_allow`, `schema_deny`, `read_exceptions` — the data guardrails. `schema_deny` is what the `schema-refs` check enforces (a denylist); `schema_allow` is the convention the scaffolded queries and docs point at, not an enforced gate |
+| `governance` | `sources` (the `DATABASE.SCHEMA` locations apps read, in any databases), `app_data` (the schema for views and dynamic tables built for the apps), `schema_deny` (`RAW` or `FINANCE.RAW`), `read_exceptions`, `imported_databases`, and `boundary` (`warn` default, or `enforce`). `schema-refs` always enforces the deny list; names outside sources and app data, and two-part names, warn or fail per `boundary`. See [Data discovery](data-discovery.md) |
 | `deploy.source` | `stage-copy` (default) or `git-repository`; `deploy.artifact_exclude` names non-code files your pipeline ships by another step |
 | `deploy.git_*` | git-repository only: `git_repository_fqn`, `git_origin` (the GitHub HTTPS URL Snowflake fetches; `deploy-setup` needs it), `git_branch` (default `main`), `api_integration_name`, `secret_name`, and `github_auth_mode` (`pat` default, `github-app` set up the same way, or `public` for no secret). See [Git repository deploys](git-repository.md) |
 | `sql_review.coverage` | `warn` (default) or `fail` — whether a page or query missing from `sql_review/index.yaml` fails `validate-app`, pre-commit and CI |

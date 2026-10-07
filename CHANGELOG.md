@@ -34,8 +34,45 @@ entry.
 
 Most entries below come from a first end-to-end run of the plugin (onboard through ship).
 
+### Breaking
+
+- **Config `schema_version: 2`: `governance.sources` and `governance.app_data` replace
+  `governance.database` and `governance.schema_allow`** (#78). Sources are `DATABASE.SCHEMA`
+  entries in any databases; app data is the one schema per repo for views and dynamic tables
+  built for the apps (default `<app_database>.STREAMSNOW_REPORTING`). A schema_version 1 file
+  now fails with a message naming the new keys; there is no automatic migration. To upgrade:
+  run `streamsnow configure` (it proposes sources from your old database and schemas and keeps
+  every other value), review the file, run `streamsnow update --apply`, and have your admin
+  re-run `streamsnow deploy-setup --admin`, which now also creates the app-data schema.
+- **`configure` and `init` take `--sources` and `--app-data`**; `--database` and `--schemas`
+  are gone, so scripts that pass them fail with "No such option".
+- **App SQL names objects in full.** `check schema-refs` now reads which names sit in relation
+  position (after `FROM`, `JOIN`, a FROM list's commas, `IDENTIFIER('...')`) and reports names
+  outside `governance.sources` and app data, and two-part `SCHEMA.OBJECT` names. Quoted names
+  keep their case, as in Snowflake. Under `governance.boundary: warn` (the default) these are
+  warnings in schema-refs, validate-app, the live SQL review and `migrate`; `enforce` makes
+  them failures. The deny list always fails, and now accepts `FINANCE.RAW` as well as `RAW`;
+  `USE ROLE` lines are no longer read as schema references. `ci-key verify --object` accepts
+  objects in any source or the app data.
+
 ### Added
 
+- **`streamsnow doctor --live`** adds an optional `source-access` check: each governance source
+  and the app-data schema are visible to your `snow` connection's role (read-only SHOW
+  statements; it logs in, so it is opt-in). `streamsnow configure` runs the same check on the
+  sources when the connection exists and records shared databases that hold a source in
+  `governance.imported_databases`. In `configure` the wait is capped at 20 seconds per statement
+  and 90 seconds in all, and a sign-in that never happens reads as unverified instead of
+  blocking the config.
+- **`deploy-setup --admin` reads sources across databases** (`USAGE` once per database),
+  grants `IMPORTED PRIVILEGES` once per shared database, and creates the app-data schema with
+  `CREATE VIEW` and `CREATE DYNAMIC TABLE` for the CI role (never `CREATE TABLE`).
+  `--teardown` keeps every source database and prints app data outside the app database as a
+  commented `DROP SCHEMA`.
+- **`governance.boundary: warn|enforce`** (default `warn`) decides what happens to a name outside
+  the sources and app data, or a two-part name. The deny list fails either way.
+- **`check schema-refs --format json` gains `warnings` and `boundary`**, and its findings gain
+  `database` and `reason`. `validate-app` shows boundary warnings alongside its checks.
 - **`streamsnow app-url <slug>`** prints the Snowsight URL of a deployed app (Snowflake's
   app-builder form), built from the name the deploy SQL creates and the organization and
   account your connection reports. `/ship-app` runs it after a green deploy and hands you
