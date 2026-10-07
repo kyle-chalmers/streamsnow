@@ -8,6 +8,11 @@ entry.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-07
+
+- Generated CI and deploy workflows pin `streamsnow>=0.10.1,<0.11`, because the stage-copy
+  deploy now calls `streamsnow stage-bundle`; run `streamsnow update --apply` to pick it up.
+
 Most entries below come from a first end-to-end run of the plugin (onboard through ship).
 
 ### Added

@@ -29,7 +29,7 @@ jobs:
           # Same ruff as the pre-commit hook: an unpinned install tracks ruff's
           # default rule set, which changes between releases.
           uv tool install ruff=={{ ruff_version }}
-          uv tool install 'streamsnow>=0.10,<0.11'
+          uv tool install 'streamsnow>=0.10.1,<0.11'
       - name: Lint
         run: |
           # A repo with no app yet (`streamsnow init --no-starter-app`) has no apps/
