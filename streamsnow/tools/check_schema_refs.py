@@ -116,7 +116,7 @@ def _strip_sql_comments(text: str) -> str:
     # Drop -- line comments and /* */ block comments so commented refs don't trip. Block
     # comments become blanks of the same length, so line numbers and offsets still match.
     text = re.sub(r"/\*.*?\*/", lambda m: _blank(m.group(0)), text, flags=re.DOTALL)
-    return "\n".join(line.split("--", 1)[0] for line in text.splitlines())
+    return "\n".join(line.split("--", 1)[0] for line in text.split("\n"))
 
 
 # `USE ROLE <name>` and `USE SECONDARY ROLES ...` name roles, never schemas: a role
@@ -262,32 +262,51 @@ _STATEMENT_START_RE = re.compile(
 
 
 class _Chunk(NamedTuple):
-    sql: str
-    statement: bool  # a query-call argument or opens with a statement keyword
+    sql: str  # the text the scanners read: every line break is a "\n"
+    statement: bool  # certainly SQL: a query-call argument or opens with a statement keyword
     starts: tuple[tuple[int, int], ...]  # (offset in sql, source line) per source piece
+    queried: bool  # an argument of a query call: the full boundary checks apply
+    raw: str  # the text as written; same length as ``sql``, so offsets agree
 
     def line_at(self, offset: int) -> int:
-        """The source line of the piece holding *offset*, plus the newlines inside it."""
-        offset = max(0, min(offset, len(self.sql)))
+        """The source line of the piece holding *offset*, plus the newlines inside it
+        (counted in the text as written: a ``\\r`` escape is not a source line)."""
+        offset = max(0, min(offset, len(self.raw)))
         i = bisect.bisect_right([o for o, _ in self.starts], offset) - 1
         start, line = self.starts[max(i, 0)]
-        return line + self.sql.count("\n", start, offset)
+        return line + self.raw.count("\n", start, offset)
+
+
+def _normalize_breaks(text: str) -> str:
+    """``\\r\\n`` and a lone ``\\r`` become line breaks, keeping the length. The comment
+    stripper, the line scan and the offsets must all agree on what a line is: splitting
+    on ``splitlines()`` in one and ``\\n`` in another gave an IndexError on ``"a\\rb"``."""
+    return text.replace("\r\n", " \n").replace("\r", "\n")
 
 
 _Folded = tuple[str, list[tuple[int, int]]]
 
 
-def _fold(node: ast.AST) -> _Folded | None:
-    """The text of a Python string expression with where each piece starts in the
-    source, or ``None`` when *node* is not one.
+def _is_add(node: ast.AST) -> bool:
+    return isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add)
 
-    ``"a" + "b"`` folds to one string, so ``"SELECT * FROM " + "DB.S.T"`` reads as
-    the statement it builds. An f-string joins its literal parts around
-    :data:`_EXPR`, and a non-literal operand of ``+`` next to a string becomes
-    :data:`_EXPR` too. The text is exactly the concatenation, never padded: a name
-    split across operands (``"SALES_" + "DB.PUBLIC.X"``) is the name Snowflake sees.
-    The piece starts map a match back to its source line.
-    """
+
+def _add_leaves(node: ast.AST) -> list[ast.AST]:
+    """The operands of a ``+`` tree that are not themselves ``+``, left to right.
+    Iterative: a source with thousands of ``+ ""`` terms must not hit the recursion limit."""
+    leaves: list[ast.AST] = []
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        if _is_add(n):
+            stack.append(n.right)
+            stack.append(n.left)
+        else:
+            leaves.append(n)
+    return leaves
+
+
+def _fold_leaf(node: ast.AST) -> _Folded | None:
     if isinstance(node, ast.Constant):
         return (node.value, [(0, node.lineno)]) if isinstance(node.value, str) else None
     if isinstance(node, ast.JoinedStr):
@@ -296,15 +315,53 @@ def _fold(node: ast.AST) -> _Folded | None:
             starts.append((len(text), v.lineno))
             text += v.value if isinstance(v, ast.Constant) else f" {_EXPR} "
         return text, starts or [(0, node.lineno)]
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left, right = _fold(node.left), _fold(node.right)
-        if left is None and right is None:
-            return None
-        left = left or (f" {_EXPR} ", [(0, node.left.lineno)])
-        right = right or (f" {_EXPR} ", [(0, node.right.lineno)])
-        shift = len(left[0])
-        return left[0] + right[0], left[1] + [(o + shift, ln) for o, ln in right[1]]
     return None
+
+
+def _fold(node: ast.AST, known_none: set[int] | None = None) -> _Folded | None:
+    """The text of a Python string expression with where each piece starts in the
+    source, or ``None`` when *node* is not one.
+
+    ``"a" + "b"`` folds to one string, so ``"SELECT * FROM " + "DB.S.T"`` reads as
+    the statement it builds. An f-string joins its literal parts around
+    :data:`_EXPR`, and a non-literal operand of ``+`` next to a string becomes
+    :data:`_EXPR` too. The text is exactly the concatenation, never padded: a name
+    split across operands (``"SALES_" + "DB.PUBLIC.X"``) is the name Snowflake sees.
+    The piece starts map a match back to its source line. The ``+`` tree is folded
+    bottom-up with an explicit stack; *known_none* remembers the ``+`` nodes already
+    found not to be strings, so a long chain of non-strings is walked once.
+    """
+    if not _is_add(node):
+        return _fold_leaf(node)
+    order: list[ast.AST] = []
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        if _is_add(n) and (known_none is None or id(n) not in known_none):
+            order.append(n)
+            stack.append(n.left)
+            stack.append(n.right)
+    done: dict[int, _Folded | None] = {}
+
+    def value(n: ast.AST) -> _Folded | None:
+        if not _is_add(n):
+            return _fold_leaf(n)
+        if id(n) in done:
+            return done.pop(id(n))  # each result is used once: free it
+        return None  # a node known not to be a string
+
+    for n in reversed(order):
+        left, right = value(n.left), value(n.right)
+        if left is None and right is None:
+            done[id(n)] = None
+            if known_none is not None:
+                known_none.add(id(n))
+            continue
+        left = left or (f" {_EXPR} ", [(0, n.left.lineno)])
+        right = right or (f" {_EXPR} ", [(0, n.right.lineno)])
+        shift = len(left[0])
+        done[id(n)] = (left[0] + right[0], left[1] + [(o + shift, ln) for o, ln in right[1]])
+    return done.get(id(node))
 
 
 def _fold_string(node: ast.AST) -> str | None:
@@ -317,27 +374,26 @@ def _string_expressions(tree: ast.AST) -> list[tuple[ast.AST, str, list[tuple[in
     """Each maximal string expression with its folded text, in source order.
 
     The pieces of a folded expression are not visited again; the expressions
-    interpolated into an f-string are, since they may hold strings of their own.
+    interpolated into an f-string, and the operands of ``+`` that are not strings, are,
+    since they may hold strings of their own. Iterative, for deeply nested source.
     """
     found: list[tuple[ast.AST, str, list[tuple[int, int]]]] = []
-
-    def visit(node: ast.AST) -> None:
-        folded = _fold(node)
-        if folded is not None:
-            found.append((node, *folded))
-            if isinstance(node, ast.JoinedStr):
-                for v in node.values:
-                    if isinstance(v, ast.FormattedValue):
-                        visit(v.value)
-            elif isinstance(node, ast.BinOp):
-                for side in (node.left, node.right):
-                    if _fold_string(side) is None:
-                        visit(side)
-            return
-        for child in ast.iter_child_nodes(node):
-            visit(child)
-
-    visit(tree)
+    known_none: set[int] = set()
+    stack: list[ast.AST] = [tree]
+    while stack:
+        node = stack.pop()
+        folded = _fold(node, known_none)
+        if folded is None:
+            stack.extend(reversed(list(ast.iter_child_nodes(node))))
+            continue
+        found.append((node, *folded))
+        inner: list[ast.AST] = []
+        for leaf in _add_leaves(node):
+            if isinstance(leaf, ast.JoinedStr):
+                inner.extend(v.value for v in leaf.values if isinstance(v, ast.FormattedValue))
+            elif _fold_leaf(leaf) is None:
+                inner.append(leaf)
+        stack.extend(reversed(inner))
     return found
 
 
@@ -352,11 +408,17 @@ def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list
     boundary scan only these, because ``raise ValueError("could not read from
     settings.toml")`` has a FROM and is not a query."""
     if not is_python:
-        return [_Chunk(text, True, ((0, 1),))]
+        return [_Chunk(_normalize_breaks(text), True, ((0, 1),), True, text)]
     try:
         tree = ast.parse(text)
-    except SyntaxError:
-        return []
+    except SyntaxError as exc:
+        if "null bytes" not in str(exc):
+            return []
+        return [_Chunk(_normalize_breaks(text), False, ((0, 1),), False, text)]
+    except (RecursionError, ValueError, MemoryError):
+        # The parser gave up (nesting too deep, a NUL byte): read the whole text for the
+        # deny list rather than report a clean file nobody looked at.
+        return [_Chunk(_normalize_breaks(text), False, ((0, 1),), False, text)]
     docstrings = _collect_docstring_ids(tree)
     queries = _collect_enclosed_string_ids(tree, _QUERY_CALL_NAMES)
     prose = _prose_ids(tree) if skip_prose else set()
@@ -373,7 +435,8 @@ def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list
             return False
         opens = bool(_STATEMENT_START_RE.match(_strip_sql_comments(sql)))
         if queried or inherited or opens or _SQL_KEYWORD_RE.search(sql):
-            chunks.append(_Chunk(sql, not deny_only and (queried or inherited or opens), starts))
+            statement = not deny_only and (queried or inherited or opens)
+            chunks.append(_Chunk(_normalize_breaks(sql), statement, tuple(starts), queried, sql))
         return queried or opens
 
     for node, sql, starts in _string_expressions(tree):
@@ -393,26 +456,45 @@ def _folded_parts(node: ast.AST) -> set[int]:
     """``id()`` of the literals whose text is already part of *node*'s folded string:
     f-string parts and operands of ``+``. Literals inside an interpolation are not."""
     ids: set[int] = set()
-    if isinstance(node, ast.Constant):
-        ids.add(id(node))
-    elif isinstance(node, ast.JoinedStr):
-        ids.update(id(v) for v in node.values if isinstance(v, ast.Constant))
-    elif isinstance(node, ast.BinOp):
-        for side in (node.left, node.right):
-            ids |= _folded_parts(side)
+    for leaf in _add_leaves(node):
+        if isinstance(leaf, ast.Constant):
+            ids.add(id(leaf))
+        elif isinstance(leaf, ast.JoinedStr):
+            ids.update(id(v) for v in leaf.values if isinstance(v, ast.Constant))
     return ids
 
 
 def _streamlit_names(tree: ast.AST) -> tuple[set[str], set[str]]:
-    """``(module names, bare names)`` that mean Streamlit in this module: ``st``, the
-    name of ``import streamlit [as X]``, and the names ``from streamlit import ...`` binds."""
-    modules, bare = {"st"}, set()
+    """``(module names, bare names)`` that mean Streamlit in this module.
+
+    A name counts only when the module binds it from streamlit (``import streamlit
+    [as X]``; ``from streamlit import a [as b]`` for bare names) and never binds it
+    again: a plain assignment, a parameter, a ``def``/``class``, a ``for``/``with``
+    target or another import of the same name takes it away. Without that,
+    ``st = io.StringIO(); st.write("SELECT ... RAW.X")`` read as a caption. A module
+    with no streamlit import has no prose roots at all."""
+    modules: set[str] = set()
+    bare: set[str] = set()
+    other: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            modules |= {(a.asname or a.name) for a in node.names if a.name == "streamlit"}
-        elif isinstance(node, ast.ImportFrom) and node.module == "streamlit":
-            bare |= {(a.asname or a.name) for a in node.names}
-    return modules, bare
+            for a in node.names:
+                if a.name == "streamlit":
+                    modules.add(a.asname or a.name)
+                else:
+                    other.add(a.asname or a.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for a in node.names:
+                (bare if node.module == "streamlit" else other).add(a.asname or a.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            other.add(node.id)
+        elif isinstance(node, ast.arg):
+            other.add(node.arg)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            other.add(node.name)
+        elif isinstance(node, ast.ExceptHandler):
+            other.add(node.name or "")
+    return modules - other, bare - other
 
 
 def _is_streamlit_call(func: ast.AST, modules: set[str], bare: set[str]) -> bool:
@@ -751,7 +833,7 @@ def _deny_hits(
         sql = chunk.sql
         line_starts = [0] + [m.end() for m in re.finditer("\n", sql)]
         for line, col, database, schema in _scan_text(_strip_sql_comments(sql), policy, read_exc):
-            at = chunk.line_at(line_starts[line - 1] + col)
+            at = chunk.line_at(line_starts[min(line, len(line_starts)) - 1] + col)
             hits.setdefault((at, database.upper(), schema.upper()), (at, database, schema))
         for pos, parts, kind in _relation_names(sql):
             if len(parts) >= 4 and kind == "object":
@@ -801,6 +883,10 @@ def find_boundary_refs(
                 continue
             verdict = _verdict(policy, parts, kind)
             if verdict not in BOUNDARY_VERDICTS:
+                continue
+            if verdict == TWO_PART and not chunk.queried:
+                # A string that only opens with a statement word may be prose ("Select a
+                # file from data.csv"); a two-part name is too ambiguous to block on there.
                 continue
             at = chunk.line_at(pos)
             ref = display_name(parts).replace(_EXPR.upper(), "<expr>")

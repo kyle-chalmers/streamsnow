@@ -35,7 +35,7 @@ CORPUS = [
         [],
         [(1, "outside_boundary", "SALES_DB.PUBLIC.X")],
     ),
-    ("py", 'st.expander("Rows from " + "DB.RAW.X")\n', [], []),
+    ("py", 'import streamlit as st; st.expander("Rows from " + "DB.RAW.X")\n', [], []),
     ("py", 'session.sql("SELECT * FROM " + "DB.RAW.X")\n', [(1, "RAW")], []),
     (
         "py",
@@ -53,8 +53,8 @@ CORPUS = [
     ),
     ("py", 'x = "select a from raw.events"\n', [(1, "raw")], []),
     # accepted exclusion: Streamlit prose call (st-rooted or streamlit import)
-    ("py", 'st.write("SELECT * FROM RAW.EVENTS")\n', [], []),
-    ("py", 'st.caption(f"Rows from {n} RAW.EVENTS")\n', [(1, "RAW")], []),
+    ("py", 'import streamlit as st; st.write("SELECT * FROM RAW.EVENTS")\n', [], []),
+    ("py", 'import streamlit as st; st.caption(f"Rows from {n} RAW.EVENTS")\n', [(1, "RAW")], []),
     ("py", 'run_query("SELECT * FROM " + tbl + " JOIN RAW.E e")\n', [(1, "RAW")], []),
     ("py", 'q = "SELECT * FROM " "RAW.E"\n', [(1, "RAW")], []),
     ("py", 'q = "USE SCHEMA RAW"\n', [(1, "RAW")], []),
@@ -79,14 +79,24 @@ CORPUS = [
         [(3, "raw")],
         [],
     ),
-    ("py", 'st.markdown("x" + f"{session.sql(\'SELECT * FROM RAW.E\')}")\n', [(1, "RAW")], []),
     (
         "py",
-        'st.expander("From " + "x").write(session.sql("SELECT * FROM RAW.E"))\n',
+        'import streamlit as st; st.markdown("x" + f"{session.sql(\'SELECT * FROM RAW.E\')}")\n',
         [(1, "RAW")],
         [],
     ),
-    ("py", 'st.caption("from " + q("SELECT * FROM RAW.E"))\n', [(1, "RAW")], []),
+    (
+        "py",
+        'import streamlit as st; st.expander("From " + "x").write(session.sql("SELECT * FROM RAW.E"))\n',
+        [(1, "RAW")],
+        [],
+    ),
+    (
+        "py",
+        'import streamlit as st; st.caption("from " + q("SELECT * FROM RAW.E"))\n',
+        [(1, "RAW")],
+        [],
+    ),
     ("py", 'labels = ["SELECT * FROM RAW.E" + "", 1]\n', [(1, "RAW")], []),
     ("sql", "SELECT * FROM RAW.EVENTS\n", [(1, "RAW")], []),
     (
@@ -124,7 +134,7 @@ CORPUS = [
     ("py", 'col.write("SELECT * FROM DB.RAW.X")\n', [(1, "RAW")], []),
     ("py", 'other.caption("SELECT * FROM DB.RAW.X")\n', [(1, "RAW")], []),
     # accepted exclusion: Streamlit prose call (st-rooted or streamlit import)
-    ("py", 'st.sidebar.write("SELECT * FROM DB.RAW.X")\n', [], []),
+    ("py", 'import streamlit as st; st.sidebar.write("SELECT * FROM DB.RAW.X")\n', [], []),
     # accepted exclusion: Streamlit prose call (st-rooted or streamlit import)
     ("py", 'import streamlit as stl\nstl.caption("SELECT * FROM DB.RAW.X")\n', [], []),
     # accepted exclusion: Streamlit prose call (st-rooted or streamlit import)
@@ -133,24 +143,29 @@ CORPUS = [
     ("py", 'import streamlit\nstreamlit.info("SELECT * FROM DB.RAW.X")\n', [], []),
     (
         "py",
-        'st.caption("Total: " + str(fetch("SELECT * FROM FINANCE_DB.STAGING.F")))\n',
+        'import streamlit as st; st.caption("Total: " + str(fetch("SELECT * FROM FINANCE_DB.STAGING.F")))\n',
         [(1, "STAGING")],
         [],
     ),
-    ("py", 'st.metric("n", "x" + f"{fetch(\'SELECT * FROM RAW.E\')}")\n', [(1, "RAW")], []),
     (
         "py",
-        'st.write(label="rows " + run("SELECT * FROM SALES_DB.PUBLIC.X"))\n',
+        'import streamlit as st; st.metric("n", "x" + f"{fetch(\'SELECT * FROM RAW.E\')}")\n',
+        [(1, "RAW")],
+        [],
+    ),
+    (
+        "py",
+        'import streamlit as st; st.write(label="rows " + run("SELECT * FROM SALES_DB.PUBLIC.X"))\n',
         [],
         [(1, "outside_boundary", "SALES_DB.PUBLIC.X")],
     ),
-    ("py", 'st.text("Rows from RAW.EVENTS")\n', [(1, "RAW")], []),
+    ("py", 'import streamlit as st; st.text("Rows from RAW.EVENTS")\n', [(1, "RAW")], []),
     # accepted exclusion: Streamlit prose call (st-rooted or streamlit import)
-    ("py", 'st.selectbox("From RAW.EVENTS", [1])\n', [], []),
-    ("py", 'st.tabs("Rows from ANALYTICS.SALES")\n', [], []),
-    ("py", 'st.expander("Rows from ANALYTICS.SALES")\n', [], []),
+    ("py", 'import streamlit as st; st.selectbox("From RAW.EVENTS", [1])\n', [], []),
+    ("py", 'import streamlit as st; st.tabs("Rows from ANALYTICS.SALES")\n', [], []),
+    ("py", 'import streamlit as st; st.expander("Rows from ANALYTICS.SALES")\n', [], []),
     ("py", 'raise ValueError("could not read from settings.toml")\n', [], []),
-    ("py", 'st.text("Data from orders.csv")\n', [], []),
+    ("py", 'import streamlit as st; st.text("Data from orders.csv")\n', [], []),
     (
         "py",
         'session.sql("SELECT * FROM SALES_DB.PUBLIC.X")\n',
@@ -289,6 +304,24 @@ CORPUS = [
         [(2, "two_part", "REPORTING")],
     ),
     ("sql", "USE DATABASE SALES_DB;\n", [], [(1, "outside_boundary", "SALES_DB")]),
+    # st rebound to a StringIO: not Streamlit, so the write is a file write and the SQL is scanned
+    (
+        "py",
+        'import io\nst = io.StringIO()\nst.write("SELECT * FROM DB.RAW.X")\nsession.sql(st.getvalue())\n',
+        [(3, "RAW")],
+        [],
+    ),
+    # accepted exclusion: Streamlit prose call, st bound by import streamlit as st
+    ("py", 'import streamlit as st\nst.caption("Rows from DB.RAW.X")\n', [], []),
+    # a module without a streamlit import has no prose roots
+    ("py", 'st.caption("Rows from DB.RAW.X")\n', [(1, "RAW")], []),
+    # a statement-keyword literal outside a query call reports three-part names only
+    ("py", 'raise ValueError("Select a file from data.csv")\n', [], []),
+    ("py", 'session.sql("SELECT * FROM PUBLIC.X")\n', [], [(1, "two_part", "PUBLIC.X")]),
+    # a lone CR is a line break for the scanners and no line for the source
+    ("py", 'session.sql("SELECT 1\\rFROM DB.RAW.X")\n', [(1, "RAW")], []),
+    # CRLF: the \\n escape is one more line in the text, as for any "\\n" escape
+    ("py", 'session.sql("SELECT 1\\r\\nFROM DB.RAW.X")\n', [(2, "RAW")], []),
 ]
 
 
@@ -312,3 +345,17 @@ def test_corpus(tmp_path, kind, src, deny, boundary):
 
 def test_corpus_is_big_enough():
     assert len(CORPUS) >= 60
+
+
+@pytest.mark.parametrize(("kind", "src", "deny", "boundary"), CORPUS)
+def test_check_paths_never_raises_on_the_corpus(tmp_path, kind, src, deny, boundary):
+    path = tmp_path / f"case.{kind}"
+    path.write_text(src, encoding="utf-8")
+    assert isinstance(check_paths([path], POLICY)["findings"], list)
+
+
+@pytest.mark.parametrize("terms", [1000, 5000])
+def test_long_concatenation_is_folded_without_recursion(tmp_path, terms):
+    src = 'q = "SELECT * FROM DB.RAW.X"' + ' + ""' * terms + "\n"
+    deny, boundary, _ = _scan(tmp_path, "py", src)
+    assert deny == [(1, "RAW")]

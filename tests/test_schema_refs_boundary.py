@@ -336,7 +336,10 @@ def test_four_part_names_keep_their_deny_coverage(tmp_path):
         ("conn.execute(text('SELECT * FROM RAW.EVENTS'))", [(3, "denied", "RAW")]),
         ("df = sa.text('SELECT id FROM ANY_DB.RAW.EVENTS')", [(3, "denied", "RAW")]),
         ("t = text('SELECT id FROM RAW.EVENTS')", [(3, "denied", "RAW")]),
-        ("st.write('SELECT * FROM RAW.EVENTS')", []),  # Streamlit prose stays unread
+        (
+            "import streamlit as st; st.write('SELECT * FROM RAW.EVENTS')",
+            [],
+        ),  # Streamlit prose stays unread
     ],
 )
 def test_sql_in_text_calls_is_scanned_but_streamlit_prose_is_not(tmp_path, src, hits):
@@ -472,8 +475,8 @@ STAGING_DENY = SchemaPolicy(sources=("SALES_DB.STAGING",), schema_deny=("STAGING
     "src",
     [
         'raise ValueError("could not read from settings.toml")\n',
-        'st.expander("Rows from ANALYTICS.SALES")\n',
-        'st.text("Data from orders.csv")\n',
+        'import streamlit as st; st.expander("Rows from ANALYTICS.SALES")\n',
+        'import streamlit as st; st.text("Data from orders.csv")\n',
     ],
 )
 def test_prose_literals_get_no_boundary_finding(src):
@@ -493,7 +496,7 @@ def test_sql_literals_still_get_boundary_findings(src):
 
 
 def test_prose_in_selectbox_style_calls_is_skipped_for_both_scans():
-    src = 'st.selectbox("From RAW.EVENTS", [1])\nst.tabs("Rows from ANALYTICS.SALES")\n'
+    src = 'import streamlit as st; st.selectbox("From RAW.EVENTS", [1])\nst.tabs("Rows from ANALYTICS.SALES")\n'
     assert _refs(src, ENFORCE, is_python=True) == []
     assert find_denied_refs(src, POLICY, is_python=True) == []
 
@@ -518,7 +521,7 @@ def test_more_statement_keywords_open_a_sql_literal(keyword):
 
 
 def test_prose_rule_applies_to_folded_expressions_too(tmp_path):
-    prose = 'st.expander("Rows from " + "DB.RAW.X")\n'
+    prose = 'import streamlit as st; st.expander("Rows from " + "DB.RAW.X")\n'
     assert _check(tmp_path, prose, ENFORCE, ".py") == ([], [])
     sql = 'session.sql("SELECT * FROM " + "DB.RAW.X")\n'
     assert _check(tmp_path, sql, ENFORCE, ".py") == ([(1, "denied", "RAW")], [])
@@ -598,8 +601,8 @@ def test_prose_exclusion_is_limited_to_streamlit_calls(tmp_path, src):
 @pytest.mark.parametrize(
     "src",
     [
-        'st.write("SELECT * FROM DB.RAW.X")\n',
-        'st.sidebar.write("SELECT * FROM DB.RAW.X")\n',
+        'import streamlit as st; st.write("SELECT * FROM DB.RAW.X")\n',
+        'import streamlit as st; st.sidebar.write("SELECT * FROM DB.RAW.X")\n',
         'import streamlit as stl\nstl.caption("SELECT * FROM DB.RAW.X")\n',
         'from streamlit import markdown\nmarkdown("SELECT * FROM DB.RAW.X")\n',
         'import streamlit\nstreamlit.info("SELECT * FROM DB.RAW.X")\n',
@@ -612,12 +615,21 @@ def test_streamlit_rooted_calls_are_prose(tmp_path, src):
 @pytest.mark.parametrize(
     "src",
     [
-        'st.caption("Total: " + str(fetch("SELECT * FROM FINANCE_DB.STAGING.F")))\n',
-        'st.caption("from " + q("SELECT * FROM RAW.E"))\n',
-        'st.metric("n", "x" + f"{fetch(\'SELECT * FROM RAW.E\')}")\n',
-        'st.write(label="rows " + run("SELECT * FROM SALES_DB.PUBLIC.X"))\n',
+        'import streamlit as st; st.caption("Total: " + str(fetch("SELECT * FROM FINANCE_DB.STAGING.F")))\n',
+        'import streamlit as st; st.caption("from " + q("SELECT * FROM RAW.E"))\n',
+        'import streamlit as st; st.metric("n", "x" + f"{fetch(\'SELECT * FROM RAW.E\')}")\n',
+        'import streamlit as st; st.write(label="rows " + run("SELECT * FROM SALES_DB.PUBLIC.X"))\n',
     ],
 )
 def test_sql_in_a_nested_call_of_a_prose_argument_is_still_scanned(tmp_path, src):
     findings, _ = _check(tmp_path, src, ENFORCE, ".py")
     assert findings != []
+
+
+def test_source_the_parser_gives_up_on_is_still_read_for_the_deny_list(tmp_path):
+    """A concatenation too long for the parser, or a NUL byte, must not crash the check or
+    report a clean file nobody looked at."""
+    deep = 'q = "SELECT * FROM DB.RAW.X"' + ' + ""' * 40000 + "\n"
+    assert _check(tmp_path, deep, ENFORCE, ".py")[0] == [(1, "denied", "RAW")]
+    nul = 'q = "SELECT * FROM DB.RAW.X"\x00\n'
+    assert _check(tmp_path, nul, ENFORCE, ".py")[0] == [(1, "denied", "RAW")]
