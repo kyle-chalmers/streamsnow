@@ -792,7 +792,8 @@ def cmd_compare(args: argparse.Namespace, runner: object = None) -> int:
     if data["helper"] != "current":
         warnings.append(
             f"apps/{app.name}/review.py is {data['helper']}: it is not the scaffolded helper, "
-            "so weigh its captures accordingly"
+            "so weigh its captures accordingly "
+            f"(refresh it with: streamsnow sql-review helper {app.name} --apply)"
         )
     live.write_json(run_dir / COMPARE_FILE, data)
     print(json.dumps(data, indent=2))

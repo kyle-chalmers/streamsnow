@@ -28,7 +28,7 @@ Command and flag names are part of the stable surface
 | `streamsnow doctor` | Checks the machine and repo for what StreamSnow needs: required `python`, `git`, `uv`; optional `snow`, a `snow` connection, `gh`, `pre-commit` and its hook, `node` (the browser tool), the config, repo files, git identity and CI secrets. Each sub-check reports `{name, ok, level, detail, hint}`; `level` is `required` or `optional`. `--format json` (or `--json`) prints `{"ok", "checks": [...]}`. Exits `1` only when a required check fails. |
 | `streamsnow configure` | Writes or edits `streamsnow.config.yaml` with a five-question wizard. Re-running prefills from the current file. |
 | `streamsnow init` | `configure`, then the governed repo files, then a starter app. |
-| `streamsnow update` | Re-renders the governance files from your config and the installed templates. Dry run unless `--apply`. |
+| `streamsnow update` | Re-renders the repo-level governance files from your config and the installed templates. Dry run unless `--apply`. It never rewrites app files (`review.py`, the glossary) or an existing `.sqlfluff`; see [Upgrading](getting-started.md#upgrading). |
 
 **Wizard answer flags** (shared by `configure` and `init`; giving all five skips the
 prompts): `--runtime container|warehouse`, `--account <locator>` or
@@ -139,6 +139,7 @@ The live review (the `/sql-review` skill drives these; each needs a `snow` conne
 | `streamsnow sql-review run <slug>` | Runs every section wrapped in an aggregate: row count, a total per numeric column, an order-insensitive hash, timing. Never fetches rows. `--page NN`, `--slow-s N` (default 10). |
 | `streamsnow sql-review bench <slug> --metric NN#n` | Times one section with the result cache off (median of `--runs`, default 3): elapsed time, bytes and partitions scanned. `--sql-file F` benchmarks a candidate rewrite of the query against it and reports `equivalent`. |
 | `streamsnow sql-review compare <slug>` | Holds what each visual received in review preview mode (`preview start --review-capture`) to its `run` result: `match`, `mismatch`, `not_captured` or `unsupported` per metric, within 0.5% or the displayed rounding, integers exactly. Reads the run's `capture/` (`--capture DIR`) and, when present, its `screen.json` from a browser walk (`--screen F`, a cross-check only). Needs no connection. |
+| `streamsnow sql-review helper <slug>` | Shows the state of `apps/<slug>/review.py` (`current`, `modified` or `missing`) and, when it differs, a diff against the current scaffold. A dry run unless `--apply`, which writes the scaffold; a `modified` file is refused (exit 1) unless `--force` is also passed, because it may hold your changes (version control is the backup). Exit 2 for an unknown slug or no config. `streamsnow update` never refreshes this file. `--dir`. |
 | `streamsnow sql-review log <slug> --findings F` | Writes `sql_review/review_log/YYYY-MM-DD_<sha>.md` from verified findings and links it from the README; refuses a finding whose evidence is not a result in the run. `--dry-run` validates and writes nothing. |
 
 `probe`, `run` and `bench` share `--run <id>|latest` (default: a new run), `--connection`
