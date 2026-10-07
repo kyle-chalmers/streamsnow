@@ -550,3 +550,49 @@ def test_open_findings_fails_closed_on_a_loose_severity_line(
 def test_a_valid_report_still_parses_after_the_loose_severity_scan() -> None:
     """The documented sample is pinned in test_review_stamp_skills.py."""
     assert rl.report_parse_problems(REPORT) == []
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        pytest.param("   ### BLOCK (critical)", id="codex-indented-and-annotated"),
+        pytest.param("   ### BLOCK", id="indented"),
+        pytest.param("### BLOCK (critical)", id="annotated"),
+        pytest.param("#### BLOCK", id="level-4"),
+        pytest.param("  #### Block items", id="indented-level-4-annotated"),
+        pytest.param("# BLOCK", id="level-1-in-a-section"),
+        pytest.param("\t### Nice to have", id="tab-indented-nice-to-have"),
+    ],
+)
+def test_open_findings_fails_closed_on_any_inexact_severity_heading(
+    tmp_path: Path, capsys: pytest.CaptureFixture, heading: str
+) -> None:
+    """Codex repro: `   ### BLOCK (critical)` after a FLAG bucket read `parsed: true`,
+    `BLOCK: 0`, `FLAG: 1`, because the critical item was filed under FLAG."""
+    report = (
+        "# Review\n\n## SQL\n\n### BLOCK\n- _none_\n\n### FLAG\n- [a.py:1] slow query\n\n"
+        f"{heading}\n- {_CRITICAL}\n\n### NICE-TO-HAVE\n- _none_\n"
+    )
+    assert not rl.report_is_parseable(report)
+    session = tmp_path / ".review"
+    session.mkdir()
+    (session / "review-20260831-090000.md").write_text(report, encoding="utf-8")
+    _, out = _open(capsys, str(session))
+    assert out["parsed"] is False
+    assert out["counts"] is None
+
+
+def test_a_severity_heading_above_the_first_section_fails_closed() -> None:
+    report = (
+        f"# Review: acme-sales\n\n  ### BLOCK (critical)\n- {_CRITICAL}\n\n"
+        + REPORT.split("\n", 1)[1]
+    )
+    assert not rl.report_is_parseable(report)
+
+
+def test_exact_headings_and_a_title_naming_a_flag_still_parse() -> None:
+    """A level-1 title is the report name, so `# Review: acme-flag-tracker` is not a
+    severity heading; the exact column-0 `### X` headings parse as before."""
+    report = REPORT.replace("# Review report", "# Review: acme-flag-tracker", 1)
+    assert rl.report_parse_problems(report) == []
+    assert rl.report_parse_problems(REPORT.replace("### FLAG\n", "### FLAG   \n", 1)) == []

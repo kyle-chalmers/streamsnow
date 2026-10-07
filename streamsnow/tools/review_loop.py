@@ -338,12 +338,25 @@ def _loose_severity_line(raw: str) -> bool:
     return word in _SEVERITY_WORDS and not _BUCKET_RE.match(raw)
 
 
+def _inexact_severity_heading(raw: str, min_level: int = 1) -> bool:
+    """True for any markdown heading (indented or not, any level from ``min_level``)
+    that names a severity but is not the exact column-0 ``### X`` heading.
+
+    The parser's heading regex is anchored at column 0 and takes nothing after
+    the word, so ``   ### BLOCK (critical)`` or ``#### BLOCK`` files its items
+    under the previous bucket."""
+    text = raw.lstrip()
+    level = len(text) - len(text.lstrip("#"))
+    return level >= min_level and bool(_SEVERITY_WORD_RE.search(text)) and not _BUCKET_RE.match(raw)
+
+
 def report_parse_problems(text: str) -> list[str]:
     """Forms in a report that ``parse_findings`` would silently skip.
 
     ``parse_findings`` drops whatever it does not recognize, so a report that is
-    only partly in the expected shape (a ``### **BLOCK**`` heading, an indented
-    ``   ### BLOCK``, a bare ``**BLOCK**`` line, numbered items under
+    only partly in the expected shape (a ``### **BLOCK**`` heading, an indented,
+    annotated or other-level one such as ``   ### BLOCK (critical)`` or
+    ``#### BLOCK``, a bare ``**BLOCK**`` line, numbered items under
     ``### BLOCK``) parses its valid buckets and loses the rest. A
     lost critical finding then reads as zero open. Any problem here makes the
     report unparsed, which callers must render as unknown, never 0.
@@ -352,7 +365,9 @@ def report_parse_problems(text: str) -> list[str]:
     sections = _split_sections(text)
     first = _DIMENSION_RE.search(text)
     for raw in text[: first.start() if first else len(text)].splitlines():
-        if _loose_severity_line(raw):
+        # Level 1 above the sections is the report title, which may name an app
+        # like `acme-flag-tracker`; a level-3 or deeper heading there is a bucket.
+        if _loose_severity_line(raw) or _inexact_severity_heading(raw, min_level=3):
             problems.append(f"severity line outside a '## <Dimension>' section: '{raw.strip()}'")
     if not any(
         _BUCKET_RE.search(body)
@@ -368,12 +383,11 @@ def report_parse_problems(text: str) -> list[str]:
         in_bucket = False
         for raw in body.splitlines():
             line = raw.strip()
-            # Test the unstripped line: the parser's heading regex is anchored at
-            # column 0, so `   ### BLOCK` files its items under the previous bucket.
+            if _inexact_severity_heading(raw):
+                problems.append(f"severity heading not in the exact form: '{line}'")
+                continue
             if raw.startswith("###"):
                 in_bucket = bool(_BUCKET_RE.match(raw))
-                if not in_bucket and _SEVERITY_WORD_RE.search(line):
-                    problems.append(f"severity heading not in the exact form: '{line}'")
                 continue
             if _loose_severity_line(raw):
                 problems.append(f"severity line not in the exact '### X' form: '{line}'")
