@@ -322,6 +322,30 @@ CORPUS = [
     ("py", 'session.sql("SELECT 1\\rFROM DB.RAW.X")\n', [(1, "RAW")], []),
     # CRLF: the \\n escape is one more line in the text, as for any "\\n" escape
     ("py", 'session.sql("SELECT 1\\r\\nFROM DB.RAW.X")\n', [(2, "RAW")], []),
+    # SQL held in a variable keeps the two-part check: its opener is all upper or all lower case
+    (
+        "py",
+        'Q = "SELECT * FROM SALES.ORDERS"\nsession.sql(Q)\n',
+        [],
+        [(1, "two_part", "SALES.ORDERS")],
+    ),
+    (
+        "py",
+        'Q = """\nSELECT *\nFROM SALES.ORDERS\n"""\nsession.sql(Q)\n',
+        [],
+        [(3, "two_part", "SALES.ORDERS")],
+    ),
+    ("py", 'q = "select * from sales.orders"\n', [], [(1, "two_part", "SALES.ORDERS")]),
+    # a title-case opener is prose: no two-part finding
+    ("py", 'raise ValueError("Update from data.csv failed")\n', [], []),
+    ("py", 'st_note = "With data from orders.csv"\n', [], []),
+    # a file the parser rejects is read in full, the boundary included
+    (
+        "py",
+        'session.sql("SELECT * FROM SALES_DB.PUBLIC.X")\x00\n',
+        [],
+        [(1, "outside_boundary", "SALES_DB.PUBLIC.X")],
+    ),
 ]
 
 

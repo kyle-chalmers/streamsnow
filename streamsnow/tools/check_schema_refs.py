@@ -257,7 +257,7 @@ def _collect_enclosed_string_ids(tree: ast.AST, names: frozenset[str]) -> set[in
 _EXPR = "__expr__"
 # A string that opens with a SQL statement keyword is SQL wherever it sits in Python.
 _STATEMENT_START_RE = re.compile(
-    r"(?i)\s*(?:SELECT|WITH|INSERT|UPDATE|DELETE|MERGE|CREATE|USE|EXPLAIN|SHOW|DESCRIBE|DESC|COPY)\b"
+    r"(?i)\s*(SELECT|WITH|INSERT|UPDATE|DELETE|MERGE|CREATE|USE|EXPLAIN|SHOW|DESCRIBE|DESC|COPY)\b"
 )
 
 
@@ -265,7 +265,7 @@ class _Chunk(NamedTuple):
     sql: str  # the text the scanners read: every line break is a "\n"
     statement: bool  # certainly SQL: a query-call argument or opens with a statement keyword
     starts: tuple[tuple[int, int], ...]  # (offset in sql, source line) per source piece
-    queried: bool  # an argument of a query call: the full boundary checks apply
+    full: bool  # the full boundary checks apply, two-part names included (see _sql_chunks)
     raw: str  # the text as written; same length as ``sql``, so offsets agree
 
     def line_at(self, offset: int) -> int:
@@ -397,6 +397,28 @@ def _string_expressions(tree: ast.AST) -> list[tuple[ast.AST, str, list[tuple[in
     return found
 
 
+_LITERAL_RE = re.compile(
+    r"""\"\"\"(?P<a>.*?)\"\"\"|\'\'\'(?P<b>.*?)\'\'\'|\"(?P<c>(?:[^"\\\n]|\\.)*)\"|\'(?P<d>(?:[^'\\\n]|\\.)*)\'""",
+    re.S,
+)
+
+
+def _unparsed_chunks(text: str) -> list[_Chunk]:
+    """Chunks for Python the parser could not read (too deep, a NUL byte): the whole text
+    for the deny scan, plus every quoted literal that opens like a statement for the
+    boundary scan, which needs the SQL apart from the Python around it."""
+    chunks = [_Chunk(_normalize_breaks(text), False, ((0, 1),), False, text)]
+    for m in _LITERAL_RE.finditer(text):
+        body = next(g for g in m.group("a", "b", "c", "d") if g is not None)
+        opener = _STATEMENT_START_RE.match(_strip_sql_comments(body))
+        if opener is None:
+            continue
+        line = text.count("\n", 0, m.start("a" if m.group("a") is not None else m.lastgroup)) + 1
+        shouted = opener.group(1).isupper() or opener.group(1).islower()
+        chunks.append(_Chunk(_normalize_breaks(body), True, ((0, line),), shouted, body))
+    return chunks
+
+
 def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list[_Chunk]:
     """The SQL pieces to scan: the whole text for ``.sql``; for ``.py``, the
     SQL-looking string expressions (query-call args, or containing a SQL keyword),
@@ -412,35 +434,45 @@ def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list
     try:
         tree = ast.parse(text)
     except SyntaxError as exc:
-        if "null bytes" not in str(exc):
-            return []
-        return [_Chunk(_normalize_breaks(text), False, ((0, 1),), False, text)]
+        # A plain syntax error is left unread, as it always was; a NUL byte is not a
+        # syntax problem of the file's own and must not make it look clean.
+        return _unparsed_chunks(text) if "null bytes" in str(exc) else []
     except (RecursionError, ValueError, MemoryError):
-        # The parser gave up (nesting too deep, a NUL byte): read the whole text for the
-        # deny list rather than report a clean file nobody looked at.
-        return [_Chunk(_normalize_breaks(text), False, ((0, 1),), False, text)]
+        # The parser gave up (nesting too deep): read the text anyway, deny list and
+        # boundary, rather than report a clean file nobody looked at.
+        return _unparsed_chunks(text)
     docstrings = _collect_docstring_ids(tree)
     queries = _collect_enclosed_string_ids(tree, _QUERY_CALL_NAMES)
     prose = _prose_ids(tree) if skip_prose else set()
     chunks: list[_Chunk] = []
 
     def add(
-        node: ast.AST, sql: str, starts: list, inherited: bool, deny_only: bool = False
-    ) -> bool:
-        """Add one chunk; True when it is a statement (so its parts belong to it).
-        ``deny_only`` keeps it out of the boundary scan: a piece already inside the
-        folded whole, whose cut-off name (``FROM DB.S.`` before ``{t}``) is no name."""
+        node: ast.AST,
+        sql: str,
+        starts: list,
+        inherited: tuple[bool, bool] = (False, False),
+        deny_only: bool = False,
+    ) -> tuple[bool, bool]:
+        """Add one chunk; returns ``(statement, full)`` so the parts of a folded whole
+        belong to the statement it opens. ``deny_only`` keeps it out of the boundary
+        scan: a piece already inside the folded whole, whose cut-off name
+        (``FROM DB.S.`` before ``{t}``) is no name."""
         queried = any(id(inner) in queries for inner in ast.walk(node))
         if id(node) in docstrings or (id(node) in prose and not queried):
-            return False
-        opens = bool(_STATEMENT_START_RE.match(_strip_sql_comments(sql)))
-        if queried or inherited or opens or _SQL_KEYWORD_RE.search(sql):
-            statement = not deny_only and (queried or inherited or opens)
-            chunks.append(_Chunk(_normalize_breaks(sql), statement, tuple(starts), queried, sql))
-        return queried or opens
+            return False, False
+        opener = _STATEMENT_START_RE.match(_strip_sql_comments(sql))
+        # "SELECT ..." and "select ..." are SQL; "Select a file from data.csv" is prose
+        # that happens to start with the word, so it only gets three-part checks.
+        shouted = opener is not None and (opener.group(1).isupper() or opener.group(1).islower())
+        in_statement = queried or inherited[0] or opener is not None
+        if in_statement or _SQL_KEYWORD_RE.search(sql):
+            statement = not deny_only and in_statement
+            full = not deny_only and (queried or inherited[1] or shouted)
+            chunks.append(_Chunk(_normalize_breaks(sql), statement, tuple(starts), full, sql))
+        return queried or opener is not None, queried or shouted
 
     for node, sql, starts in _string_expressions(tree):
-        statement = add(node, sql, starts, False)
+        flags = add(node, sql, starts)
         if isinstance(node, ast.Constant):
             continue
         # The folded whole is an extra chunk: every literal inside it is still read on
@@ -448,7 +480,7 @@ def _sql_chunks(text: str, is_python: bool, *, skip_prose: bool = False) -> list
         folded = _folded_parts(node)
         for inner in ast.walk(node):
             if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
-                add(inner, inner.value, [(0, inner.lineno)], statement, id(inner) in folded)
+                add(inner, inner.value, [(0, inner.lineno)], flags, id(inner) in folded)
     return chunks
 
 
@@ -884,9 +916,9 @@ def find_boundary_refs(
             verdict = _verdict(policy, parts, kind)
             if verdict not in BOUNDARY_VERDICTS:
                 continue
-            if verdict == TWO_PART and not chunk.queried:
-                # A string that only opens with a statement word may be prose ("Select a
-                # file from data.csv"); a two-part name is too ambiguous to block on there.
+            if verdict == TWO_PART and not chunk.full:
+                # Title-case prose that opens with a statement word ("Select a file from
+                # data.csv"): a two-part name is too ambiguous to report there.
                 continue
             at = chunk.line_at(pos)
             ref = display_name(parts).replace(_EXPR.upper(), "<expr>")

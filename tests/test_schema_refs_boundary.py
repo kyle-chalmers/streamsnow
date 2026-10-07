@@ -633,3 +633,10 @@ def test_source_the_parser_gives_up_on_is_still_read_for_the_deny_list(tmp_path)
     assert _check(tmp_path, deep, ENFORCE, ".py")[0] == [(1, "denied", "RAW")]
     nul = 'q = "SELECT * FROM DB.RAW.X"\x00\n'
     assert _check(tmp_path, nul, ENFORCE, ".py")[0] == [(1, "denied", "RAW")]
+
+
+def test_unparseable_file_gets_the_boundary_scan_too(tmp_path):
+    deep = 'session.sql("SELECT * FROM SALES_DB.PUBLIC.X")\nq = ""' + ' + ""' * 40000 + "\n"
+    assert _check(tmp_path, deep, ENFORCE, ".py")[0] == [
+        (1, "outside_boundary", "SALES_DB.PUBLIC.X")
+    ]
