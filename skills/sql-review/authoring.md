@@ -32,14 +32,17 @@ regenerated. The folder's own rules are in `apps/<slug>/sql_review/AGENTS.md`.
      entry.
    - `tokens`: a **real sample value** for every `{TOKEN}` the query has, whose literals satisfy
      the predicates (values the data actually contains, inside the review window), and that
-     mirror the page's **default filter state**. Otherwise a correct query and an empty one look
+     mirror the page's **default filter state** (an optional "All" is `""`). Otherwise a correct query and an empty one look
      the same when run.
    - `binds`: a value for every `:1` / `:name`. `params.start_date` reads the section's own
      `params` CTE; anything else is inserted as a SQL literal (`"'West'"`). An unused or missing
      bind is an `index` finding.
    - `reads`: every object the query reads, `DATABASE.SCHEMA.OBJECT`.
    - `notes`: a definition a reviewer needs ("booked date, not ship date"), when there is one.
-   - **Anchor `review_window` to the data, always**: end it at the source's own latest date,
+   - **Omit `review_window` when no metric binds `params.*`.** It only feeds the `params` CTE;
+     without a bind that reads it, the window is dead weight in every generated section.
+   - **Anchor `review_window` to the data, always** (when you keep one): end it at the source's
+     own latest date,
      `end_date: "(SELECT MAX(<date_col>) FROM <db>.<schema>.<table>)::DATE"` and
      `start_date: "(SELECT DATEADD('year', -1, MAX(<date_col>)) FROM <db>.<schema>.<table>)::DATE"`,
      reading the object and date column the page's default range uses (see the default-date-range

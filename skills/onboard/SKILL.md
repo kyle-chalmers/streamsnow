@@ -67,7 +67,7 @@ nothing is being decided, so skip the setup questions (setup.md §2c). In order:
 
 1. Snowflake admin setup when not confirmed (setup.md §2d): `streamsnow ci-key create`, the
    admin file in `.internal/`, the hand-off. Never run the admin SQL.
-2. Once the admin objects are confirmed: `streamsnow ci-key push` (setup.md §2e).
+2. Once the admin objects are confirmed: offer `ci-key verify`, then `streamsnow ci-key push` (setup.md §2e).
 3. With a GitHub remote, whether or not step 2 ran: read whether GitHub deletes merged branches
    and, if it does not, ask yes or no before turning it on (setup.md §2e).
 4. Offer to commit the new repo files and `.claude/settings.json`.

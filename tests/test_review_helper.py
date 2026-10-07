@@ -137,6 +137,9 @@ class _Col:
     def __len__(self) -> int:
         return len(self.values)
 
+    def __iter__(self):
+        return iter(self.values)
+
 
 class _ILoc:
     def __init__(self, frame: DataFrame) -> None:
@@ -302,6 +305,52 @@ def test_capture_of_a_frame_holds_counts_and_hashed_totals_never_rows(
         digest("AMOUNT"): "3.30",
     }
     assert data["headline"]["float_columns"] == [digest("REVENUE"), digest("DISCOUNT")]
+
+
+def test_capture_counts_key_columns_never_their_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Columns without a total are a frame's group keys. compare needs to know
+    whether they repeat (a slice) and how many distinct values each holds (a
+    grouping keeps every one), so capture records counts, never a value."""
+    app, capture, module = _app(tmp_path, monkeypatch)
+    d = module._digest
+    grouped = DataFrame(
+        {
+            "REGION": ("O", ["Wile E. Coyote", "Road Runner", "Acme"]),
+            "MONTH": ("O", ["Jan", "Jan", None]),
+            "REVENUE": ("i", [100, 7, -7]),
+        }
+    )
+    _call_from(app / "pages" / "overview.py", module, "orders_by_region", grouped)
+    raw = (capture / "overview__orders_by_region.json").read_text(encoding="utf-8")
+    headline = json.loads(raw)["headline"]
+    assert headline["key_distinct"] == {d("REGION"): 3, d("MONTH"): 1}  # nulls not counted
+    assert headline["key_rows_unique"] is True
+    assert "Coyote" not in raw and "Jan" not in raw
+    # df.head(2) of REGION=[A, A, B, C]: the key repeats and two regions are gone.
+    head = DataFrame({"REGION": ("O", ["A", "A"]), "REVENUE": ("i", [60, 40])})
+    _call_from(app / "pages" / "overview.py", module, "orders_by_region", head)
+    headline = _read(capture, "overview__orders_by_region.json")["headline"]
+    assert headline["key_distinct"] == {d("REGION"): 1}
+    assert headline["key_rows_unique"] is False
+    # No key columns: nothing to say about keys.
+    plain = DataFrame({"REVENUE": ("i", [60, 40])})
+    _call_from(app / "pages" / "overview.py", module, "orders_by_region", plain)
+    headline = _read(capture, "overview__orders_by_region.json")["headline"]
+    assert headline["key_distinct"] == {} and headline["key_rows_unique"] is True
+
+
+def test_capture_skips_key_counts_it_cannot_take(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unhashable cells (a VARIANT as a dict) leave the key counts out, never the capture."""
+    app, capture, module = _app(tmp_path, monkeypatch)
+    frame = DataFrame({"DATA": ("O", [{"a": 1}, {"a": 2}]), "REVENUE": ("i", [1, 2])})
+    _call_from(app / "pages" / "overview.py", module, "orders_by_region", frame)
+    headline = _read(capture, "overview__orders_by_region.json")["headline"]
+    assert headline["totals"] == {module._digest("REVENUE"): "3"}
+    assert "key_distinct" not in headline and "key_rows_unique" not in headline
 
 
 def test_capture_hashes_names_like_the_compare_side(
@@ -498,6 +547,12 @@ def test_capture_with_real_pandas(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         d("empty"): None,
         d("data"): "3",
     }
+    assert data["headline"]["key_distinct"] == {d("region"): 3, d("flag"): 2, d("wait"): 3}
+    assert data["headline"]["key_rows_unique"] is True
+    head = frame[["region", "orders"]].assign(region=["West", "West", "East"]).head(2)
+    _call_from(page, module, "orders_by_day", head)
+    headline = _read(capture, "overview__orders_by_day.json")["headline"]
+    assert (headline["key_distinct"], headline["key_rows_unique"]) == ({d("region"): 1}, False)
     _call_from(page, module, "orders_by_month", frame["orders"])
     assert _read(capture, "overview__orders_by_month.json")["headline"]["totals"] == {
         d("orders"): "12"

@@ -56,7 +56,10 @@ The gated rules (caching TTLs, bind predicates, page imports) stay in `streamsno
 ## Rerun less
 
 Every widget interaction reruns the whole script.
-- **Batch filter widgets in `st.form`:** one rerun per Apply.
+- **Batch filter widgets in `st.form` only when each rerun is expensive** (an uncached query, heavy
+  pandas work): one rerun per Apply.
+  - Over cached data a rerun is cheap, so plain widgets are fine and a missing form is at most
+    nice-to-have. A form costs the reader an Apply click on every filter change.
 - **Wrap a self-contained widget and the chart it drives in `@st.fragment`,** so only that part
   reruns.
 - **Tab and expander bodies run on every rerun by default, open or not.**
@@ -70,7 +73,7 @@ Every widget interaction reruns the whole script.
 | Sign | Usual cause |
 |---|---|
 | First open slow, later fast | Cold cache. Check the TTL isn't shorter than the source's refresh |
-| Every interaction slow | Uncached work on each rerun (pandas over row-level data, a loader without a cache), or filters outside a form |
+| Every interaction slow | Uncached work on each rerun (pandas over row-level data, a loader without a cache), or, when the rerun itself is costly, filters outside a form |
 | Slow only deployed | Warehouse resume or queueing, or a cold container start. Compare query history in Snowsight with the local run |
 | Slower month by month | `SELECT *` on a growing view, or an unbounded date range |
 

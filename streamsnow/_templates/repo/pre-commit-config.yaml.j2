@@ -16,6 +16,8 @@ repos:
   - repo: local
     hooks:
       # All hooks require the `streamsnow` package on PATH (uv/pip install streamsnow).
+      # require_serial keeps each check in one process: pre-commit otherwise splits the files into
+      # parallel batches, and every clean batch prints its own "clean" line next to a BLOCK.
       - id: streamsnow-schema-refs
         description: >-
           A query against a raw/landing schema compiled locally under a broad personal role and failed deployed under the app owner's grants. Denylist lives in streamsnow.config.yaml (governance.schema_deny).
@@ -25,6 +27,7 @@ repos:
         language: system
         files: ^apps/.*\.(py|sql)$
         pass_filenames: true
+        require_serial: true
       - id: streamsnow-security
         description: >-
           Apps are read-only by contract: no network egress, no exec, no write SQL, no string-built SQL. The compensating control for a low-friction merge model.
@@ -34,6 +37,7 @@ repos:
         language: system
         files: ^apps/.*\.(py|sql)$
         pass_filenames: true
+        require_serial: true
       - id: streamsnow-bind-predicates
         description: >-
           Deployed, the Go-driver middleware NULL-binds every positional param when any one is None, so `(:1 IS NULL OR col = :1)` returns zero rows and reports success. Local Python never reproduces it.
@@ -43,6 +47,7 @@ repos:
         language: system
         files: ^apps/.*\.(py|sql)$
         pass_filenames: true
+        require_serial: true
       - id: streamsnow-caching
         description: >-
           An uncached loader re-queries Snowflake on every rerun; every data fetch carries @st.cache_data(ttl=...) keyed on its filter arguments.
@@ -52,6 +57,7 @@ repos:
         language: system
         files: ^apps/.*\.py$
         pass_filenames: true
+        require_serial: true
       - id: streamsnow-sql-tokens
         description: >-
           render_sql substitutes {TOKEN} inside comments too; a token name written in a `--` comment expanded into live SQL on the next line.
@@ -61,6 +67,7 @@ repos:
         language: system
         files: ^apps/.*\.sql$
         pass_filenames: true
+        require_serial: true
       - id: streamsnow-session-fallback
         description: >-
           get_active_session() only exists inside Snowflake; a narrow except let a different local exception type through under uv-resolved snowpark.
@@ -70,6 +77,7 @@ repos:
         language: system
         files: ^apps/.*\.py$
         pass_filenames: true
+        require_serial: true
       - id: streamsnow-page-imports
         description: >-
           Deployed, only the app root is on sys.path; `streamlit run` also adds the page's own directory, so a bare sibling import passed a full click-through and broke every page in production (2026-08).
@@ -79,6 +87,7 @@ repos:
         language: system
         files: ^apps/.*\.py$
         pass_filenames: true
+        require_serial: true
       - id: streamsnow-artifacts
         description: >-
           snowflake.yml artifacts: is what `snow streamlit deploy` uploads (the generated stage-copy workflow uploads the whole app dir, so it is a hand-deploy and drift guard here); a helper missing from it works locally and 404s on a manifest deploy. deploy.artifact_exclude in config names files another pipeline step ships.
@@ -88,6 +97,7 @@ repos:
         language: system
         files: ^apps/
         pass_filenames: true
+        require_serial: true
       - id: streamsnow-path-leaks
         description: >-
           A contributor's home-directory path landed in committed docs and was caught only at human review; agent instruction files leak origin paths the same way app code does.
@@ -97,6 +107,7 @@ repos:
         language: system
         files: ^apps/.*\.(py|sql|md)$
         pass_filenames: true
+        require_serial: true
       - id: streamsnow-sql-review
         description: >-
           Review SQL nobody can re-run rots; sql_review/index.yaml is the editing surface, and provenance hashes turn drift into a named finding. sqlfluff lints only the staged queries here (CI lints all). Coverage severity follows sql_review.coverage in config.
@@ -106,6 +117,7 @@ repos:
         language: system
         files: ^(apps/.*(queries/.*\.sql|sql_review/.*|\.py)|\.sqlfluff)$
         pass_filenames: true
+        require_serial: true
       - id: streamsnow-dependency-vulns
         description: >-
           OSV scan of every exact pin; a live connector CVE sat in a manifest for weeks before a scan existed. Best-effort offline here, fail-closed in CI.

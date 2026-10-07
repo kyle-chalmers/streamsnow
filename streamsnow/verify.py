@@ -32,6 +32,11 @@ that could not run is ``skipped``, never ``pass``: its ``ok`` is false and the
 summary line counts it apart from the passes. Skips do not fail the run (the
 exit code tracks failures only), but they are never shown as a pass.
 
+Each check also carries a ``level``. A ``block`` check that fails fails the
+run. A ``warn`` check that fails is reported and counted as a warning, and the
+run still passes: ``stage-files`` is warn-only so a repo whose stage-copy
+workflow predates ``stage-bundle`` keeps passing while it is told to update.
+
 All Snowflake access goes through an injected ``run_query`` callable so the
 check logic stays pure and unit-testable.
 """
@@ -43,9 +48,16 @@ import re
 import subprocess
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from .config import Config
-from .deploy import streamlit_fqn
+from .deploy import _safe_sha, stage_path, streamlit_fqn
+from .stage_bundle import (
+    BundleError,
+    app_artifact_entries,
+    excluded_reason,
+    select_app_files,
+)
 
 RunQuery = Callable[[str], list[dict]]
 
@@ -103,8 +115,14 @@ FAIL = "fail"
 SKIPPED = "skipped"
 
 
-def _check(name: str, status: str, findings: list[str], level: str = "block") -> dict:
-    """One check result. ``ok`` is true only for a check that ran and passed."""
+BLOCK = "block"
+WARN = "warn"
+
+
+def _check(name: str, status: str, findings: list[str], level: str = BLOCK) -> dict:
+    """One check result. ``ok`` is true only for a check that ran and passed.
+    ``level`` is ``block`` (a failure fails the run) or ``warn`` (a failure is
+    reported as a warning and the run still passes)."""
     return {
         "name": name,
         "status": status,
@@ -115,7 +133,12 @@ def _check(name: str, status: str, findings: list[str], level: str = "block") ->
 
 
 def _skipped(name: str, why: str) -> dict:
-    return _check(name, SKIPPED, [f"not checked: {why}"], level="warn")
+    return _check(name, SKIPPED, [f"not checked: {why}"], level=WARN)
+
+
+def _blocks(check: dict) -> bool:
+    """A failed check that fails the run (a failed warn-level check does not)."""
+    return check["status"] == FAIL and check.get("level", BLOCK) == BLOCK
 
 
 def _show_streamlit(cfg: Config, slug: str, run_query: RunQuery) -> dict | None:
@@ -264,6 +287,81 @@ def check_service_logs(log_text: str | None, fqn: str) -> dict:
     return _check("service-logs", FAIL if findings else PASS, findings)
 
 
+# The stage-copy deploy uploads to '@<stage>/commits/<sha>/apps/<slug>/'. LIST
+# names each file with the stage name first (observed lowercased), so the
+# app-relative path is whatever follows '<sha>/apps/<slug>/'.
+_FULL_SHA_LEN = 40
+
+
+def _list_stage_files(cfg: Config, slug: str, sha: str, run_query: RunQuery) -> list[str]:
+    """App-relative POSIX paths the stage holds for this app at this commit."""
+    marker = f"{sha.lower()}/apps/{slug}/"
+    rows = run_query(f"LIST '{stage_path(cfg)}/commits/{sha}/apps/{slug}/'")
+    out: list[str] = []
+    for row in rows:
+        name = str(_get(row, "name") or "")
+        i = name.lower().find(marker)
+        if i >= 0 and name[i + len(marker) :]:
+            out.append(name[i + len(marker) :])
+    return sorted(out)
+
+
+def check_stage_files(listed: list[str], app_dir: Path, stage_dir: str) -> dict:
+    """Warn-only: compare the files on the stage with what the deploy bundle ships.
+
+    Two drifts are reported. Each file ``stage-bundle`` would ship for this
+    app (computed from the local app, nothing written) must be on the stage;
+    one missing means the deployed app cannot import or read it. The
+    comparison is per file: checking that each artifacts entry matched some
+    staged file let one staged page satisfy all of ``pages/``. A staged file that
+    ``stage-bundle`` would leave out (AGENTS.md, sql_review/, ...) means the
+    workflow still uploads the whole ``apps/`` tree, so internal docs sit on
+    the stage at every commit. Warn-level so a repo on the old workflow is
+    told, not failed. An app holding a symlink that resolves outside the repo
+    is reported too: ``stage-bundle`` refuses it, so the next deploy fails.
+    """
+    entries = app_artifact_entries(app_dir)
+    try:
+        expected, _ = select_app_files(app_dir)
+    except BundleError as exc:
+        return _check("stage-files", FAIL, [f"stage-bundle refuses this app: {exc}"], level=WARN)
+    on_stage = set(listed)
+    missing = [rel for rel in sorted(expected) if rel not in on_stage]
+    findings: list[str] = [
+        f"{m} is not on the stage at {stage_dir}: the deployed app cannot load it" for m in missing
+    ]
+    for rel in listed:
+        reason = excluded_reason(rel, entries)
+        if reason:
+            findings.append(
+                f"{rel} is on the stage but the deploy bundle leaves it out ({reason}). "
+                "Re-render deploy.yml with `streamsnow update --apply` so the workflow "
+                "uploads `streamsnow stage-bundle` output instead of apps/"
+            )
+    return _check("stage-files", FAIL if findings else PASS, findings, level=WARN)
+
+
+def _stage_files(cfg: Config, slug: str, sha: str, app_dir: Path, run_query: RunQuery) -> dict:
+    if cfg.deploy.source != "stage-copy":
+        return _skipped(
+            "stage-files",
+            "the git-repository source builds from the committed repo folder, so there is "
+            "no uploaded stage listing to check",
+        )
+    try:
+        _safe_sha(sha)
+    except ValueError as exc:
+        return _skipped("stage-files", str(exc))
+    if len(sha) < _FULL_SHA_LEN:
+        return _skipped("stage-files", "needs the full commit SHA to find the staged files")
+    stage_dir = f"{stage_path(cfg)}/commits/{sha}/apps/{slug}/"
+    try:
+        listed = _list_stage_files(cfg, slug, sha, run_query)
+    except Exception as exc:
+        return _skipped("stage-files", f"LIST {stage_dir} failed: {exc}")
+    return check_stage_files(listed, app_dir, stage_dir)
+
+
 def _fetch_service_logs(cfg: Config, slug: str, run_query: RunQuery) -> str | None:
     """Best-effort container log fetch. Any failure returns None (warn-skip)."""
     try:
@@ -300,10 +398,13 @@ def verify_app(
     attempts: int = 3,
     delay: float = 20.0,
     sleep: Callable[[float], None] = time.sleep,
+    app_dir: Path | None = None,
 ) -> dict:
     """Run all post-deploy checks for one app; retries exists/live-version to
     absorb container cold start. Returns ``{"app", "ok", "checks"}``, where
-    ``ok`` means no check failed (a skipped check is reported, not failed)."""
+    ``ok`` means no block-level check failed (a skipped check, or a failed
+    warn-level one, is reported, not failed). ``app_dir`` (the local
+    ``apps/<slug>``) with ``sha`` adds the warn-only ``stage-files`` check."""
     fqn = streamlit_fqn(cfg, slug)
     attempts = max(1, attempts)
     for attempt in range(attempts):
@@ -338,21 +439,26 @@ def verify_app(
         blocker = _describe_blocker(exists, describe_error)
         check = check_version_source if cfg.deploy.source == "stage-copy" else check_git_commit
         checks.append(_skipped("version-source", blocker) if blocker else check(desc, fqn, sha))
+        if app_dir is not None:
+            checks.append(_stage_files(cfg, slug, sha, app_dir, run_query))
 
     if cfg.runtime == "container":
         checks.append(check_service_logs(_fetch_service_logs(cfg, slug, run_query), fqn))
 
-    return {"app": slug, "ok": not any(c["status"] == FAIL for c in checks), "checks": checks}
+    return {"app": slug, "ok": not any(_blocks(c) for c in checks), "checks": checks}
 
 
 def summary_line(result: dict) -> str:
-    """``PASS: <app> (3 passed; 1 skipped: service-logs)``. Skipped checks are
-    counted and named on their own, never folded into the passes."""
-    by_status: dict[str, list[str]] = {PASS: [], FAIL: [], SKIPPED: []}
+    """``PASS: <app> (3 passed; 1 skipped: service-logs)``. Skipped checks, and
+    failed warn-level checks (``1 warned: stage-files``), are counted and named
+    on their own, never folded into the passes or the failures."""
+    warned = "warned"
+    by_status: dict[str, list[str]] = {PASS: [], FAIL: [], warned: [], SKIPPED: []}
     for c in result["checks"]:
-        by_status[c["status"]].append(c["name"])
+        key = warned if c["status"] == FAIL and not _blocks(c) else c["status"]
+        by_status[key].append(c["name"])
     parts = [f"{len(by_status[PASS])} passed"]
-    for status, word in ((FAIL, "failed"), (SKIPPED, "skipped")):
+    for status, word in ((FAIL, "failed"), (warned, "warned"), (SKIPPED, "skipped")):
         if by_status[status]:
             parts.append(f"{len(by_status[status])} {word}: {', '.join(by_status[status])}")
     verdict = "PASS" if result["ok"] else "FAIL"

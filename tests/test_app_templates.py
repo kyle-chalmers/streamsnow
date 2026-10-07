@@ -174,3 +174,29 @@ def test_metric_delta_is_colored_by_meaning(tmp_path):
         assert ink(down) == bad and ink(down, "inverse") == good
     for unchanged in ("0%", "+0.0 pts", "0"):  # no change is neither good nor bad
         assert ink(unchanged) == grey and ink(unchanged, "inverse") == grey
+
+
+def test_hover_definition_keeps_a_lone_percent_sign(tmp_path):
+    """plotly.js does not unescape a doubled percent sign, so doubling one showed "100%%" in the
+    hover. Only `%{...}` is a placeholder, and a definition does not contain one."""
+    path = _app(tmp_path) / "pages/_glossary.py"
+    spec = importlib.util.spec_from_file_location("acme_glossary", path)
+    glossary = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(glossary)  # stdlib only, no streamlit import
+    glossary._BY_KEY["conv"] = glossary.Metric("conv", "Conversion", "Share of 100% of leads.", "a")
+    assert glossary.hover_definition("conv") == glossary.metric_help("conv")
+    assert "100% of" in glossary.hover_definition("conv")
+    assert "%%" not in glossary.hover_definition("conv")
+    assert 'replace("%", "%%")' not in (path.read_text(encoding="utf-8"))
+    # The skill's copy of the snippet must not teach the escape the template dropped.
+    conventions = (REPO_ROOT / "skills/_shared/page-conventions.md").read_text(encoding="utf-8")
+    assert 'replace("%", "%%")' not in conventions
+
+
+def test_entrypoint_warns_against_data_calls_before_navigation(tmp_path):
+    """Until st.navigation runs Streamlit shows a fallback menu of every pages/*.py file,
+    helpers included, so a data call or widget before it stretches that window."""
+    entry = (_app(tmp_path) / "streamlit_app.py").read_text(encoding="utf-8")
+    comment = entry[: entry.index("nav = st.navigation")]
+    assert "before st.navigation" in comment
+    assert "after `nav`" in comment

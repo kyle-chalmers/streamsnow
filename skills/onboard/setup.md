@@ -29,7 +29,8 @@ Hand those over with a one-line reason:
 - anything that asks for their computer password (`sudo` on Linux/WSL): your shell cannot answer
   that prompt, so give them the command; prefer installs that need no password (uv, nvm).
 
-The CI key is handled only by `streamsnow ci-key create` and `streamsnow ci-key push` (§2d, §2e).
+The CI key is handled only by `streamsnow ci-key create`, `streamsnow ci-key push` and
+`streamsnow ci-key verify` (§2d, §2e).
 The plugin's key guard blocks every other tool call that names `~/.streamsnow-ci`, so a blocked
 call there is expected: never try another way to read a key or secret file.
 
@@ -404,7 +405,8 @@ warehouse, the CI and viewer roles, a CI service user and the grants that tie th
    - **App database and schema**: where deployed apps live.
    - **Warehouse**: the compute apps query with.
    - **CI role**: what the deploy workflow runs as; it owns the apps.
-   - **Viewer role**: what people viewing an app, and local preview, run as.
+   - **Viewer role**: what people viewing an app run as. It gets no data grants unless the admin
+     uncomments them, so local preview uses a role whose data reads match the CI role's.
    - **CI service user**: the account the deploy workflow signs in as, with a key pair and no
      password.
    - **Grants**: the CI role gets SELECT on exactly the allowed schemas, which is what makes the
@@ -433,13 +435,18 @@ warehouse, the CI and viewer roles, a CI service user and the grants that tie th
    `~/.streamsnow-ci`, prints only file names and a fingerprint, and never overwrites a key. Tell
    the user, in one line, to save a copy of the `.p8` somewhere safe such as a password manager
    themselves (you never open it; a lost key means rotating).
-4. **The admin file.** Run
-   `streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > .internal/admin-setup.sql`,
-   adding `--viewer-role <ROLE>` once for each role chosen in step 2
-   (make `.internal/` first). Repos set up on 0.7.1 or later gitignore `.internal/`; check with
-   `git check-ignore -q .internal/admin-setup.sql` and add `.internal/` to `.gitignore` if it is
-   not, so the file is never committed. It runs unedited
-   and is safe to re-run; `streamsnow deploy-setup --teardown` prints a start-fresh cleanup to review.
+4. **The admin file.** Run these as three separate commands, in this order, with no chaining,
+   piping or grouping: the key guard denies any command that names `~/.streamsnow-ci` unless it
+   starts with `streamsnow ci-key` or `streamsnow deploy-setup` and has nothing else attached.
+   1. `mkdir -p .internal`
+   2. `streamsnow deploy-setup --admin --public-key-file ~/.streamsnow-ci/streamsnow_ci_rsa_key.pub > .internal/admin-setup.sql`
+      on a line of its own, adding `--viewer-role <ROLE>` once for each role chosen in step 2.
+   3. `git check-ignore -q .internal/admin-setup.sql`. Repos set up on 0.7.1 or later already
+      ignore `.internal/`; if this check fails, add `.internal/` to `.gitignore` so the file is
+      never committed.
+
+   The file runs unedited and is safe to re-run; `streamsnow deploy-setup --teardown` prints a
+   start-fresh cleanup to review.
 5. **Hand it off.** You never run the admin SQL, whoever the user is. Give the explanation from
    step 2 and the steps below, nothing more: do not open or quote the admin file, and do not add
    your own warnings about its contents (line numbers, statement types, object names). The
@@ -465,6 +472,30 @@ everyone who opens this repo is offered the same tools automatically." Then run
 `claude plugin install --scope project streamsnow@streamsnow`, and offer to commit
 `.claude/settings.json`.
 
+**Prove what CI will see (optional, ask first).** Offer this before `streamsnow ci-key push`
+below: the push switches the deploy job on, and this catches a bad CI identity before the first
+merge deploys. Skip it while §2d is not confirmed or the key files from `ci-key create` are not
+on this machine. `streamsnow ci-key verify` signs in as the CI service user the way the deploy
+job does and runs read-only checks: the CI role, the warehouse, the app schema, the grants the
+admin script gives the CI role, and one `LIMIT 0` read, each with secondary roles off so it
+proves the CI role alone (deployed apps query with that role's owner's rights). Before running
+it, tell the user plainly and ask:
+- it signs in from this machine with the production CI key;
+- the sign-in shows in the CI user's login history in Snowflake;
+- if the account has a network policy that only admits the CI runners, it will be refused,
+  which means the policy is doing its job and the deploy job will still sign in from CI;
+- it is meant to run once, right after the admin setup.
+
+On a yes, run `streamsnow ci-key verify --object <DB.SCHEMA.TABLE>` with a table or view in an
+allowed governance schema that the first app will read (leave `--object` off if there is none
+yet). It prints each check by object name and never the key, account or user. Exit 1 names
+what failed: a missing grant goes back to the admin as one line naming the grant; a sign-in
+failure usually means the admin registered a different public key, so compare the fingerprint
+from `ci-key create` with `RSA_PUBLIC_KEY_FP` in `DESC USER`. Exit 2 is a tool error with no
+results printed: a missing or unreadable secret file, a file that differs from the config, a
+bad config or `--object`, no `snow`, or a `snow` call that could not start, timed out or
+printed unreadable output. On a no, skip it: the first deploy checks the same things.
+
 **Deploy secrets on GitHub.** Doctor's `ci-secrets` row lists which are missing. Explain: "The
 deploy workflow signs in to Snowflake with these GitHub secrets; until they exist, merging
 deploys nothing." Skip this when the row says "not checked" because the user cannot list secrets
@@ -479,6 +510,16 @@ admin registers the new `.pub`. When it runs, it sets
 Setting `SNOWFLAKE_ACCOUNT` switches the deploy job on, so tell the user the next merge to
 `main` will deploy. If it stops partway, it names what failed and leaves `SNOWFLAKE_ACCOUNT`
 unset; fix the cause and run it again.
+
+If `ci-key push` refuses a secret file by name (empty, not UTF-8 text, contains a NUL byte, or
+differs from the config), offer to walk the user through replacing it. The key guard keeps you
+out of `~/.streamsnow-ci`, so the user runs the delete. Name the file, say that it is a value
+the config can rebuild and not the key itself, and give them the one command to run in their
+own terminal: `rm ~/.streamsnow-ci/secrets/<NAME>` (with `--dir`, use that folder instead).
+Then run `streamsnow ci-key create`, which rewrites the missing file from the config and keeps
+the existing key pair, and run `streamsnow ci-key push` again. If the refused file is
+`SNOWFLAKE_PRIVATE_KEY_RAW`, stop instead: that file points at the key itself, and replacing
+the key means the admin registers a new public key (§2d steps 3 to 5).
 
 **Delete merged branches on GitHub.** Skip this when there is no GitHub remote yet or `gh` is
 not signed in; it does not wait on §2d. Find the repo with

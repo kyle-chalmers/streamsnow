@@ -20,8 +20,10 @@ streamsnow deploy-sql     Emit the CREATE OR REPLACE STREAMLIT SQL for one app (
 streamsnow verify-deploy  Check that a deployed app actually serves
 streamsnow ci-key create  Make the CI user's key pair + the deploy secret files
 streamsnow ci-key push    Set the five deploy secrets on GitHub from those files
+streamsnow ci-key verify  Sign in as the CI user and check, read-only, what a deploy sees
 streamsnow config-get     Print one config value by dotted path (deploy job)
 streamsnow stage-path     Print the stage-copy base path @DB.SCHEMA.STAGE (deploy job)
+streamsnow stage-bundle   Copy each app minus internal docs for the stage-copy upload (deploy job)
 streamsnow update         Re-render the governance files (AGENTS.md, CLAUDE.md, pre-commit,
                           CI, deploy workflow) from the config; checks run from the package
 
@@ -51,6 +53,7 @@ from .config import (
     RUNTIMES,
     Config,
     ConfigError,
+    find_config,
     load_config,
     normalize_account,
     validate_github_origin,
@@ -122,6 +125,9 @@ app = typer.Typer(
     help="Build, govern, and ship Streamlit-in-Snowflake apps with Claude Code.",
     no_args_is_help=True,
     add_completion=False,
+    # A traceback's locals could include the CI key and account (ci-key verify
+    # holds them in `env` and `payloads`); never print them.
+    pretty_exceptions_show_locals=False,
 )
 check_app = typer.Typer(help="Run a governance check (config-driven).", no_args_is_help=True)
 app.add_typer(check_app, name="check")
@@ -1045,7 +1051,9 @@ def ci_key_create(
     print(f"  fingerprint {result.fingerprint}  (DESC USER shows it as RSA_PUBLIC_KEY_FP)")
     if result.written:
         print(f"Wrote secrets/: {', '.join(result.written)}")
-    if result.kept:
+    if result.kept and not result.mismatched:
+        print("Kept existing secrets/ (all match this config)")
+    elif result.kept:
         print(f"Kept existing secrets/: {', '.join(result.kept)}")
     for warning in result.warnings:
         console.print(f"[yellow]warning:[/] {warning}")
@@ -1056,16 +1064,18 @@ def ci_key_create(
         )
     print("")
     print("Next:")
+    print("  1. Make the folder for the admin script (a command of its own):")
+    print("       mkdir -p .internal")
+    print("  2. Write the admin script (review it, then run it as ACCOUNTADMIN):")
     print(
-        "  1. streamsnow deploy-setup --admin --public-key-file "
-        f"{result.public_key} > admin-setup.sql"
+        "       streamsnow deploy-setup --admin --public-key-file "
+        f"{result.public_key} > .internal/admin-setup.sql"
     )
-    print("     (review, then run it as ACCOUNTADMIN)")
-    print("  2. Once your admin has run it: streamsnow ci-key push")
+    print("  3. Once your admin has run it: streamsnow ci-key push")
     print("     (sets the five GitHub secrets from these files, SNOWFLAKE_ACCOUNT last;")
     print("      no value is ever printed)")
-    print(f"  3. Save a copy of {result.private_key} somewhere safe,")
-    print("     such as a password manager. If it is lost, make a new pair and re-run step 1.")
+    print(f"  4. Save a copy of {result.private_key} somewhere safe,")
+    print("     such as a password manager. If it is lost, make a new pair and re-run step 2.")
 
 
 @ci_key_app.command(name="push")
@@ -1076,18 +1086,42 @@ def ci_key_push(
     repo: str = typer.Option(
         None, "--repo", help="owner/name, when the checkout has several GitHub remotes."
     ),
+    config: Path = typer.Option(
+        None,
+        "--config",
+        help="Path to streamsnow.config.yaml. When given, the user, warehouse, role and "
+        "account files must match it (compared by name; refuses before any gh call).",
+    ),
+    account: str = typer.Option(
+        None,
+        "--account",
+        help="With --config: the account locator you gave `ci-key create` (default: the config's).",
+    ),
 ) -> None:
     """Set the five deploy secrets on GitHub from the files `ci-key create` wrote.
 
     Each value goes from its file straight to `gh secret set` on stdin, never on
     the command line, and is never printed. SNOWFLAKE_ACCOUNT goes last because
-    it switches the deploy job on; a failure stops before it.
+    it switches the deploy job on; a failure stops before it. With --config, a
+    file that no longer matches the config (an old warehouse or role kept by
+    `ci-key create`) stops the push before anything is set.
     """
     try:
-        result = _ci_key.push(directory, repo=repo)
-    except _ci_key.CiKeyError as exc:
+        expected = None
+        if config is not None:
+            cfg = load_config(Path(config))
+            expected = _ci_key.config_values(
+                account=normalize_account(account) if account else cfg.snowflake.account,
+                user=ci_user_name(cfg.snowflake.roles.ci_role),
+                warehouse=cfg.snowflake.objects.default_warehouse,
+                role=cfg.snowflake.roles.ci_role,
+            )
+        result = _ci_key.push(directory, repo=repo, expected=expected)
+    except (ConfigError, _ci_key.CiKeyError) as exc:
         _err(str(exc))
         raise typer.Exit(2) from exc
+    if expected:
+        print("Checked the user, warehouse, role and account files: all match this config.")
     print(f"Setting the deploy secrets on {result.repo} (SNOWFLAKE_ACCOUNT last):")
     for name in result.done:
         print(f"  {name}: set")
@@ -1097,6 +1131,69 @@ def ci_key_push(
             print(f"  {name}: not set (stopped after the failure)")
         raise typer.Exit(1)
     print("Done. The next merge to main deploys.")
+
+
+@ci_key_app.command(name="verify")
+def ci_key_verify(
+    directory: Path = typer.Option(
+        _ci_key.DEFAULT_DIR, "--dir", help="The directory `ci-key create` wrote."
+    ),
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+    obj: str = typer.Option(
+        None,
+        "--object",
+        help="DB.SCHEMA.OBJECT in an allowed governance schema: a LIMIT 0 read proves the CI "
+        "role can query it. Without it the read probe is skipped.",
+    ),
+    output_format: str = typer.Option("md", "--format", help="md | json"),
+) -> None:
+    """Sign in as the CI service user with the CI key and check, read-only, what a deploy sees.
+
+    Signs in from this machine with the production CI key, exactly as the deploy job
+    does (the five secret files as SNOWFLAKE_* variables, key-pair auth, a temporary
+    connection), then checks the CI role, the warehouse, the app schema, the grants
+    the admin script gives the CI role, and with --object one LIMIT 0 read. Every
+    check runs with secondary roles off, so it proves the CI role alone: the deploy
+    job leaves them at the CI user's default, but deployed apps query with the CI
+    role's owner's rights. Nothing is created or changed, and the key, account and
+    user are never printed.
+
+    Know before you run it: the sign-in shows in the CI user's login history, and a
+    network policy that only admits the CI runners will refuse it, which means the
+    policy is doing its job. Run it once, after the admin setup has run.
+
+    Exit codes: 0 every probe passed, 1 a probe failed, 2 a tool error with no probe
+    results printed: a missing or unreadable secret file, a file that differs from the
+    config, a bad config or --object, no `snow`, or a `snow` call that could not start,
+    timed out or printed unreadable output.
+    """
+    if output_format not in ("md", "json"):
+        _err(f"--format must be md or json, not {output_format!r}")
+        raise typer.Exit(2)
+    try:
+        cfg = load_config(Path(config) if config else None)
+        result = _ci_key.verify(directory, cfg=cfg, obj=obj)
+    except (ConfigError, _ci_key.CiKeyError) as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    if output_format == "json":
+        print(json.dumps(result.to_json(), indent=2))
+    else:
+        marks = {"pass": "✓", "fail": "✗", "skipped": "○"}
+        print("Signed in as the CI service user (key-pair auth, read-only probes):")
+        for p in result.probes:
+            label = f"{p.probe} {p.object}".strip()
+            if p.status == "skipped":
+                label += " (skipped)"
+            print(f"  {marks[p.status]} {label}" + (f": {p.detail}" if p.detail else ""))
+        failed = sum(p.status == "fail" for p in result.probes)
+        print("")
+        print(
+            f"{failed} probe(s) failed: a deploy as the CI user would hit the same errors."
+            if failed
+            else "Every probe passed: CI can sign in and see what a deploy needs."
+        )
+    raise typer.Exit(code=0 if result.ok else 1)
 
 
 _SSH_GITHUB_RE = re.compile(
@@ -1168,6 +1265,30 @@ def stage_path_cmd(
     print(stage_path(cfg))
 
 
+@app.command(name="stage-bundle")
+def stage_bundle_cmd(
+    slugs: list[str] = typer.Argument(None, help="App slugs to bundle (default: every app)."),
+    out: Path = typer.Option(..., "--out", help="Empty directory to write <slug>/ folders into."),
+    directory: Path = typer.Option(Path("."), "--dir", help="Repo root."),
+    output_format: str = typer.Option("md", "--format"),
+) -> None:
+    """Copy each app minus internal docs into --out for the stage-copy upload (deploy job).
+
+    Leaves out root-level *.md files an artifacts entry does not declare, sql_review/,
+    tooling dot-directories, everything in .streamlit/ except config.toml, .env and
+    secrets.toml files, and symlinks to any of those. Symlinks that resolve inside the
+    repo (--dir) are followed. Exit 2 on a bad slug, a symlink that resolves outside the
+    repo, or an --out that is not empty, is a broken symlink or sits inside apps/."""
+    from .stage_bundle import BundleError, build_bundle, render_md
+
+    try:
+        result = build_bundle(directory, out, list(slugs or []))
+    except BundleError as exc:
+        _err(str(exc))
+        raise typer.Exit(2) from exc
+    print(json.dumps(result, indent=2) if output_format == "json" else render_md(result))
+
+
 @app.command(name="deploy-sql")
 def deploy_sql(
     slug: str = typer.Argument(..., help="App slug to deploy."),
@@ -1232,8 +1353,20 @@ def verify_deploy_cmd(
         _err(str(exc))
         raise typer.Exit(2) from exc
     run_query = partial(run_query_snow, temporary_connection=temporary_connection)
+    # The stage-files check compares the stage with the local apps/<slug>, found
+    # next to the config. No such directory: the check does not run.
+    cfg_path = Path(config) if config else find_config()
+    app_dir = cfg_path.resolve().parent / "apps" / slug if cfg_path else None
     try:
-        result = verify_app(cfg, slug, sha=sha, run_query=run_query, attempts=attempts, delay=delay)
+        result = verify_app(
+            cfg,
+            slug,
+            sha=sha,
+            run_query=run_query,
+            attempts=attempts,
+            delay=delay,
+            app_dir=app_dir if app_dir is not None and app_dir.is_dir() else None,
+        )
     except ValueError as exc:  # invalid slug
         _err(str(exc))
         raise typer.Exit(2) from exc
@@ -1242,10 +1375,15 @@ def verify_deploy_cmd(
     else:
         # A check that could not run gets its own mark and word: a check mark
         # beside "skipped" read as a pass in CI logs.
+        # A failed warn-level check gets "!" and "(warning)": it does not fail the run.
         marks = {"pass": "✓", "fail": "✗", "skipped": "○"}
         for c in result["checks"]:
-            label = f"{c['name']} (skipped)" if c["status"] == "skipped" else c["name"]
-            print(f"  {marks[c['status']]} {label}")
+            mark, label = marks[c["status"]], c["name"]
+            if c["status"] == "skipped":
+                label = f"{label} (skipped)"
+            elif c["status"] == "fail" and c.get("level") == "warn":
+                mark, label = "!", f"{label} (warning)"
+            print(f"  {mark} {label}")
             for f in c["findings"]:
                 print(f"      - {f}")
         print(f"\n{summary_line(result)}")
@@ -1471,6 +1609,7 @@ _PREVIEW_VERBS = {"start", "status", "stop", "logs"}
 
 
 @app.command(
+    add_help_option=False,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def preview(ctx: typer.Context) -> None:
@@ -1483,17 +1622,20 @@ def preview(ctx: typer.Context) -> None:
     """
     argv = list(ctx.args)
     # The shorthand must also route flag-first invocations (`preview --port
-    # 8501 my-app`): when NO verb appears anywhere, this is the shorthand —
-    # unless the user is asking for help.
+    # 8501 my-app`): when NO verb appears anywhere, this is the shorthand. Bare
+    # `preview --help` (no slug) keeps the tool's top-level help; with a slug,
+    # `preview my-app --help` is `preview start my-app --help`.
     wants_help = any(a in ("-h", "--help") for a in argv)
     has_verb = any(a in _PREVIEW_VERBS for a in argv)
-    if argv and not has_verb and not wants_help:
+    has_positional = any(not a.startswith("-") for a in argv)
+    if argv and not has_verb and (has_positional or not wants_help):
         argv = ["start", *argv]
     raise typer.Exit(code=_preview_main(argv))
 
 
 @app.command(
     name="review-gate",
+    add_help_option=False,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def review_gate_cmd(ctx: typer.Context) -> None:
@@ -1503,6 +1645,7 @@ def review_gate_cmd(ctx: typer.Context) -> None:
 
 @app.command(
     name="sql-review",
+    add_help_option=False,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def sql_review_cmd(ctx: typer.Context) -> None:
@@ -1519,6 +1662,7 @@ def sql_review_cmd(ctx: typer.Context) -> None:
 
 @app.command(
     name="review-loop",
+    add_help_option=False,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def review_loop_cmd(ctx: typer.Context) -> None:
@@ -1528,6 +1672,7 @@ def review_loop_cmd(ctx: typer.Context) -> None:
 
 
 @app.command(
+    add_help_option=False,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def migrate(ctx: typer.Context) -> None:

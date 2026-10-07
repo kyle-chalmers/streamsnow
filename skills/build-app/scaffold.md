@@ -68,6 +68,9 @@ the checks enforce, and container apps can't import repo-level shared modules an
   `sql_loader` — never inlined as a Python f-string. Each file opens with the required header block
   (`Query / Feeds / Schemas / Params / Tokens`); copy the shape from an existing file. Named-column
   `SELECT`s against allowed schemas only.
+- **`st.navigation` runs before any data call** in `streamlit_app.py`. A loader above it leaves
+  Streamlit's fallback menu of every `pages/*.py` helper on screen for the whole first run.
+  Call `st.navigation(...)` first, then load data.
 - **Cache every data fetch:** `@st.cache_data(ttl=...)` with the repo default TTL unless §8 says
   otherwise. Pass filter values as function arguments, not closures — closures poison the cache key.
 - **Optional filters use `{TOKEN}` fragments**, never `(:N IS NULL OR col = :N)` — see the

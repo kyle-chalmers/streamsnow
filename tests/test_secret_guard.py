@@ -116,6 +116,7 @@ def test_denied(tool, tool_input):
     [
         ("Bash", {"command": "streamsnow ci-key create"}),
         ("Bash", {"command": "streamsnow ci-key push --dir ~/.streamsnow-ci"}),
+        ("Bash", {"command": "streamsnow ci-key verify --dir ~/.streamsnow-ci"}),
         (
             "Bash",
             {

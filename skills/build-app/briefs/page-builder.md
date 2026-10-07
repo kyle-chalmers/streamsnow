@@ -31,8 +31,10 @@ another page, or a shared query. Need something there? Return it as a request.
    period, shared data from `pages/_data.py`, `show_sql` where the design says so. Mark each
    visual with `review_value("<key>", value)` in this file.
 3. Run `streamsnow check page-imports apps/<slug>`, `streamsnow check caching apps/<slug>`,
-   `streamsnow check schema-refs apps/<slug>` and `streamsnow check bind-predicates apps/<slug>`;
-   fix findings in your own files.
+   `streamsnow check schema-refs apps/<slug>`, `streamsnow check bind-predicates apps/<slug>` and
+   `streamsnow check sql-tokens apps/<slug>`; fix findings in your own files. In a query header,
+   name tokens without braces (`-- Tokens: REGION_FILTER (what it filters)`): `sql-tokens` flags
+   a `{TOKEN}` inside any SQL comment.
 
 ## Returns
 
@@ -42,12 +44,13 @@ another page, or a shared query. Need something there? Return it as a request.
  "index_entry": "  - path: pages/<page>.py\n    metrics:\n      - key: ...",
  "glossary_entries": [{"key": "...", "label": "...", "definition": "...", "formula": "..."}],
  "data_requests": ["a loader or query another page also needs"],
- "checks": {"page-imports": 0, "caching": 0, "schema-refs": 0, "bind-predicates": 0}}
+ "checks": {"page-imports": 0, "caching": 0, "schema-refs": 0, "bind-predicates": 0,
+            "sql-tokens": 0}}
 ```
 
 ## Verify
 
-The orchestrator re-runs the four checks, rejects any write outside `files_written` ∩ Owns, merges
+The orchestrator re-runs the five checks, rejects any write outside `files_written` ∩ Owns, merges
 the entries, runs `streamsnow sql-review generate <slug>` once for all pages, then
 `streamsnow sql-review check <slug>`.
 

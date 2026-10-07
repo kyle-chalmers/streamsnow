@@ -89,8 +89,8 @@ def render_glossary(*keys):  # -> one expander per page listing what it shows
             st.markdown(f"**{_BY_KEY[k].label}** — {metric_help(k)}")
 
 
-def hover_definition(key):  # -> %-escaped text for a Plotly hovertemplate
-    return metric_help(key).replace("%", "%%")
+def hover_definition(key):  # -> text for a Plotly hovertemplate; a lone % renders as written
+    return metric_help(key)  # plotly.js does not unescape %%, and only %{...} is a placeholder
 ```
 
 House rules the table encodes: formulas use `÷`; every ratio is `SUM(numerator) ÷ SUM(denominator)`

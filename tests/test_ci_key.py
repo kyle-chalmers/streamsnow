@@ -171,3 +171,28 @@ def test_kept_secret_files_are_tightened_to_600(tmp_path):
     role.chmod(0o644)
     assert _create(tmp_path).exit_code == 0
     assert _mode(role) == 0o600
+
+
+def test_rerun_with_matching_files_says_all_match(tmp_path):
+    _create(tmp_path)
+    second = _create(tmp_path)
+    assert second.exit_code == 0, second.output
+    assert "Kept existing secrets/ (all match this config)" in second.output
+    assert "differs" not in second.output
+
+
+def test_rerun_flags_a_file_with_non_breaking_spaces(tmp_path):
+    # push sends bytes.strip(), which keeps U+00A0, so create must not call it a match.
+    _create(tmp_path)
+    role = tmp_path / "ci" / "secrets" / "SNOWFLAKE_ROLE"
+    role.write_text(" STREAMSNOW_DEPLOY_ROLE", encoding="utf-8")
+    second = _create(tmp_path)
+    assert "secrets/SNOWFLAKE_ROLE differs" in second.output
+    assert "all match this config" not in second.output
+
+
+def test_rerun_with_a_differing_file_does_not_claim_a_match(tmp_path):
+    _create(tmp_path)
+    second = _create(tmp_path, "--account", "other-acct")
+    assert "all match this config" not in second.output
+    assert "secrets/SNOWFLAKE_ACCOUNT differs" in second.output

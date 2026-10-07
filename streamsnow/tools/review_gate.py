@@ -16,13 +16,28 @@ Subcommands:
         classifies every app with changes. Exit 0 = nothing needed,
         1 = review recommended, 2 = tool error.
 
+        Read ``needs_review`` for the decision. ``verdict`` is review depth
+        only: ``loop`` means the diff is substantive enough to merit the full
+        loop, and it stays ``loop`` after a review covers the change. Callers
+        that gated on ``verdict == "loop"`` asked for a review after one had
+        already run.
+
     baseline <slug>
         Print the current baseline digest for an app (see "Baselines" below).
 
-    stamp <artifact.md> --slug=<slug>
+    stamp <artifact.md> --slug=<slug> [--expect-baseline=<digest>]
         Write/refresh the ``Reviewed-baseline:`` header in a review artifact.
         `/review-app --auto` calls this at the END of a run, after its fix
-        commits, so the review it just completed does not read as stale.
+        commits, so the review it just completed does not read as stale. The
+        default `/review-app` pass calls it after writing its report.
+
+        The stamp records the tree as it is NOW and never reads the report, so
+        stamping a report after the app changed would mark code nobody
+        reviewed as reviewed. ``--expect-baseline`` closes that gap: the caller
+        captures ``baseline`` when it dispatches reviewers and passes it here;
+        a different current baseline exits 2 ("app changed since dispatch")
+        and writes nothing. The stamp also records ``Reviewed-head:``, the
+        commit it saw, so ``classify`` can list the commits made since.
 
     stop-hook [--payload=system-only|both]
         Read Claude Code `Stop` hook JSON on stdin and emit the warn-only
@@ -143,6 +158,16 @@ CODE_SUFFIXES = frozenset({".py", ".sql"})
 
 BASELINE_HEADER = "Reviewed-baseline:"
 
+#: Commit the stamp saw, written after the files fence. ``classify`` reads it to
+#: list the commits that touched the app since the review.
+HEAD_HEADER = "Reviewed-head:"
+
+#: ``reviewed_head_status`` values: no artifact recorded a head; the recorded
+#: head is in HEAD's history; or it is not (rebased, amended or reset away).
+HEAD_NONE = "none"
+HEAD_ANCESTOR = "ancestor"
+HEAD_NOT_ANCESTOR = "not-ancestor"
+
 #: Per-file coverage block. Lines below it are ``<coverage-key>  <repo-rel-path>``.
 FILES_HEADER = "Reviewed-files:"
 
@@ -187,6 +212,13 @@ class AppVerdict:
     #: True when coverage came from the whole-tree digest because no artifact
     #: carried a per-file block (artifacts written before per-file tracking).
     coverage_mode: str = "per-file"  # per-file | whole-tree
+    #: Commit recorded by the newest artifact that carries ``Reviewed-head:``.
+    reviewed_head: str = ""
+    reviewed_head_status: str = HEAD_NONE  # none | ancestor | not-ancestor
+    #: ``[{sha, subject}]`` for commits touching the app after ``reviewed_head``,
+    #: oldest first. Empty unless the status is ``ancestor``: after a rebase the
+    #: range is unknowable, and the status says so instead of a misleading [].
+    commits_since_review: list[dict[str, str]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -657,8 +689,12 @@ def stamp_artifact(
     path: Path,
     baseline: str,
     file_blobs: dict[str, str] | None = None,
+    head: str | None = None,
 ) -> None:
     """Insert or refresh the Reviewed-baseline (+ fenced Reviewed-files) headers.
+
+    ``head`` (the commit the stamp saw) is written as ``Reviewed-head:`` after
+    the fence, outside the coverage block, so it can never parse as coverage.
 
     ``file_blobs`` maps repo-relative path → coverage key for every substantive
     file this run reviewed. It is what makes coverage per-change rather than
@@ -677,15 +713,19 @@ def stamp_artifact(
         for rel in sorted(file_blobs):
             block += f"  {file_blobs[rel]}  {rel}\n"
         block += f"{FILES_END}\n"
+    if head:
+        block += f"{HEAD_HEADER} {head}\n"
 
-    # Drop any prior stamp (baseline line + optional fenced files block).
-    # Deliberately line-scoped (`[^\n]*`, no DOTALL): with DOTALL the baseline
-    # line's wildcard spans newlines and swallows the entire report body.
+    # Drop any prior stamp (baseline line + optional fenced files block +
+    # optional head line). Deliberately line-scoped (`[^\n]*`, no DOTALL): with
+    # DOTALL the baseline line's wildcard spans newlines and swallows the
+    # entire report body.
     text = re.sub(
         rf"^{re.escape(BASELINE_HEADER)}[^\n]*\n"
         rf"(?:{re.escape(FILES_HEADER)}[ \t]*\n"
         rf"(?:[^\n]*\n)*?"
-        rf"{re.escape(FILES_END)}[ \t]*\n)?",
+        rf"{re.escape(FILES_END)}[ \t]*\n)?"
+        rf"(?:{re.escape(HEAD_HEADER)}[^\n]*\n)?",
         "",
         text,
         count=1,
@@ -694,8 +734,8 @@ def stamp_artifact(
 
     if text.startswith("# "):
         # Put it directly under the title so it survives casual editing.
-        head, sep, rest = text.partition("\n")
-        text = f"{head}{sep}{block}{rest.lstrip(chr(10))}"
+        title, sep, rest = text.partition("\n")
+        text = f"{title}{sep}{block}{rest.lstrip(chr(10))}"
     else:
         text = f"{block}\n{text.lstrip(chr(10))}"
     path.write_text(text, encoding="utf-8")
@@ -707,6 +747,97 @@ def app_substantive_blobs(
     """{path: coverage_key} for every substantive changed file in an app right now."""
     changed = [rel for rel in changed_paths(root, base_ref) if app_slug_of(rel, apps_dir) == slug]
     return {rel: coverage_key(root, rel) for rel in substantive_files(root, changed, base_ref)}
+
+
+# ---------------------------------------------------------------------------
+# Reviewed head: which commits landed after the review
+# ---------------------------------------------------------------------------
+
+_HEAD_RE = re.compile(rf"^{re.escape(HEAD_HEADER)}[ \t]*([0-9a-f]{{7,64}})[ \t]*$", re.MULTILINE)
+
+
+def stored_review_head(root: Path, slug: str, apps_dir: str) -> str:
+    """``Reviewed-head`` from the newest artifact that records one, or "".
+
+    Newest by modification time (name breaks ties): the artifact prefixes
+    differ (``review-``, ``loop-``, ``walk-``), so the filename alone does not
+    order them.
+    """
+    review_dir = root / apps_dir / slug / ".review"
+    if not review_dir.is_dir():
+        return ""
+    found: list[tuple[float, str, str]] = []
+    for path in review_dir.glob("*.md"):
+        if not path.name.lower().startswith(ARTIFACT_PREFIXES):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        m = _HEAD_RE.search(text)
+        if m:
+            found.append((mtime, path.name, m.group(1)))
+    return max(found)[2] if found else ""
+
+
+def review_head_state(
+    root: Path, slug: str, apps_dir: str = DEFAULT_APPS_DIR
+) -> tuple[str, str, list[dict[str, str]]]:
+    """(reviewed_head, status, commits_since_review) for one app.
+
+    Coverage already answers "is the current content reviewed". This answers
+    the shipping question coverage cannot: which commits touched the app after
+    the reviewer looked, so the PR can name them. A recorded head that is no
+    longer in HEAD's history (rebase, amend, reset) reads ``not-ancestor`` with
+    an empty list. Guessing a range there would either hide commits or list
+    the reviewed ones again, and an unknown object fails the same way, toward
+    "we cannot tell".
+    """
+    head = stored_review_head(root, slug, apps_dir)
+    if not head:
+        return "", HEAD_NONE, []
+    proc = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", head, "HEAD"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        return head, HEAD_NOT_ANCESTOR, []
+    app_rel = f"{apps_dir}/{slug}"
+    out = _git(
+        root,
+        "log",
+        "--reverse",
+        "--format=%H%x1f%s",
+        f"{head}..HEAD",
+        "--",
+        app_rel,
+        f":(exclude){app_rel}/.review",
+        check=False,
+    )
+    commits = []
+    for line in out.splitlines():
+        sha, _, subject = line.partition("\x1f")
+        if sha.strip():
+            commits.append({"sha": sha.strip(), "subject": subject.strip()})
+    return head, HEAD_ANCESTOR, commits
+
+
+def current_head(root: Path) -> str:
+    """HEAD's commit sha, or "" in a repo with no commits yet."""
+    proc = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
 # ---------------------------------------------------------------------------
@@ -724,6 +855,15 @@ def app_slug_of(rel: str, apps_dir: str = DEFAULT_APPS_DIR) -> str | None:
 def classify(
     root: Path, slug: str | None, base_ref: str, apps_dir: str = DEFAULT_APPS_DIR
 ) -> list[AppVerdict]:
+    """One ``AppVerdict`` per changed app (or just ``slug``).
+
+    ``needs_review`` is the decision; ``verdict`` is review depth. A
+    substantive diff stays ``verdict == "loop"`` after a review covers it,
+    because the depth a change merits does not shrink once it is reviewed.
+    Gate on ``needs_review``, which is ``loop`` and not reviewed and not
+    skipped. Reading ``verdict`` as the decision is how a caller ends up asking
+    for a review that already ran.
+    """
     changed = changed_paths(root, base_ref)
     by_app: dict[str, list[str]] = {}
     for rel in changed:
@@ -736,6 +876,7 @@ def classify(
 
     verdicts: list[AppVerdict] = []
     for app, files in sorted(by_app.items()):
+        head, head_status, since = review_head_state(root, app, apps_dir)
         if not files:
             verdicts.append(
                 AppVerdict(
@@ -747,6 +888,9 @@ def classify(
                     skipped=False,
                     changed_files=[],
                     reason="no changes under this app",
+                    reviewed_head=head,
+                    reviewed_head_status=head_status,
+                    commits_since_review=since,
                 )
             )
             continue
@@ -788,6 +932,9 @@ def classify(
                 unreviewed_files=sorted(uncovered),
                 reviewed_files=sorted(covered),
                 coverage_mode=mode,
+                reviewed_head=head,
+                reviewed_head_status=head_status,
+                commits_since_review=since,
             )
         )
     return verdicts
@@ -889,6 +1036,14 @@ def cmd_classify(args: argparse.Namespace) -> int:
                 print(f"         unreviewed: {rel}")
             if v.coverage_mode == "whole-tree" and v.verdict == VERDICT_LOOP:
                 print("         (whole-tree coverage — artifacts predate per-file tracking)")
+            if v.reviewed_head_status == HEAD_ANCESTOR:
+                n = len(v.commits_since_review)
+                print(f"         reviewed at {v.reviewed_head[:12]}: {n} commit(s) since")
+            elif v.reviewed_head_status == HEAD_NOT_ANCESTOR:
+                print(
+                    f"         reviewed at {v.reviewed_head[:12]}, which is not in this "
+                    "branch's history (rebased?): commits since review unknown"
+                )
     return 1 if needs else 0
 
 
@@ -921,17 +1076,29 @@ def cmd_stamp(args: argparse.Namespace) -> int:
         return 2
     base_ref = resolve_base_ref(root, args.base_ref or _config_base_ref(root))
     baseline = compute_baseline(root, args.slug, apps_dir)
+    if args.expect_baseline and args.expect_baseline != baseline:
+        # The stamp would vouch for the tree as it is now, not the tree the
+        # reviewers read. Refuse rather than mark unreviewed code reviewed.
+        print(
+            f"error: app changed since dispatch: expected baseline "
+            f"{args.expect_baseline}, now {baseline}. The review covers an older "
+            f"tree; re-run it rather than stamping.",
+            file=sys.stderr,
+        )
+        return 2
     blobs = app_substantive_blobs(root, args.slug, base_ref, apps_dir)
+    head = current_head(root)
     path = Path(args.artifact)
     if not path.is_absolute():
         path = root / path
-    stamp_artifact(path, baseline, blobs)
+    stamp_artifact(path, baseline, blobs, head=head or None)
     print(
         json.dumps(
             {
                 "artifact": str(path),
                 "baseline": baseline,
                 "reviewed_files": sorted(blobs),
+                "reviewed_head": head,
             },
             indent=2,
         )
@@ -1048,6 +1215,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("artifact")
     p.add_argument("--slug", required=True)
     p.add_argument("--base-ref", default=None)
+    p.add_argument(
+        "--expect-baseline",
+        default=None,
+        help="Baseline captured when the review was dispatched; a different current "
+        "baseline exits 2 and writes nothing.",
+    )
 
     # Default is system-only ON PURPOSE — see the module docstring's measured
     # finding about additionalContext starting an unrequested turn. A test

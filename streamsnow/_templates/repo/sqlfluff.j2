@@ -3,8 +3,11 @@
 # `streamsnow sql-review generate` applies the layout and capitalisation fixes
 # from these settings to every page section it writes, and
 # `streamsnow sql-review check` lints each app's queries/*.sql with the full
-# rule set below. Run the same lint by hand with:
-#   sqlfluff lint apps/<slug>/queries --templater placeholder
+# rule set below. Lint through it, not through a bare sqlfluff run:
+#   streamsnow sql-review check <slug>
+# The query files hold {TOKEN} placeholders, which sqlfluff's placeholder templater
+# (param_style colon) cannot parse. sql-review check substitutes the index's sample
+# tokens first, so the same files lint cleanly there.
 #
 # Tune it here (for example, add rule codes to exclude_rules); StreamSnow reads
 # this file and never overwrites it. Keep it in the repo root.
