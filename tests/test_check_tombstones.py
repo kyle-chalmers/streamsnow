@@ -76,9 +76,9 @@ def _write_app(repo: Path, slug: str) -> None:
     )
 
 
-def _init_repo(tmp_path: Path) -> str:
+def _init_repo(tmp_path: Path, config: str = CONFIG) -> str:
     """Two committed Acme apps; returns the base commit sha."""
-    (tmp_path / "streamsnow.config.yaml").write_text(CONFIG, encoding="utf-8")
+    (tmp_path / "streamsnow.config.yaml").write_text(config, encoding="utf-8")
     _write_app(tmp_path, "acme-sales-dashboard")
     _write_app(tmp_path, "marketing-campaign-dashboard")
     subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
@@ -309,6 +309,25 @@ def test_namespace_move_requires_tombstones_for_old_fqns(tmp_path, monkeypatch, 
     out = capsys.readouterr().out
     assert code == 1
     assert SALES_FQN in out  # the OLD namespace's identifier needs a tombstone
+
+
+def test_base_identity_survives_a_base_config_this_streamsnow_cannot_read(
+    tmp_path, monkeypatch, capsys
+):
+    """C17: only snowflake.objects and deploy are read from the base commit. A base
+    whose governance block does not load today (here: missing) must still yield the
+    BASE FQNs, so moving app_database in the same PR still demands tombstones."""
+    _init_repo(tmp_path, config=CONFIG.split("governance:")[0])
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        CONFIG.replace('app_database: "STREAMSNOW_APPS"', 'app_database: "NEW_APPS"'),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    code = main(["--base-ref", "main"])
+    out = capsys.readouterr().out
+    assert code == 1, out
+    assert SALES_FQN in out and CAMPAIGN_FQN in out
+    assert "unparseable" not in out
 
 
 def test_drop_sql_from_wrong_cwd_fails_closed(tmp_path, monkeypatch, capsys):
