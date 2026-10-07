@@ -933,17 +933,28 @@ def doctor(
     output_format: str = typer.Option(
         "md", "--format", help="md | json (package-wide check contract; --json is an alias)."
     ),
+    live: bool = typer.Option(
+        False,
+        "--live",
+        help=(
+            "Also check, read-only, that each governance source and the app data are visible "
+            "to your snow connection's role (logs in; SSO may open a browser)."
+        ),
+    ),
 ) -> None:
     """Check the local environment for the prerequisites StreamSnow needs.
 
     Each prerequisite is an independent sub-check with a machine-readable
     result ({name, ok, level, detail, hint}) so skills can shell out per
     check instead of prose-detecting. Exit 0 = all required checks pass,
-    1 = a required check failed, 2 = tool error.
+    1 = a required check failed, 2 = tool error. --live adds the optional
+    source-access check; without it doctor never logs in to Snowflake.
     """
     argv = ["--format", output_format]
     if output_json:
         argv.append("--json")
+    if live:
+        argv.append("--live")
     raise typer.Exit(code=_doctor.main(argv))
 
 

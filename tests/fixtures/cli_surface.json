@@ -213,7 +213,8 @@
     "doctor": {
       "options": [
         "--format",
-        "--json"
+        "--json",
+        "--live"
       ],
       "arguments": []
     },

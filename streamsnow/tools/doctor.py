@@ -62,6 +62,13 @@ NAMES via ``gh``, and a listing that fails for lack of access says "not
 checked", never "missing"). On native Windows only, a ``platform`` warning says
 StreamSnow runs inside WSL today.
 
+``source-access`` (optional, only with ``--live``): every ``governance.sources``
+schema and the app-data schema is visible to the configured connection's role,
+via one read-only ``snow sql`` call of SHOW statements (``streamsnow/probe.py``).
+Ok only when all are visible; a target that could not be verified reads as
+not checked, with its reason. Opt-in because it logs in, and an SSO login
+opens a browser; the default doctor never does.
+
 Detection only: no prompts, no fix execution — hints name the fix, callers own
 the UX. Checks never raise; an unexpected error inside the doctor itself is a
 tool error.
@@ -81,6 +88,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .. import probe as _probe
 from ..config import ConfigError, find_config, load_config
 from ..scaffolder import missing_repo_files
 
@@ -736,6 +744,59 @@ def check_ci_secrets(cfg_result: dict) -> dict:
     )
 
 
+def check_source_access(
+    cfg_result: dict,
+    rows: list[dict] | None,
+    list_error: str = "",
+    probe_fn=None,
+) -> dict:
+    """``--live`` only: is every governance source, and the app data, visible?
+
+    A typo in ``governance.sources`` is silent until the deployed app comes up
+    empty; this names it. Visibility under the connection's own role is not the
+    CI role's SELECT, so the hint says which role ran and where the CI role's
+    grants come from. Ok only when every target is visible: a target the probe
+    could not verify is "not checked" with its reason, never a pass, and
+    anything that stops the probe outright is "not checked" too (principle 6).
+    """
+    name = "source-access"
+    if not cfg_result.get("ok"):
+        return _not_checked(name, "no valid config")
+    connection = cfg_result["detail"].get("connection_name")
+    if rows is None:
+        return _not_checked(name, list_error or "snow connection list unavailable")
+    if not any(_connection_name(r) == connection for r in rows):
+        return _not_checked(name, f"no snow connection named {connection!r}")
+    try:
+        cfg = load_config(Path(cfg_result["detail"]["path"]))
+    except ConfigError as exc:
+        return _not_checked(name, str(exc))
+    targets = [*cfg.governance.sources, cfg.governance.app_data]
+    report = (probe_fn or _probe.probe_schemas)(connection, targets)
+    detail = {"role": report.role, "sources": {r.target: r.status for r in report.results}}
+    if report.error:
+        return _not_checked(name, report.error, detail)
+    missing = [r.target for r in report.results if r.status == _probe.NOT_VISIBLE]
+    unchecked = [
+        f"{r.target} ({r.detail or 'no reason given'})"
+        for r in report.results
+        if r.status == _probe.UNVERIFIED
+    ]
+    if not missing and not unchecked:
+        return _result(name, True, OPTIONAL, detail)
+    hints: list[str] = []
+    if missing:
+        hints.append(
+            f"not visible to role {report.role}: {', '.join(missing)}. Check the names in "
+            "governance.sources and governance.app_data (app data exists once the admin runs "
+            "`streamsnow deploy-setup --admin`); deployed apps read as the CI role, whose "
+            "grants that script writes"
+        )
+    if unchecked:
+        hints.append(f"not checked: {', '.join(unchecked)}")
+    return _result(name, False, OPTIONAL, {**detail, "warn": True}, "; ".join(hints))
+
+
 def check_platform(system: str | None = None) -> dict | None:
     """Native Windows only: StreamSnow's preview and safety hooks are POSIX-only
     today, so it runs inside WSL. Returns None everywhere else (no row)."""
@@ -752,7 +813,7 @@ def check_platform(system: str | None = None) -> dict | None:
     )
 
 
-def run_checks(start: Path | None = None) -> list[dict]:
+def run_checks(start: Path | None = None, live: bool = False, probe_fn=None) -> list[dict]:
     """Run every check; never raises from an individual check."""
     checks = [check_python()]
     tools = {name: check_path_tool(name, level, hint) for name, level, hint in _PATH_TOOLS}
@@ -777,6 +838,8 @@ def run_checks(start: Path | None = None) -> list[dict]:
     checks.append(check_pre_commit_hook(config))
     checks.append(check_node())
     checks.append(check_ci_secrets(config))
+    if live:
+        checks.append(check_source_access(config, rows, list_error, probe_fn))
     platform = check_platform()
     if platform is not None:
         checks.append(platform)
@@ -831,10 +894,18 @@ def main(argv: list[str] | None = None) -> int:
     # The package-wide check contract is `--format md|json`; honor it here too
     # so automation doesn't need a doctor-specific flag (--json stays an alias).
     ap.add_argument("--format", choices=("md", "json"), default="md", dest="output_format")
+    ap.add_argument(
+        "--live",
+        action="store_true",
+        help=(
+            "Also check, read-only, that each governance source and the app data are visible "
+            "to your snow connection's role (logs in; SSO may open a browser)."
+        ),
+    )
     args = ap.parse_args(argv)
 
     try:
-        results = run_checks()
+        results = run_checks(live=args.live)
     except Exception as exc:  # noqa: BLE001 — the doctor itself must not crash opaquely
         print(f"doctor: tool error: {exc}", file=sys.stderr)
         return 2
