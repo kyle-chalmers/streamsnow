@@ -45,6 +45,7 @@ from rich.console import Console
 
 from . import __version__
 from . import ci_key as _ci_key
+from . import probe as _probe
 from .agent_skills import main as _agent_skills_main
 from .config import (
     CONFIG_FILENAME,
@@ -228,6 +229,54 @@ def _snow_connections() -> list[dict] | None:
     return _doctor.snow_connections()
 
 
+def _live_probe(connection: str, targets: list[str]) -> _probe.ProbeReport:
+    """Probe the sources, read-only, as ``connection``'s role when this machine has it.
+
+    One indirection so the suite never reaches a real ``snow`` (tests/conftest.py
+    stubs it). No such connection is "unverified", never a failure: configure
+    must work before any connection exists (principle 6).
+    """
+    rows = _snow_connections()
+    if not any((r.get("connection_name") or r.get("name")) == connection for r in rows or []):
+        return _probe.unverified(
+            targets, f"no snow connection named {connection!r} on this machine yet"
+        )
+    return _probe.probe_schemas(connection, targets)
+
+
+def _report_probe(report: _probe.ProbeReport) -> None:
+    if report.error:
+        console.print(
+            f"[dim]sources not checked live ({report.error}); "
+            "`streamsnow doctor --live` checks them later[/]"
+        )
+        return
+    console.print(
+        f"[dim]checked sources live as role {report.role} (SHOW only: it proves the role can "
+        "see each schema, not that it can SELECT)[/]"
+    )
+    for r in report.results:
+        mark = "[green]✓[/]" if r.status == _probe.VISIBLE else "[yellow]![/]"
+        console.print(f"  {mark} {r.target}: {r.status.replace('_', ' ')}")
+    if any(r.status == _probe.NOT_VISIBLE for r in report.results):
+        console.print(
+            "[yellow]A source this role cannot see is often a typo. The CI role's reads come "
+            "from deploy-setup --admin, not from this role.[/]"
+        )
+
+
+def _imported_prefill(
+    prefill: dict | None, report: _probe.ProbeReport, sources: list[str], app_data: str
+) -> list[str]:
+    """The configured imported databases, plus any the probe found holding a source or
+    the app data (the loader then refuses app data in a share, with its reason).
+    Names compare exactly as stored: an unquoted config name is upper-case."""
+    current = [str(d).upper() for d in (_pf(prefill, "governance.imported_databases", []) or [])]
+    held = {s.split(".", 1)[0] for s in sources} | {app_data.split(".", 1)[0]}
+    found = [d for d in report.imported_databases if d in held]
+    return list(dict.fromkeys([*current, *found]))
+
+
 def _detect_connection_name(account: str, slug: str) -> str:
     """The default ``snow`` connection's name when it opens ``account``, else ``slug``.
 
@@ -363,6 +412,10 @@ def _prompt_config(
     else:
         deny = _pf(prefill, "governance.schema_deny", ["RAW", "STAGING"])
     sources = [s.upper() for s in _split_schemas(sources_answer)]
+    app_data = str(app_data).strip().upper()
+    report = _live_probe(connection_name, sources)
+    _report_probe(report)
+    imported = _imported_prefill(prefill, report, sources, app_data)
     # Everything below ships as a commented default in the written file.
     app_schema = _pf(prefill, "snowflake.objects.app_schema", "DASHBOARDS")
     warehouse = _pf(prefill, "snowflake.objects.default_warehouse", "STREAMSNOW_WH")
@@ -411,12 +464,14 @@ def _prompt_config(
         },
         "governance": {
             "sources": sources,
-            "app_data": str(app_data).strip().upper(),
+            "app_data": app_data,
             "schema_deny": deny,
             "boundary": _pf(prefill, "governance.boundary", "warn"),
         },
         "deploy": deploy,
     }
+    if imported:
+        answers["governance"]["imported_databases"] = imported
     return _deep_merge(_drop_retired(prefill), answers)
 
 

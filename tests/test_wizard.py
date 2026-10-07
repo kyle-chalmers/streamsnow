@@ -7,13 +7,14 @@ from pathlib import Path
 import typer
 import yaml
 
-from streamsnow import cli
+from streamsnow import cli, probe
 from streamsnow.cli import _connection_hint, _prompt_config, _render_config_yaml
 from streamsnow.config import Config
 from streamsnow.tools import doctor
 
 # Captured at import, before tests/conftest.py stubs it per test.
 _REAL_SNOW_CONNECTIONS = cli._snow_connections
+_REAL_LIVE_PROBE = cli._live_probe
 
 
 def _run_wizard(monkeypatch, prefill=None, directory=Path("acme-analytics")):
@@ -289,3 +290,52 @@ def test_connection_hint_matches_what_snow_already_has():
     assert exists.startswith(f"snow connection set-default {name}")
     already = _connection_hint(cfg, [{"connection_name": name, "is_default": True}])
     assert "snow connection add" not in already and "already your default" in already
+
+
+def test_wizard_checks_sources_live_and_prefills_imported_databases(monkeypatch, capsys):
+    calls = []
+
+    def fake_probe(connection, targets):
+        calls.append((connection, list(targets)))
+        return probe.ProbeReport(
+            role="ANALYST",
+            results=(
+                probe.ProbeResult("ANALYTICS_DB.ANALYTICS", probe.VISIBLE, "ANALYST"),
+                probe.ProbeResult(
+                    "ANALYTICS_DB.REPORTING", probe.NOT_VISIBLE, "ANALYST", "not visible"
+                ),
+            ),
+            imported_databases=("ANALYTICS_DB", "PARTNER_SHARE"),
+        )
+
+    monkeypatch.setattr(cli, "_live_probe", fake_probe)
+    cfg_dict, _ = _run_wizard(monkeypatch)
+    assert calls == [("acme-analytics", ["ANALYTICS_DB.ANALYTICS", "ANALYTICS_DB.REPORTING"])]
+    # Only an imported database that holds a source (or app data) is recorded.
+    assert cfg_dict["governance"]["imported_databases"] == ["ANALYTICS_DB"]
+    Config.from_dict(cfg_dict)
+    out = " ".join(capsys.readouterr().out.split())
+    assert "role ANALYST" in out and "ANALYTICS_DB.REPORTING: not visible" in out
+
+
+def test_wizard_without_a_probe_says_unverified_and_writes_no_imported_list(monkeypatch, capsys):
+    cfg_dict, _ = _run_wizard(monkeypatch)  # conftest's stub: unverified
+    assert "imported_databases" not in cfg_dict["governance"]
+    assert "not checked live" in capsys.readouterr().out
+
+
+def test_live_probe_only_runs_for_a_connection_this_machine_has(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("probed without a matching snow connection")
+
+    monkeypatch.setattr(probe, "probe_schemas", boom)
+    monkeypatch.setattr(cli, "_snow_connections", lambda: None)
+    report = _REAL_LIVE_PROBE("acme", ["ANALYTICS_DB.REPORTING"])
+    assert report.results[0].status == probe.UNVERIFIED and "acme" in report.error
+    seen = []
+    monkeypatch.setattr(cli, "_snow_connections", lambda: [{"connection_name": "acme"}])
+    monkeypatch.setattr(
+        probe, "probe_schemas", lambda c, t: seen.append((c, t)) or probe.unverified(t, "x")
+    )
+    _REAL_LIVE_PROBE("acme", ["ANALYTICS_DB.REPORTING"])
+    assert seen == [("acme", ["ANALYTICS_DB.REPORTING"])]
