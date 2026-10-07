@@ -546,3 +546,78 @@ def test_placeholder_never_reaches_the_findings(tmp_path):
         "",
     )
     assert res["findings"][1]["ref"] == "SALES_DB.PUBLIC.<expr>"
+
+
+# --- wave 3: exact text, Streamlit-only prose, nested calls ----------------------------
+
+
+def test_split_name_across_concatenated_operands_is_found_without_padding(tmp_path):
+    src = 'session.sql("SELECT * FROM SALES_" +\n    "DB.PUBLIC.X")\n'
+    assert _check(tmp_path, src, ENFORCE, ".py") == (
+        [(1, "outside_boundary", "SALES_DB.PUBLIC.X")],
+        [],
+    )
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        'session.sql("SELECT * FROM R" +\n    "AW.E")\n',
+        'session.sql("SEL" + "ECT * FROM RAW.E")\n',
+        'session.sql("SELECT * FROM RAW" +\n    ".E")\n',
+    ],
+)
+def test_denied_name_split_across_operands_is_denied(tmp_path, src):
+    findings, _ = _check(tmp_path, src, ENFORCE, ".py")
+    assert [(r, s) for _, r, s in findings] == [("denied", "RAW")]
+
+
+def test_a_name_on_a_later_source_line_reports_that_line(tmp_path):
+    src = 'q = ("SELECT *" +\n     " FROM " +\n     "SALES_DB.PUBLIC.X")\nsession.sql(q)\n'
+    assert _check(tmp_path, src, ENFORCE, ".py") == (
+        [(3, "outside_boundary", "SALES_DB.PUBLIC.X")],
+        [],
+    )
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        'import io\nq = io.StringIO()\nq.write("SELECT * FROM DB.RAW.X")\nsession.sql(q.getvalue())\n',
+        'write("SELECT * FROM DB.RAW.X")\n',
+        'sql_file.write("SELECT * FROM DB.RAW.X")\n',
+        'col.write("SELECT * FROM DB.RAW.X")\n',
+        'other.caption("SELECT * FROM DB.RAW.X")\n',
+    ],
+)
+def test_prose_exclusion_is_limited_to_streamlit_calls(tmp_path, src):
+    findings, _ = _check(tmp_path, src, ENFORCE, ".py")
+    assert [(r, s) for _, r, s in findings] == [("denied", "RAW")]
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        'st.write("SELECT * FROM DB.RAW.X")\n',
+        'st.sidebar.write("SELECT * FROM DB.RAW.X")\n',
+        'import streamlit as stl\nstl.caption("SELECT * FROM DB.RAW.X")\n',
+        'from streamlit import markdown\nmarkdown("SELECT * FROM DB.RAW.X")\n',
+        'import streamlit\nstreamlit.info("SELECT * FROM DB.RAW.X")\n',
+    ],
+)
+def test_streamlit_rooted_calls_are_prose(tmp_path, src):
+    assert _check(tmp_path, src, ENFORCE, ".py") == ([], [])
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        'st.caption("Total: " + str(fetch("SELECT * FROM FINANCE_DB.STAGING.F")))\n',
+        'st.caption("from " + q("SELECT * FROM RAW.E"))\n',
+        'st.metric("n", "x" + f"{fetch(\'SELECT * FROM RAW.E\')}")\n',
+        'st.write(label="rows " + run("SELECT * FROM SALES_DB.PUBLIC.X"))\n',
+    ],
+)
+def test_sql_in_a_nested_call_of_a_prose_argument_is_still_scanned(tmp_path, src):
+    findings, _ = _check(tmp_path, src, ENFORCE, ".py")
+    assert findings != []
