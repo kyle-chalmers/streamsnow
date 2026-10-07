@@ -17,6 +17,7 @@ streamsnow agent-skills   Install the skills for Codex and other agents
 streamsnow deploy-setup   Emit the one-time Snowflake DDL for your deploy source
                           (--admin: full bootstrap; --teardown: start-fresh reverse)
 streamsnow deploy-sql     Emit the CREATE OR REPLACE STREAMLIT SQL for one app (deploy job)
+streamsnow objects-sql    Emit the app-data views and dynamic tables, in dependency order (deploy job)
 streamsnow verify-deploy  Check that a deployed app actually serves
 streamsnow ci-key create  Make the CI user's key pair + the deploy secret files
 streamsnow ci-key push    Set the five deploy secrets on GitHub from those files
@@ -1427,6 +1428,40 @@ def deploy_sql(
         _err(str(exc))
         raise typer.Exit(2) from exc
     print(sql)
+
+
+@app.command(name="objects-sql")
+def objects_sql_cmd(
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+) -> None:
+    """Emit the app-data DDL the deploy job runs before any app (deploy workflow).
+
+    Every view and dynamic table the apps declare in governance.app_data, in
+    dependency order across apps. Every file is checked first: on any finding
+    nothing is printed and the exit code is 1, so the deploy stops before
+    Snowflake sees a statement. Prints nothing when no app declares one.
+    """
+    # stdout is the SQL file the deploy job redirects, so every message goes to stderr
+    # (the shared _err helper writes to stdout).
+    from .app_data import load_app_data
+
+    cfg_path = Path(config) if config else find_config()
+    try:
+        cfg = load_config(cfg_path)
+    except ConfigError as exc:
+        typer.echo(f"objects-sql: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    plan = load_app_data(Path(cfg_path).resolve().parent, cfg)
+    if not plan.ok:
+        for f in plan.findings:
+            typer.echo(f"objects-sql: {f['file']}:{f['line']} {f['detail']}", err=True)
+        typer.echo(
+            f"objects-sql: {len(plan.findings)} finding(s); printed no SQL, so the deploy "
+            "stops before any change.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    typer.echo(plan.sql(), nl=False)
 
 
 @app.command(name="verify-deploy")

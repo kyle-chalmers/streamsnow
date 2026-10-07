@@ -254,6 +254,12 @@
         "function"
       ]
     },
+    "objects-sql": {
+      "options": [
+        "--config"
+      ],
+      "arguments": []
+    },
     "stage-bundle": {
       "options": [
         "--dir",
