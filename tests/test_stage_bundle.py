@@ -73,6 +73,12 @@ def _declare(app_dir: Path, *entries: str) -> None:
         "pages/__pycache__/overview.cpython-311.pyc",
         ".streamlit/secrets.toml",
         ".streamlit/secrets.toml.example",
+        "acme_sales.egg-info/PKG-INFO",
+        "pages/acme_sales.egg-info/SOURCES.txt",
+        "branding.pyc",
+        "pages/overview.cpython-311.pyc",
+        ".DS_Store",
+        "pages/.DS_Store",
     ],
 )
 def test_excluded_reason_names_why_a_path_never_ships(rel):
@@ -226,6 +232,26 @@ def test_bundle_skips_tooling_dirs(tmp_path):
 
     shipped = _shipped(out)
     assert not any("__pycache__" in p or ".pytest_cache" in p for p in shipped)
+
+
+def test_bundle_skips_build_metadata_bytecode_and_finder_files(tmp_path):
+    """A git-ignored `*.egg-info/` from a local editable install, loose bytecode and
+    `.DS_Store` are local debris: the bundle must not carry them to the stage."""
+    repo = _repo(tmp_path)
+    app_dir = repo / "apps" / SLUG
+    _write(app_dir / "acme_sales.egg-info" / "PKG-INFO", "x")
+    _write(app_dir / "branding.pyc", "x")
+    _write(app_dir / ".DS_Store", "x")
+    _write(app_dir / "pages" / ".DS_Store", "x")
+    out = tmp_path / "bundle"
+
+    build_bundle(repo, out)
+
+    shipped = _shipped(out)
+    assert not any(
+        "egg-info" in p or p.endswith(".pyc") or p.endswith(".DS_Store") for p in shipped
+    )
+    assert "streamlit_app.py" in shipped
 
 
 def test_bundle_refuses_a_file_symlink_that_escapes_the_repo(tmp_path):

@@ -78,7 +78,9 @@ leaves out:
   `README.md`), unless an `artifacts:` entry in the app's `snowflake.yml`
   declares one, as an app that renders its own `help.md` would;
 - `sql_review/`, including `review_log/`;
-- dot-directories other than `.streamlit`, and `__pycache__`;
+- dot-directories other than `.streamlit`, `__pycache__`, and `*.egg-info` directories
+  (build metadata from a local editable install, often ignored by version control), plus
+  `*.pyc` and `.DS_Store` files;
 - everything in `.streamlit/` except `config.toml`, so a local `secrets.toml`
   never ships;
 - `.env` and `.env.*` files anywhere in the app, even when declared, because
