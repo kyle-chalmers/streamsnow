@@ -345,7 +345,8 @@ def test_a_missing_secret_file_exits_2_before_signing_in(tmp_path, monkeypatch, 
     fake = FakeSnow(cfg)
     r = _cli(monkeypatch, fake, "--dir", str(_secrets_dir(tmp_path, skip=(name,))))
     assert r.exit_code == 2
-    assert name in r.output
+    # A narrow CI terminal wraps the long tmp path mid-word, so join the lines.
+    assert name in r.output.replace("\n", "")
     assert fake.calls == []
     _no_secret(r.output)
 
@@ -375,7 +376,7 @@ def test_a_secret_file_that_differs_from_the_config_exits_2(tmp_path, monkeypatc
     d = _secrets_dir(tmp_path, SNOWFLAKE_WAREHOUSE="OLD_WH")
     r = _cli(monkeypatch, fake, "--dir", str(d))
     assert r.exit_code == 2
-    assert "SNOWFLAKE_WAREHOUSE" in r.output
+    assert "SNOWFLAKE_WAREHOUSE" in r.output.replace("\n", "")
     assert fake.calls == []
 
 
@@ -497,7 +498,7 @@ def test_a_non_utf8_secret_file_exits_2(tmp_path, monkeypatch, name):
     (d / "secrets" / name).write_bytes(b"\xff\xfe not text")
     r = _cli(monkeypatch, fake, "--dir", str(d))
     assert r.exit_code == 2, r.output
-    assert "UTF-8" in r.output and name in r.output
+    assert "UTF-8" in r.output and name in r.output.replace("\n", "")
     assert "Traceback" not in r.output
     assert fake.calls == []
 
@@ -599,7 +600,7 @@ def test_a_secret_file_with_a_nul_byte_exits_2(tmp_path, monkeypatch, name):
     (d / "secrets" / name).write_bytes(original[:4] + b"\x00" + original[4:])
     r = _cli(monkeypatch, fake, "--dir", str(d))
     assert r.exit_code == 2, r.output
-    assert "NUL" in r.output and name in r.output
+    assert "NUL" in r.output and name in r.output.replace("\n", "")
     assert "Traceback" not in r.output
     assert fake.calls == []
     _no_secret(r.output)
