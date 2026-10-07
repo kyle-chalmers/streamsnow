@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
 import re
 import subprocess
 import sys
+import tarfile
 import urllib.error
 from datetime import date
 from pathlib import Path
@@ -699,6 +701,80 @@ def test_open_pr_refuses_unexpected_modified_files(tmp_path, capsys):
     assert code == 1 and "playwright-walkthrough.md" in out and fake.mutations() == []
 
 
+def test_open_pr_scans_the_committed_tree_with_the_denylist_before_pushing(tmp_path, capsys):
+    root = _pr_repo(tmp_path, capsys)
+    fake = pr_run(root, {})
+    code, _, _ = run_main(capsys, ["open-pr", "0.4.3", "--root", str(root)], run=fake)
+    assert code == 0
+    scan_at = next(
+        i for i, c in enumerate(fake.calls) if "streamsnow.tools.check_export_clean" in c
+    )
+    scan = fake.calls[scan_at]
+    assert scan[scan.index("--denylist") + 1] == str(root / ".streamsnow/export-denylist.txt")
+    commit_at = next(i for i, c in enumerate(fake.calls) if c[:2] == ["git", "commit"])
+    push_at = next(i for i, c in enumerate(fake.calls) if c[:2] == ["git", "push"])
+    assert commit_at < scan_at < push_at
+
+
+def test_open_pr_runs_the_real_scan_and_refuses_a_leak_in_the_files(tmp_path, capsys):
+    root = _pr_repo(tmp_path, capsys, prepare=False)
+    log = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    log = log.replace("orders table.", "orders table for globex-internal.")
+    (root / "CHANGELOG.md").write_text(log, encoding="utf-8", newline="\n")
+    _git(root, "commit", "-qam", "docs: acme wording")
+    _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+    assert _prepare(capsys, root, "0.4.3")[0] == 0
+    fake = pr_run(root, {})
+    fake.handlers.insert(0, ([sys.executable, "-m", "streamsnow.tools.check_export_clean"], _real))
+    code, payload, out = run_main(capsys, ["open-pr", "0.4.3", "--root", str(root)], run=fake)
+    assert code == 1
+    assert {g["name"]: g["status"] for g in payload["gates"]}["privacy scan"] == "FAIL"
+    assert "globex" not in out.lower() and not _pushed(fake)
+
+
+DENY_RELEASE = DENY + "re:release 0\\.4\\.3\n"
+
+
+@pytest.mark.parametrize(
+    ("argv", "deny", "what"),
+    [
+        (["--pin-floor-note", "deploy calls the globex-internal sync"], DENY, "--pin-floor-note"),
+        (["--pin-floor-note", "see INITECH-9"], DENY, "--pin-floor-note"),
+        (["--trailer", "Co-Authored-By: Globex-Internal Bot <bot@example.com>"], DENY, "--trailer"),
+        ([], DENY_RELEASE, "title"),
+    ],
+)
+def test_open_pr_runs_free_text_through_the_denylist(tmp_path, capsys, argv, deny, what):
+    root = _pr_repo(tmp_path, capsys)
+    _write_denylist(root, deny)
+    fake = pr_run(root, {})
+    code, _, out = run_main(capsys, ["open-pr", "0.4.3", *argv, "--root", str(root)], run=fake)
+    assert code == 1, out
+    assert what in out and "denylist" in out
+    assert "globex" not in out.lower() and "INITECH" not in out
+    assert fake.mutations() == []
+
+
+def test_open_pr_checks_the_generated_pr_body_before_pushing(tmp_path, capsys):
+    root = _pr_repo(tmp_path, capsys)
+    fake = pr_run(root, {})
+    # a gate detail is copied into the PR body; here the docs checker echoes a term
+    fake.on([sys.executable, "scripts/check_docs_links.py", "--online"], out="ok globex-internal\n")
+    code, _, out = run_main(capsys, ["open-pr", "0.4.3", "--root", str(root)], run=fake)
+    assert code == 1 and "PR body" in out
+    assert "globex" not in out.lower()
+    assert not _pushed(fake)
+
+
+def test_open_pr_needs_a_denylist_before_committing(tmp_path, capsys):
+    root = _pr_repo(tmp_path, capsys)
+    (root / ".streamsnow/export-denylist.txt").unlink()
+    fake = pr_run(root, {})
+    code, _, out = run_main(capsys, ["open-pr", "0.4.3", "--root", str(root)], run=fake)
+    assert code == 1 and "export-denylist.txt" in out
+    assert fake.mutations() == []
+
+
 def test_open_pr_stops_before_the_push_when_a_gate_fails(tmp_path, capsys):
     root = _pr_repo(tmp_path, capsys)
     fake = pr_run(root, {}, scan_rc=1)
@@ -797,6 +873,7 @@ def tag_run(
     changelog=None,
     messages="feat: acme report\x00",
     denylist=DENY,
+    tree=None,
 ) -> FakeRun:
     ov = origin_version or version
     if denylist is not None:
@@ -850,10 +927,39 @@ def tag_run(
         ["git", "ls-remote", "origin", "refs/heads/main"], out=f"{remote_main}\trefs/heads/main\n"
     )
     fake.on(["gh", "run", "list", "--commit", SHA], out=json.dumps(runs))
+    fake.handlers.append((["git", "archive", "--format=tar", "-o"], _archive(tree)))
+    fake.handlers.append(([sys.executable, "-m", "streamsnow.tools.check_export_clean"], _real))
     fake.on(["git", "tag", t, SHA])
     fake.on(["git", "push", "origin", f"refs/tags/{t}"])
     fake.on(["gh", "release", "create", t])
     return fake
+
+
+CLEAN_TREE = {"README.md": "# Acme dashboards\n", "apps/sales/app.py": "print('acme')\n"}
+
+
+def _archive(tree: dict | None, extra_member=None):
+    """Answer `git archive --format=tar -o <path> <sha>` by writing a tar of ``tree``."""
+
+    def handler(args, kw):
+        assert args[-1] == SHA, args
+        with tarfile.open(args[4], "w") as tf:
+            for name, text in (tree if tree is not None else CLEAN_TREE).items():
+                data = text.encode("utf-8")
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            if extra_member is not None:
+                tf.addfile(extra_member)
+        return (0, "", "")
+
+    return handler
+
+
+def _real(args, kw):
+    """Run the real privacy scanner: it is local and offline."""
+    proc = subprocess.run(args, cwd=kw.get("cwd"), capture_output=True, text=True, encoding="utf-8")
+    return (proc.returncode, proc.stdout, proc.stderr)
 
 
 def _tag(capsys, tmp_path, fake, *extra):
@@ -873,6 +979,79 @@ def test_tag_success_runs_exactly_three_mutations_in_order(tmp_path, capsys):
     assert muts[2][muts[2].index("--title") + 1] == "v0.5.0"
     assert "/release verify 0.5.0" in out
     assert fake.calls[0] == ["git", "fetch", "origin", "--tags"]
+
+
+def _scan_index(fake):
+    return next(i for i, c in enumerate(fake.calls) if "streamsnow.tools.check_export_clean" in c)
+
+
+def test_tag_scans_the_candidate_tree_before_any_mutation(tmp_path, capsys):
+    fake = tag_run(tmp_path)
+    code, _, _ = _tag(capsys, tmp_path, fake)
+    assert code == 0
+    scan = fake.calls[_scan_index(fake)]
+    assert scan[scan.index("--denylist") + 1] == str(tmp_path / ".streamsnow/export-denylist.txt")
+    first_mutation = fake.calls.index(fake.mutations()[0])
+    assert _scan_index(fake) < first_mutation
+    archive = next(c for c in fake.calls if c[:2] == ["git", "archive"])
+    assert fake.calls.index(archive) < _scan_index(fake)
+
+
+@pytest.mark.parametrize(
+    "tree",
+    [
+        {"README.md": "# Acme\nBuilt for globex-internal.\n"},
+        {"docs/notes.md": "Ticket INITECH-77 tracks this.\n"},
+        # split so the repo's own privacy scan does not read this file as a leak
+        {"README.md": "Mail ops@" + "acme-corp.com\n"},
+    ],
+)
+def test_tag_refuses_a_leak_in_the_candidate_files(tmp_path, capsys, tree):
+    fake = tag_run(tmp_path, tree=tree)
+    code, _, out = _tag(capsys, tmp_path, fake)
+    assert code == 1, out
+    assert "privacy scan" in out
+    assert "globex" not in out.lower() and "INITECH" not in out and "acme-corp" not in out
+    assert fake.mutations() == []
+
+
+def test_tag_without_a_denylist_scans_the_tree_generically_when_allowed(tmp_path, capsys):
+    fake = tag_run(tmp_path, denylist=None)
+    code, _, out = _tag(capsys, tmp_path, fake, "--allow-no-denylist")
+    assert code == 0, out
+    assert "--denylist" not in fake.calls[_scan_index(fake)]
+    user = "acmedev"
+    fake = tag_run(tmp_path, denylist=None, tree={"README.md": f"see /home/{user}/x\n"})
+    code, _, _ = _tag(capsys, tmp_path, fake, "--allow-no-denylist")
+    assert code == 1 and fake.mutations() == []
+
+
+@pytest.mark.parametrize("name", ["../escape.txt", "/abs/escape.txt"])
+def test_tag_refuses_an_archive_member_that_escapes(tmp_path, capsys, name):
+    fake = tag_run(tmp_path)
+    bad = tarfile.TarInfo(name)
+    bad.size = 0
+    fake.handlers.insert(0, (["git", "archive", "--format=tar", "-o"], _archive(None, bad)))
+    code, _, out = _tag(capsys, tmp_path, fake)
+    assert code == 2 and "escape" in out
+    assert fake.mutations() == []
+
+
+def test_tag_refuses_a_symlink_that_points_outside(tmp_path, capsys):
+    fake = tag_run(tmp_path)
+    link = tarfile.TarInfo("apps/link")
+    link.type = tarfile.SYMTYPE
+    link.linkname = "../../outside"
+    fake.handlers.insert(0, (["git", "archive", "--format=tar", "-o"], _archive(None, link)))
+    code, _, out = _tag(capsys, tmp_path, fake)
+    assert code == 2 and fake.mutations() == []
+
+
+def test_tag_scanner_tool_error_refuses(tmp_path, capsys):
+    fake = tag_run(tmp_path)
+    fake.on([sys.executable, "-m", "streamsnow.tools.check_export_clean"], rc=2, out="boom")
+    code, _, _ = _tag(capsys, tmp_path, fake)
+    assert code == 2 and fake.mutations() == []
 
 
 def test_tag_release_notes_are_the_changelog_section(tmp_path, capsys):
