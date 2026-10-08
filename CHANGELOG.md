@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-08
+
 ### Breaking
 
 - **Config `schema_version: 2`: `governance.sources` and `governance.app_data` replace
