@@ -17,7 +17,9 @@ streamsnow agent-skills   Install the skills for Codex and other agents
 streamsnow deploy-setup   Emit the one-time Snowflake DDL for your deploy source
                           (--admin: full bootstrap; --teardown: start-fresh reverse)
 streamsnow deploy-sql     Emit the CREATE OR REPLACE STREAMLIT SQL for one app (deploy job)
+streamsnow objects-sql    Emit the app-data views and dynamic tables, in dependency order (deploy job)
 streamsnow verify-deploy  Check that a deployed app actually serves
+streamsnow git-head       Stop a git-repository deploy when the branch moved past this commit (deploy job)
 streamsnow ci-key create  Make the CI user's key pair + the deploy secret files
 streamsnow ci-key push    Set the five deploy secrets on GitHub from those files
 streamsnow ci-key verify  Sign in as the CI user and check, read-only, what a deploy sees
@@ -1098,7 +1100,23 @@ def deploy_setup(
                 origin = _checkout_github_origin()
             cfg = with_source(cfg, target, git_origin=origin, github_auth=github_auth)
         if teardown:
-            sql = generate_teardown_sql(cfg)
+            from .app_data import load_app_data
+
+            cfg_file = Path(config) if config else find_config()
+            repo = cfg_file.resolve().parent if cfg_file else Path.cwd()
+            plan = load_app_data(repo, cfg)
+            if plan.findings:
+                typer.echo(
+                    f"deploy-setup: {len(plan.findings)} app-data finding(s); teardown lists "
+                    "what is declared, run `streamsnow objects-sql` for the findings",
+                    err=True,
+                )
+            sql = generate_teardown_sql(
+                cfg,
+                plan.drop_order(),
+                inventory_incomplete=plan.incomplete,
+                skipped=plan.skipped_names(),
+            )
         elif admin:
             key = read_public_key(public_key_file) if public_key_file else None
             sql = generate_admin_sql(
@@ -1113,8 +1131,11 @@ def deploy_setup(
         _err(str(exc))
         raise typer.Exit(2) from exc
     if cfg.deploy.source != configured:
+        from .app_data import one_line
+
         sql = (
-            f"-- PREVIEW of the {cfg.deploy.source} deploy source. Your config uses {configured};\n"
+            f"-- PREVIEW of the {one_line(cfg.deploy.source)} deploy source. Your config uses "
+            f"{one_line(configured)};\n"
             "-- nothing here takes effect until you switch deploy.source (`streamsnow configure`)\n"
             "-- and re-render the deploy workflow (`streamsnow update --apply`). See\n"
             "-- docs/git-repository.md. Review only: this command never runs SQL.\n" + sql
@@ -1429,6 +1450,40 @@ def deploy_sql(
     print(sql)
 
 
+@app.command(name="objects-sql")
+def objects_sql_cmd(
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+) -> None:
+    """Emit the app-data DDL the deploy job runs before any app (deploy workflow).
+
+    Every view and dynamic table the apps declare in governance.app_data, in
+    dependency order across apps. Every file is checked first: on any finding
+    nothing is printed and the exit code is 1, so the deploy stops before
+    Snowflake sees a statement. Prints nothing when no app declares one.
+    """
+    # stdout is the SQL file the deploy job redirects, so every message goes to stderr
+    # (the shared _err helper writes to stdout).
+    from .app_data import load_app_data
+
+    cfg_path = Path(config) if config else find_config()
+    try:
+        cfg = load_config(cfg_path)
+    except ConfigError as exc:
+        typer.echo(f"objects-sql: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    plan = load_app_data(Path(cfg_path).resolve().parent, cfg)
+    if not plan.ok:
+        for f in plan.findings:
+            typer.echo(f"objects-sql: {f['file']}:{f['line']} {f['detail']}", err=True)
+        typer.echo(
+            f"objects-sql: {len(plan.findings)} finding(s); printed no SQL, so the deploy "
+            "stops before any change.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    typer.echo(plan.sql(), nl=False)
+
+
 @app.command(name="verify-deploy")
 def verify_deploy_cmd(
     slug: str = typer.Argument(..., help="App slug to verify."),
@@ -1464,6 +1519,15 @@ def verify_deploy_cmd(
     # next to the config. No such directory: the check does not run.
     cfg_path = Path(config) if config else find_config()
     app_dir = cfg_path.resolve().parent / "apps" / slug if cfg_path else None
+    from .app_data import load_app_data
+
+    tables: list[str] = []
+    app_data_error = ""
+    if cfg_path:
+        try:
+            tables = load_app_data(cfg_path.resolve().parent, cfg).dynamic_tables(slug)
+        except Exception as exc:  # a verify run must not die on the app-data loader
+            app_data_error = f"could not load the app-data objects: {exc}"
     try:
         result = verify_app(
             cfg,
@@ -1473,6 +1537,8 @@ def verify_deploy_cmd(
             attempts=attempts,
             delay=delay,
             app_dir=app_dir if app_dir is not None and app_dir.is_dir() else None,
+            app_data_tables=tables,
+            app_data_error=app_data_error,
         )
     except ValueError as exc:  # invalid slug
         _err(str(exc))
@@ -1495,6 +1561,61 @@ def verify_deploy_cmd(
                 print(f"      - {f}")
         print(f"\n{summary_line(result)}")
     raise typer.Exit(code=0 if result["ok"] else 1)
+
+
+@app.command(name="git-head", hidden=True)
+def git_head_cmd(
+    expect: str = typer.Option(..., "--expect", help="The commit this run deploys ($GITHUB_SHA)."),
+    temporary_connection: bool = typer.Option(
+        False,
+        "--temporary-connection",
+        help="Pass --temporary-connection to snow (the deploy workflow does, in CI).",
+    ),
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+) -> None:
+    """Stop a git-repository deploy when the fetched branch is not this run's commit (deploy job).
+
+    Exit 0 when the branch head is --expect, 1 when it moved (stop before any
+    DDL: the newer commit's own run ships both), 2 when it cannot be checked.
+    """
+    from functools import partial
+
+    from .verify import git_branch_head, run_query_snow
+
+    if not re.fullmatch(r"[0-9a-fA-F]{7,64}", expect):
+        typer.echo(
+            f"git-head: --expect {expect!r} must be a commit SHA (7 to 64 hex characters)",
+            err=True,
+        )
+        raise typer.Exit(2)
+    try:
+        cfg = load_config(Path(config) if config else None)
+        head = git_branch_head(
+            cfg, partial(run_query_snow, temporary_connection=temporary_connection)
+        )
+    except ConfigError as exc:
+        typer.echo(f"git-head: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    except (ValueError, RuntimeError) as exc:
+        typer.echo(f"git-head: cannot read the branch head: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    d = cfg.deploy
+    if not head:
+        typer.echo(
+            f"git-head: no branch {d.git_branch} in {d.git_repository_fqn} after the fetch: "
+            "check deploy.git_branch",
+            err=True,
+        )
+        raise typer.Exit(2)
+    if not head.lower().startswith(expect.lower()):
+        typer.echo(
+            f"git-head: {d.git_repository_fqn} branch {d.git_branch} is at {head[:12]}, but this "
+            f"run deploys {expect[:12]}: another merge landed after this run started, and its "
+            "own deploy run ships both. Stopping before any DDL or app change.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    typer.echo(f"git-head: {d.git_branch} is at {head[:12]}, this run's commit.", err=True)
 
 
 @app.command(name="app-url")
@@ -1721,7 +1842,9 @@ def check_tombstones_cmd(
     base_ref: str = typer.Option("origin/main", "--base-ref"),
     registry: Path = typer.Option(None, "--registry", help="Path to deploy/tombstones.yml."),
     drop_sql: bool = typer.Option(
-        False, "--drop-sql", help="Emit DROP STREAMLIT IF EXISTS for tombstoned identifiers."
+        False,
+        "--drop-sql",
+        help="Emit DROP STREAMLIT|VIEW|DYNAMIC TABLE IF EXISTS for each tombstone, by its kind.",
     ),
     apps_dir: Path = typer.Option(None, "--apps-dir", help="Apps directory (default: apps)."),
     config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),

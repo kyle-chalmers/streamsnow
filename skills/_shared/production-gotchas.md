@@ -19,7 +19,9 @@ recipes: [`docs/production-lessons.md`](../../docs/production-lessons.md).
 | Query "succeeds" deployed but returns nothing | Never pass Python `None` in `params=` — the deployed driver NULL-binds ALL positional params when any is None (local doesn't reproduce). Use `render_sql` tokens for optional filters. |
 | Every page in a group renders locally, `ModuleNotFoundError` deployed | Deployed, **only the app root is on `sys.path`**; `streamlit run` also adds the executing page's own directory. Import subdirectory helpers package-qualified (`from pages._header import ...`). A local boot and a full UI walkthrough cannot catch this — `streamsnow check page-imports` can. |
 | App consumed DDL that lives outside this repo | Record it as a dated SQL file in a `migrations/`-style dir, committed with the consuming PR; live object is the source of truth, the file is the audit trail. |
-| Retiring an app | `git mv apps/<slug> retired_apps/<slug>` (deploy scopes to `apps/**`). Dropping the Snowflake object is a separate deliberate manual step. |
+| Retiring an app or an app-data object | Remove it and add its identifier to deploy/tombstones.yml in the same PR (with kind: view or kind: dynamic_table for an app-data object); the deploy job drops it on merge, and streamsnow check tombstones blocks a PR that forgets. Prefer git mv apps/<slug> retired_apps/<slug> for an app, so its code stays in history. |
+| A dynamic table rebuilt from scratch, its grants gone, after every deploy | Deployed DDL uses CREATE OR ALTER DYNAMIC TABLE. CREATE OR REPLACE DYNAMIC TABLE recreates it: a full refresh and new grants each time. streamsnow objects-sql refuses it. |
+| A column's data vanished after a table DDL change | CREATE OR ALTER TABLE drops the data in a renamed or removed column. App data holds no tables: pre-compute with a dynamic table instead. |
 
 Contract: this file is read-only guidance — nothing here authorizes running
 DDL, widening grants, or bypassing the schema deny-list. Grant and view

@@ -377,3 +377,24 @@ def test_ship_app_has_a_fallback_when_the_host_forbids_polling_ci():
     assert "gh pr checks <num> --watch" in skill
     assert "PR open, checks pending" in skill
     assert skill.count("PR open, checks pending") >= 2  # the step and "Done when"
+
+
+def test_skills_say_who_applies_app_data_ddl():
+    """#79: the deploy job applies app-data DDL. "A human applies DDL" without that
+    qualifier would send an agent to ask for a manual apply the deploy already does."""
+    for rel in (
+        "sql-review/SKILL.md",
+        "sql-review/authoring.md",
+        "sql-review/reviewers/object.md",
+    ):
+        text = _flat((SKILLS_DIR / rel).read_text(encoding="utf-8"))
+        assert "streamsnow objects-sql" in text or "the deploy job applies" in text, rel
+        assert "outside app data" in text, rel
+    gotchas = _flat((SKILLS_DIR / "_shared" / "production-gotchas.md").read_text(encoding="utf-8"))
+    assert "CREATE OR REPLACE DYNAMIC TABLE" in gotchas
+    assert "CREATE OR ALTER TABLE" in gotchas
+    assert "separate deliberate manual step" not in gotchas
+    authoring = _flat((SKILLS_DIR / "sql-review" / "authoring.md").read_text(encoding="utf-8"))
+    assert "reason: performance" in authoring and "shared_logic" in authoring
+    assert "CREATE OR REPLACE VIEW ... COPY GRANTS" in authoring
+    assert authoring.index("CREATE OR REPLACE VIEW") < authoring.index("CREATE OR ALTER VIEW")

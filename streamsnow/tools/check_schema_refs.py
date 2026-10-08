@@ -113,10 +113,12 @@ _USE = re.compile(
 
 
 def _strip_sql_comments(text: str) -> str:
-    # Drop -- line comments and /* */ block comments so commented refs don't trip. Block
-    # comments become blanks of the same length, so line numbers and offsets still match.
-    text = re.sub(r"/\*.*?\*/", lambda m: _blank(m.group(0)), text, flags=re.DOTALL)
-    return "\n".join(line.split("--", 1)[0] for line in text.split("\n"))
+    """Comments (``--``, ``//``, ``/* */``) to spaces, same length and lines, so commented
+    refs don't trip the deny line scan. Literals and quoted identifiers are kept as
+    written (the line scan reads names inside them) and are lexed exactly as the
+    relation scan lexes them: a comment opener inside a string is text, and ``//``
+    ends a line as it does in Snowflake (#79)."""
+    return _lex_sql(text, keep_literals=True)
 
 
 # `USE ROLE <name>` and `USE SECONDARY ROLES ...` name roles, never schemas: a role
@@ -655,12 +657,21 @@ def _mask_sql(text: str) -> str:
     """Comments to spaces; string and ``$$`` literal CONTENTS to spaces with their
     delimiters kept; double-quoted identifiers untouched. Same length, newlines
     kept, so offsets and line numbers match the original text, which is where
-    an IDENTIFIER literal's value is read back from."""
+    an IDENTIFIER literal's value is read back from. ``//`` starts a line comment
+    too, as in Snowflake: read as text, an apostrophe after it opened a phantom
+    string that hid the next line's FROM from every scan (#79)."""
+    return _lex_sql(text, keep_literals=False)
+
+
+def _lex_sql(text: str, *, keep_literals: bool) -> str:
+    """The one SQL lexer behind :func:`_mask_sql` and :func:`_strip_sql_comments`:
+    comments always become spaces; literal contents too unless ``keep_literals``."""
+    lit = (lambda span: span) if keep_literals else _blank
     out: list[str] = []
     i, n = 0, len(text)
     while i < n:
         two, ch = text[i : i + 2], text[i]
-        if two == "--":
+        if two in ("--", "//"):
             j = text.find("\n", i)
             j = n if j == -1 else j
             out.append(_blank(text[i:j]))
@@ -673,9 +684,9 @@ def _mask_sql(text: str) -> str:
         elif two == "$$":
             j = text.find("$$", i + 2)
             if j == -1:
-                out.append(_blank(text[i:]))
+                out.append(lit(text[i:]))
                 break
-            out.append("$$" + _blank(text[i + 2 : j]) + "$$")
+            out.append("$$" + lit(text[i + 2 : j]) + "$$")
             i = j + 2
         elif ch == '"':
             j = i + 1
@@ -702,9 +713,9 @@ def _mask_sql(text: str) -> str:
                     break
                 j += 1
             if j >= n:
-                out.append(_blank(text[i:]))
+                out.append(lit(text[i:]))
                 break
-            out.append("'" + _blank(text[i + 1 : j]) + "'")
+            out.append("'" + lit(text[i + 1 : j]) + "'")
             i = j + 1
         else:
             out.append(ch)
@@ -982,6 +993,99 @@ _IGNORED_DIR_NAMES = frozenset(
         "node_modules",
     }
 )
+
+
+class RelationName(NamedTuple):
+    line: int  # 1-based, in the text given
+    parts: tuple[str, ...]
+    kind: str  # object | schema | database
+    cte: bool  # a one-part name that reads a CTE in scope, not a table
+
+
+_ONE_PART = r'"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*'
+_CTE_RE = re.compile(
+    rf"(?:\bWITH\s+(?:RECURSIVE\s+)?|,)\s*(?P<name>{_ONE_PART})\s*(?:\([^()]*\)\s*)?AS\s*\(",
+    re.I,
+)
+
+
+def _blank_quoted_identifiers(masked: str) -> str:
+    """Double-quoted identifier contents to spaces, quotes kept, same length. Structure
+    is read from this: ``AS "WITH Z AS ("`` is a column alias, and matched as text it
+    opened a CTE named Z that hid the table Z the query reads (#79)."""
+    return re.sub(r'"(?:[^"]|"")*"', lambda m: '"' + _blank(m.group(0)[1:-1]) + '"', masked)
+
+
+def _cte_scopes(masked: str) -> list[tuple[tuple[str, ...], int, int]]:
+    """``(name parts, start, end)`` per CTE: visible from its definition until the
+    parenthesis level it was defined at closes, or (at the top level) until the
+    statement ends. A WITH inside a subquery is invisible outside that subquery.
+    Keywords and parentheses count only outside literals, comments and quoted
+    identifiers; a quoted CTE name is read back from *masked*."""
+    structure = _blank_quoted_identifiers(masked)
+    depth, depths = 0, []
+    for ch in structure:
+        if ch == ")":
+            depth -= 1
+        depths.append(depth)  # "(" belongs to the outer level, ")" too
+        if ch == "(":
+            depth += 1
+    scopes = []
+    for m in _CTE_RE.finditer(structure):
+        level = depths[m.start("name")]
+        end = len(masked)
+        for i in range(m.end(), len(masked)):
+            if depths[i] < level or (level == 0 and structure[i] == ";"):
+                end = i
+                break
+        name = masked[m.start("name") : m.end("name")]
+        scopes.append((split_name(name), m.start("name"), end))
+    return scopes
+
+
+def relation_names(sql: str) -> list[RelationName]:
+    """Names in relation position in plain SQL text, each with its line.
+
+    The public face of the scanner the boundary check uses, for callers that read
+    SQL files rather than app code (the app-data loader, #79). The scanner reports
+    character offsets; a caller that took them for lines would point a finding at
+    the wrong line, so the conversion lives here, once. ``cte`` marks a one-part
+    name that reads a CTE in scope: a name a CTE in some subquery shadows still
+    reads the table outside that subquery, and treating it as a CTE everywhere
+    would hide a real dependency.
+    """
+    text = _normalize_breaks(sql)
+    scopes = _cte_scopes(_mask_sql(text))
+    out = []
+    for pos, parts, kind in _relation_names(text):
+        cte = len(parts) == 1 and any(
+            name == parts and start < pos < end for name, start, end in scopes
+        )
+        out.append(RelationName(text.count("\n", 0, pos) + 1, parts, kind, cte))
+    return out
+
+
+class StatementRelation(NamedTuple):
+    query: tuple[int, int]  # (chunk, statement): one query per pair
+    line: int  # 1-based source line
+    parts: tuple[str, ...]
+
+
+def statement_relations(text: str, is_python: bool) -> list[StatementRelation]:
+    """Object names in relation position in a file's certain SQL: statement chunks
+    only, Streamlit prose skipped, exactly as :func:`find_boundary_refs` reads it.
+    ``query`` tells queries apart, so two statements in one ``.sql`` file, or two
+    query literals in one ``.py`` file, count as two readers of an object."""
+    out: list[StatementRelation] = []
+    for index, chunk in enumerate(_sql_chunks(text, is_python, skip_prose=True)):
+        if not chunk.statement:
+            continue
+        masked = _mask_sql(chunk.sql)
+        for pos, parts, kind in _relation_names(chunk.sql):
+            if kind == "object" and parts and not _unresolved(parts, kind):
+                query = (index, masked.count(";", 0, pos))
+                out.append(StatementRelation(query, chunk.line_at(pos), parts))
+    return out
 
 
 def _in_ignored_dir(path: Path, root: Path | None = None) -> bool:

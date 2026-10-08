@@ -727,6 +727,36 @@ def test_verify_deploy_cli_finds_the_app_dir_next_to_the_config(tmp_path, monkey
         assert "1 warned: stage-files" in result.output
 
 
+def test_verify_deploy_skips_app_data_refresh_when_the_loader_crashes(tmp_path, monkeypatch):
+    """An unexpected loader exception must not crash the command: the check is skipped."""
+    import streamsnow.app_data as app_data
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("loader exploded")
+
+    monkeypatch.setattr(app_data, "load_app_data", boom)
+    monkeypatch.setattr(verify.subprocess, "run", _fake_snow([]))
+    cfg_path = tmp_path / "streamsnow.config.yaml"
+    cfg_path.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+    result = CliRunner().invoke(
+        app,
+        [
+            "verify-deploy",
+            "my-app",
+            "--attempts",
+            "1",
+            "--config",
+            str(cfg_path),
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    checks = {c["name"]: c for c in json.loads(result.output)["checks"]}
+    assert checks["app-data-refresh"]["status"] == "skipped"
+    assert "loader exploded" in " ".join(checks["app-data-refresh"]["findings"])
+
+
 # ---- summary line ------------------------------------------------------------
 
 
@@ -868,3 +898,218 @@ def test_verify_deploy_json_reports_status_per_check(monkeypatch):
         "version-source": ("pass", True),
         "service-logs": ("skipped", False),
     }
+
+
+DT = "STREAMSNOW_APPS.STREAMSNOW_REPORTING.DAILY_REVENUE"
+
+
+def _dt_row(state: str = "RUNNING", ts: object = "2026-10-06 09:00:00.000 -0700") -> dict:
+    return {"name": "DAILY_REVENUE", "scheduling_state": state, "data_timestamp": ts}
+
+
+@pytest.mark.parametrize("state", ["RUNNING", "ACTIVE", "running"])
+def test_app_data_refresh_passes_when_scheduled_and_refreshed(state):
+    """The docs say RUNNING; ACTIVE is accepted too, so either spelling reads healthy."""
+    c = verify.check_app_data_refresh({DT: _dt_row(state=state)})
+    assert c["status"] == "pass" and c["level"] == "warn"
+
+
+@pytest.mark.parametrize(
+    ("row", "needle"),
+    [
+        (_dt_row(state="SUSPENDED"), f"ALTER DYNAMIC TABLE {DT} RESUME;"),
+        (_dt_row(state="FAILED"), "not RUNNING"),
+        (_dt_row(state=""), "not RUNNING"),
+        (_dt_row(ts=None), "has never refreshed"),
+        (None, "not found"),
+    ],
+)
+def test_app_data_refresh_warns(row, needle):
+    c = verify.check_app_data_refresh({DT: row})
+    assert c["status"] == "fail" and c["level"] == "warn"
+    assert needle in " ".join(c["findings"])
+
+
+def test_verify_app_checks_only_the_apps_dynamic_tables_and_never_fails_on_them():
+    seen: list[str] = []
+    base = _run_query_factory([[_show_row()]], seen=seen)
+
+    def run_query(sql: str) -> list[dict]:
+        if sql.upper().startswith("SHOW DYNAMIC TABLES"):
+            seen.append(sql)
+            return [_dt_row(state="SUSPENDED")]
+        return base(sql)
+
+    result = verify_app(
+        _cfg(), "my-app", sha=SHA, run_query=run_query, sleep=lambda _: None, app_data_tables=[DT]
+    )
+    assert result["ok"]  # warn level: reported, never fails the run
+    checks = _by_name(result)
+    assert checks["app-data-refresh"]["status"] == "fail"
+    assert (
+        "SHOW DYNAMIC TABLES LIKE 'DAILY_REVENUE' IN SCHEMA STREAMSNOW_APPS.STREAMSNOW_REPORTING"
+        in seen
+    )
+    assert "warned: app-data-refresh" in summary_line(result)
+    plain = verify_app(_cfg(), "my-app", sha=SHA, run_query=base, sleep=lambda _: None)
+    assert "app-data-refresh" not in _by_name(plain)
+
+
+def test_verify_app_skips_the_refresh_check_when_show_fails():
+    base = _run_query_factory([[_show_row()]])
+
+    def run_query(sql: str) -> list[dict]:
+        if sql.upper().startswith("SHOW DYNAMIC TABLES"):
+            raise RuntimeError("snow sql failed (1): insufficient privileges")
+        return base(sql)
+
+    result = verify_app(
+        _cfg(), "my-app", run_query=run_query, sleep=lambda _: None, app_data_tables=[DT]
+    )
+    assert _by_name(result)["app-data-refresh"]["status"] == "skipped"
+
+
+def test_verify_app_never_renders_a_non_plain_name_into_show():
+    """A name that is not three plain identifiers is skipped, never put into SQL."""
+    seen: list[str] = []
+    base = _run_query_factory([[_show_row()]], seen=seen)
+    bad = "A.B.C'; DROP TABLE X; --"
+    result = verify_app(
+        _cfg(), "my-app", run_query=base, sleep=lambda _: None, app_data_tables=[bad]
+    )
+    assert _by_name(result)["app-data-refresh"]["status"] == "skipped"
+    assert not any(s.upper().startswith("SHOW DYNAMIC TABLES") for s in seen)
+
+
+def test_plan_lists_an_apps_dynamic_tables(tmp_path):
+    from _app_data_fixtures import dynamic_table, view, write_app, write_config
+
+    from streamsnow.app_data import load_app_data
+    from streamsnow.config import load_config
+
+    cfg = load_config(write_config(tmp_path))
+    write_app(
+        tmp_path,
+        "my-app",
+        {
+            "DAILY_REVENUE": dynamic_table("DAILY_REVENUE"),
+            "REGION_REVENUE": view(
+                "REGION_REVENUE",
+                "SELECT region, SUM(revenue) AS r\nFROM ANALYTICS_DB.REPORTING.ORDERS\nGROUP BY region",
+            ),
+        },
+    )
+    assert load_app_data(tmp_path, cfg).dynamic_tables("my-app") == [DT]
+
+
+GIT_REPO = "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO"
+OTHER_SHA = "fedcba9876543210fedcba9876543210fedcba98"
+
+
+def _git_data() -> dict:
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
+    data["deploy"] = {
+        "source": "git-repository",
+        "git_repository_fqn": GIT_REPO,
+        "api_integration_name": "GITHUB_API_INTEGRATION",
+        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
+    }
+    return data
+
+
+def test_git_branch_head_reads_the_fetched_branch_by_exact_name():
+    seen: list[str] = []
+
+    def run_query(sql: str) -> list[dict]:
+        seen.append(sql)
+        return [
+            {"name": "main_old", "commit_hash": OTHER_SHA},
+            {"name": "main", "commit_hash": SHA},
+        ]
+
+    assert verify.git_branch_head(Config.from_dict(_git_data()), run_query) == SHA
+    assert seen == [f"SHOW GIT BRANCHES LIKE 'main' IN GIT REPOSITORY {GIT_REPO}"]
+
+
+def test_git_branch_head_refuses_a_stage_copy_config():
+    with pytest.raises(ValueError, match="git-repository"):
+        verify.git_branch_head(_cfg(), lambda sql: [])
+
+
+@pytest.mark.parametrize("fqn", ["STREAMLIT_REPO", "DB.REPO", f"{GIT_REPO}\n", "DB.SC.R; DROP"])
+def test_git_branch_head_refuses_a_repository_name_that_is_not_three_plain_identifiers(fqn):
+    cfg = Config.from_dict(_git_data())
+    object.__setattr__(cfg.deploy, "git_repository_fqn", fqn)
+    ran: list[str] = []
+    with pytest.raises(ValueError, match="three plain identifiers"):
+        verify.git_branch_head(cfg, lambda sql: ran.append(sql) or [])
+    assert ran == []
+
+
+def test_git_branch_head_refuses_a_branch_that_could_close_the_literal():
+    cfg = Config.from_dict(_git_data())
+    object.__setattr__(cfg.deploy, "git_branch", "main'\n")
+    with pytest.raises(ValueError, match="branch"):
+        verify.git_branch_head(cfg, lambda sql: [])
+
+
+def _git_head(tmp_path, monkeypatch, rows=None, error=None, expect=SHA, data=None):
+    cfg = tmp_path / "streamsnow.config.yaml"
+    cfg.write_text(yaml.safe_dump(data or _git_data()), encoding="utf-8")
+
+    def fake(sql: str, *, temporary_connection: bool = False) -> list[dict]:
+        assert temporary_connection
+        if error:
+            raise RuntimeError(error)
+        return rows or []
+
+    monkeypatch.setattr(verify, "run_query_snow", fake)
+    return CliRunner().invoke(
+        app, ["git-head", "--expect", expect, "--temporary-connection", "--config", str(cfg)]
+    )
+
+
+def test_git_head_matching_commit_exits_0(tmp_path, monkeypatch):
+    r = _git_head(tmp_path, monkeypatch, rows=[{"name": "main", "commit_hash": SHA}])
+    assert r.exit_code == 0, r.output
+
+
+def test_git_head_compares_the_commit_without_regard_to_case(tmp_path, monkeypatch):
+    mixed = "0123456789AbCdEf0123456789aBcDeF01234567"
+    r = _git_head(
+        tmp_path, monkeypatch, rows=[{"name": "main", "commit_hash": SHA.upper()}], expect=mixed
+    )
+    assert r.exit_code == 0, r.output
+
+
+def test_git_head_on_a_config_that_is_not_a_git_repository_deploy_exits_2(tmp_path, monkeypatch):
+    stage_copy = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))  # deploy.source: stage-copy
+    r = _git_head(
+        tmp_path,
+        monkeypatch,
+        rows=[{"name": "main", "commit_hash": SHA}],
+        data=stage_copy,
+    )
+    assert r.exit_code == 2
+    assert "not git-repository" in r.stderr
+
+
+def test_git_head_mismatch_exits_1_and_says_why(tmp_path, monkeypatch):
+    r = _git_head(tmp_path, monkeypatch, rows=[{"name": "main", "commit_hash": OTHER_SHA}])
+    assert r.exit_code == 1
+    assert "Stopping before any DDL or app change" in r.stderr
+    assert OTHER_SHA[:12] in r.stderr and SHA[:12] in r.stderr
+
+
+@pytest.mark.parametrize(
+    ("kw", "needle"),
+    [
+        ({"rows": []}, "no branch main"),
+        ({"error": "snow sql failed (1): no such repository"}, "cannot read"),
+        ({"rows": [{"name": "main", "commit_hash": SHA}], "expect": "<sha>"}, "7 to 64 hex"),
+    ],
+)
+def test_git_head_that_cannot_check_exits_2(tmp_path, monkeypatch, kw, needle):
+    r = _git_head(tmp_path, monkeypatch, **kw)
+    assert r.exit_code == 2
+    assert needle in r.stderr

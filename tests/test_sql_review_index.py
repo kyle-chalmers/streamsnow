@@ -258,3 +258,42 @@ def test_paths_resolve_only_inside_the_app(app: Path, tmp_path: Path) -> None:
     assert sri._contained(app, "queries/revenue.sql") == app / "queries" / "revenue.sql"
     assert sri._contained(app, "../../outside.py") is None
     assert sri._contained(app, "queries/missing.sql") is None
+
+
+def test_objects_take_a_reason(app: Path) -> None:
+    obj = {
+        "name": "STREAMSNOW_APPS.STREAMSNOW_REPORTING.DAILY_REVENUE",
+        "grants": [],
+        "reason": "performance",
+    }
+    _write(app, _index(objects=[obj]))
+    idx = sri.load_index(app)
+    assert idx.objects[0].reason == "performance"
+    assert not [d for d in _details(idx) if "unknown key" in d]
+
+
+def test_a_non_string_reason_is_an_index_finding(app: Path) -> None:
+    obj = {"name": "STREAMSNOW_APPS.STREAMSNOW_REPORTING.DAILY_REVENUE", "reason": 3}
+    _write(app, _index(objects=[obj]))
+    assert any("reason must be a string" in d for d in _details(sri.load_index(app)))
+
+
+@pytest.mark.parametrize(
+    "objects",
+    [
+        "not a list",
+        [{"name": "NOT_THREE_PARTS"}],
+        ["STREAMSNOW_APPS.STREAMSNOW_REPORTING.DAILY_REVENUE"],
+    ],
+)
+def test_an_objects_list_that_did_not_load_is_marked_incomplete(app: Path, objects) -> None:
+    """Tombstones and teardown read the declared inventory: one that lost an entry
+    must say so, or a removed object would read as never declared."""
+    _write(app, _index(objects=objects))
+    assert sri.load_index(app).objects_complete is False
+
+
+def test_a_clean_or_missing_objects_list_is_complete(app: Path) -> None:
+    assert sri.load_index(app).objects_complete is True
+    (app / "sql_review" / "index.yaml").write_text("pages: [\n", encoding="utf-8")
+    assert sri.load_index(app).objects_complete is False

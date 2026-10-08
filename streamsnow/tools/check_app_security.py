@@ -38,7 +38,9 @@ Detection
   masked first, so ``WHERE status = 'DELETED'`` never trips the guard, and a
   write verb is only flagged when it is statement-initial. Maintained DDL directly
   in an app's ``sql_review/app_specific_reporting_objects/`` may use ``CREATE``,
-  ``ALTER`` and ``GRANT`` (see :func:`_is_maintained_ddl`).
+  ``ALTER`` and ``GRANT``; a file whose DB.SCHEMA is ``governance.app_data`` is run
+  by the deploy job (``streamsnow objects-sql``) and may use only ``CREATE`` and
+  ``GRANT`` (see :func:`_is_maintained_ddl` and :func:`_ddl_verbs`).
 
 Waivers
 =======
@@ -63,6 +65,8 @@ import json
 import re
 from pathlib import Path
 
+from ..config import ConfigError, find_config, load_config
+from ..policy import split_name
 from .sql_review import OBJECTS_DIR
 
 # --------------------------------------------------------------------------- #
@@ -663,22 +667,48 @@ def _iter_files(root: Path) -> list[Path]:
 # still a write finding inside that folder.
 _DDL_VERBS: frozenset[str] = frozenset({"CREATE", "ALTER", "GRANT"})
 
+# An app-data file is not documentation: the deploy job runs it as the CI role
+# (`streamsnow objects-sql`, #79). There a stray ALTER or DROP would run unattended,
+# so only the CREATE that defines the object and its GRANTs may begin a statement.
+_DEPLOYED_DDL_VERBS: frozenset[str] = frozenset({"CREATE", "GRANT"})
+
+
+def _ddl_verbs(path: Path) -> frozenset[str]:
+    """Write verbs allowed in ``path``: none for app code, :data:`_DDL_VERBS` for
+    review-only DDL, :data:`_DEPLOYED_DDL_VERBS` for a file in app data. A missing
+    or unreadable config means app data is unknown, so today's allowance applies
+    (``streamsnow objects-sql`` refuses to run without a config anyway)."""
+    if not _is_maintained_ddl(path):
+        return frozenset()
+    cfg_path = find_config(path.parent)
+    try:
+        app_data = load_config(cfg_path).governance.app_data if cfg_path else ""
+    except ConfigError:
+        app_data = ""
+    parts = split_name(path.name[: -len(".sql")])
+    if app_data and len(parts) == 3 and ".".join(parts[:2]) == app_data:
+        return _DEPLOYED_DDL_VERBS
+    return _DDL_VERBS
+
 
 def _is_maintained_ddl(path: Path) -> bool:
     """True for a file directly in an app's ``sql_review/app_specific_reporting_objects/``.
 
     Those files exist to hold ``CREATE`` statements: the maintained definition of
-    a view or table the app reads. A human applies them; no StreamSnow command
-    executes them (``sql-review probe`` only reads them to compare against the
-    live ``GET_DDL``), and ``sql-review check`` validates each one (the ``objects``
-    kind). Scanning them as app code made every app that declared an object fail
-    ``validate-app`` and the pre-commit hook on its own DDL.
+    a view or table the app reads. Files whose DB.SCHEMA is app data are applied by
+    the deploy job (``streamsnow objects-sql``) and allow only CREATE and GRANT;
+    every other file there is review-only and a human applies it (``sql-review
+    probe`` only reads it to compare against the live ``GET_DDL``). ``sql-review
+    check`` validates each one (the ``objects`` kind). Scanning them as app code made
+    every app that declared an object fail ``validate-app`` and the pre-commit hook on
+    its own DDL.
 
     The scope is exactly what ``sql-review`` validates: a direct child of that
     folder in an app root, which is ``apps/<slug>/`` holding a ``snowflake.yml``.
     A look-alike folder deeper in the app (even beside a planted manifest), or a
-    subfolder of it, is scanned like any other SQL, and inside the folder only
-    :data:`_DDL_VERBS` are allowed.
+    subfolder of it, is scanned like any other SQL. Inside the folder the allowed
+    verbs are :data:`_DDL_VERBS`, or :data:`_DEPLOYED_DDL_VERBS` for a file in app
+    data (see :func:`_ddl_verbs`).
     """
     folder = path.parent
     app_root = folder.parent.parent
@@ -702,7 +732,15 @@ def scan_paths(paths: list[Path], root: Path | None = None) -> dict:
         if p.suffix == ".py":
             findings.extend(_scan_python(p))
         elif p.suffix == ".sql":
-            findings.extend(_scan_sql(p, _DDL_VERBS if _is_maintained_ddl(p) else frozenset()))
+            verbs = _ddl_verbs(p)
+            found = _scan_sql(p, verbs)
+            if verbs is _DEPLOYED_DDL_VERBS:
+                for f in found:
+                    f["detail"] += (
+                        ": the deploy job runs this app-data file as the CI role, so it holds "
+                        "only CREATE and GRANT"
+                    )
+            findings.extend(found)
     return {"ok": not findings, "findings": findings}
 
 

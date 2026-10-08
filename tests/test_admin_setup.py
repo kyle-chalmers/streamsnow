@@ -445,3 +445,307 @@ def test_teardown_flags_every_object_that_could_predate_streamsnow():
         "DROP API INTEGRATION IF EXISTS GITHUB_API_INTEGRATION;",
     ):
         assert sql[sql.index(target) - 1] == marker, target
+
+
+# --------------------------------------------------------------------------- #
+# Teardown: declared app-data objects go before the roles that own them (#79)
+# --------------------------------------------------------------------------- #
+
+ELSEWHERE = "STREAMSNOW_DATA.REPORTING"
+
+
+def test_teardown_drops_declared_app_data_objects_before_the_roles():
+    objs = [
+        (f"{ELSEWHERE}.REGION_REVENUE", "view"),
+        (f"{ELSEWHERE}.DAILY_REVENUE", "dynamic_table"),
+    ]
+    sql = generate_teardown_sql(_cfg(**{"governance.app_data": ELSEWHERE}), objs)
+    view = f"DROP VIEW IF EXISTS {ELSEWHERE}.REGION_REVENUE;"
+    table = f"DROP DYNAMIC TABLE IF EXISTS {ELSEWHERE}.DAILY_REVENUE;"
+    assert view in _drops(sql) and table in _drops(sql)
+    order = [
+        sql.index(f"-- 2. App data ({ELSEWHERE})."),
+        sql.index(view),
+        sql.index(table),
+        sql.index(f"--   DROP SCHEMA IF EXISTS {ELSEWHERE};"),
+        sql.index("DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;"),
+    ]
+    assert order == sorted(order)
+
+
+def test_an_object_of_unknown_kind_holds_back_its_owners_role_drop():
+    """The object cannot be dropped safely, so neither can the CI role that owns it:
+    dropping the owner first would leave the object owned by whoever runs teardown."""
+    objs = [(f"{ELSEWHERE}.X", ""), (f"{ELSEWHERE}.DAILY_REVENUE", "dynamic_table")]
+    sql = generate_teardown_sql(_cfg(**{"governance.app_data": ELSEWHERE}), objs)
+    assert f"--   DROP VIEW IF EXISTS {ELSEWHERE}.X;" in sql
+    assert f"--   DROP DYNAMIC TABLE IF EXISTS {ELSEWHERE}.X;" in sql
+    assert not [s for s in _drops(sql) if f"{ELSEWHERE}.X" in s]
+    assert f"DROP DYNAMIC TABLE IF EXISTS {ELSEWHERE}.DAILY_REVENUE;" in _drops(sql)
+    drops = _drops(sql)
+    assert "DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" not in drops
+    held = "--   DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;"
+    assert held in sql
+    assert f"{ELSEWHERE}.X" in sql[sql.index(held) - 300 : sql.index(held)]  # the reason names it
+    assert "DROP ROLE IF EXISTS STREAMSNOW_VIEWER_ROLE;" in drops  # the viewer owns nothing there
+
+
+def test_an_incomplete_inventory_holds_back_the_ci_role_drop():
+    """A malformed index.yaml gives an empty drop order: objects the deploy job built
+    may still exist unseen, so the role that owns them must not be dropped first."""
+    index = "apps/acme-sales/sql_review/index.yaml"
+    sql = generate_teardown_sql(
+        _cfg(**{"governance.app_data": ELSEWHERE}), [], inventory_incomplete=[index]
+    )
+    drops = _drops(sql)
+    assert "DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" not in drops
+    held = "--   DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;"
+    assert held in sql
+    assert index in sql[sql.index("-- 2. App data") : sql.index(held)]
+    assert "DROP ROLE IF EXISTS STREAMSNOW_VIEWER_ROLE;" in drops
+
+
+def test_deploy_setup_teardown_holds_the_role_back_for_a_malformed_index(tmp_path):
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    cfg = write_config(tmp_path, app_data=ELSEWHERE)
+    app = write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE", ad=ELSEWHERE)},
+        ad=ELSEWHERE,
+    )
+    (app / "sql_review" / "index.yaml").write_text("objects: [\n", encoding="utf-8")
+    result = _cli("deploy-setup", "--teardown", "--config", str(cfg))
+    assert result.exit_code == 0, result.output
+    assert "--   DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in result.output
+    assert "\nDROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" not in result.output
+
+
+def test_known_kinds_keep_the_role_drop():
+    sql = generate_teardown_sql(
+        _cfg(**{"governance.app_data": ELSEWHERE}), [(f"{ELSEWHERE}.V", "view")]
+    )
+    assert "DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in _drops(sql)
+
+
+def test_teardown_app_data_in_the_app_database_needs_no_object_drops():
+    objs = [("STREAMSNOW_APPS.STREAMSNOW_REPORTING.DAILY_REVENUE", "dynamic_table")]
+    sql = generate_teardown_sql(_cfg(), objs)
+    assert "DROP DYNAMIC TABLE" not in sql
+    assert "1 view(s) and dynamic table(s) the deploy job built there" in sql
+
+
+def test_deploy_setup_teardown_reads_the_declared_objects(tmp_path):
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    cfg = write_config(tmp_path, app_data=ELSEWHERE)
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE", ad=ELSEWHERE)},
+        ad=ELSEWHERE,
+    )
+    result = _cli("deploy-setup", "--teardown", "--config", str(cfg))
+    assert result.exit_code == 0, result.output
+    assert f"DROP DYNAMIC TABLE IF EXISTS {ELSEWHERE}.DAILY_REVENUE;" in result.output
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 1: a declared name must never reach teardown SQL unquoted (#79)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_quoted_name_with_a_newline_never_becomes_a_live_drop(tmp_path):
+    """An index.yaml entry can carry a newline inside a quoted part. Rendered into a
+    `-- ...` comment it would end the comment and print a live DROP DATABASE."""
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    cfg = write_config(tmp_path, app_data=ELSEWHERE)
+    app = write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE", ad=ELSEWHERE)},
+        ad=ELSEWHERE,
+    )
+    index = app / "sql_review" / "index.yaml"
+    data = yaml.safe_load(index.read_text(encoding="utf-8"))
+    evil = f'{ELSEWHERE}."X\nDROP DATABASE ANALYTICS_DB;\n--"'
+    data["objects"].append({"name": evil, "grants": [], "reason": "performance"})
+    index.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    result = _cli("deploy-setup", "--teardown", "--config", str(cfg))
+    assert result.exit_code == 0, result.output
+    live = [ln for ln in result.stdout.splitlines() if not ln.startswith("--")]
+    assert not [ln for ln in live if "ANALYTICS_DB" in ln]
+    for ln in result.stdout.splitlines():
+        assert not ln.startswith("DROP DATABASE ANALYTICS_DB")
+    assert f"DROP DYNAMIC TABLE IF EXISTS {ELSEWHERE}.DAILY_REVENUE;" in live
+
+
+def test_teardown_sql_renders_only_plain_names_and_reports_others_once():
+    evil = f'{ELSEWHERE}."X\nDROP DATABASE ANALYTICS_DB;\n--"'
+    sql = generate_teardown_sql(
+        _cfg(**{"governance.app_data": ELSEWHERE}), [(evil, ""), (evil, "view")]
+    )
+    assert "\nDROP DATABASE ANALYTICS_DB;" not in sql
+    assert sql.count("DROP DATABASE ANALYTICS_DB") <= 1
+    assert "DROP VIEW IF EXISTS" not in sql
+    # A malformed name cannot prove the object was never built (it may have been renamed
+    # after a deploy), so the CI role that would own it is held back, never dropped.
+    assert "DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" not in _drops(sql)
+    assert "--   DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in sql
+    # the one report line is a single comment line
+    report = [ln for ln in sql.splitlines() if "DROP DATABASE ANALYTICS_DB" in ln]
+    assert all(ln.startswith("--") for ln in report)
+
+
+def test_drop_order_puts_dependents_first_even_for_invalid_objects(tmp_path):
+    from _app_data_fixtures import dynamic_table, view, write_app, write_config
+
+    from streamsnow.app_data import load_app_data
+
+    cfg_path = write_config(tmp_path, app_data=ELSEWHERE)
+    # A_DT is invalid (wrong warehouse) yet Z_VIEW reads it: Z_VIEW must go first.
+    bad_dt = dynamic_table("A_DT", ad=ELSEWHERE).replace("STREAMSNOW_WH", "OTHER_WH")
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "A_DT": bad_dt,
+            "Z_VIEW": view("Z_VIEW", f"SELECT revenue FROM {ELSEWHERE}.A_DT", ad=ELSEWHERE),
+        },
+        ad=ELSEWHERE,
+    )
+    cfg = Config.from_dict(yaml.safe_load(cfg_path.read_text(encoding="utf-8")))
+    order = [f for f, _ in load_app_data(tmp_path, cfg).drop_order()]
+    assert order.index(f"{ELSEWHERE}.Z_VIEW") < order.index(f"{ELSEWHERE}.A_DT")
+
+
+def test_teardown_prints_the_finding_count_on_stderr(tmp_path):
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    cfg = write_config(tmp_path, app_data=ELSEWHERE)
+    bad = dynamic_table("DAILY_REVENUE", ad=ELSEWHERE).replace("STREAMSNOW_WH", "OTHER_WH")
+    write_app(tmp_path, "acme-sales", {"DAILY_REVENUE": bad}, ad=ELSEWHERE)
+    result = _cli("deploy-setup", "--teardown", "--config", str(cfg))
+    assert result.exit_code == 0, result.output
+    assert "finding(s)" in result.stderr
+    assert "finding(s)" not in result.stdout
+
+
+def test_drop_order_puts_a_cycle_member_before_the_acyclic_object_it_reads(tmp_path):
+    """D_V reads A_BASE and is in a cycle with C_V. Nothing acyclic can read a cycle
+    member, so both cycle members must go before A_BASE, which they depend on."""
+    from _app_data_fixtures import dynamic_table, view, write_app, write_config
+
+    from streamsnow.app_data import load_app_data
+
+    cfg_path = write_config(tmp_path, app_data=ELSEWHERE)
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "A_BASE": dynamic_table("A_BASE", ad=ELSEWHERE),
+            "C_V": view("C_V", f"SELECT revenue FROM {ELSEWHERE}.D_V", ad=ELSEWHERE),
+            "D_V": view(
+                "D_V",
+                f"SELECT a.revenue FROM {ELSEWHERE}.A_BASE a JOIN {ELSEWHERE}.C_V c ON 1 = 1",
+                ad=ELSEWHERE,
+            ),
+        },
+        ad=ELSEWHERE,
+    )
+    cfg = Config.from_dict(yaml.safe_load(cfg_path.read_text(encoding="utf-8")))
+    order = [f for f, _ in load_app_data(tmp_path, cfg).drop_order()]
+    assert order.index(f"{ELSEWHERE}.C_V") < order.index(f"{ELSEWHERE}.A_BASE")
+    assert order.index(f"{ELSEWHERE}.D_V") < order.index(f"{ELSEWHERE}.A_BASE")
+
+
+def test_a_declared_name_with_a_trailing_newline_holds_the_role_back(tmp_path):
+    """`...EVIL\\n` renders as a plain name once stripped, and the loader rejects the entry.
+    A name malformed now cannot prove the object never existed (the newline may have come
+    after a deploy built it), so the CI role's DROP is held back with the reason, and the
+    name is rendered once, escaped, in one comment line."""
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    cfg = write_config(tmp_path, app_data=ELSEWHERE)
+    app = write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE", ad=ELSEWHERE)},
+        ad=ELSEWHERE,
+    )
+    index = app / "sql_review" / "index.yaml"
+    data = yaml.safe_load(index.read_text(encoding="utf-8"))
+    data["objects"].append({"name": f"{ELSEWHERE}.EVIL\n", "grants": [], "reason": "performance"})
+    index.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    result = _cli("deploy-setup", "--teardown", "--config", str(cfg))
+    assert result.exit_code == 0, result.output
+    live = [ln for ln in result.stdout.splitlines() if not ln.startswith("--")]
+    assert not [ln for ln in live if "EVIL" in ln]
+    skipped = [ln for ln in result.stdout.splitlines() if "EVIL" in ln]
+    assert len(skipped) == 1 and skipped[0].startswith("-- Skipped")
+    assert "\nDROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" not in result.stdout
+    assert "--   DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in result.stdout
+    held = [ln for ln in result.stdout.splitlines() if ln.startswith("-- Held back")]
+    assert len(held) == 1 and "not a plain DATABASE.SCHEMA.NAME" in held[0]
+
+
+def test_drop_order_drops_what_reads_a_cycle_before_the_cycle(tmp_path):
+    """A_V and B_V read each other; C_V reads B_V. C_V must go before B_V: sorting every
+    object left after the topological pass by name put it last."""
+    from _app_data_fixtures import view, write_app, write_config
+
+    from streamsnow.app_data import load_app_data
+
+    cfg_path = write_config(tmp_path, app_data=ELSEWHERE)
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "A_V": view("A_V", f"SELECT revenue FROM {ELSEWHERE}.B_V", ad=ELSEWHERE),
+            "B_V": view("B_V", f"SELECT revenue FROM {ELSEWHERE}.A_V", ad=ELSEWHERE),
+            "C_V": view("C_V", f"SELECT revenue FROM {ELSEWHERE}.B_V", ad=ELSEWHERE),
+        },
+        ad=ELSEWHERE,
+    )
+    cfg = Config.from_dict(yaml.safe_load(cfg_path.read_text(encoding="utf-8")))
+    order = [f for f, _ in load_app_data(tmp_path, cfg).drop_order()]
+    assert order == [f"{ELSEWHERE}.C_V", f"{ELSEWHERE}.A_V", f"{ELSEWHERE}.B_V"]
+
+
+# --------------------------------------------------------------------------- #
+# Codex round 2: a config value never ends the comment it is rendered into (#79)
+# --------------------------------------------------------------------------- #
+
+
+def _unvalidated(cfg: Config, **objects) -> Config:
+    """The config with values validation would refuse, to prove the renderer holds alone."""
+    import dataclasses
+
+    sf = dataclasses.replace(
+        cfg.snowflake, objects=dataclasses.replace(cfg.snowflake.objects, **objects)
+    )
+    return dataclasses.replace(cfg, snowflake=sf)
+
+
+def _comment_tails_stay_comments(sql: str, *tails: str) -> None:
+    for tail in tails:
+        lines = [ln for ln in sql.splitlines() if tail in ln]
+        assert lines, tail
+        assert all(ln.startswith("--") for ln in lines), lines
+
+
+def test_teardown_keeps_a_newline_in_a_config_value_inside_its_comment():
+    cfg = _unvalidated(
+        _cfg(**{"governance.app_data": ELSEWHERE}), stage_database="OTHER_STAGE_DB\nX"
+    )
+    sql = generate_teardown_sql(cfg)
+    _comment_tails_stay_comments(sql, "which may hold other things")
+    assert "'OTHER_STAGE_DB\\nX'" in sql
+
+
+def test_admin_sql_keeps_a_newline_in_a_config_value_inside_its_comment():
+    cfg = _unvalidated(_cfg(), default_warehouse="STREAMSNOW_WH\nX")
+    sql = generate_admin_sql(cfg)
+    _comment_tails_stay_comments(sql, "which the CI", "refresh with WAREHOUSE")

@@ -32,7 +32,7 @@ document?
    genuine forks (runtime, a non-default TTL, an ambiguous page boundary). Otherwise propose a
    default and ask to confirm or redirect.
 5. **Resolve source schemas against `governance.sources`.** Every §3 object must live in a
-   source schema (or the app-data schema). If the user can't name exact objects, capture the *data domain* ("order line items") for
+   source schema (or the app-data schema). Query the sources directly; add an app-data object only for a stated reason (performance or shared logic), and `/sql-review` authoring explains the form. If the user can't name exact objects, capture the *data domain* ("order line items") for
    discovery during SQL authoring — never invent table names.
 6. **Decide the runtime** per [_shared/runtime-decision.md](../_shared/runtime-decision.md); default
    to the repo's configured runtime, record any deviation with its reason in §9.

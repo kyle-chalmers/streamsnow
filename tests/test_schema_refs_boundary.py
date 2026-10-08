@@ -11,7 +11,13 @@ import yaml
 from streamsnow.config import Config
 from streamsnow.policy import SchemaPolicy
 from streamsnow.scaffolder import scaffold
-from streamsnow.tools.check_schema_refs import check_paths, find_boundary_refs, find_denied_refs
+from streamsnow.tools.check_schema_refs import (
+    check_paths,
+    find_boundary_refs,
+    find_denied_refs,
+    relation_names,
+    statement_relations,
+)
 from streamsnow.tools.validate_app import validate_app
 
 EXAMPLE = Path(__file__).resolve().parent.parent / "streamsnow.config.example.yaml"
@@ -640,3 +646,80 @@ def test_unparseable_file_gets_the_boundary_scan_too(tmp_path):
     assert _check(tmp_path, deep, ENFORCE, ".py")[0] == [
         (1, "outside_boundary", "SALES_DB.PUBLIC.X")
     ]
+
+
+def test_public_relation_names_report_lines_not_offsets():
+    sql = "SELECT 1\nFROM A.B.C\nJOIN D.E.F f ON f.x = 1"
+    assert [(r.line, r.parts, r.kind, r.cte) for r in relation_names(sql)] == [
+        (2, ("A", "B", "C"), "object", False),
+        (3, ("D", "E", "F"), "object", False),
+    ]
+
+
+def _ctes(sql: str) -> list[tuple[tuple[str, ...], bool]]:
+    return [(r.parts, r.cte) for r in relation_names(sql) if r.kind == "object"]
+
+
+def test_a_cte_shadows_names_only_in_its_scope():
+    sql = 'WITH recent AS (SELECT 1), "Other" (a) AS (SELECT 2) SELECT * FROM recent, "Other"'
+    assert _ctes(sql) == [(("RECENT",), True), (("Other",), True)]
+    # A CTE defined inside a subquery never shadows the same name outside it.
+    nested = "SELECT * FROM V_TWO WHERE EXISTS (WITH V_TWO AS (SELECT 1) SELECT * FROM V_TWO)"
+    assert _ctes(nested) == [(("V_TWO",), False), (("V_TWO",), True)]
+    # Nor one in an earlier statement.
+    assert _ctes("WITH x AS (SELECT 1) SELECT * FROM x; SELECT * FROM x") == [
+        (("X",), True),
+        (("X",), False),
+    ]
+
+
+def test_statement_relations_tell_queries_apart_and_skip_prose():
+    two = "SELECT * FROM A.B.C;\nSELECT * FROM A.B.C;\n"
+    assert len({r.query for r in statement_relations(two, False)}) == 2
+    py = (
+        "import streamlit as st\n"
+        'conn = st.connection("snowflake")\n'
+        'conn.query("SELECT * FROM A.B.C")\n'
+        'conn.query("SELECT * FROM A.B.C")\n'
+        'st.caption("Loaded from A.B.D")\n'
+    )
+    rels = statement_relations(py, True)
+    assert {r.parts for r in rels} == {("A", "B", "C")}
+    assert len({r.query for r in rels}) == 2
+    assert {r.line for r in rels} == {3, 4}
+
+
+def test_relation_lines_survive_cr_only_breaks():
+    assert [r.line for r in relation_names("SELECT 1\rFROM A.B.C\rJOIN D.E.F f ON f.x = 1")] == [
+        2,
+        3,
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# Codex review of #79: quoted identifiers and `//` comments
+# --------------------------------------------------------------------------- #
+
+
+def test_a_with_inside_a_quoted_identifier_is_no_cte():
+    rels = relation_names('SELECT COUNT(*) AS "WITH Z AS (" FROM Z')
+    assert [(r.parts, r.cte) for r in rels] == [(("Z",), False)]
+
+
+def test_a_paren_inside_a_quoted_identifier_does_not_end_a_cte_scope():
+    sql = 'WITH Z AS (SELECT 1 AS ")") SELECT * FROM Z'
+    assert [(r.parts, r.cte) for r in relation_names(sql)] == [(("Z",), True)]
+
+
+def test_a_real_cte_is_still_a_cte():
+    rels = relation_names("WITH Z AS (SELECT 1 AS x) SELECT * FROM Z")
+    assert [(r.parts, r.cte) for r in rels] == [(("Z",), True)]
+
+
+def test_a_slash_slash_comment_hides_no_relation():
+    rels = relation_names("SELECT COUNT(*) AS n // '\nFROM DB.SC.Z // '")
+    assert [(r.line, r.parts) for r in rels] == [(2, ("DB", "SC", "Z"))]
+
+
+def test_a_slash_slash_comment_names_no_relation():
+    assert relation_names("SELECT 1 // FROM DB.SC.Z\n") == []

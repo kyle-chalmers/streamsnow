@@ -1,6 +1,6 @@
 """Post-deploy health verification — because "deploy succeeded" ≠ "app serves".
 
-Three production failure modes motivate this module, all invisible to a deploy
+Four production failure modes motivate this module, all invisible to a deploy
 pipeline that stops at "the SQL ran":
 
 1. **No live version** — an app whose ``live_version_location_uri`` is NULL
@@ -14,6 +14,9 @@ pipeline that stops at "the SQL ran":
    the base image passes a launcher flag the pinned Streamlit version rejects)
    while the backing service still reports healthy. Only the service logs show
    the ``No such option`` signature.
+4. **Stalled dynamic table**: a dynamic table in the app's app data that was
+   suspended (or never refreshed) keeps serving its last rows with no error
+   anywhere. Warn-only: the app itself deployed fine.
 
 Checks 1–2 retry to absorb the 1–3 minute container cold start that follows a
 version bump; the log scan (3) is strictly best-effort and fail-open — log
@@ -47,9 +50,10 @@ import json
 import re
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from .app_data import is_plain_fqn
 from .config import Config
 from .deploy import _safe_sha, stage_path, streamlit_fqn
 from .stage_bundle import (
@@ -104,6 +108,42 @@ def _get(row: dict, key: str) -> object:
         if k.lower() == key:
             return v
     return None
+
+
+def git_branch_head(cfg: Config, run_query: RunQuery) -> str:
+    """The commit the git repository's deploy branch points at in Snowflake.
+
+    A git-repository deploy builds each app from the branch after ``snow git
+    fetch``, but builds app data from the runner's checkout of ``$GITHUB_SHA``.
+    When another merge moved the branch while this run waited, the two come from
+    different commits: a view from one, the app that reads it from another. The
+    deploy job compares this with ``$GITHUB_SHA`` before any DDL (``streamsnow
+    git-head``). ``""`` when the branch is not in the repository's list. Docs:
+    https://docs.snowflake.com/en/sql-reference/sql/show-git-branches
+
+    Both config values are rendered into the SHOW statement, so they are
+    re-checked here (three plain identifiers, a branch of ``[A-Za-z0-9._/-]``
+    matched in full): the loader's patterns accept a trailing newline and
+    shorter names, which must never reach SQL text.
+    """
+    d = cfg.deploy
+    if d.source != "git-repository":
+        raise ValueError(
+            f"deploy.source is {d.source}, not git-repository: there is no branch to check"
+        )
+    if not is_plain_fqn(d.git_repository_fqn):
+        raise ValueError(
+            f"deploy.git_repository_fqn {d.git_repository_fqn!r} is not three plain identifiers"
+        )
+    if not re.fullmatch(r"[A-Za-z0-9._/-]+", d.git_branch):
+        raise ValueError(f"deploy.git_branch {d.git_branch!r} is not a plain branch name")
+    rows = run_query(
+        f"SHOW GIT BRANCHES LIKE '{d.git_branch}' IN GIT REPOSITORY {d.git_repository_fqn}"
+    )
+    for row in rows:
+        if str(_get(row, "name") or "") == d.git_branch:
+            return str(_get(row, "commit_hash") or "")
+    return ""
 
 
 def _has(row: dict, key: str) -> bool:
@@ -390,6 +430,54 @@ def _describe_blocker(exists: dict, describe_error: str) -> str:
     return describe_error
 
 
+def _show_dynamic_table(fqn: str, run_query: RunQuery) -> dict | None:
+    """The ``SHOW DYNAMIC TABLES`` row for one app-data table. Only a plain three-part
+    name is rendered into SQL (anything else raises, so the check is skipped); the
+    exact-name match drops LIKE's ``_`` wildcard."""
+    if not is_plain_fqn(fqn):
+        raise ValueError(f"{fqn!r} is not a plain DB.SCHEMA.NAME")
+    database, schema, name = fqn.split(".")
+    rows = run_query(f"SHOW DYNAMIC TABLES LIKE '{name}' IN SCHEMA {database}.{schema}")
+    return next((r for r in rows if str(_get(r, "name") or "").upper() == name.upper()), None)
+
+
+#: Healthy ``scheduling_state`` values: the docs say RUNNING; ACTIVE is accepted as well.
+#: SUSPENDED, FAILED, empty or anything else means the table stopped refreshing.
+_SCHEDULED = frozenset({"RUNNING", "ACTIVE"})
+
+
+def check_app_data_refresh(found: dict[str, dict | None]) -> dict:
+    """Warn when a dynamic table this app owns is not refreshing (#79).
+
+    The deploy created it with ``INITIALIZE = ON_CREATE``, so it held data then
+    (a later ``CREATE OR ALTER`` does not refresh it at once; the next refresh
+    follows its target lag). A suspended table (Snowflake suspends one after
+    repeated refresh failures, or someone ran SUSPEND) or one with no
+    ``data_timestamp`` stops changing, and the app keeps serving its last rows
+    with no error anywhere. Warn-level: the app itself deployed fine.
+    Docs: https://docs.snowflake.com/en/sql-reference/sql/show-dynamic-tables
+    """
+    findings: list[str] = []
+    for fqn, row in found.items():
+        if row is None:
+            findings.append(
+                f"{fqn} not found: the deploy job's objects-sql step did not build it, or the "
+                "CI role cannot see it"
+            )
+            continue
+        state = str(_get(row, "scheduling_state") or "").strip().upper()
+        if state not in _SCHEDULED:
+            findings.append(
+                f"{fqn} scheduling_state is {state or 'empty'}, not RUNNING: it no longer "
+                f"refreshes, so pages show stale data. Fix the cause, then run "
+                f"ALTER DYNAMIC TABLE {fqn} RESUME;"
+            )
+        ts = _get(row, "data_timestamp")
+        if not ts or str(ts).strip().lower() in ("null", "none"):
+            findings.append(f"{fqn} has never refreshed (no data_timestamp): pages read nothing")
+    return _check("app-data-refresh", FAIL if findings else PASS, findings, level=WARN)
+
+
 def verify_app(
     cfg: Config,
     slug: str,
@@ -399,12 +487,17 @@ def verify_app(
     delay: float = 20.0,
     sleep: Callable[[float], None] = time.sleep,
     app_dir: Path | None = None,
+    app_data_tables: Sequence[str] = (),
+    app_data_error: str = "",
 ) -> dict:
     """Run all post-deploy checks for one app; retries exists/live-version to
     absorb container cold start. Returns ``{"app", "ok", "checks"}``, where
     ``ok`` means no block-level check failed (a skipped check, or a failed
     warn-level one, is reported, not failed). ``app_dir`` (the local
-    ``apps/<slug>``) with ``sha`` adds the warn-only ``stage-files`` check."""
+    ``apps/<slug>``) with ``sha`` adds the warn-only ``stage-files`` check.
+    ``app_data_tables`` (the dynamic tables this app owns in app data) adds the
+    warn-only ``app-data-refresh`` check; ``app_data_error`` (the app-data loader
+    failed, so the tables are unknown) makes that check skipped with the reason."""
     fqn = streamlit_fqn(cfg, slug)
     attempts = max(1, attempts)
     for attempt in range(attempts):
@@ -441,6 +534,15 @@ def verify_app(
         checks.append(_skipped("version-source", blocker) if blocker else check(desc, fqn, sha))
         if app_dir is not None:
             checks.append(_stage_files(cfg, slug, sha, app_dir, run_query))
+
+    if app_data_error:
+        checks.append(_skipped("app-data-refresh", app_data_error))
+    elif app_data_tables:
+        try:
+            found = {fqn: _show_dynamic_table(fqn, run_query) for fqn in app_data_tables}
+            checks.append(check_app_data_refresh(found))
+        except Exception as exc:  # a check that cannot run is skipped, never passed
+            checks.append(_skipped("app-data-refresh", f"SHOW DYNAMIC TABLES failed: {exc}"))
 
     if cfg.runtime == "container":
         checks.append(check_service_logs(_fetch_service_logs(cfg, slug, run_query), fqn))

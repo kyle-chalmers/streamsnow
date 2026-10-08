@@ -235,7 +235,7 @@ Every guardrail exists because something went wrong in a real production fleet
 | A query names a raw or staging schema and ships to production | `streamsnow check schema-refs` blocks it in pre-commit, `validate-app` and CI |
 | A `None` in `params=` makes the deployed driver bind every filter to NULL: the page renders, with zero rows | `check bind-predicates` blocks the `(:1 IS NULL OR col = :1)` shape, and the scaffold's `render_sql` builds optional filters without nullable binds |
 | A page helper imports fine under `streamlit run` and dies with `ModuleNotFoundError` once deployed | `check page-imports` fails it before merge |
-| Renaming an app leaves the old one live in Snowflake, frozen and forgotten | `check tombstones` blocks the PR until the old name is tombstoned; the deploy job drops it |
+| Renaming or removing an app or an app-data object leaves the old one live in Snowflake, frozen and forgotten | `check tombstones` blocks the PR until the old name is tombstoned; the deploy job drops it |
 | The "reviewed SQL" stops matching what the app actually runs | `sql-review check` hashes every input, so drift and hand edits fail CI |
 | A Claude Code session runs `snow streamlit deploy` or a `DROP` from a laptop | The deploy-safety hook stops and asks first; the sanctioned path is `/ship-app`, and only CI deploys |
 | "Deploy succeeded", but the app is blank or serving old code | `streamsnow verify-deploy` checks the live version, the commit it serves and the container logs |
@@ -526,6 +526,7 @@ streamsnow/            the PyPI package — CLI, config, policy, scaffolder, too
   ├── policy.py        schema allow/deny single source of truth
   ├── scaffolder.py    renders a governed repo from config
   ├── deploy.py        deploy-setup and deploy-sql
+  ├── app_data.py      app-data objects: checks, order, objects-sql
   ├── verify.py        verify-deploy
   ├── ci_key.py        ci-key create / push
   ├── agent_skills.py  agent-skills (Codex and other agents)
