@@ -727,6 +727,36 @@ def test_verify_deploy_cli_finds_the_app_dir_next_to_the_config(tmp_path, monkey
         assert "1 warned: stage-files" in result.output
 
 
+def test_verify_deploy_skips_app_data_refresh_when_the_loader_crashes(tmp_path, monkeypatch):
+    """An unexpected loader exception must not crash the command: the check is skipped."""
+    import streamsnow.app_data as app_data
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("loader exploded")
+
+    monkeypatch.setattr(app_data, "load_app_data", boom)
+    monkeypatch.setattr(verify.subprocess, "run", _fake_snow([]))
+    cfg_path = tmp_path / "streamsnow.config.yaml"
+    cfg_path.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+    result = CliRunner().invoke(
+        app,
+        [
+            "verify-deploy",
+            "my-app",
+            "--attempts",
+            "1",
+            "--config",
+            str(cfg_path),
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    checks = {c["name"]: c for c in json.loads(result.output)["checks"]}
+    assert checks["app-data-refresh"]["status"] == "skipped"
+    assert "loader exploded" in " ".join(checks["app-data-refresh"]["findings"])
+
+
 # ---- summary line ------------------------------------------------------------
 
 

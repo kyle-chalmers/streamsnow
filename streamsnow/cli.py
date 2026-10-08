@@ -1518,7 +1518,13 @@ def verify_deploy_cmd(
     app_dir = cfg_path.resolve().parent / "apps" / slug if cfg_path else None
     from .app_data import load_app_data
 
-    tables = load_app_data(cfg_path.resolve().parent, cfg).dynamic_tables(slug) if cfg_path else []
+    tables: list[str] = []
+    app_data_error = ""
+    if cfg_path:
+        try:
+            tables = load_app_data(cfg_path.resolve().parent, cfg).dynamic_tables(slug)
+        except Exception as exc:  # a verify run must not die on the app-data loader
+            app_data_error = f"could not load the app-data objects: {exc}"
     try:
         result = verify_app(
             cfg,
@@ -1529,6 +1535,7 @@ def verify_deploy_cmd(
             delay=delay,
             app_dir=app_dir if app_dir is not None and app_dir.is_dir() else None,
             app_data_tables=tables,
+            app_data_error=app_data_error,
         )
     except ValueError as exc:  # invalid slug
         _err(str(exc))

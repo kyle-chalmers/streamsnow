@@ -68,7 +68,7 @@ KIND_DYNAMIC_TABLE = "dynamic_table"
 OBJECT_KINDS = (KIND_VIEW, KIND_DYNAMIC_TABLE)
 #: The SQL keyword for each kind, in CREATE, GRANT and DROP.
 SQL_KIND = {KIND_VIEW: "VIEW", KIND_DYNAMIC_TABLE: "DYNAMIC TABLE"}
-#: Why an app-data object may exist (D13): it pre-computes a slow or costly query, or
+#: Why an app-data object may exist (#79): it pre-computes a slow or costly query, or
 #: one definition replaces logic that two or more queries, pages or apps would repeat.
 REASONS = ("performance", "shared_logic")
 KIND_FINDING = "objects"

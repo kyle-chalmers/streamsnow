@@ -447,7 +447,7 @@ _SCHEDULED = frozenset({"RUNNING", "ACTIVE"})
 
 
 def check_app_data_refresh(found: dict[str, dict | None]) -> dict:
-    """Warn when a dynamic table this app reads is not refreshing (#79).
+    """Warn when a dynamic table this app owns is not refreshing (#79).
 
     The deploy created it with ``INITIALIZE = ON_CREATE``, so it held data then
     (a later ``CREATE OR ALTER`` does not refresh it at once; the next refresh
@@ -488,6 +488,7 @@ def verify_app(
     sleep: Callable[[float], None] = time.sleep,
     app_dir: Path | None = None,
     app_data_tables: Sequence[str] = (),
+    app_data_error: str = "",
 ) -> dict:
     """Run all post-deploy checks for one app; retries exists/live-version to
     absorb container cold start. Returns ``{"app", "ok", "checks"}``, where
@@ -495,7 +496,8 @@ def verify_app(
     warn-level one, is reported, not failed). ``app_dir`` (the local
     ``apps/<slug>``) with ``sha`` adds the warn-only ``stage-files`` check.
     ``app_data_tables`` (the dynamic tables this app owns in app data) adds the
-    warn-only ``app-data-refresh`` check."""
+    warn-only ``app-data-refresh`` check; ``app_data_error`` (the app-data loader
+    failed, so the tables are unknown) makes that check skipped with the reason."""
     fqn = streamlit_fqn(cfg, slug)
     attempts = max(1, attempts)
     for attempt in range(attempts):
@@ -533,7 +535,9 @@ def verify_app(
         if app_dir is not None:
             checks.append(_stage_files(cfg, slug, sha, app_dir, run_query))
 
-    if app_data_tables:
+    if app_data_error:
+        checks.append(_skipped("app-data-refresh", app_data_error))
+    elif app_data_tables:
         try:
             found = {fqn: _show_dynamic_table(fqn, run_query) for fqn in app_data_tables}
             checks.append(check_app_data_refresh(found))
