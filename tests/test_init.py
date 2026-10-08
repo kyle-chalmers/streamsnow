@@ -1260,3 +1260,189 @@ def test_scaffold_targets_the_first_source_in_any_database(tmp_path):
     rules = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
     assert "FINANCE_DB.MARTS, ANALYTICS_DB.REPORTING" in rules
     assert "DATABASE.SCHEMA.OBJECT" in rules
+
+
+RUN_SHA = "0123456789abcdef0123456789abcdef01234567"
+MOVED_SHA = "fedcba9876543210fedcba9876543210fedcba98"
+OBJECTS = (
+    "CREATE OR REPLACE VIEW STREAMSNOW_APPS.STREAMSNOW_REPORTING.REGION_REVENUE COPY GRANTS AS "
+    "SELECT 1;\n"
+)
+PRODUCERS = {
+    "stage-copy": ("objects-sql", "stage-path", "deploy-setup", "stage-bundle", "deploy-sql"),
+    "git-repository": ("config-get", "objects-sql", "deploy-sql"),
+}
+
+
+def _deploy_steps(repo: Path) -> dict[str, str]:
+    workflow = yaml.safe_load((repo / ".github/workflows/deploy.yml").read_text(encoding="utf-8"))
+    return {s.get("name"): s.get("run") for s in workflow["jobs"]["deploy"]["steps"]}
+
+
+def _run_deploy_step(
+    repo: Path, script: str, bin_dir: Path, **env: str
+) -> tuple[subprocess.CompletedProcess, list[str]]:
+    """Run one deploy step under bash with `snow` stubbed and `streamsnow` wrapped.
+    The wrapper fails the verb named in FAIL_VERB, answers objects-sql from
+    OBJECTS_SQL, and hands every other verb (git-head included) to the real CLI. The
+    snow stub answers SHOW GIT BRANCHES with BRANCH_HEAD. One log holds both, in call
+    order: wrapper lines start with "streamsnow ", snow lines with its subcommand."""
+    import os
+    import shutil
+
+    real = shutil.which("streamsnow")
+    bin_dir.mkdir(exist_ok=True)
+    log = bin_dir / "calls.log"
+    log.write_text("", encoding="utf-8")
+    wrapper = bin_dir / "streamsnow"
+    wrapper.write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "streamsnow $*" >> "$SNOW_LOG"\n'
+        'if [ -n "${FAIL_VERB:-}" ] && [ "$1" = "$FAIL_VERB" ]; then\n'
+        '  echo "$1: failed" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        'if [ "$1" = objects-sql ]; then\n'
+        '  printf "%s" "${OBJECTS_SQL:-}"\n'
+        "  exit 0\n"
+        "fi\n"
+        f'exec "{real}" "$@"\n',
+        encoding="utf-8",
+    )
+    snow = bin_dir / "snow"
+    snow.write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "$*" >> "$SNOW_LOG"\n'
+        'if [ "$1" = stage ] && [ ! -e "$4" ]; then echo "No data" >&2; exit 2; fi\n'
+        'case "$*" in\n'
+        '  *"SHOW GIT BRANCHES"*)\n'
+        '    printf \'[{"name": "main", "commit_hash": "%s"}]\' "$BRANCH_HEAD" ;;\n'
+        "esac\n",
+        encoding="utf-8",
+    )
+    for stub in (wrapper, snow):
+        stub.chmod(0o755)
+    full_env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "SNOW_LOG": str(log),
+        "GITHUB_SHA": RUN_SHA,
+        "BRANCH_HEAD": RUN_SHA,
+        "RUNNER_TEMP": str(bin_dir.parent),
+        **env,
+    }
+    proc = subprocess.run(
+        ["bash", "-e", "-c", script],
+        cwd=repo,
+        env=full_env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return proc, log.read_text(encoding="utf-8").splitlines()
+
+
+def _sql_call(calls: list[str], needle: str) -> int | None:
+    return next((i for i, c in enumerate(calls) if c.startswith("sql") and needle in c), None)
+
+
+def _first_snow_call(calls: list[str]) -> int:
+    return next((i for i, c in enumerate(calls) if not c.startswith("streamsnow ")), len(calls))
+
+
+def _need_bash_and_streamsnow() -> None:
+    import shutil
+
+    if shutil.which("bash") is None or shutil.which("streamsnow") is None:
+        pytest.skip("needs bash and streamsnow on PATH (uv run pytest provides both)")
+
+
+@_workflow_bash
+@pytest.mark.parametrize("source", ["stage-copy", "git-repository"])
+def test_every_producer_runs_before_the_first_snow_call(tmp_path, source):
+    _need_bash_and_streamsnow()
+    repo = _init_repo(tmp_path, source=source, app_slug="acme-sales")
+    step = _deploy_steps(repo)[f"Deploy changed apps ({source})"]
+    proc, calls = _run_deploy_step(repo, step, tmp_path / "bin", OBJECTS_SQL=OBJECTS)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    first_snow = _first_snow_call(calls)
+    for verb in PRODUCERS[source]:
+        ran = [i for i, c in enumerate(calls) if c.startswith(f"streamsnow {verb}")]
+        assert ran and max(ran) < first_snow, (verb, calls)
+
+
+@_workflow_bash
+def test_stage_copy_deploy_applies_app_data_before_any_app(tmp_path):
+    _need_bash_and_streamsnow()
+    repo = _init_repo(tmp_path, source="stage-copy", app_slug="acme-sales")
+    step = _deploy_steps(repo)["Deploy changed apps (stage-copy)"]
+    proc, calls = _run_deploy_step(repo, step, tmp_path / "bin", OBJECTS_SQL=OBJECTS)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    setup = _sql_call(calls, "-f /tmp/ss-setup.sql")
+    objects = _sql_call(calls, "-f /tmp/ss-objects.sql")
+    app_sql = _sql_call(calls, "-f /tmp/ss-acme-sales.sql")
+    assert None not in (setup, objects, app_sql), calls
+    assert setup < objects < app_sql, calls
+
+
+@_workflow_bash
+def test_stage_copy_deploy_skips_empty_app_data(tmp_path):
+    _need_bash_and_streamsnow()
+    repo = _init_repo(tmp_path, source="stage-copy", app_slug="acme-sales")
+    step = _deploy_steps(repo)["Deploy changed apps (stage-copy)"]
+    proc, calls = _run_deploy_step(repo, step, tmp_path / "bin", OBJECTS_SQL="")
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    assert _sql_call(calls, "ss-objects.sql") is None
+    assert _sql_call(calls, "-f /tmp/ss-acme-sales.sql") is not None
+
+
+@_workflow_bash
+@pytest.mark.parametrize(
+    ("source", "verb"),
+    [("stage-copy", v) for v in PRODUCERS["stage-copy"]]
+    + [("git-repository", v) for v in PRODUCERS["git-repository"]],
+)
+def test_a_failing_producer_stops_the_deploy_before_snowflake(tmp_path, source, verb):
+    """Any producer failure (objects-sql, stage-path, deploy-setup, stage-bundle or an
+    app's deploy-sql) stops the step with Snowflake untouched. The old
+    `deploy-setup > f && snow sql -f f` kept going under `set -e`: a failure on the
+    left of `&&` never stops the script."""
+    _need_bash_and_streamsnow()
+    repo = _init_repo(tmp_path, source=source, app_slug="acme-sales")
+    step = _deploy_steps(repo)[f"Deploy changed apps ({source})"]
+    proc, calls = _run_deploy_step(
+        repo, step, tmp_path / "bin", OBJECTS_SQL=OBJECTS, FAIL_VERB=verb
+    )
+    assert proc.returncode != 0
+    assert f"{verb}: failed" in proc.stderr
+    assert [c for c in calls if not c.startswith("streamsnow ")] == [], calls
+
+
+@_workflow_bash
+def test_git_deploy_checks_the_branch_head_then_applies_app_data_then_apps(tmp_path):
+    _need_bash_and_streamsnow()
+    repo = _init_repo(tmp_path, source="git-repository", app_slug="acme-sales")
+    step = _deploy_steps(repo)["Deploy changed apps (git-repository)"]
+    proc, calls = _run_deploy_step(repo, step, tmp_path / "bin", OBJECTS_SQL=OBJECTS)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    fetch = next(i for i, c in enumerate(calls) if c.startswith("git fetch"))
+    head = _sql_call(calls, "SHOW GIT BRANCHES")
+    objects = _sql_call(calls, "-f /tmp/ss-objects.sql")
+    app_sql = _sql_call(calls, "-f /tmp/ss-acme-sales.sql")
+    assert None not in (head, objects, app_sql), calls
+    assert fetch < head < objects < app_sql, calls
+
+
+@_workflow_bash
+def test_git_deploy_stops_before_any_ddl_when_the_branch_moved(tmp_path):
+    _need_bash_and_streamsnow()
+    repo = _init_repo(tmp_path, source="git-repository", app_slug="acme-sales")
+    step = _deploy_steps(repo)["Deploy changed apps (git-repository)"]
+    proc, calls = _run_deploy_step(
+        repo, step, tmp_path / "bin", OBJECTS_SQL=OBJECTS, BRANCH_HEAD=MOVED_SHA
+    )
+    assert proc.returncode == 1
+    assert "Stopping before any DDL or app change" in proc.stderr
+    assert _sql_call(calls, "-f /tmp/ss-objects.sql") is None, calls
+    assert _sql_call(calls, "-f /tmp/ss-acme-sales.sql") is None, calls

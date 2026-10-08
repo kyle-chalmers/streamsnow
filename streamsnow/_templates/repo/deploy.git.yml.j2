@@ -73,14 +73,29 @@ jobs:
             echo "No app directories under apps/ yet: nothing to deploy."
             exit 0
           fi
+          # Every file this step runs is written first, each producer on a line of its
+          # own, so any producer failure stops the step before Snowflake is touched.
+          # objects-sql (#79) checks every app-data file and prints nothing at all on
+          # any finding.
           REPO="$(streamsnow config-get deploy.git_repository_fqn)"
-          # A failed fetch stops the deploy: without it Snowflake would rebuild
-          # each app from the previous commit and report success.
-          snow git fetch --temporary-connection "$REPO"
+          streamsnow objects-sql > /tmp/ss-objects.sql
           for d in "${apps[@]}"; do
             slug="$(basename "$d")"
             streamsnow deploy-sql "$slug" > "/tmp/ss-$slug.sql"
-            snow sql --temporary-connection -f "/tmp/ss-$slug.sql"
+          done
+          # A failed fetch stops the deploy: without it Snowflake would rebuild
+          # each app from the previous commit and report success.
+          snow git fetch --temporary-connection "$REPO"
+          # The apps are built from the fetched branch, the app data from this
+          # checkout. If another merge moved the branch after this run started,
+          # they would come from different commits: stop before any DDL or app
+          # change. The newer commit's own deploy run ships both.
+          streamsnow git-head --expect "$GITHUB_SHA" --temporary-connection
+          if [ -s /tmp/ss-objects.sql ]; then
+            snow sql --temporary-connection -f /tmp/ss-objects.sql
+          fi
+          for d in "${apps[@]}"; do
+            snow sql --temporary-connection -f "/tmp/ss-$(basename "$d").sql"
           done
 
       # A CREATE OR REPLACE pipeline has no delete path — this is it. Every

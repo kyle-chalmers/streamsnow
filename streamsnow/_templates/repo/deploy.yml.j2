@@ -69,6 +69,8 @@ jobs:
       # other root-level docs, sql_review/ and tooling folders, which the running
       # app never reads. `--recursive` skips dot-directories, so the loop after
       # the upload copies each bundled .streamlit/config.toml on its own.
+      # Every producer runs before the first snow call, so a failed one stops the
+      # step with Snowflake untouched.
       - name: Deploy changed apps (stage-copy)
         if: steps.gate.outputs.go == 'true'
         run: |
@@ -79,20 +81,34 @@ jobs:
             echo "No app directories under apps/ yet: nothing to deploy."
             exit 0
           fi
+          # Every file this step runs is written first, each producer on a line of its
+          # own (under `set -e` a failure on the left of `&&` does not stop the script),
+          # so any producer failure stops the step before Snowflake is touched. App data
+          # (#79) is every view and dynamic table the apps declare in governance.app_data,
+          # in dependency order; objects-sql checks every file and prints nothing at all
+          # on any finding.
+          streamsnow objects-sql > /tmp/ss-objects.sql
           STAGE="$(streamsnow stage-path)"
-          streamsnow deploy-setup > /tmp/ss-setup.sql && snow sql --temporary-connection -f /tmp/ss-setup.sql
+          streamsnow deploy-setup > /tmp/ss-setup.sql
           BUNDLE="${RUNNER_TEMP:-/tmp}/ss-bundle"
           rm -rf "$BUNDLE"
           streamsnow stage-bundle --out "$BUNDLE"
+          for d in "${apps[@]}"; do
+            slug="$(basename "$d")"
+            streamsnow deploy-sql "$slug" --sha "$GITHUB_SHA" > "/tmp/ss-$slug.sql"
+          done
+          # Snowflake from here on: setup, app data, then the apps.
+          snow sql --temporary-connection -f /tmp/ss-setup.sql
+          if [ -s /tmp/ss-objects.sql ]; then
+            snow sql --temporary-connection -f /tmp/ss-objects.sql
+          fi
           snow stage copy --temporary-connection "$BUNDLE/" "$STAGE/commits/$GITHUB_SHA/apps/" --recursive --overwrite
           for d in "${apps[@]}"; do
             cfg="$BUNDLE/$(basename "$d")/.streamlit/config.toml"
             [ -f "$cfg" ] && snow stage copy --temporary-connection "$cfg" "$STAGE/commits/$GITHUB_SHA/apps/$(basename "$d")/.streamlit/" --overwrite
           done
           for d in "${apps[@]}"; do
-            slug="$(basename "$d")"
-            streamsnow deploy-sql "$slug" --sha "$GITHUB_SHA" > "/tmp/ss-$slug.sql"
-            snow sql --temporary-connection -f "/tmp/ss-$slug.sql"
+            snow sql --temporary-connection -f "/tmp/ss-$(basename "$d").sql"
           done
 
       # A CREATE OR REPLACE pipeline has no delete path — this is it. Every
