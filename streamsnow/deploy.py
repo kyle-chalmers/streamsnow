@@ -651,6 +651,7 @@ def generate_teardown_sql(
     app_data_objects: Sequence[tuple[str, str]] = (),
     *,
     inventory_incomplete: Sequence[str] = (),
+    skipped: Sequence[str] = (),
 ) -> str:
     """Reviewable reverse of :func:`generate_admin_sql`: the start-fresh path.
 
@@ -668,7 +669,9 @@ def generate_teardown_sql(
     that owns them, so nothing is left owned by a dropped role; when an
     object's kind is unknown, or the inventory is incomplete
     (``inventory_incomplete``), the CI role's DROP is printed commented with the
-    reason, for the reviewer to finish in that order.
+    reason, for the reviewer to finish in that order. ``skipped`` names declared
+    objects the deploy never built (a name the loader rejected): they are listed in
+    one escaped comment line and hold nothing back.
     """
     o = cfg.snowflake.objects
     ci = cfg.snowflake.roles.ci_role
@@ -745,11 +748,11 @@ def generate_teardown_sql(
                 f"-- Incomplete inventory: objects: in {listed} did not load in full. Objects",
                 "-- the deploy job built there may exist that this script cannot list.",
             ]
-        odd = [f for f, _ in app_data_objects if not is_plain_fqn(f)]
+        odd = [*skipped, *(f for f, _ in app_data_objects if not is_plain_fqn(f))]
         if odd:
             # Never built (findings block the deploy), so nothing to drop and nothing held back.
             out.append(
-                "-- Skipped, not a plain DATABASE.SCHEMA.NAME and never built: "
+                "-- Skipped, never built (the declared name is not a plain DATABASE.SCHEMA.NAME): "
                 + ", ".join(dict.fromkeys(_one_line(f) for f in odd))
             )
         app_data_objects = [(f, k) for f, k in app_data_objects if is_plain_fqn(f)]

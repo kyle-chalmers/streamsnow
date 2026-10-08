@@ -363,6 +363,7 @@ class AppDataObject:
     reason: str
     statements: tuple[str, ...]
     depends_on: tuple[str, ...]  # app-data objects its query reads
+    line: int = 1  # the CREATE's line in its file, where a finding about the object points
 
 
 @dataclass
@@ -378,6 +379,9 @@ class AppDataPlan:
     incomplete: list[str] = field(default_factory=list)
     # fqn -> app-data objects its query reads, for every object built, valid or not
     deps: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # declared names the loader rejected for their form (never built, so never a DROP, and
+    # they hold nothing back): the display name can look plain once a trailing newline is gone
+    unbuilt: set[str] = field(default_factory=set)
 
     @property
     def ok(self) -> bool:
@@ -403,12 +407,13 @@ class AppDataPlan:
         """``(fqn, kind)`` for every declared object, dependents first (teardown).
 
         Reverse topological over every built object (valid or not: an invalid
-        one may still exist from an earlier deploy), ties by name, objects in a
-        dependency cycle last. Only plain three-part names are returned: a
-        declared name that is not one was never built, and its text must not
-        reach the SQL a person runs.
+        one may still exist from an earlier deploy), ties by name. Objects in a
+        dependency cycle go first: nothing acyclic can read a cycle member, so
+        every acyclic object they read must outlive them. Only plain three-part
+        names are returned: a declared name that is not one was never built, and
+        its text must not reach the SQL a person runs (see :attr:`unbuilt`).
         """
-        names = sorted(f for f in self.declared if is_plain_fqn(f))
+        names = sorted(f for f in self.declared if is_plain_fqn(f) and f not in self.unbuilt)
         pending = {f: {d for d in self.deps.get(f, ()) if d in names and d != f} for f in names}
         forward: list[str] = []
         while True:
@@ -420,8 +425,12 @@ class AppDataPlan:
                 del pending[f]
             for ds in pending.values():
                 ds.difference_update(ready)
-        ordered = [*reversed(forward), *sorted(pending)]
+        ordered = [*sorted(pending), *reversed(forward)]
         return [(f, self.declared[f][1]) for f in ordered]
+
+    def skipped_names(self) -> list[str]:
+        """Declared names the teardown does not drop because the deploy never built them."""
+        return sorted(f for f in self.declared if f in self.unbuilt or not is_plain_fqn(f))
 
     def dynamic_tables(self, slug: str) -> list[str]:
         return sorted(
@@ -558,6 +567,8 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
     indexes: dict[str, sri.Index] = {}
     valid: set[str] = set()
     owners: dict[str, list[tuple[str, str]]] = {}
+    unbuilt: set[str] = set()  # rejected for their form
+    accepted: set[str] = set()  # declared with a plain name, so a deploy may have built them
     for app in apps:
         slug = app.name
         idx = sri.load_index(app)
@@ -604,6 +615,7 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
             owners.setdefault(fqn, []).append((slug, rel_index))
             if not is_plain_fqn(obj.name):
                 plan.declared.setdefault(fqn, (slug, ""))
+                unbuilt.add(fqn)
                 add(
                     slug,
                     rel_index,
@@ -613,6 +625,7 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
                     "render into SQL",
                 )
                 continue
+            accepted.add(fqn)
             if parts in collided:
                 plan.declared.setdefault(fqn, (slug, ""))
                 continue  # reported above, once per file
@@ -684,7 +697,14 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
             built.setdefault(
                 fqn,
                 AppDataObject(
-                    fqn, parsed.kind, slug, rel, obj.reason, parsed.statements, tuple(deps)
+                    fqn,
+                    parsed.kind,
+                    slug,
+                    rel,
+                    obj.reason,
+                    parsed.statements,
+                    tuple(deps),
+                    parsed.line,
                 ),
             )
             if not problems:
@@ -742,20 +762,24 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
             add(
                 obj.app,
                 obj.file,
-                1,
-                f"no app query reads {fqn}: an app-data object exists for a query that reads it. "
-                "Read it from a query (and list it in that metric's reads:), or delete it (with a "
-                "tombstone if it was deployed)",
+                obj.line,
+                f"no app query reads {fqn}, and app data holds only objects that a query reads. "
+                "Read it from a query and list it in that metric's reads:, or delete its file "
+                "(add a tombstone if it was deployed)",
             )
         elif obj.reason == "shared_logic" and len(users) == 1:
             (who,) = users
-            reader = who[1] if who[0] == "object" else f"apps/{who[1]}/{who[2]}"
+            reader = (
+                f"the app-data object {who[1]}"
+                if who[0] == "object"
+                else f"the query apps/{who[1]}/{who[2]}"
+            )
             add(
                 obj.app,
                 obj.file,
-                1,
-                f"{fqn} is shared_logic but only one query ({reader}) reads it: inline it there, "
-                "or keep it when a second reader is coming",
+                obj.line,
+                f"{fqn} has reason: shared_logic but only {reader} reads it: inline it there, "
+                "or keep it if a second reader is coming",
                 KIND_ADVISORY,
             )
         if obj.depends_on:
@@ -768,5 +792,6 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
                 KIND_ADVISORY,
             )
     plan.deps = {f: o.depends_on for f, o in built.items()}
+    plan.unbuilt = unbuilt - accepted
     plan.objects = [o for o in _order(built, add) if o.fqn in valid]
     return plan

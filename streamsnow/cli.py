@@ -1112,7 +1112,10 @@ def deploy_setup(
                     err=True,
                 )
             sql = generate_teardown_sql(
-                cfg, plan.drop_order(), inventory_incomplete=plan.incomplete
+                cfg,
+                plan.drop_order(),
+                inventory_incomplete=plan.incomplete,
+                skipped=plan.skipped_names(),
             )
         elif admin:
             key = read_public_key(public_key_file) if public_key_file else None

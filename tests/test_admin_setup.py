@@ -629,3 +629,57 @@ def test_teardown_prints_the_finding_count_on_stderr(tmp_path):
     assert result.exit_code == 0, result.output
     assert "finding(s)" in result.stderr
     assert "finding(s)" not in result.stdout
+
+
+def test_drop_order_puts_a_cycle_member_before_the_acyclic_object_it_reads(tmp_path):
+    """D_V reads A_BASE and is in a cycle with C_V. Nothing acyclic can read a cycle
+    member, so both cycle members must go before A_BASE, which they depend on."""
+    from _app_data_fixtures import dynamic_table, view, write_app, write_config
+
+    from streamsnow.app_data import load_app_data
+
+    cfg_path = write_config(tmp_path, app_data=ELSEWHERE)
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "A_BASE": dynamic_table("A_BASE", ad=ELSEWHERE),
+            "C_V": view("C_V", f"SELECT revenue FROM {ELSEWHERE}.D_V", ad=ELSEWHERE),
+            "D_V": view(
+                "D_V",
+                f"SELECT a.revenue FROM {ELSEWHERE}.A_BASE a JOIN {ELSEWHERE}.C_V c ON 1 = 1",
+                ad=ELSEWHERE,
+            ),
+        },
+        ad=ELSEWHERE,
+    )
+    cfg = Config.from_dict(yaml.safe_load(cfg_path.read_text(encoding="utf-8")))
+    order = [f for f, _ in load_app_data(tmp_path, cfg).drop_order()]
+    assert order.index(f"{ELSEWHERE}.C_V") < order.index(f"{ELSEWHERE}.A_BASE")
+    assert order.index(f"{ELSEWHERE}.D_V") < order.index(f"{ELSEWHERE}.A_BASE")
+
+
+def test_a_declared_name_with_a_trailing_newline_does_not_hold_the_role_back(tmp_path):
+    """`...EVIL\\n` renders as a plain name once stripped, but the loader rejects the entry
+    so the deploy never built it: it must not hold back the CI role's DROP."""
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    cfg = write_config(tmp_path, app_data=ELSEWHERE)
+    app = write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE", ad=ELSEWHERE)},
+        ad=ELSEWHERE,
+    )
+    index = app / "sql_review" / "index.yaml"
+    data = yaml.safe_load(index.read_text(encoding="utf-8"))
+    data["objects"].append({"name": f"{ELSEWHERE}.EVIL\n", "grants": [], "reason": "performance"})
+    index.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    result = _cli("deploy-setup", "--teardown", "--config", str(cfg))
+    assert result.exit_code == 0, result.output
+    live = [ln for ln in result.stdout.splitlines() if not ln.startswith("--")]
+    assert not [ln for ln in live if "EVIL" in ln]
+    skipped = [ln for ln in result.stdout.splitlines() if "EVIL" in ln]
+    assert len(skipped) == 1 and skipped[0].startswith("-- Skipped")
+    assert "\nDROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in result.stdout
+    assert "Held back" not in result.stdout

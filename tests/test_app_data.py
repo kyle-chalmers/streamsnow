@@ -768,3 +768,35 @@ def test_only_certain_sql_counts_as_a_reader(tmp_path):
         encoding="utf-8",
     )
     assert f"no app query reads {FAD}.DAILY_REVENUE" in _details(_plan(tmp_path))
+
+
+def test_an_unreferenced_object_finding_points_at_its_create_and_reads_plainly(tmp_path):
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")},
+        read_objects=False,
+    )
+    (row,) = [f for f in _plan(tmp_path).findings if "no app query reads" in f["detail"]]
+    assert row["detail"].startswith(
+        f"no app query reads {FAD}.DAILY_REVENUE, and app data holds only objects that a query reads."
+    )
+    assert row["line"] > 1  # the header comment comes first; the CREATE is the finding's line
+
+
+def test_the_shared_logic_advisory_names_an_object_reader_as_an_object(tmp_path):
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "BASE_V": view("BASE_V", "SELECT region FROM ANALYTICS_DB.REPORTING.ORDERS"),
+            "TOP_V": view("TOP_V", f"SELECT region FROM {FAD}.BASE_V"),
+        },
+        reasons={"BASE_V": "shared_logic", "TOP_V": "performance"},
+        queries={"top_v.sql": f"SELECT * FROM {FAD}.TOP_V\n"},
+        read_objects=False,
+    )
+    (adv,) = [a for a in _plan(tmp_path).advisories if "shared_logic" in a["detail"]]
+    assert adv["detail"].startswith(
+        f"{FAD}.BASE_V has reason: shared_logic but only the app-data object {FAD}.TOP_V reads it"
+    )
