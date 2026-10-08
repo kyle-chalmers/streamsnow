@@ -1099,7 +1099,14 @@ def deploy_setup(
                 origin = _checkout_github_origin()
             cfg = with_source(cfg, target, git_origin=origin, github_auth=github_auth)
         if teardown:
-            sql = generate_teardown_sql(cfg)
+            from .app_data import load_app_data
+
+            cfg_file = Path(config) if config else find_config()
+            repo = cfg_file.resolve().parent if cfg_file else Path.cwd()
+            plan = load_app_data(repo, cfg)
+            sql = generate_teardown_sql(
+                cfg, plan.drop_order(), inventory_incomplete=plan.incomplete
+            )
         elif admin:
             key = read_public_key(public_key_file) if public_key_file else None
             sql = generate_admin_sql(

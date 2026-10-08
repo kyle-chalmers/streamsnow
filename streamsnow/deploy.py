@@ -28,6 +28,7 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
+from .app_data import SQL_KIND
 from .config import (
     DEPLOY_SOURCES,
     GITHUB_AUTH_MODES,
@@ -639,7 +640,12 @@ def generate_admin_sql(
     return "\n".join(out)
 
 
-def generate_teardown_sql(cfg: Config) -> str:
+def generate_teardown_sql(
+    cfg: Config,
+    app_data_objects: Sequence[tuple[str, str]] = (),
+    *,
+    inventory_incomplete: Sequence[str] = (),
+) -> str:
     """Reviewable reverse of :func:`generate_admin_sql`: the start-fresh path.
 
     Printed, never run. Everything the bootstrap created goes, in an order
@@ -651,8 +657,12 @@ def generate_teardown_sql(cfg: Config) -> str:
     something that may predate StreamSnow says so. Every statement uses
     ``IF EXISTS``, so a partial teardown can simply be re-run. App data in the
     app database goes with it; elsewhere its DROP SCHEMA is printed commented.
-    PR 3 adds the declared app-data objects' DROPs at the top of section 2,
-    before any role is dropped.
+    Elsewhere, the views and dynamic tables the deploy job built there are
+    dropped first (``app_data_objects``, dependents first), before the CI role
+    that owns them, so nothing is left owned by a dropped role; when an
+    object's kind is unknown, or the inventory is incomplete
+    (``inventory_incomplete``), the CI role's DROP is printed commented with the
+    reason, for the reviewer to finish in that order.
     """
     o = cfg.snowflake.objects
     ci = cfg.snowflake.roles.ci_role
@@ -707,15 +717,59 @@ def generate_teardown_sql(cfg: Config) -> str:
         if outside:
             out += ["-- Deploy-source objects that live outside the app database:", *outside]
     app_data = cfg.governance.app_data
+    unsure: list[str] = []  # objects whose DROP the reviewer must pick: their owner stays too
+    holds: list[str] = []  # why the CI role's DROP is held back
     out += ["", f"-- 2. App data ({app_data})."]
     if app_data.split(".", 1)[0].upper() == o.app_database.upper():
         out.append(f"-- It lives in {o.app_database}, so step 1 dropped it with everything in it.")
+        if app_data_objects:
+            out.append(
+                f"-- That includes the {len(app_data_objects)} view(s) and dynamic table(s) "
+                "the deploy job built there."
+            )
     else:
+        if inventory_incomplete:
+            listed = ", ".join(inventory_incomplete)
+            holds.append(
+                f"objects: in {listed} did not load in full, so objects the deploy job "
+                "built may be missing below"
+            )
+            out += [
+                f"-- Incomplete inventory: objects: in {listed} did not load in full. Objects",
+                "-- the deploy job built there may exist that this script cannot list.",
+            ]
+        if app_data_objects:
+            out.append(
+                "-- The views and dynamic tables the deploy job built there go first, before "
+                "the CI role that owns them:"
+            )
+            for fqn, kind in app_data_objects:
+                if kind in SQL_KIND:
+                    out.append(f"DROP {SQL_KIND[kind]} IF EXISTS {fqn};")
+                else:
+                    unsure.append(fqn)
+                    out += [
+                        f"-- {fqn}: its DDL file does not show whether it is a view or a "
+                        "dynamic table. Uncomment the line that matches:",
+                        f"--   DROP VIEW IF EXISTS {fqn};",
+                        f"--   DROP DYNAMIC TABLE IF EXISTS {fqn};",
+                    ]
         out += [
             "-- It lives outside the app database. Drop it only if nothing else lives there:",
             "-- uncomment the next line.",
             f"--   DROP SCHEMA IF EXISTS {app_data};",
         ]
+    if unsure:
+        holds.append(f"{', '.join(unsure)} may still exist")
+    ci_drop = (
+        [
+            f"-- Held back: {'; '.join(holds)}, owned by {ci}. Dropping the role first would",
+            "-- leave those objects owned by whoever runs this script. Drop them, then uncomment:",
+            f"--   DROP ROLE IF EXISTS {ci};",
+        ]
+        if holds
+        else [f"DROP ROLE IF EXISTS {ci};"]
+    )
     out += [
         "",
         "-- 3. Warehouse, CI service user, roles (after the objects they own are gone).",
@@ -723,7 +777,7 @@ def generate_teardown_sql(cfg: Config) -> str:
         f"DROP WAREHOUSE IF EXISTS {o.default_warehouse};",
         f"DROP USER IF EXISTS {ci_user_name(ci)};",
         f"DROP ROLE IF EXISTS {viewer};",
-        f"DROP ROLE IF EXISTS {ci};",
+        *ci_drop,
         "",
         "-- 4. Account-level objects.",
     ]

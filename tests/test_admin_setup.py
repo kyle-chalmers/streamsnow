@@ -445,3 +445,107 @@ def test_teardown_flags_every_object_that_could_predate_streamsnow():
         "DROP API INTEGRATION IF EXISTS GITHUB_API_INTEGRATION;",
     ):
         assert sql[sql.index(target) - 1] == marker, target
+
+
+# --------------------------------------------------------------------------- #
+# Teardown: declared app-data objects go before the roles that own them (#79)
+# --------------------------------------------------------------------------- #
+
+ELSEWHERE = "STREAMSNOW_DATA.REPORTING"
+
+
+def test_teardown_drops_declared_app_data_objects_before_the_roles():
+    objs = [
+        (f"{ELSEWHERE}.REGION_REVENUE", "view"),
+        (f"{ELSEWHERE}.DAILY_REVENUE", "dynamic_table"),
+    ]
+    sql = generate_teardown_sql(_cfg(**{"governance.app_data": ELSEWHERE}), objs)
+    view = f"DROP VIEW IF EXISTS {ELSEWHERE}.REGION_REVENUE;"
+    table = f"DROP DYNAMIC TABLE IF EXISTS {ELSEWHERE}.DAILY_REVENUE;"
+    assert view in _drops(sql) and table in _drops(sql)
+    order = [
+        sql.index(f"-- 2. App data ({ELSEWHERE})."),
+        sql.index(view),
+        sql.index(table),
+        sql.index(f"--   DROP SCHEMA IF EXISTS {ELSEWHERE};"),
+        sql.index("DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;"),
+    ]
+    assert order == sorted(order)
+
+
+def test_an_object_of_unknown_kind_holds_back_its_owners_role_drop():
+    """The object cannot be dropped safely, so neither can the CI role that owns it:
+    dropping the owner first would leave the object owned by whoever runs teardown."""
+    objs = [(f"{ELSEWHERE}.X", ""), (f"{ELSEWHERE}.DAILY_REVENUE", "dynamic_table")]
+    sql = generate_teardown_sql(_cfg(**{"governance.app_data": ELSEWHERE}), objs)
+    assert f"--   DROP VIEW IF EXISTS {ELSEWHERE}.X;" in sql
+    assert f"--   DROP DYNAMIC TABLE IF EXISTS {ELSEWHERE}.X;" in sql
+    assert not [s for s in _drops(sql) if f"{ELSEWHERE}.X" in s]
+    assert f"DROP DYNAMIC TABLE IF EXISTS {ELSEWHERE}.DAILY_REVENUE;" in _drops(sql)
+    drops = _drops(sql)
+    assert "DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" not in drops
+    held = "--   DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;"
+    assert held in sql
+    assert f"{ELSEWHERE}.X" in sql[sql.index(held) - 300 : sql.index(held)]  # the reason names it
+    assert "DROP ROLE IF EXISTS STREAMSNOW_VIEWER_ROLE;" in drops  # the viewer owns nothing there
+
+
+def test_an_incomplete_inventory_holds_back_the_ci_role_drop():
+    """A malformed index.yaml gives an empty drop order: objects the deploy job built
+    may still exist unseen, so the role that owns them must not be dropped first."""
+    index = "apps/acme-sales/sql_review/index.yaml"
+    sql = generate_teardown_sql(
+        _cfg(**{"governance.app_data": ELSEWHERE}), [], inventory_incomplete=[index]
+    )
+    drops = _drops(sql)
+    assert "DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" not in drops
+    held = "--   DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;"
+    assert held in sql
+    assert index in sql[sql.index("-- 2. App data") : sql.index(held)]
+    assert "DROP ROLE IF EXISTS STREAMSNOW_VIEWER_ROLE;" in drops
+
+
+def test_deploy_setup_teardown_holds_the_role_back_for_a_malformed_index(tmp_path):
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    cfg = write_config(tmp_path, app_data=ELSEWHERE)
+    app = write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE", ad=ELSEWHERE)},
+        ad=ELSEWHERE,
+    )
+    (app / "sql_review" / "index.yaml").write_text("objects: [\n", encoding="utf-8")
+    result = _cli("deploy-setup", "--teardown", "--config", str(cfg))
+    assert result.exit_code == 0, result.output
+    assert "--   DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in result.output
+    assert "\nDROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" not in result.output
+
+
+def test_known_kinds_keep_the_role_drop():
+    sql = generate_teardown_sql(
+        _cfg(**{"governance.app_data": ELSEWHERE}), [(f"{ELSEWHERE}.V", "view")]
+    )
+    assert "DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in _drops(sql)
+
+
+def test_teardown_app_data_in_the_app_database_needs_no_object_drops():
+    objs = [("STREAMSNOW_APPS.STREAMSNOW_REPORTING.DAILY_REVENUE", "dynamic_table")]
+    sql = generate_teardown_sql(_cfg(), objs)
+    assert "DROP DYNAMIC TABLE" not in sql
+    assert "1 view(s) and dynamic table(s) the deploy job built there" in sql
+
+
+def test_deploy_setup_teardown_reads_the_declared_objects(tmp_path):
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    cfg = write_config(tmp_path, app_data=ELSEWHERE)
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE", ad=ELSEWHERE)},
+        ad=ELSEWHERE,
+    )
+    result = _cli("deploy-setup", "--teardown", "--config", str(cfg))
+    assert result.exit_code == 0, result.output
+    assert f"DROP DYNAMIC TABLE IF EXISTS {ELSEWHERE}.DAILY_REVENUE;" in result.output
