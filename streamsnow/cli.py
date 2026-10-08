@@ -1104,6 +1104,12 @@ def deploy_setup(
             cfg_file = Path(config) if config else find_config()
             repo = cfg_file.resolve().parent if cfg_file else Path.cwd()
             plan = load_app_data(repo, cfg)
+            if plan.findings:
+                typer.echo(
+                    f"deploy-setup: {len(plan.findings)} app-data finding(s); teardown lists "
+                    "what is declared, run `streamsnow objects-sql` for the findings",
+                    err=True,
+                )
             sql = generate_teardown_sql(
                 cfg, plan.drop_order(), inventory_incomplete=plan.incomplete
             )

@@ -549,3 +549,83 @@ def test_deploy_setup_teardown_reads_the_declared_objects(tmp_path):
     result = _cli("deploy-setup", "--teardown", "--config", str(cfg))
     assert result.exit_code == 0, result.output
     assert f"DROP DYNAMIC TABLE IF EXISTS {ELSEWHERE}.DAILY_REVENUE;" in result.output
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 1: a declared name must never reach teardown SQL unquoted (#79)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_quoted_name_with_a_newline_never_becomes_a_live_drop(tmp_path):
+    """An index.yaml entry can carry a newline inside a quoted part. Rendered into a
+    `-- ...` comment it would end the comment and print a live DROP DATABASE."""
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    cfg = write_config(tmp_path, app_data=ELSEWHERE)
+    app = write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE", ad=ELSEWHERE)},
+        ad=ELSEWHERE,
+    )
+    index = app / "sql_review" / "index.yaml"
+    data = yaml.safe_load(index.read_text(encoding="utf-8"))
+    evil = f'{ELSEWHERE}."X\nDROP DATABASE ANALYTICS_DB;\n--"'
+    data["objects"].append({"name": evil, "grants": [], "reason": "performance"})
+    index.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    result = _cli("deploy-setup", "--teardown", "--config", str(cfg))
+    assert result.exit_code == 0, result.output
+    live = [ln for ln in result.stdout.splitlines() if not ln.startswith("--")]
+    assert not [ln for ln in live if "ANALYTICS_DB" in ln]
+    for ln in result.stdout.splitlines():
+        assert not ln.startswith("DROP DATABASE ANALYTICS_DB")
+    assert f"DROP DYNAMIC TABLE IF EXISTS {ELSEWHERE}.DAILY_REVENUE;" in live
+
+
+def test_teardown_sql_renders_only_plain_names_and_reports_others_once():
+    evil = f'{ELSEWHERE}."X\nDROP DATABASE ANALYTICS_DB;\n--"'
+    sql = generate_teardown_sql(
+        _cfg(**{"governance.app_data": ELSEWHERE}), [(evil, ""), (evil, "view")]
+    )
+    assert "\nDROP DATABASE ANALYTICS_DB;" not in sql
+    assert sql.count("DROP DATABASE ANALYTICS_DB") <= 1
+    assert "DROP VIEW IF EXISTS" not in sql
+    # never built, so it does not hold back the CI role
+    assert "DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in _drops(sql)
+    # the one report line is a single comment line
+    report = [ln for ln in sql.splitlines() if "DROP DATABASE ANALYTICS_DB" in ln]
+    assert all(ln.startswith("--") for ln in report)
+
+
+def test_drop_order_puts_dependents_first_even_for_invalid_objects(tmp_path):
+    from _app_data_fixtures import dynamic_table, view, write_app, write_config
+
+    from streamsnow.app_data import load_app_data
+
+    cfg_path = write_config(tmp_path, app_data=ELSEWHERE)
+    # A_DT is invalid (wrong warehouse) yet Z_VIEW reads it: Z_VIEW must go first.
+    bad_dt = dynamic_table("A_DT", ad=ELSEWHERE).replace("STREAMSNOW_WH", "OTHER_WH")
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "A_DT": bad_dt,
+            "Z_VIEW": view("Z_VIEW", f"SELECT revenue FROM {ELSEWHERE}.A_DT", ad=ELSEWHERE),
+        },
+        ad=ELSEWHERE,
+    )
+    cfg = Config.from_dict(yaml.safe_load(cfg_path.read_text(encoding="utf-8")))
+    order = [f for f, _ in load_app_data(tmp_path, cfg).drop_order()]
+    assert order.index(f"{ELSEWHERE}.Z_VIEW") < order.index(f"{ELSEWHERE}.A_DT")
+
+
+def test_teardown_prints_the_finding_count_on_stderr(tmp_path):
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    cfg = write_config(tmp_path, app_data=ELSEWHERE)
+    bad = dynamic_table("DAILY_REVENUE", ad=ELSEWHERE).replace("STREAMSNOW_WH", "OTHER_WH")
+    write_app(tmp_path, "acme-sales", {"DAILY_REVENUE": bad}, ad=ELSEWHERE)
+    result = _cli("deploy-setup", "--teardown", "--config", str(cfg))
+    assert result.exit_code == 0, result.output
+    assert "finding(s)" in result.stderr
+    assert "finding(s)" not in result.stdout

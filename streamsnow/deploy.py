@@ -28,7 +28,7 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
-from .app_data import SQL_KIND
+from .app_data import SQL_KIND, is_plain_fqn
 from .config import (
     DEPLOY_SOURCES,
     GITHUB_AUTH_MODES,
@@ -640,6 +640,12 @@ def generate_admin_sql(
     return "\n".join(out)
 
 
+def _one_line(text: str) -> str:
+    """*text* escaped onto one line (control characters and quotes visible), safe in a ``--``
+    comment: a raw newline would end the comment and leave the rest as live SQL."""
+    return ascii(text)
+
+
 def generate_teardown_sql(
     cfg: Config,
     app_data_objects: Sequence[tuple[str, str]] = (),
@@ -722,22 +728,31 @@ def generate_teardown_sql(
     out += ["", f"-- 2. App data ({app_data})."]
     if app_data.split(".", 1)[0].upper() == o.app_database.upper():
         out.append(f"-- It lives in {o.app_database}, so step 1 dropped it with everything in it.")
-        if app_data_objects:
+        declared = [f for f, _ in app_data_objects if is_plain_fqn(f)]
+        if declared:
             out.append(
-                f"-- That includes the {len(app_data_objects)} view(s) and dynamic table(s) "
-                "the deploy job built there."
+                f"-- That includes the {len(declared)} view(s) and dynamic table(s) "
+                "the deploy job built there (as declared)."
             )
     else:
         if inventory_incomplete:
-            listed = ", ".join(inventory_incomplete)
+            listed = ", ".join(_one_line(i) for i in inventory_incomplete)
             holds.append(
-                f"objects: in {listed} did not load in full, so objects the deploy job "
-                "built may be missing below"
+                f"objects: in {listed} did not load in full, so this script may not list "
+                "every object the deploy job built"
             )
             out += [
                 f"-- Incomplete inventory: objects: in {listed} did not load in full. Objects",
                 "-- the deploy job built there may exist that this script cannot list.",
             ]
+        odd = [f for f, _ in app_data_objects if not is_plain_fqn(f)]
+        if odd:
+            # Never built (findings block the deploy), so nothing to drop and nothing held back.
+            out.append(
+                "-- Skipped, not a plain DATABASE.SCHEMA.NAME and never built: "
+                + ", ".join(dict.fromkeys(_one_line(f) for f in odd))
+            )
+        app_data_objects = [(f, k) for f, k in app_data_objects if is_plain_fqn(f)]
         if app_data_objects:
             out.append(
                 "-- The views and dynamic tables the deploy job built there go first, before "

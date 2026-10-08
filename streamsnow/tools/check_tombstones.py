@@ -104,7 +104,7 @@ from pathlib import Path
 
 import yaml
 
-from ..app_data import OBJECT_KINDS, SQL_KIND, ddl_kind, load_app_data
+from ..app_data import OBJECT_KINDS, SQL_KIND, ddl_kind, is_plain_fqn, load_app_data
 from ..config import (
     CONFIG_SCHEMA_VERSION,
     DEFAULT_APP_DATA_SCHEMA,
@@ -433,7 +433,8 @@ def _valid_fqn(value: str) -> bool:
         validate_fqn(value, "tombstones[].identifier")
     except ConfigError:
         return False
-    return value.count(".") == 2  # DROP needs the full DB.SCHEMA.NAME
+    # DROP needs the full DB.SCHEMA.NAME; fullmatch, since `$` lets a trailing newline through.
+    return is_plain_fqn(value)
 
 
 def load_registry(path: Path) -> tuple[list[Tombstone], list[str]]:

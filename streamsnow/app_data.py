@@ -333,7 +333,15 @@ def parse_ddl(
     return ParsedDDL(kind, tuple(s[1] for s in stmts), tuple(reads), body, line, tuple(problems))
 
 
-_PLAIN_FQN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*){2}$")
+_PLAIN_FQN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*){2}")
+
+
+def is_plain_fqn(name: str) -> bool:
+    """True for exactly three unquoted identifiers. ``fullmatch``, not ``$``: a trailing
+    newline must not pass, because teardown and tombstones render the name into SQL."""
+    return isinstance(name, str) and _PLAIN_FQN_RE.fullmatch(name) is not None
+
+
 _READ_PROBLEMS = {
     DENIED: "{name} is in a denied schema (governance.schema_deny): deployed DDL never reads it",
     OUTSIDE_BOUNDARY: "{name} is outside governance.sources: the CI role that builds this "
@@ -368,6 +376,8 @@ class AppDataPlan:
     advisories: list[dict] = field(default_factory=list)
     # index.yaml files whose objects: did not load in full: `declared` may miss entries
     incomplete: list[str] = field(default_factory=list)
+    # fqn -> app-data objects its query reads, for every object built, valid or not
+    deps: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -390,10 +400,28 @@ class AppDataPlan:
         return "\n".join(out) + "\n"
 
     def drop_order(self) -> list[tuple[str, str]]:
-        """``(fqn, kind)`` for every declared object, dependents first (teardown)."""
-        ordered = [o.fqn for o in reversed(self.objects)]
-        rest = sorted(set(self.declared) - set(ordered))
-        return [(f, self.declared[f][1]) for f in (*ordered, *rest)]
+        """``(fqn, kind)`` for every declared object, dependents first (teardown).
+
+        Reverse topological over every built object (valid or not: an invalid
+        one may still exist from an earlier deploy), ties by name, objects in a
+        dependency cycle last. Only plain three-part names are returned: a
+        declared name that is not one was never built, and its text must not
+        reach the SQL a person runs.
+        """
+        names = sorted(f for f in self.declared if is_plain_fqn(f))
+        pending = {f: {d for d in self.deps.get(f, ()) if d in names and d != f} for f in names}
+        forward: list[str] = []
+        while True:
+            ready = sorted(f for f, ds in pending.items() if not ds)
+            if not ready:
+                break
+            forward += ready
+            for f in ready:
+                del pending[f]
+            for ds in pending.values():
+                ds.difference_update(ready)
+        ordered = [*reversed(forward), *sorted(pending)]
+        return [(f, self.declared[f][1]) for f in ordered]
 
     def dynamic_tables(self, slug: str) -> list[str]:
         return sorted(
@@ -574,7 +602,7 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
             declared_here.add(parts)
             fqn = display_name(parts)
             owners.setdefault(fqn, []).append((slug, rel_index))
-            if not _PLAIN_FQN_RE.match(obj.name):
+            if not is_plain_fqn(obj.name):
                 plan.declared.setdefault(fqn, (slug, ""))
                 add(
                     slug,
@@ -739,5 +767,6 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
                 "to review, so read sources directly when you can",
                 KIND_ADVISORY,
             )
+    plan.deps = {f: o.depends_on for f, o in built.items()}
     plan.objects = [o for o in _order(built, add) if o.fqn in valid]
     return plan

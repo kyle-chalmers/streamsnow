@@ -702,3 +702,17 @@ def test_a_base_config_schema_version_is_read_like_the_loader(tmp_path, monkeypa
     base = _git(tmp_path, "rev-parse", "HEAD")
     monkeypatch.chdir(tmp_path)
     assert main(["--base-ref", base]) == 0
+
+
+def test_a_tombstone_identifier_with_a_trailing_newline_renders_one_clean_line(tmp_path):
+    """The identifier is rendered into --drop-sql: a trailing newline must not survive."""
+    path = tmp_path / "t.yml"
+    path.write_text(
+        "tombstones:\n"
+        '  - identifier: "STREAMSNOW_APPS.DASHBOARDS.X\\n"\n'
+        "    reason: r\n    date: 2026-08-31\n",
+        encoding="utf-8",
+    )
+    stones, errors = load_registry(path)
+    assert drop_sql(stones).count("\n") == 0
+    assert all(s.identifier == s.identifier.strip() for s in stones) or errors
