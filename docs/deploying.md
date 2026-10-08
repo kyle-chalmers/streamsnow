@@ -164,7 +164,10 @@ kindless tombstone for an app-data name is refused, and an inventory the check
 cannot read completely fails closed. Changing an object's kind (view to
 dynamic table) needs a new name: tombstone the old one. `deploy-setup
 --teardown` drops declared app-data objects, dependents first, before the role
-drops, when app data lives outside the app database.
+drops, when app data lives outside the app database. When it cannot be sure what
+the deploy job built (an incomplete inventory, an object of unknown kind, or a
+declared name that is not a plain `DATABASE.SCHEMA.NAME`), it prints the CI
+role's `DROP` commented, with the reason.
 
 ## Two deploy sources
 

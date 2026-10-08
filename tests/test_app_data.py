@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 import yaml
 from _app_data_fixtures import AD as FAD
@@ -800,3 +802,105 @@ def test_the_shared_logic_advisory_names_an_object_reader_as_an_object(tmp_path)
     assert adv["detail"].startswith(
         f"{FAD}.BASE_V has reason: shared_logic but only the app-data object {FAD}.TOP_V reads it"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Codex review of #79: SQL comments, symlinks, and what the scanners can see
+# --------------------------------------------------------------------------- #
+
+
+def test_one_line_keeps_any_text_on_one_physical_line():
+    """Runs on every platform: whatever a path or name holds, the escaped form has no
+    character that ends a `--` comment, so nothing after it can become live SQL."""
+    from streamsnow.app_data import one_line
+
+    for text in (
+        "apps/acme-sales/payload\nDROP VIEW X;--",
+        "a\rb",
+        "a\r\nb",
+        "a b c\x0bd\x0ce\x85f",
+        "plain/path.sql",
+    ):
+        escaped = one_line(text)
+        assert escaped.splitlines() == [escaped]
+        assert "\n" not in escaped and "\r" not in escaped
+        assert escaped.isascii() and escaped.isprintable()
+
+
+def test_sql_never_lets_a_rendered_path_end_its_comment():
+    from streamsnow.app_data import AppDataObject, AppDataPlan
+
+    evil = f"apps/acme-sales/payload\nDROP VIEW {FAD}.OTHER;--"
+    plan = AppDataPlan(
+        app_data=FAD,
+        objects=[
+            AppDataObject(
+                f"{FAD}.DAILY_REVENUE",
+                KIND_VIEW,
+                "acme-sales",
+                evil,
+                "performance",
+                (f"CREATE OR REPLACE VIEW {FAD}.DAILY_REVENUE COPY GRANTS AS SELECT 1",),
+                (),
+            )
+        ],
+    )
+    lines = plan.sql().splitlines()
+    live = [ln for ln in lines if ln.strip() and not ln.startswith("--")]
+    assert live == [f"CREATE OR REPLACE VIEW {FAD}.DAILY_REVENUE COPY GRANTS AS SELECT 1;"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need extra rights on Windows")
+def test_a_symlinked_ddl_file_is_a_finding_and_never_rendered(tmp_path):
+    app = write_app(tmp_path, "acme-sales", {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    link = app / "sql_review" / OBJECTS_DIR / f"{FAD}.DAILY_REVENUE.sql"
+    target = app / f"payload\nDROP VIEW {FAD}.OTHER;--"
+    target.write_text(link.read_text(encoding="utf-8"), encoding="utf-8")
+    link.unlink()
+    link.symlink_to(target)
+    plan = _plan(tmp_path)
+    assert not plan.ok
+    assert plan.sql() == ""
+    (row,) = [f for f in plan.findings if "symbolic link" in f["detail"]]
+    assert row["file"] == f"apps/acme-sales/sql_review/{OBJECTS_DIR}/{FAD}.DAILY_REVENUE.sql"
+    assert "payload" not in " ".join(f["file"] + f["detail"] for f in plan.findings)
+
+
+def test_a_quoted_identifier_never_opens_a_cte_that_hides_a_dependency(tmp_path):
+    """`AS "WITH Z_DT AS ("` is a column alias. Read as a CTE it hid the read of Z_DT,
+    so A_V was built before the dynamic table it reads."""
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "A_V": view("A_V", 'SELECT COUNT(*) AS "WITH Z_DT AS (" FROM Z_DT'),
+            "Z_DT": dynamic_table("Z_DT"),
+        },
+    )
+    plan = _plan(tmp_path)
+    assert plan.ok, _details(plan)
+    assert [o.fqn for o in plan.objects] == [f"{FAD}.Z_DT", f"{FAD}.A_V"]
+    assert plan.deps[f"{FAD}.A_V"] == (f"{FAD}.Z_DT",)
+
+
+def test_a_slash_slash_comment_never_hides_a_dependency_or_a_reader(tmp_path):
+    """Snowflake reads `//` as a comment, so the apostrophe after it opens no string:
+    the FROM on the next line is real, in the DDL and in the app's query alike."""
+
+    def hidden(name):
+        return f"SELECT COUNT(*) AS n // '\nFROM {FAD}.{name} // '"
+
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "A_V": view("A_V", hidden("Z_DT")),
+            "Y_DT": dynamic_table("Y_DT"),
+            "Z_DT": dynamic_table("Z_DT"),
+        },
+        queries={"a_v.sql": f"SELECT * FROM {FAD}.A_V\n", "y.sql": hidden("Y_DT") + "\n"},
+        read_objects=False,
+    )
+    plan = _plan(tmp_path)
+    assert plan.ok, _details(plan)  # Y_DT has its reader: the query in y.sql
+    assert [o.fqn for o in plan.objects] == [f"{FAD}.Y_DT", f"{FAD}.Z_DT", f"{FAD}.A_V"]

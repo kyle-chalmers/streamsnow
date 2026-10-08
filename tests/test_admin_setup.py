@@ -590,8 +590,10 @@ def test_teardown_sql_renders_only_plain_names_and_reports_others_once():
     assert "\nDROP DATABASE ANALYTICS_DB;" not in sql
     assert sql.count("DROP DATABASE ANALYTICS_DB") <= 1
     assert "DROP VIEW IF EXISTS" not in sql
-    # never built, so it does not hold back the CI role
-    assert "DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in _drops(sql)
+    # A malformed name cannot prove the object was never built (it may have been renamed
+    # after a deploy), so the CI role that would own it is held back, never dropped.
+    assert "DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" not in _drops(sql)
+    assert "--   DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in sql
     # the one report line is a single comment line
     report = [ln for ln in sql.splitlines() if "DROP DATABASE ANALYTICS_DB" in ln]
     assert all(ln.startswith("--") for ln in report)
@@ -659,9 +661,11 @@ def test_drop_order_puts_a_cycle_member_before_the_acyclic_object_it_reads(tmp_p
     assert order.index(f"{ELSEWHERE}.D_V") < order.index(f"{ELSEWHERE}.A_BASE")
 
 
-def test_a_declared_name_with_a_trailing_newline_does_not_hold_the_role_back(tmp_path):
-    """`...EVIL\\n` renders as a plain name once stripped, but the loader rejects the entry
-    so the deploy never built it: it must not hold back the CI role's DROP."""
+def test_a_declared_name_with_a_trailing_newline_holds_the_role_back(tmp_path):
+    """`...EVIL\\n` renders as a plain name once stripped, and the loader rejects the entry.
+    A name malformed now cannot prove the object never existed (the newline may have come
+    after a deploy built it), so the CI role's DROP is held back with the reason, and the
+    name is rendered once, escaped, in one comment line."""
     from _app_data_fixtures import dynamic_table, write_app, write_config
 
     cfg = write_config(tmp_path, app_data=ELSEWHERE)
@@ -681,5 +685,30 @@ def test_a_declared_name_with_a_trailing_newline_does_not_hold_the_role_back(tmp
     assert not [ln for ln in live if "EVIL" in ln]
     skipped = [ln for ln in result.stdout.splitlines() if "EVIL" in ln]
     assert len(skipped) == 1 and skipped[0].startswith("-- Skipped")
-    assert "\nDROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in result.stdout
-    assert "Held back" not in result.stdout
+    assert "\nDROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" not in result.stdout
+    assert "--   DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in result.stdout
+    held = [ln for ln in result.stdout.splitlines() if ln.startswith("-- Held back")]
+    assert len(held) == 1 and "not a plain DATABASE.SCHEMA.NAME" in held[0]
+
+
+def test_drop_order_drops_what_reads_a_cycle_before_the_cycle(tmp_path):
+    """A_V and B_V read each other; C_V reads B_V. C_V must go before B_V: sorting every
+    object left after the topological pass by name put it last."""
+    from _app_data_fixtures import view, write_app, write_config
+
+    from streamsnow.app_data import load_app_data
+
+    cfg_path = write_config(tmp_path, app_data=ELSEWHERE)
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "A_V": view("A_V", f"SELECT revenue FROM {ELSEWHERE}.B_V", ad=ELSEWHERE),
+            "B_V": view("B_V", f"SELECT revenue FROM {ELSEWHERE}.A_V", ad=ELSEWHERE),
+            "C_V": view("C_V", f"SELECT revenue FROM {ELSEWHERE}.B_V", ad=ELSEWHERE),
+        },
+        ad=ELSEWHERE,
+    )
+    cfg = Config.from_dict(yaml.safe_load(cfg_path.read_text(encoding="utf-8")))
+    order = [f for f, _ in load_app_data(tmp_path, cfg).drop_order()]
+    assert order == [f"{ELSEWHERE}.C_V", f"{ELSEWHERE}.A_V", f"{ELSEWHERE}.B_V"]

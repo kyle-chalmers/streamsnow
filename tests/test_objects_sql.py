@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+
+import pytest
 from _app_data_fixtures import AD, dynamic_table, view, write_app, write_config
 from typer.testing import CliRunner
 
@@ -79,3 +82,21 @@ def test_objects_sql_with_only_advisories_prints_the_sql_and_nothing_on_stderr(t
     assert r.exit_code == 0, r.output
     assert f"CREATE OR REPLACE VIEW {AD}.REGION_REVENUE COPY GRANTS" in r.stdout
     assert r.stderr == ""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need extra rights on Windows")
+def test_objects_sql_prints_nothing_for_a_symlinked_ddl_file(tmp_path):
+    """The link's target name holds a newline and a DROP. Followed and rendered into the
+    `-- ... from <path>` comment, it printed a live DROP VIEW (Codex review of #79)."""
+    cfg = write_config(tmp_path)
+    app = write_app(tmp_path, "acme-sales", {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    link = app / "sql_review" / "app_specific_reporting_objects" / f"{AD}.DAILY_REVENUE.sql"
+    target = app / f"payload\nDROP VIEW {AD}.OTHER;--"
+    target.write_text(link.read_text(encoding="utf-8"), encoding="utf-8")
+    link.unlink()
+    link.symlink_to(target)
+    r = _run(cfg)
+    assert r.exit_code == 1, r.output
+    assert r.stdout == ""
+    assert "symbolic link" in r.stderr
+    assert "DROP VIEW" not in r.stderr

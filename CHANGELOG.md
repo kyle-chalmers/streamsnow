@@ -41,8 +41,8 @@ entry.
   `CREATE OR ALTER DYNAMIC TABLE` (with `WAREHOUSE = <default_warehouse>` and
   `INITIALIZE = ON_CREATE`), `CREATE OR REPLACE VIEW ... COPY GRANTS` (the form the docs and
   skills propose for views) or `CREATE OR ALTER VIEW`, then only `GRANT SELECT` on the same
-  object. Tables, passthrough views, an object no query reads, one object declared by two apps
-  and dependency cycles are findings in `sql-review check` and `validate-app`. These rules apply
+  object. Tables, passthrough views, a DDL file that is a symbolic link, an object no query
+  reads, one object declared by two apps and dependency cycles are findings in `sql-review check` and `validate-app`. These rules apply
   only to files in app data. A repo whose existing review-only DDL already sits in the schema it
   names as app data gets the findings at once: move those files, or bring them into a
   deployable form. Run `streamsnow update --apply` to pick up the new deploy workflow steps.
@@ -73,7 +73,9 @@ entry.
   and `--drop-sql` drops by kind. Objects left in the old schema after `governance.app_data`
   moves get a note with the `DROP` to run by hand, not a tombstone demand.
 - `deploy-setup --teardown` drops declared app-data objects before the roles that own them,
-  when app data lives outside the app database.
+  when app data lives outside the app database. An incomplete inventory, an object of unknown
+  kind, or a declared name that is not a plain `DATABASE.SCHEMA.NAME` holds the CI role's
+  `DROP` back, printed commented with the reason.
 - `verify-deploy` warns (`app-data-refresh`) when an app's dynamic table is not scheduled
   (`RUNNING` or `ACTIVE`), has never refreshed or is not found; it is skipped when the query
   fails.

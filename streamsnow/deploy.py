@@ -28,7 +28,7 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
-from .app_data import SQL_KIND, is_plain_fqn
+from .app_data import SQL_KIND, is_plain_fqn, one_line
 from .config import (
     DEPLOY_SOURCES,
     GITHUB_AUTH_MODES,
@@ -640,12 +640,6 @@ def generate_admin_sql(
     return "\n".join(out)
 
 
-def _one_line(text: str) -> str:
-    """*text* escaped onto one line (control characters and quotes visible), safe in a ``--``
-    comment: a raw newline would end the comment and leave the rest as live SQL."""
-    return ascii(text)
-
-
 def generate_teardown_sql(
     cfg: Config,
     app_data_objects: Sequence[tuple[str, str]] = (),
@@ -670,8 +664,10 @@ def generate_teardown_sql(
     object's kind is unknown, or the inventory is incomplete
     (``inventory_incomplete``), the CI role's DROP is printed commented with the
     reason, for the reviewer to finish in that order. ``skipped`` names declared
-    objects the deploy never built (a name the loader rejected): they are listed in
-    one escaped comment line and hold nothing back.
+    objects the loader rejected for their form: they are listed, escaped, in one
+    comment line and never dropped. They also hold the CI role's DROP back: a name
+    malformed now (a stray newline or quotes added after a deploy) cannot prove the
+    object it named was never built and owned by that role.
     """
     o = cfg.snowflake.objects
     ci = cfg.snowflake.roles.ci_role
@@ -739,7 +735,7 @@ def generate_teardown_sql(
             )
     else:
         if inventory_incomplete:
-            listed = ", ".join(_one_line(i) for i in inventory_incomplete)
+            listed = ", ".join(one_line(i) for i in inventory_incomplete)
             holds.append(
                 f"objects: in {listed} did not load in full, so this script may not list "
                 "every object the deploy job built"
@@ -750,10 +746,15 @@ def generate_teardown_sql(
             ]
         odd = [*skipped, *(f for f, _ in app_data_objects if not is_plain_fqn(f))]
         if odd:
-            # Never built (findings block the deploy), so nothing to drop and nothing held back.
+            # Never rendered into a DROP; but an earlier deploy may have built what the name
+            # meant before it went bad, so the inventory is uncertain and the role stays.
             out.append(
-                "-- Skipped, never built (the declared name is not a plain DATABASE.SCHEMA.NAME): "
-                + ", ".join(dict.fromkeys(_one_line(f) for f in odd))
+                "-- Skipped (the declared name is not a plain DATABASE.SCHEMA.NAME, so this "
+                "script cannot drop it): " + ", ".join(dict.fromkeys(one_line(f) for f in odd))
+            )
+            holds.append(
+                "the skipped name(s) above are not a plain DATABASE.SCHEMA.NAME, so this "
+                "script cannot tell whether the deploy job built them"
             )
         app_data_objects = [(f, k) for f, k in app_data_objects if is_plain_fqn(f)]
         if app_data_objects:

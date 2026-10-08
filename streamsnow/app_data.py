@@ -41,6 +41,7 @@ https://docs.snowflake.com/en/sql-reference/sql/create-or-alter
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -333,6 +334,15 @@ def parse_ddl(
     return ParsedDDL(kind, tuple(s[1] for s in stmts), tuple(reads), body, line, tuple(problems))
 
 
+def one_line(text: str) -> str:
+    """*text* escaped onto one physical line (control characters, quotes and anything
+    non-ASCII visible), safe in a ``--`` comment. Every path or name a producer of
+    printed SQL puts in a comment goes through this: a raw newline (or any other line
+    break) would end the comment and leave the rest as live SQL, and a file name can
+    hold one."""
+    return ascii(text)
+
+
 _PLAIN_FQN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*){2}")
 
 
@@ -379,8 +389,9 @@ class AppDataPlan:
     incomplete: list[str] = field(default_factory=list)
     # fqn -> app-data objects its query reads, for every object built, valid or not
     deps: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    # declared names the loader rejected for their form (never built, so never a DROP, and
-    # they hold nothing back): the display name can look plain once a trailing newline is gone
+    # declared names the loader rejected for their form: never rendered into a DROP (the
+    # display name can look plain once a trailing newline is gone), but teardown holds the
+    # CI role back for them, since the object the name meant may have been built earlier
     unbuilt: set[str] = field(default_factory=set)
 
     @property
@@ -399,33 +410,39 @@ class AppDataPlan:
             "order, from `streamsnow objects-sql`.",
         ]
         for obj in self.objects:
-            out += ["", f"-- {obj.fqn} ({obj.kind.replace('_', ' ')}) from {obj.file}"]
+            kind = obj.kind.replace("_", " ")
+            out += ["", f"-- {one_line(obj.fqn)} ({one_line(kind)}) from {one_line(obj.file)}"]
             out += [f"{stmt};" for stmt in obj.statements]
         return "\n".join(out) + "\n"
 
     def drop_order(self) -> list[tuple[str, str]]:
         """``(fqn, kind)`` for every declared object, dependents first (teardown).
 
-        Reverse topological over every built object (valid or not: an invalid
-        one may still exist from an earlier deploy), ties by name. Objects in a
-        dependency cycle go first: nothing acyclic can read a cycle member, so
-        every acyclic object they read must outlive them. Only plain three-part
-        names are returned: a declared name that is not one was never built, and
-        its text must not reach the SQL a person runs (see :attr:`unbuilt`).
+        Over every built object (valid or not: an invalid one may still exist
+        from an earlier deploy). A dependency cycle is one group, so whatever
+        reads a cycle member drops before the whole cycle and whatever the cycle
+        reads drops after it; groups go dependents first, ties and the members
+        of a cycle by name. Only plain three-part names are returned: the text
+        of any other must not reach the SQL a person runs (see :attr:`unbuilt`).
         """
         names = sorted(f for f in self.declared if is_plain_fqn(f) and f not in self.unbuilt)
-        pending = {f: {d for d in self.deps.get(f, ()) if d in names and d != f} for f in names}
-        forward: list[str] = []
-        while True:
-            ready = sorted(f for f, ds in pending.items() if not ds)
-            if not ready:
-                break
-            forward += ready
-            for f in ready:
-                del pending[f]
-            for ds in pending.values():
-                ds.difference_update(ready)
-        ordered = [*sorted(pending), *reversed(forward)]
+        known = set(names)
+        edges = {f: sorted({d for d in self.deps.get(f, ()) if d in known}) for f in names}
+        groups = _cycle_groups(names, edges)
+        group_of = {f: i for i, g in enumerate(groups) for f in g}
+        # readers[i]: groups holding an object that reads something in group i
+        readers: dict[int, set[int]] = {i: set() for i in range(len(groups))}
+        for f, ds in edges.items():
+            for d in ds:
+                if group_of[d] != group_of[f]:
+                    readers[group_of[d]].add(group_of[f])
+        ordered: list[str] = []
+        done: set[int] = set()
+        while len(done) < len(groups):
+            ready = [i for i in range(len(groups)) if i not in done and readers[i] <= done]
+            first = min(ready, key=lambda i: groups[i][0])
+            ordered += groups[first]
+            done.add(first)
         return [(f, self.declared[f][1]) for f in ordered]
 
     def skipped_names(self) -> list[str]:
@@ -438,6 +455,50 @@ class AppDataPlan:
             for f, (app, kind) in self.declared.items()
             if app == slug and kind == KIND_DYNAMIC_TABLE
         )
+
+
+def _cycle_groups(names: list[str], edges: dict[str, list[str]]) -> list[list[str]]:
+    """The strongly connected components of the dependency graph, each sorted by name
+    (Tarjan's algorithm, iterative so a long chain of views cannot hit the recursion
+    limit). An object in no cycle is a group of one."""
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    groups: list[list[str]] = []
+    for root in names:
+        if root in index:
+            continue
+        work = [(root, iter(edges[root]))]
+        index[root] = low[root] = len(index)
+        stack.append(root)
+        on_stack.add(root)
+        while work:
+            node, it = work[-1]
+            nxt = next(it, None)
+            if nxt is not None:
+                if nxt not in index:
+                    index[nxt] = low[nxt] = len(index)
+                    stack.append(nxt)
+                    on_stack.add(nxt)
+                    work.append((nxt, iter(edges[nxt])))
+                elif nxt in on_stack:
+                    low[node] = min(low[node], index[nxt])
+                continue
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[node])
+            if low[node] == index[node]:
+                group = []
+                while True:
+                    member = stack.pop()
+                    on_stack.discard(member)
+                    group.append(member)
+                    if member == node:
+                        break
+                groups.append(sorted(group))
+    return groups
 
 
 _PASSTHROUGH_STOP = re.compile(
@@ -508,8 +569,10 @@ def _consumers(apps: list[Path], indexes: dict, declared: set[str]) -> dict[str,
 
 
 def _rel(repo: Path, path: Path) -> str:
+    """The path as declared in the repo, never a symlink's target: findings and the
+    printed SQL name the file a reviewer sees, not wherever a link points."""
     try:
-        return path.resolve().relative_to(repo.resolve()).as_posix()
+        return Path(os.path.abspath(path)).relative_to(os.path.abspath(repo)).as_posix()
     except ValueError:
         return path.as_posix()
 
@@ -538,6 +601,12 @@ def _order(objects: dict[str, AppDataObject], add) -> list[AppDataObject]:
             f"objects ({stuck}). Break the cycle",
         )
     return ordered
+
+
+_SYMLINK = (
+    "is a symbolic link: the deploy job runs app-data DDL unattended as the CI role, so "
+    "the file it runs must be the reviewed file itself. Replace the link with the file"
+)
 
 
 def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppDataPlan:
@@ -585,9 +654,16 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
             )
         odir = app / "sql_review" / OBJECTS_DIR
         by_name: dict[tuple[str, ...], list[Path]] = {}
-        for path in sorted(odir.glob("*.sql")) if odir.is_dir() else []:
+        linked: set[tuple[str, ...]] = set()
+        if odir.is_symlink():
+            add(slug, _rel(repo, odir), 1, _SYMLINK)
+        for path in sorted(odir.glob("*.sql")) if odir.is_dir() and not odir.is_symlink() else []:
             parts = split_name(path.name[: -len(".sql")])
             if len(parts) == 3 and parts[:2] == target:
+                if path.is_symlink():
+                    linked.add(parts)
+                    add(slug, _rel(repo, path), 1, _SYMLINK)
+                    continue
                 by_name.setdefault(parts, []).append(path)
         on_disk: dict[tuple[str, ...], Path] = {}
         collided: set[tuple[str, ...]] = set()
@@ -626,7 +702,7 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
                 )
                 continue
             accepted.add(fqn)
-            if parts in collided:
+            if parts in collided or parts in linked:
                 plan.declared.setdefault(fqn, (slug, ""))
                 continue  # reported above, once per file
             path = on_disk.get(parts)
