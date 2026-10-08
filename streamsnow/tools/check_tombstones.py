@@ -51,6 +51,9 @@ A mapping with a single ``tombstones`` key holding a list of entries::
 - ``reason`` — non-empty free text: what removed the object and, for a rename,
   what replaced it.
 - ``date`` — ISO ``YYYY-MM-DD`` (a quoted string or a bare YAML date).
+- ``kind``: optional, ``view`` or ``dynamic_table`` for an app-data object
+  (#79), absent for a Streamlit app. It picks the DROP, because the DDL file
+  that defined a retired object is gone by the time a later deploy runs.
 
 Unknown keys are rejected so a typo (``data:`` for ``date:``) fails loudly
 instead of silently passing. A missing registry file is not an error — the
@@ -66,13 +69,18 @@ Modes
     but not declared by the working tree must appear in the registry. Also
     flags the contradiction — a tombstone whose identifier is still declared —
     because CI would otherwise create the object in the deploy step and drop
-    it in the reconcile step of the same run, flapping forever.
+    it in the reconcile step of the same run, flapping forever. The same rule
+    covers app-data views and dynamic tables declared at the merge base: each
+    removed one needs a tombstone whose ``kind`` is ``view`` or ``dynamic_table``
+    (and matches the base DDL when that can be read), and an inventory the tool
+    cannot read completely is a finding, never an empty set.
 
 ``check_tombstones.py --drop-sql``
-    Validate the registry and print one ``DROP STREAMLIT IF EXISTS`` statement
-    per tombstone — the shape the deploy workflow's reconcile step consumes.
-    Prints nothing on a registry error, so a malformed file can never be
-    turned into DROP statements.
+    Validate the registry and print one ``DROP STREAMLIT|VIEW|DYNAMIC TABLE IF
+    EXISTS`` statement per tombstone, by its recorded kind: the shape the deploy
+    workflow's reconcile step consumes. Prints nothing on a registry error, so a
+    malformed file can never be turned into DROP statements, and refuses (exit 2)
+    while the live app-data inventory is incomplete.
 
 Exit codes: 0 = clean, 1 = finding (missing tombstone / live-app tombstone),
 2 = cannot verify (unreadable or invalid registry, missing config, git or
@@ -92,15 +100,30 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..config import Config, ConfigError, DeployCfg, SnowflakeObjects, load_config, validate_fqn
+import yaml
+
+from ..app_data import OBJECT_KINDS, SQL_KIND, ddl_kind, load_app_data
+from ..config import (
+    DEFAULT_APP_DATA_SCHEMA,
+    Config,
+    ConfigError,
+    DeployCfg,
+    SnowflakeObjects,
+    load_config,
+    validate_fqn,
+)
 from ..deploy import streamlit_fqn
+from ..policy import display_name, split_name
+from .sql_review import OBJECTS_DIR
 
 _KIND = "tombstones"
 
 DEFAULT_REGISTRY = Path("deploy/tombstones.yml")
 DEFAULT_APPS_DIR = Path("apps")
 
-_ENTRY_KEYS = {"identifier", "reason", "date"}
+_ENTRY_KEYS = {"identifier", "reason", "date", "kind"}
+#: The DROP keyword per tombstone kind; no kind is a Streamlit app (the original shape).
+_DROP_KEYWORD = {"": "STREAMLIT", **SQL_KIND}
 
 
 def _manifest_re(apps_dir: Path) -> re.Pattern[str]:
@@ -125,6 +148,7 @@ class Tombstone:
     identifier: str
     reason: str
     date: str
+    kind: str = ""  # "" = a Streamlit app; view | dynamic_table = an app-data object
 
 
 @dataclass
@@ -275,6 +299,121 @@ def base_identifiers(
     return out, notes
 
 
+def live_app_data(cfg, apps_dir: Path) -> tuple[dict[str, tuple[str, str]], list[str]]:
+    """UPPER FQN -> (slug, kind) for every app-data object the working tree declares,
+    plus the index.yaml files whose objects: did not load in full. An incomplete
+    inventory must never read as "nothing declared": a tombstone for a live object
+    would then pass the guard and drop what the deploy just built (#79)."""
+    plan = load_app_data(Path.cwd(), cfg, apps_dir=apps_dir)
+    return {fqn.upper(): owner for fqn, owner in plan.declared.items()}, list(plan.incomplete)
+
+
+def base_app_data(base_commit: str, apps_dir: Path) -> tuple[dict[str, tuple[str, str]], list[str]]:
+    """UPPER FQN -> (slug, kind) for every app-data object declared at the base commit,
+    plus every problem that makes that inventory unverifiable.
+
+    Read from the base commit's own config and index files, like the Streamlit
+    inventory: what the deploy job built then is a function of the repo then. A
+    schema_version 1 base had no app data, so nothing there was ever deployed, and a
+    base without a config compares nothing (as for Streamlit apps). Anything else the
+    tool cannot read is a problem the caller reports as a finding: "could not read
+    the base" must never look like "nothing was removed". The kind comes from the
+    base DDL file; "" when it cannot be told (the tombstone still needs one).
+    """
+    try:
+        raw_text = _git(["show", f"{base_commit}:streamsnow.config.yaml"])
+    except ToolError:
+        return {}, []
+
+    def unverifiable(why: str) -> list[str]:
+        return [
+            f"base streamsnow.config.yaml {why}, so the tool cannot tell which app-data "
+            "objects were deployed"
+        ]
+
+    try:
+        raw = yaml.safe_load(raw_text) or {}
+    except yaml.YAMLError:
+        return {}, unverifiable("is not valid YAML")
+    if not isinstance(raw, dict):
+        return {}, unverifiable("is not a mapping")
+    gov = raw.get("governance") or {}
+    if not isinstance(gov, dict):
+        return {}, unverifiable("has a governance: that is not a mapping")
+    version = raw.get("schema_version")
+    if version == 1 or "database" in gov or "schema_allow" in gov:
+        return {}, []  # schema_version 1: no app data existed, nothing was deployed there
+    if version != 2:
+        return {}, unverifiable(f"has schema_version {version!r}, neither 1 nor 2")
+    snowflake = raw.get("snowflake")
+    objects = snowflake.get("objects") if isinstance(snowflake, dict) else None
+    app_db = objects.get("app_database") if isinstance(objects, dict) else None
+    app_data = gov.get("app_data") or (
+        f"{app_db}.{DEFAULT_APP_DATA_SCHEMA}" if isinstance(app_db, str) and app_db else None
+    )
+    target = split_name(app_data) if isinstance(app_data, str) else ()
+    if len(target) != 2:
+        return {}, unverifiable(
+            "names no readable app data (governance.app_data, or snowflake.objects.app_database "
+            "for the default)"
+        )
+    rel = str(apps_dir).strip("/")
+    listing = _git(["ls-tree", "-r", "--name-only", base_commit, "--", f"{rel}/"]).splitlines()
+    present = set(listing)
+    out: dict[str, tuple[str, str]] = {}
+    problems: list[str] = []
+    for line in listing:
+        m = re.match(rf"^{re.escape(rel)}/([^/]+)/sql_review/index\.yaml$", line)
+        if not m or f"{rel}/{m.group(1)}/snowflake.yml" not in present:
+            continue
+        slug = m.group(1)
+        unreadable = (
+            f"{line} at base {base_commit[:12]}: its objects: cannot be read in full, so the "
+            "tool cannot tell which app-data objects this app declared"
+        )
+        try:
+            index = yaml.safe_load(_git(["show", f"{base_commit}:{line}"]))
+        except (ToolError, yaml.YAMLError):
+            problems.append(unreadable)
+            continue
+        index = {} if index is None else index
+        entries = index.get("objects") if isinstance(index, dict) else None
+        entries = [] if isinstance(index, dict) and entries is None else entries
+        if not isinstance(entries, list):
+            problems.append(unreadable)
+            continue
+        prefix = f"{rel}/{slug}/sql_review/{OBJECTS_DIR}/"
+        files = {
+            split_name(p[len(prefix) : -len(".sql")]): p
+            for p in listing
+            if p.startswith(prefix) and p.endswith(".sql") and "/" not in p[len(prefix) :]
+        }
+        for entry in entries:
+            name = entry.get("name") if isinstance(entry, dict) else None
+            parts = split_name(name) if isinstance(name, str) else ()
+            if len(parts) != 3:
+                # A name that cannot be compared might have been an app-data object.
+                problems.append(unreadable)
+                break
+            if parts[:2] != target:
+                continue
+            path = files.get(parts)
+            kind = ddl_kind(_git(["show", f"{base_commit}:{path}"])) if path else ""
+            out[display_name(parts).upper()] = (slug, kind)
+    return out, problems
+
+
+def _in_app_data(cfg, identifier: str) -> bool:
+    parts = split_name(identifier)
+    return len(parts) == 3 and ".".join(parts[:2]) == cfg.governance.app_data.upper()
+
+
+_NEEDS_KIND = (
+    "needs kind: view or kind: dynamic_table: a tombstone without one is a Streamlit "
+    "app, so --drop-sql would render DROP STREAMLIT for an app-data object"
+)
+
+
 # --------------------------------------------------------------------------- #
 # Registry
 # --------------------------------------------------------------------------- #
@@ -329,7 +468,7 @@ def load_registry(path: Path) -> tuple[list[Tombstone], list[str]]:
         if unknown:
             errors.append(
                 f"{where}: unknown key(s): {', '.join(sorted(unknown))} "
-                f"(allowed: identifier, reason, date)"
+                f"(allowed: identifier, reason, date, kind)"
             )
 
         identifier = str(entry.get("identifier") or "").strip()
@@ -360,7 +499,13 @@ def load_registry(path: Path) -> tuple[list[Tombstone], list[str]]:
             except ValueError:
                 errors.append(f"{where}: date {date_str!r} is not ISO YYYY-MM-DD")
 
-        tombstones.append(Tombstone(identifier=identifier, reason=reason, date=date_str))
+        kind = str(entry.get("kind") or "").strip()
+        if kind and kind not in OBJECT_KINDS:
+            errors.append(
+                f"{where}: kind must be view or dynamic_table for an app-data object "
+                f"(got {kind!r}); leave it out for a Streamlit app"
+            )
+        tombstones.append(Tombstone(identifier=identifier, reason=reason, date=date_str, kind=kind))
     return tombstones, errors
 
 
@@ -393,6 +538,39 @@ def run_check(cfg, registry_path: Path, apps_dir: Path, base_ref: str) -> Result
                 }
             )
 
+    live_objects, incomplete = live_app_data(cfg, apps_dir)
+    for path in incomplete:
+        result.findings.append(
+            {
+                "file": path,
+                "line": 1,
+                "detail": "objects: did not load in full, so the tool cannot tell which "
+                "app-data objects this app declares; fix the index first",
+            }
+        )
+    for stone in tombstones:
+        owner = live_objects.get(stone.identifier.upper())
+        if owner is not None:
+            result.findings.append(
+                {
+                    "file": str(registry_path),
+                    "line": 1,
+                    "detail": (
+                        f"tombstone {stone.identifier} is still declared as an app-data object "
+                        f"by apps/{owner[0]}/: the deploy job would build it and the reconcile "
+                        "step drop it in the same run. Remove this entry, or remove the object."
+                    ),
+                }
+            )
+        if not stone.kind and _in_app_data(cfg, stone.identifier):
+            result.findings.append(
+                {
+                    "file": str(registry_path),
+                    "line": 1,
+                    "detail": f"tombstone {stone.identifier} {_NEEDS_KIND}",
+                }
+            )
+
     base_commit = resolve_base(base_ref)
     base, notes = base_identifiers(cfg, base_commit, apps_dir)
     result.notes.extend(notes)
@@ -420,13 +598,82 @@ def run_check(cfg, registry_path: Path, apps_dir: Path, base_ref: str) -> Result
                 ),
             }
         )
+
+    by_id = {t.identifier.upper(): t for t in tombstones}
+    for identifier in sorted(set(base) - set(live)):
+        stone = by_id.get(identifier)
+        if stone is not None and stone.kind:
+            result.findings.append(
+                {
+                    "file": str(registry_path),
+                    "line": 1,
+                    "detail": f"tombstone {identifier} names a Streamlit app but has kind: "
+                    f"{stone.kind}, so --drop-sql would run the wrong DROP. Remove kind:.",
+                }
+            )
+    base_objects, problems = base_app_data(base_commit, apps_dir)
+    for problem in problems:  # fail closed: an unreadable base is a finding, not a note
+        result.findings.append({"file": "streamsnow.config.yaml", "line": 1, "detail": problem})
+    for fqn in sorted(set(base_objects) & set(live_objects)):
+        (_slug, was), (_owner, now) = base_objects[fqn], live_objects[fqn]
+        if was and now and was != now:
+            result.findings.append(
+                {
+                    "file": f"apps/{_owner}/sql_review/{OBJECTS_DIR}/{fqn}.sql",
+                    "line": 1,
+                    "detail": (
+                        f"{fqn} was a {was.replace('_', ' ')} at base and is a "
+                        f"{now.replace('_', ' ')} now: CREATE OR ALTER cannot change an "
+                        "object's kind, so the deploy would fail. Give the new object a new "
+                        f"name and tombstone {fqn} with kind: {was}."
+                    ),
+                }
+            )
+    for fqn in sorted(set(base_objects) - set(live_objects)):
+        slug, kind = base_objects[fqn]
+        stone = by_id.get(fqn)
+        if stone is None:
+            result.findings.append(
+                {
+                    "file": f"apps/{slug}/sql_review/index.yaml",
+                    "line": 1,
+                    "detail": (
+                        f"removed app-data object {fqn} (declared by apps/{slug}/ at base "
+                        f"{base_commit[:12]}, not in {registry_path}) stays in Snowflake, still "
+                        "refreshing if it is a dynamic table. Fix in THIS change: add to "
+                        f"{registry_path}:  - identifier: {fqn}  kind: "
+                        f"{kind or 'view | dynamic_table'}  reason: <why it went>  date: {today}"
+                    ),
+                }
+            )
+        elif stone.kind not in OBJECT_KINDS:
+            # Whatever the base shows: without a kind --drop-sql renders DROP STREAMLIT.
+            if _in_app_data(cfg, fqn):
+                continue  # already reported once by the loop above
+            result.findings.append(
+                {"file": str(registry_path), "line": 1, "detail": f"tombstone {fqn} {_NEEDS_KIND}"}
+            )
+        elif kind and stone.kind != kind:
+            result.findings.append(
+                {
+                    "file": str(registry_path),
+                    "line": 1,
+                    "detail": (
+                        f"tombstone {fqn} has kind {stone.kind}, but at base it was a "
+                        f"{kind.replace('_', ' ')}, so --drop-sql would run the wrong DROP. "
+                        f"Set kind: {kind}."
+                    ),
+                }
+            )
     return result
 
 
 def drop_sql(tombstones: list[Tombstone]) -> str:
-    """One DROP per tombstone. Identifiers were validated to the safe FQN
-    charset at load time, so rendering them directly cannot inject."""
-    return "\n".join(f"DROP STREAMLIT IF EXISTS {t.identifier};" for t in tombstones)
+    """One DROP per tombstone, by its recorded kind, so a later deploy drops a retired
+    app-data object without the DDL file that defined it. Identifiers were validated
+    to the safe FQN charset and kinds to a fixed set at load time, so nothing here
+    can inject."""
+    return "\n".join(f"DROP {_DROP_KEYWORD[t.kind]} IF EXISTS {t.identifier};" for t in tombstones)
 
 
 # --------------------------------------------------------------------------- #
@@ -453,7 +700,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--drop-sql",
         action="store_true",
-        help="Print DROP STREAMLIT IF EXISTS for every tombstone and skip the diff rule.",
+        help="Print DROP STREAMLIT|VIEW|DYNAMIC TABLE IF EXISTS for every tombstone, by its kind, and skip the diff rule.",
     )
     ap.add_argument("--config", type=Path, default=None, help="Path to streamsnow.config.yaml.")
     ap.add_argument("--format", choices=("md", "json"), default="md")
@@ -479,18 +726,42 @@ def main(argv: list[str] | None = None) -> int:
         try:
             cfg = load_config(args.config)
             live = worktree_identifiers(cfg, args.apps_dir)
+            live_objects, incomplete = live_app_data(cfg, args.apps_dir)
         except (ConfigError, ToolError) as exc:
             print(f"{_KIND}: cannot verify live apps before emitting DROPs: {exc}", file=sys.stderr)
             return 2
+        if incomplete:
+            print(
+                f"{_KIND}: refusing --drop-sql: the app-data inventory is incomplete "
+                f"({', '.join(incomplete)}: objects: did not load in full), so a tombstone "
+                "for a live object could not be told apart",
+                file=sys.stderr,
+            )
+            return 2
+        kindless = [
+            t.identifier for t in tombstones if not t.kind and _in_app_data(cfg, t.identifier)
+        ]
+        for ident in kindless:
+            print(f"{_KIND}: refusing --drop-sql: tombstone {ident} {_NEEDS_KIND}", file=sys.stderr)
         conflicts = [t.identifier for t in tombstones if t.identifier.upper() in live]
-        if conflicts:
-            for ident in conflicts:
+        for ident in conflicts:
+            print(
+                f"{_KIND}: refusing --drop-sql: tombstone {ident} is still a "
+                f"declared app ({live[ident.upper()]}) - dropping it would kill "
+                "the app this very deploy just created",
+                file=sys.stderr,
+            )
+        for t in tombstones:
+            owner = live_objects.get(t.identifier.upper())
+            if owner is not None:
+                conflicts.append(t.identifier)
                 print(
-                    f"{_KIND}: refusing --drop-sql: tombstone {ident} is still a "
-                    f"declared app ({live[ident.upper()]}) — dropping it would kill "
-                    "the app this very deploy just created",
+                    f"{_KIND}: refusing --drop-sql: tombstone {t.identifier} is still declared "
+                    f"as an app-data object by apps/{owner[0]}/; dropping it would remove what "
+                    "this very deploy just built",
                     file=sys.stderr,
                 )
+        if kindless or conflicts:
             return 2
         sql = drop_sql(tombstones)
         if sql:

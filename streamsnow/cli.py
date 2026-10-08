@@ -1756,7 +1756,9 @@ def check_tombstones_cmd(
     base_ref: str = typer.Option("origin/main", "--base-ref"),
     registry: Path = typer.Option(None, "--registry", help="Path to deploy/tombstones.yml."),
     drop_sql: bool = typer.Option(
-        False, "--drop-sql", help="Emit DROP STREAMLIT IF EXISTS for tombstoned identifiers."
+        False,
+        "--drop-sql",
+        help="Emit DROP STREAMLIT|VIEW|DYNAMIC TABLE IF EXISTS for each tombstone, by its kind.",
     ),
     apps_dir: Path = typer.Option(None, "--apps-dir", help="Apps directory (default: apps)."),
     config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
