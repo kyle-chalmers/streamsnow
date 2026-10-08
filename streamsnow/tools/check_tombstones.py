@@ -406,6 +406,8 @@ def base_app_data(base_commit: str, apps_dir: Path) -> tuple[dict[str, tuple[str
                 break
             if parts[:2] != target:
                 continue
+            if not is_plain_fqn(display_name(parts)):
+                continue  # never buildable (like plan.unbuilt), so never in Snowflake
             path = files.get(parts)
             kind = ddl_kind(_git(["show", f"{base_commit}:{path}"])) if path else ""
             out[display_name(parts).upper()] = (slug, kind)
@@ -656,6 +658,19 @@ def run_check(cfg, registry_path: Path, apps_dir: Path, base_ref: str) -> Result
     for fqn in sorted(set(base_objects) - set(live_objects)):
         slug, kind = base_objects[fqn]
         stone = by_id.get(fqn)
+        if not _in_app_data(cfg, fqn):
+            # governance.app_data (or app_database) moved: the old schema is no longer
+            # governed, --drop-sql refuses a kind outside app data, so a human drops it.
+            drops = (
+                [f"DROP {SQL_KIND[kind]} IF EXISTS {fqn};"]
+                if kind in SQL_KIND
+                else [f"DROP {SQL_KIND[k]} IF EXISTS {fqn};" for k in OBJECT_KINDS]
+            )
+            result.notes.append(
+                f"app data moved: drop {(kind or 'view or dynamic_table').replace('_', ' ')} "
+                f"{fqn} by hand when nothing reads it ({' or '.join(drops)})"
+            )
+            continue
         if stone is None:
             result.findings.append(
                 {

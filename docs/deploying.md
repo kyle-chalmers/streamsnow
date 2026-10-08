@@ -157,7 +157,9 @@ one addition: the tombstone carries `kind: view` or `kind: dynamic_table`, and
 `--drop-sql` emits `DROP VIEW IF EXISTS` or `DROP DYNAMIC TABLE IF EXISTS` by
 that kind (never `DROP STREAMLIT` for a name in app data). A tombstone with a
 kind may only name an object in the current `governance.app_data`; objects
-left behind in an old schema after `app_data` moves are dropped by hand. A
+left behind in an old schema after `app_data` moves are dropped by hand, and
+`check tombstones` prints a note with the exact `DROP` instead of demanding a
+tombstone. A
 kindless tombstone for an app-data name is refused, and an inventory the check
 cannot read completely fails closed. Changing an object's kind (view to
 dynamic table) needs a new name: tombstone the old one. `deploy-setup

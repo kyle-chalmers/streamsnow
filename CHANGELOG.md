@@ -70,8 +70,10 @@ entry.
   refused (exit 1) even with `--force`. `sql-review compare` points at it when the helper is stale.
 - **Tombstones take `kind: view` or `kind: dynamic_table`** for app-data objects;
   `check tombstones` requires one for an object removed since the base and checks its kind,
-  and `--drop-sql` drops by kind.
-- `deploy-setup --teardown` drops declared app-data objects before the roles that own them.
+  and `--drop-sql` drops by kind. Objects left in the old schema after `governance.app_data`
+  moves get a note with the `DROP` to run by hand, not a tombstone demand.
+- `deploy-setup --teardown` drops declared app-data objects before the roles that own them,
+  when app data lives outside the app database.
 - `verify-deploy` warns (`app-data-refresh`) when an app's dynamic table is not scheduled
   (`RUNNING` or `ACTIVE`), has never refreshed or is not found; it is skipped when the query
   fails.

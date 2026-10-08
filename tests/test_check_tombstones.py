@@ -8,6 +8,7 @@ chdir into the scratch repo.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -732,3 +733,94 @@ def test_a_boolean_base_schema_version_is_unverifiable_not_version_one(
     assert main(["--base-ref", base]) == 1
     out = capsys.readouterr().out
     assert "cannot tell which app-data objects" in out and "True" in out
+
+
+# ---- app data moves (#79) --------------------------------------------------
+# Objects left in the old schema after governance.app_data moves are dropped by a
+# human, so the check must not demand a tombstone it would then refuse to honor.
+NEW_DT_FQN = "STREAMSNOW_APPS.NEW_DATA.DAILY_REVENUE"
+
+
+def _move_app_data(repo: Path) -> None:
+    """Point governance.app_data at a new schema and re-declare the object there."""
+    cfg_path = repo / "streamsnow.config.yaml"
+    text = cfg_path.read_text(encoding="utf-8")
+    assert "  sources:" in text
+    cfg_path.write_text(
+        text.replace("  sources:", '  app_data: "STREAMSNOW_APPS.NEW_DATA"\n  sources:', 1),
+        encoding="utf-8",
+    )
+    _retire_object(repo)
+    review = repo / "apps" / "acme-sales-dashboard" / "sql_review"
+    (review / "app_specific_reporting_objects").mkdir(parents=True)
+    (review / "app_specific_reporting_objects" / f"{NEW_DT_FQN}.sql").write_text(
+        DT_DDL.replace(DT_FQN, NEW_DT_FQN), encoding="utf-8"
+    )
+    index = {
+        "schema_version": 2,
+        "app": "acme-sales-dashboard",
+        "pages": [],
+        "objects": [{"name": NEW_DT_FQN, "grants": [], "reason": "performance"}],
+    }
+    (review / "index.yaml").write_text(yaml.safe_dump(index), encoding="utf-8")
+
+
+def test_an_object_left_in_the_old_schema_after_app_data_moves_is_a_note(
+    tmp_path, monkeypatch, capsys
+):
+    base = _base_with_object(tmp_path)
+    _move_app_data(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert main(["--base-ref", base]) == 0
+    out = capsys.readouterr().out
+    assert "(note)" in out and "app data moved" in out
+    assert f"DROP DYNAMIC TABLE IF EXISTS {DT_FQN};" in out
+    assert main(["--base-ref", base, "--format", "json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["findings"] == []
+    assert any("app data moved" in n and DT_FQN in n for n in data["notes"])
+
+
+def test_a_kinded_tombstone_for_the_old_schema_object_is_still_a_finding(
+    tmp_path, monkeypatch, capsys
+):
+    base = _base_with_object(tmp_path)
+    _move_app_data(tmp_path)
+    _tombstone(tmp_path, _object_stone("dynamic_table"))
+    monkeypatch.chdir(tmp_path)
+    assert main(["--base-ref", base]) == 1
+    assert "retires objects in governance.app_data only" in capsys.readouterr().out
+
+
+def test_drop_sql_still_refuses_a_kinded_tombstone_for_the_old_schema(
+    tmp_path, monkeypatch, capsys
+):
+    base = _base_with_object(tmp_path)
+    _move_app_data(tmp_path)
+    _tombstone(tmp_path, _object_stone("dynamic_table"))
+    monkeypatch.chdir(tmp_path)
+    assert main(["--drop-sql", "--base-ref", base]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "retires objects in governance.app_data only" in captured.err
+
+
+def test_a_never_buildable_quoted_base_name_does_not_demand_a_tombstone(
+    tmp_path, monkeypatch, capsys
+):
+    _init_repo(tmp_path)
+    review = tmp_path / "apps" / "acme-sales-dashboard" / "sql_review"
+    review.mkdir(parents=True)
+    quoted = 'STREAMSNOW_APPS.STREAMSNOW_REPORTING."Daily"'
+    index = {
+        "schema_version": 2,
+        "app": "acme-sales-dashboard",
+        "pages": [],
+        "objects": [{"name": quoted, "grants": [], "reason": "performance"}],
+    }
+    (review / "index.yaml").write_text(yaml.safe_dump(index), encoding="utf-8")
+    base = _commit(tmp_path, "declare a quoted app-data name that never deployed")
+    _retire_object(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert main(["--base-ref", base]) == 0
+    assert "Daily" not in capsys.readouterr().out
