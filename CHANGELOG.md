@@ -41,7 +41,8 @@ entry.
   `CREATE OR ALTER DYNAMIC TABLE` (with `WAREHOUSE = <default_warehouse>` and
   `INITIALIZE = ON_CREATE`), `CREATE OR REPLACE VIEW ... COPY GRANTS` (the form the docs and
   skills propose for views) or `CREATE OR ALTER VIEW`, then only `GRANT SELECT` on the same
-  object. Tables, passthrough views, a DDL file that is a symbolic link, an object no query
+  object. Tables, passthrough views, a symbolic link anywhere from `apps/` down to an
+  `index.yaml` or DDL file (which also counts as an incomplete inventory), an object no query
   reads, one object declared by two apps and dependency cycles are findings in `sql-review check` and `validate-app`. These rules apply
   only to files in app data. A repo whose existing review-only DDL already sits in the schema it
   names as app data gets the findings at once: move those files, or bring them into a
@@ -98,8 +99,9 @@ entry.
 - **`check schema-refs` reads `//` as a comment, as Snowflake does.** An apostrophe after `//`
   opened a string literal in the relation scan, hiding the next line's `FROM` from the
   boundary and deny checks, and the deny check flagged a name commented out by `//`. A comment
-  opener inside a string literal no longer starts a comment for the deny check. A `WITH ... AS (` inside a quoted column alias no longer reads as a
-  CTE that hides the table of the same name.
+  opener inside a string literal no longer starts a comment for the deny check. A
+  `WITH ... AS (` inside a quoted column alias no longer reads as a CTE that hides the table of
+  the same name.
 - **`stage-bundle` leaves out `*.egg-info` directories, `*.pyc` and `.DS_Store`.** A local
   editable install's ignored build metadata reached the stage in a live test; it is never read
   at runtime.

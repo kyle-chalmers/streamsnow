@@ -910,3 +910,78 @@ def test_a_slash_slash_comment_never_hides_a_dependency_or_a_reader(tmp_path):
     plan = _plan(tmp_path)
     assert plan.ok, _details(plan)  # Y_DT has its reader: the query in y.sql
     assert [o.fqn for o in plan.objects] == [f"{FAD}.Y_DT", f"{FAD}.Z_DT", f"{FAD}.A_V"]
+
+
+# --------------------------------------------------------------------------- #
+# Codex round 2: a symlink anywhere from the apps root to a DDL file
+# --------------------------------------------------------------------------- #
+
+_LINKABLE = [
+    "apps",
+    "apps/acme-sales",
+    "apps/acme-sales/sql_review",
+    "apps/acme-sales/sql_review/index.yaml",
+    f"apps/acme-sales/sql_review/{OBJECTS_DIR}",
+]
+
+
+def _link_out(repo, outside, component):
+    """Move ``repo/component`` outside the repo and leave a symlink to it in its place."""
+    import shutil
+
+    src = repo / component
+    dest = outside / component.replace("/", "_")
+    shutil.move(str(src), str(dest))
+    src.symlink_to(dest, target_is_directory=dest.is_dir())
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need extra rights on Windows")
+@pytest.mark.parametrize("component", _LINKABLE)
+def test_a_symlinked_path_component_is_a_finding_and_an_incomplete_inventory(tmp_path, component):
+    repo, outside = tmp_path / "repo", tmp_path / "outside"
+    repo.mkdir()
+    outside.mkdir()
+    write_app(repo, "acme-sales", {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    _link_out(repo, outside, component)
+    plan = _plan(repo)
+    assert not plan.ok
+    assert plan.sql() == ""
+    assert any(f["file"] == component and "symbolic link" in f["detail"] for f in plan.findings), (
+        _details(plan)
+    )
+    assert plan.incomplete  # teardown holds the CI role back; tombstones fail closed
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need extra rights on Windows")
+def test_teardown_holds_the_role_back_for_a_symlinked_app_dir(tmp_path):
+    from typer.testing import CliRunner
+
+    from streamsnow.cli import app as cli
+
+    repo, outside = tmp_path / "repo", tmp_path / "outside"
+    repo.mkdir()
+    outside.mkdir()
+    ad = "STREAMSNOW_DATA.REPORTING"
+    cfg = write_config(repo, app_data=ad)
+    write_app(repo, "acme-sales", {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE", ad=ad)}, ad=ad)
+    _link_out(repo, outside, "apps/acme-sales")
+    r = CliRunner().invoke(cli, ["deploy-setup", "--teardown", "--config", str(cfg)])
+    assert r.exit_code == 0, r.output
+    assert "--   DROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" in r.stdout
+    assert "\nDROP ROLE IF EXISTS STREAMSNOW_DEPLOY_ROLE;" not in r.stdout
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need extra rights on Windows")
+def test_the_tombstone_inventory_is_incomplete_for_a_symlinked_index(tmp_path, monkeypatch):
+    from streamsnow.config import load_config
+    from streamsnow.tools.check_tombstones import live_app_data
+
+    repo, outside = tmp_path / "repo", tmp_path / "outside"
+    repo.mkdir()
+    outside.mkdir()
+    cfg = load_config(write_config(repo))
+    write_app(repo, "acme-sales", {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    _link_out(repo, outside, "apps/acme-sales/sql_review/index.yaml")
+    monkeypatch.chdir(repo)
+    _objects, incomplete = live_app_data(cfg, repo / "apps")
+    assert incomplete == ["apps/acme-sales/sql_review/index.yaml"]

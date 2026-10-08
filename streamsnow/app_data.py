@@ -609,7 +609,8 @@ def _order(objects: dict[str, AppDataObject], add) -> list[AppDataObject]:
 
 _SYMLINK = (
     "is a symbolic link: the deploy job runs app-data DDL unattended as the CI role, so "
-    "the file it runs must be the reviewed file itself. Replace the link with the file"
+    "what it reads must be the reviewed files in the repo. Replace the link with the real "
+    "directory or file"
 )
 
 
@@ -626,15 +627,35 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
     plan = AppDataPlan(app_data=cfg.governance.app_data)
     root = Path(apps_dir) if apps_dir is not None else Path("apps")
     root = root if root.is_absolute() else repo / root
-    apps = (
-        sorted(p for p in root.iterdir() if (p / "snowflake.yml").is_file())
-        if root.is_dir()
-        else []
-    )
 
     def add(slug: str, file: str, line: int, detail: str, kind: str = KIND_FINDING) -> None:
         bucket = plan.findings if kind == KIND_FINDING else plan.advisories
         bucket.append({"kind": kind, "app": slug, "file": file, "line": line, "detail": detail})
+
+    # Nothing is read through a symlink, from the apps root down to each DDL file: the
+    # deploy job runs what it reads as the CI role, so it must be the reviewed file in
+    # the repo. A refused path also makes the inventory incomplete, so teardown holds
+    # the CI role back and the tombstone checks fail closed.
+    if root.is_symlink():
+        add("", _rel(repo, root), 1, _SYMLINK)
+        plan.incomplete.append(_rel(repo, root))
+        candidates: list[Path] = []
+    else:
+        candidates = (
+            sorted(p for p in root.iterdir() if (p / "snowflake.yml").is_file())
+            if root.is_dir()
+            else []
+        )
+    apps: list[Path] = []
+    for app in candidates:
+        index = app / "sql_review" / sri.INDEX_NAME
+        links = [p for p in (app, app / "sql_review", index) if p.is_symlink()]
+        for link in links:
+            add(app.name, _rel(repo, link), 1, _SYMLINK)
+        if links:
+            plan.incomplete.append(_rel(repo, index))
+        else:
+            apps.append(app)
 
     built: dict[str, AppDataObject] = {}
     indexes: dict[str, sri.Index] = {}
@@ -661,12 +682,16 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
         linked: set[tuple[str, ...]] = set()
         if odir.is_symlink():
             add(slug, _rel(repo, odir), 1, _SYMLINK)
+            if rel_index not in plan.incomplete:
+                plan.incomplete.append(rel_index)
         for path in sorted(odir.glob("*.sql")) if odir.is_dir() and not odir.is_symlink() else []:
             parts = split_name(path.name[: -len(".sql")])
             if len(parts) == 3 and parts[:2] == target:
                 if path.is_symlink():
                     linked.add(parts)
                     add(slug, _rel(repo, path), 1, _SYMLINK)
+                    if rel_index not in plan.incomplete:
+                        plan.incomplete.append(rel_index)
                     continue
                 by_name.setdefault(parts, []).append(path)
         on_disk: dict[tuple[str, ...], Path] = {}
