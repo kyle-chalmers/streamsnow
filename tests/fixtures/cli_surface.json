@@ -218,6 +218,14 @@
       ],
       "arguments": []
     },
+    "git-head": {
+      "options": [
+        "--config",
+        "--expect",
+        "--temporary-connection"
+      ],
+      "arguments": []
+    },
     "init": {
       "options": [
         "--account",

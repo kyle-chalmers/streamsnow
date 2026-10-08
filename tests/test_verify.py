@@ -970,3 +970,96 @@ def test_plan_lists_an_apps_dynamic_tables(tmp_path):
         },
     )
     assert load_app_data(tmp_path, cfg).dynamic_tables("my-app") == [DT]
+
+
+GIT_REPO = "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO"
+OTHER_SHA = "fedcba9876543210fedcba9876543210fedcba98"
+
+
+def _git_data() -> dict:
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
+    data["deploy"] = {
+        "source": "git-repository",
+        "git_repository_fqn": GIT_REPO,
+        "api_integration_name": "GITHUB_API_INTEGRATION",
+        "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
+    }
+    return data
+
+
+def test_git_branch_head_reads_the_fetched_branch_by_exact_name():
+    seen: list[str] = []
+
+    def run_query(sql: str) -> list[dict]:
+        seen.append(sql)
+        return [
+            {"name": "main_old", "commit_hash": OTHER_SHA},
+            {"name": "main", "commit_hash": SHA},
+        ]
+
+    assert verify.git_branch_head(Config.from_dict(_git_data()), run_query) == SHA
+    assert seen == [f"SHOW GIT BRANCHES LIKE 'main' IN GIT REPOSITORY {GIT_REPO}"]
+
+
+def test_git_branch_head_refuses_a_stage_copy_config():
+    with pytest.raises(ValueError, match="git-repository"):
+        verify.git_branch_head(_cfg(), lambda sql: [])
+
+
+@pytest.mark.parametrize("fqn", ["STREAMLIT_REPO", "DB.REPO", f"{GIT_REPO}\n", "DB.SC.R; DROP"])
+def test_git_branch_head_refuses_a_repository_name_that_is_not_three_plain_identifiers(fqn):
+    cfg = Config.from_dict(_git_data())
+    object.__setattr__(cfg.deploy, "git_repository_fqn", fqn)
+    ran: list[str] = []
+    with pytest.raises(ValueError, match="three plain identifiers"):
+        verify.git_branch_head(cfg, lambda sql: ran.append(sql) or [])
+    assert ran == []
+
+
+def test_git_branch_head_refuses_a_branch_that_could_close_the_literal():
+    cfg = Config.from_dict(_git_data())
+    object.__setattr__(cfg.deploy, "git_branch", "main'\n")
+    with pytest.raises(ValueError, match="branch"):
+        verify.git_branch_head(cfg, lambda sql: [])
+
+
+def _git_head(tmp_path, monkeypatch, rows=None, error=None, expect=SHA):
+    cfg = tmp_path / "streamsnow.config.yaml"
+    cfg.write_text(yaml.safe_dump(_git_data()), encoding="utf-8")
+
+    def fake(sql: str, *, temporary_connection: bool = False) -> list[dict]:
+        assert temporary_connection
+        if error:
+            raise RuntimeError(error)
+        return rows or []
+
+    monkeypatch.setattr(verify, "run_query_snow", fake)
+    return CliRunner().invoke(
+        app, ["git-head", "--expect", expect, "--temporary-connection", "--config", str(cfg)]
+    )
+
+
+def test_git_head_matching_commit_exits_0(tmp_path, monkeypatch):
+    r = _git_head(tmp_path, monkeypatch, rows=[{"name": "main", "commit_hash": SHA}])
+    assert r.exit_code == 0, r.output
+
+
+def test_git_head_mismatch_exits_1_and_says_why(tmp_path, monkeypatch):
+    r = _git_head(tmp_path, monkeypatch, rows=[{"name": "main", "commit_hash": OTHER_SHA}])
+    assert r.exit_code == 1
+    assert "Stopping before any DDL or app change" in r.stderr
+    assert OTHER_SHA[:12] in r.stderr and SHA[:12] in r.stderr
+
+
+@pytest.mark.parametrize(
+    ("kw", "needle"),
+    [
+        ({"rows": []}, "no branch main"),
+        ({"error": "snow sql failed (1): no such repository"}, "cannot read"),
+        ({"rows": [{"name": "main", "commit_hash": SHA}], "expect": "<sha>"}, "7 to 64 hex"),
+    ],
+)
+def test_git_head_that_cannot_check_exits_2(tmp_path, monkeypatch, kw, needle):
+    r = _git_head(tmp_path, monkeypatch, **kw)
+    assert r.exit_code == 2
+    assert needle in r.stderr

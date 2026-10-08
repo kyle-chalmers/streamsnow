@@ -110,6 +110,42 @@ def _get(row: dict, key: str) -> object:
     return None
 
 
+def git_branch_head(cfg: Config, run_query: RunQuery) -> str:
+    """The commit the git repository's deploy branch points at in Snowflake.
+
+    A git-repository deploy builds each app from the branch after ``snow git
+    fetch``, but builds app data from the runner's checkout of ``$GITHUB_SHA``.
+    When another merge moved the branch while this run waited, the two come from
+    different commits: a view from one, the app that reads it from another. The
+    deploy job compares this with ``$GITHUB_SHA`` before any DDL (``streamsnow
+    git-head``). ``""`` when the branch is not in the repository's list. Docs:
+    https://docs.snowflake.com/en/sql-reference/sql/show-git-branches
+
+    Both config values are rendered into the SHOW statement, so they are
+    re-checked here (three plain identifiers, a branch of ``[A-Za-z0-9._/-]``
+    matched in full): the loader's patterns accept a trailing newline and
+    shorter names, which must never reach SQL text.
+    """
+    d = cfg.deploy
+    if d.source != "git-repository":
+        raise ValueError(
+            f"deploy.source is {d.source}, not git-repository: there is no branch to check"
+        )
+    if not is_plain_fqn(d.git_repository_fqn):
+        raise ValueError(
+            f"deploy.git_repository_fqn {d.git_repository_fqn!r} is not three plain identifiers"
+        )
+    if not re.fullmatch(r"[A-Za-z0-9._/-]+", d.git_branch):
+        raise ValueError(f"deploy.git_branch {d.git_branch!r} is not a plain branch name")
+    rows = run_query(
+        f"SHOW GIT BRANCHES LIKE '{d.git_branch}' IN GIT REPOSITORY {d.git_repository_fqn}"
+    )
+    for row in rows:
+        if str(_get(row, "name") or "") == d.git_branch:
+            return str(_get(row, "commit_hash") or "")
+    return ""
+
+
 def _has(row: dict, key: str) -> bool:
     return any(k.lower() == key for k in row)
 

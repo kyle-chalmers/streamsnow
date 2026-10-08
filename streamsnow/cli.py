@@ -19,6 +19,7 @@ streamsnow deploy-setup   Emit the one-time Snowflake DDL for your deploy source
 streamsnow deploy-sql     Emit the CREATE OR REPLACE STREAMLIT SQL for one app (deploy job)
 streamsnow objects-sql    Emit the app-data views and dynamic tables, in dependency order (deploy job)
 streamsnow verify-deploy  Check that a deployed app actually serves
+streamsnow git-head       Stop a git-repository deploy when the branch moved past this commit (deploy job)
 streamsnow ci-key create  Make the CI user's key pair + the deploy secret files
 streamsnow ci-key push    Set the five deploy secrets on GitHub from those files
 streamsnow ci-key verify  Sign in as the CI user and check, read-only, what a deploy sees
@@ -1547,6 +1548,61 @@ def verify_deploy_cmd(
                 print(f"      - {f}")
         print(f"\n{summary_line(result)}")
     raise typer.Exit(code=0 if result["ok"] else 1)
+
+
+@app.command(name="git-head", hidden=True)
+def git_head_cmd(
+    expect: str = typer.Option(..., "--expect", help="The commit this run deploys ($GITHUB_SHA)."),
+    temporary_connection: bool = typer.Option(
+        False,
+        "--temporary-connection",
+        help="Pass --temporary-connection to snow (the deploy workflow does, in CI).",
+    ),
+    config: Path = typer.Option(None, "--config", help="Path to streamsnow.config.yaml."),
+) -> None:
+    """Stop a git-repository deploy when the fetched branch is not this run's commit (deploy job).
+
+    Exit 0 when the branch head is --expect, 1 when it moved (stop before any
+    DDL: the newer commit's own run ships both), 2 when it cannot be checked.
+    """
+    from functools import partial
+
+    from .verify import git_branch_head, run_query_snow
+
+    if not re.fullmatch(r"[0-9a-fA-F]{7,64}", expect):
+        typer.echo(
+            f"git-head: --expect {expect!r} must be a commit SHA (7 to 64 hex characters)",
+            err=True,
+        )
+        raise typer.Exit(2)
+    try:
+        cfg = load_config(Path(config) if config else None)
+        head = git_branch_head(
+            cfg, partial(run_query_snow, temporary_connection=temporary_connection)
+        )
+    except ConfigError as exc:
+        typer.echo(f"git-head: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    except (ValueError, RuntimeError) as exc:
+        typer.echo(f"git-head: cannot read the branch head: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    d = cfg.deploy
+    if not head:
+        typer.echo(
+            f"git-head: no branch {d.git_branch} in {d.git_repository_fqn} after the fetch: "
+            "check deploy.git_branch",
+            err=True,
+        )
+        raise typer.Exit(2)
+    if not head.lower().startswith(expect.lower()):
+        typer.echo(
+            f"git-head: {d.git_repository_fqn} branch {d.git_branch} is at {head[:12]}, but this "
+            f"run deploys {expect[:12]}: another merge landed after this run started, and its "
+            "own deploy run ships both. Stopping before any DDL or app change.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    typer.echo(f"git-head: {d.git_branch} is at {head[:12]}, this run's commit.", err=True)
 
 
 @app.command(name="app-url")
