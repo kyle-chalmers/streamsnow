@@ -586,7 +586,12 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
     # it, `fail` gates on it, so an adopting fleet backfills on its own schedule.
     # `advisory` never gates; split_by_policy is the one place those rules live.
     # `check` is import-free by design, so it is safe inside this gate.
-    sqlr = sql_review._check_app(app_dir.parent.parent, app_dir)
+    # App-data objects (governance.app_data) are checked across every app by
+    # `app_data.load_app_data`; this app's share of those findings joins the sql-review check.
+    from ..app_data import load_app_data  # noqa: PLC0415 (import cycle)
+
+    repo_root = app_dir.parent.parent
+    sqlr = sql_review._check_app(repo_root, app_dir, plan=load_app_data(repo_root, cfg))
     policy = cfg.sql_review.coverage
     hard, soft = sql_review.split_by_policy(sqlr, policy)
     checks.append(

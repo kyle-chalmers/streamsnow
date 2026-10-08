@@ -888,3 +888,83 @@ def test_skeleton_app_with_no_metrics_is_clean(tmp_path: Path) -> None:
     assert sr.main(["generate", "skel-app", "--dir", str(tmp_path)]) == 0
     assert sr.main(["check", "skel-app", "--dir", str(tmp_path)]) == 0
     assert not sr._generated_page_files(a)
+
+
+def _check_json(repo):
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        code = sr.main(["check", "--dir", str(repo), "--format", "json"])
+    return code, json.loads(buf.getvalue())
+
+
+def test_check_fails_on_an_app_data_finding_without_repeating_it(tmp_path):
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    write_config(tmp_path)
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE").replace("OR ALTER", "OR REPLACE")},
+    )
+    write_app(tmp_path, "acme-orphan", {}).joinpath(
+        "sql_review",
+        "app_specific_reporting_objects",
+        "STREAMSNOW_APPS.STREAMSNOW_REPORTING.STRAY.sql",
+    ).write_text(dynamic_table("STRAY"), encoding="utf-8")
+    code, out = _check_json(tmp_path)
+    assert code == 1
+    loader = [f for f in out["findings"] if f["kind"] == "objects" and "app" in f]
+    sales = [f["detail"] for f in loader if f["app"] == "acme-sales"]
+    orphan = [f["detail"] for f in loader if f["app"] == "acme-orphan"]
+    assert any(
+        d.startswith("a dynamic table deploys with CREATE OR ALTER DYNAMIC TABLE") for d in sales
+    )
+    assert any("not under objects: in index.yaml" in d for d in orphan)
+    # The loader owns app-data names: the per-app object rules do not repeat them.
+    per_app = [f["detail"] for f in out["findings"] if f["kind"] == "objects" and "app" not in f]
+    assert not [d for d in per_app if "STRAY" in d or "DAILY_REVENUE" in d], per_app
+
+
+def test_stray_app_data_ddl_in_an_app_without_an_index_blocks(tmp_path):
+    """_check_app returns early when index.yaml is missing; the loader's findings must
+    still be added there, or a stray file would deploy-block nothing at review time."""
+    from _app_data_fixtures import dynamic_table, write_app, write_config
+
+    write_config(tmp_path)
+    app = write_app(tmp_path, "acme-sales", {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")})
+    (app / "sql_review" / "index.yaml").unlink()
+    code, out = _check_json(tmp_path)
+    assert code == 1
+    assert any(
+        f["kind"] == "objects"
+        and f.get("app") == "acme-sales"
+        and "not under objects:" in f["detail"]
+        for f in out["findings"]
+    ), out["findings"]
+
+
+def test_a_valid_app_data_object_read_by_another_app_has_no_object_findings(tmp_path):
+    """Positive control: headers present (the fixtures write them), reason given, read by
+    another app's query. Neither the loader nor the per-app rules report anything of kind
+    objects for it."""
+    from _app_data_fixtures import AD, dynamic_table, write_app, write_config
+
+    write_config(tmp_path)
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {"DAILY_REVENUE": dynamic_table("DAILY_REVENUE")},
+        read_objects=False,
+    )
+    write_app(
+        tmp_path,
+        "acme-finance",
+        {},
+        queries={"revenue.sql": f"SELECT SUM(revenue) AS r FROM {AD}.DAILY_REVENUE\n"},
+    )
+    _code, out = _check_json(tmp_path)
+    objects = [f for f in out["findings"] if f["kind"] == "objects"]
+    assert objects == [], objects
