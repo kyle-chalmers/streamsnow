@@ -45,7 +45,8 @@ Data notes (grain, definitions, quirks, freshness) live in `../AGENTS.md`, not h
   `index.yaml`), and `-- Grants:` (must match the object's `grants:` in `index.yaml`).
 - List each object under `objects:` in `index.yaml` and name it in the `reads:` of every metric
   that reads it. `check` fails on a DDL file nothing reads, or an object with no DDL file.
-- Objects in app data are applied by the deploy job (`streamsnow objects-sql`). A human applies DDL outside app data; Claude deploys it only when the user explicitly says to.
+- Objects in app data are applied by the deploy job (`streamsnow objects-sql`). A human applies
+  DDL outside app data; Claude deploys it only when the user explicitly says to.
 - These files are DDL on purpose: they are exempt from the read-only guard and no review command
   ever runs them.
 

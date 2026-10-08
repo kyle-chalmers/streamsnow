@@ -256,9 +256,9 @@ not being granted to `viewer_role` (the manifest check flags an unlisted
 warehouse before deploy).
 
 When an app owns a dynamic table, `verify-deploy` also runs the warn-only
-`app-data-refresh` check: it warns when the table's scheduling state is not
-`RUNNING` or its refresh is not `ACTIVE`, and reports it as skipped when the
-query fails.
+`app-data-refresh` check: it warns when the table's `scheduling_state` is not
+`RUNNING` or `ACTIVE`, when it has never refreshed, or when it is not found,
+and reports it as skipped when the query fails.
 
 ## Re-rendering the pipeline after a config change
 
