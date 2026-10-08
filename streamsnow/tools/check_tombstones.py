@@ -343,8 +343,11 @@ def base_app_data(base_commit: str, apps_dir: Path) -> tuple[dict[str, tuple[str
     gov = raw.get("governance") or {}
     if not isinstance(gov, dict):
         return {}, unverifiable("has a governance: that is not a mapping")
+    declared_version = raw.get("schema_version", CONFIG_SCHEMA_VERSION)
     try:  # mirror Config.from_dict: a missing key is the current version, "2" is 2
-        version = int(raw.get("schema_version", CONFIG_SCHEMA_VERSION))
+        if isinstance(declared_version, bool):
+            raise TypeError("a boolean is not a version: int(True) would read as version 1")
+        version = int(declared_version)
     except (TypeError, ValueError):
         return {}, unverifiable(f"has schema_version {raw.get('schema_version')!r}, not a number")
     if version < CONFIG_SCHEMA_VERSION or "database" in gov or "schema_allow" in gov:

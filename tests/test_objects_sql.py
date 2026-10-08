@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from _app_data_fixtures import AD, dynamic_table, write_app, write_config
+from _app_data_fixtures import AD, dynamic_table, view, write_app, write_config
 from typer.testing import CliRunner
 
 from streamsnow.cli import app
@@ -44,10 +44,38 @@ def test_objects_sql_prints_nothing_when_any_file_fails(tmp_path):
     assert r.exit_code == 1
     assert r.stdout == ""
     assert "objects-sql: apps/acme-finance/sql_review/app_specific_reporting_objects/" in r.stderr
-    assert "printed no SQL" in r.stderr
+    lines = r.stderr.splitlines()
+    findings = [ln for ln in lines if ln.startswith("objects-sql: apps/")]
+    assert len(findings) >= 1
+    assert lines[-1] == (
+        f"objects-sql: {len(findings)} finding(s); printed no SQL, "
+        "so the deploy stops before any change."
+    )
+    assert lines[:-1] == findings
 
 
 def test_objects_sql_without_a_config_exits_2(tmp_path):
     r = _run(tmp_path / "missing.yaml")
     assert r.exit_code == 2
     assert r.stdout == ""
+
+
+def test_objects_sql_with_only_advisories_prints_the_sql_and_nothing_on_stderr(tmp_path):
+    """shared_logic with a single reader is an advisory: it never fails the verb and is
+    never printed, so the deploy proceeds with a clean stderr."""
+    cfg = write_config(tmp_path)
+    write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "REGION_REVENUE": view(
+                "REGION_REVENUE",
+                "SELECT region, COUNT(*) AS n FROM ANALYTICS_DB.REPORTING.ORDERS GROUP BY region",
+            )
+        },
+        reasons={"REGION_REVENUE": "shared_logic"},
+    )
+    r = _run(cfg)
+    assert r.exit_code == 0, r.output
+    assert f"CREATE OR REPLACE VIEW {AD}.REGION_REVENUE COPY GRANTS" in r.stdout
+    assert r.stderr == ""

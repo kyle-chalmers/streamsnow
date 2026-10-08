@@ -714,5 +714,21 @@ def test_a_tombstone_identifier_with_a_trailing_newline_renders_one_clean_line(t
         encoding="utf-8",
     )
     stones, errors = load_registry(path)
-    assert drop_sql(stones).count("\n") == 0
-    assert all(s.identifier == s.identifier.strip() for s in stones) or errors
+    assert errors == []
+    assert [s.identifier for s in stones] == ["STREAMSNOW_APPS.DASHBOARDS.X"]
+    assert drop_sql(stones) == "DROP STREAMLIT IF EXISTS STREAMSNOW_APPS.DASHBOARDS.X;"
+
+
+def test_a_boolean_base_schema_version_is_unverifiable_not_version_one(
+    tmp_path, monkeypatch, capsys
+):
+    """int(True) is 1, which would read the base as a pre-app-data config and report that
+    nothing was removed. A boolean is not a version: the inventory is unverifiable."""
+    data = yaml.safe_load(CONFIG)
+    data["schema_version"] = True
+    base = _init_repo(tmp_path, config=yaml.safe_dump(data))
+    (tmp_path / "streamsnow.config.yaml").write_text(CONFIG, encoding="utf-8")  # live is valid
+    monkeypatch.chdir(tmp_path)
+    assert main(["--base-ref", base]) == 1
+    out = capsys.readouterr().out
+    assert "cannot tell which app-data objects" in out and "True" in out

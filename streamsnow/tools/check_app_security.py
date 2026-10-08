@@ -699,14 +699,16 @@ def _is_maintained_ddl(path: Path) -> bool:
     the deploy job (``streamsnow objects-sql``) and allow only CREATE and GRANT;
     every other file there is review-only and a human applies it (``sql-review
     probe`` only reads it to compare against the live ``GET_DDL``). ``sql-review
-    check`` validates each one (the ``objects`` kind). Scanning them as app code made every app that declared an object fail
-    ``validate-app`` and the pre-commit hook on its own DDL.
+    check`` validates each one (the ``objects`` kind). Scanning them as app code made
+    every app that declared an object fail ``validate-app`` and the pre-commit hook on
+    its own DDL.
 
     The scope is exactly what ``sql-review`` validates: a direct child of that
     folder in an app root, which is ``apps/<slug>/`` holding a ``snowflake.yml``.
     A look-alike folder deeper in the app (even beside a planted manifest), or a
-    subfolder of it, is scanned like any other SQL, and inside the folder only
-    :data:`_DDL_VERBS` are allowed.
+    subfolder of it, is scanned like any other SQL. Inside the folder the allowed
+    verbs are :data:`_DDL_VERBS`, or :data:`_DEPLOYED_DDL_VERBS` for a file in app
+    data (see :func:`_ddl_verbs`).
     """
     folder = path.parent
     app_root = folder.parent.parent

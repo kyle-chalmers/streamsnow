@@ -1023,9 +1023,9 @@ def test_git_branch_head_refuses_a_branch_that_could_close_the_literal():
         verify.git_branch_head(cfg, lambda sql: [])
 
 
-def _git_head(tmp_path, monkeypatch, rows=None, error=None, expect=SHA):
+def _git_head(tmp_path, monkeypatch, rows=None, error=None, expect=SHA, data=None):
     cfg = tmp_path / "streamsnow.config.yaml"
-    cfg.write_text(yaml.safe_dump(_git_data()), encoding="utf-8")
+    cfg.write_text(yaml.safe_dump(data or _git_data()), encoding="utf-8")
 
     def fake(sql: str, *, temporary_connection: bool = False) -> list[dict]:
         assert temporary_connection
@@ -1042,6 +1042,26 @@ def _git_head(tmp_path, monkeypatch, rows=None, error=None, expect=SHA):
 def test_git_head_matching_commit_exits_0(tmp_path, monkeypatch):
     r = _git_head(tmp_path, monkeypatch, rows=[{"name": "main", "commit_hash": SHA}])
     assert r.exit_code == 0, r.output
+
+
+def test_git_head_compares_the_commit_without_regard_to_case(tmp_path, monkeypatch):
+    mixed = "0123456789AbCdEf0123456789aBcDeF01234567"
+    r = _git_head(
+        tmp_path, monkeypatch, rows=[{"name": "main", "commit_hash": SHA.upper()}], expect=mixed
+    )
+    assert r.exit_code == 0, r.output
+
+
+def test_git_head_on_a_config_that_is_not_a_git_repository_deploy_exits_2(tmp_path, monkeypatch):
+    stage_copy = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))  # deploy.source: stage-copy
+    r = _git_head(
+        tmp_path,
+        monkeypatch,
+        rows=[{"name": "main", "commit_hash": SHA}],
+        data=stage_copy,
+    )
+    assert r.exit_code == 2
+    assert "not git-repository" in r.stderr
 
 
 def test_git_head_mismatch_exits_1_and_says_why(tmp_path, monkeypatch):
