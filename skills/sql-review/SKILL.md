@@ -72,7 +72,8 @@ fails a ship. Run it on request and before a release or deploy.
 
 - No row-level data or small-group breakdowns in a finding, the log, or chat: pass or fail, row
   counts, top-level totals.
-- A human applies DDL. Propose it; deploy it only when the user explicitly says to.
+- A human applies DDL outside app data; propose it, deploy only when the user says to. App-data
+  objects (`governance.app_data`) are applied by the deploy job (`streamsnow objects-sql`).
 - Data judgment follows [tracing.md](tracing.md): never claim upstream is broken without cited
   evidence, and tell "missing" from "not visible to this role" apart.
 - Exit codes: `1` means a check failed (report it as a fact); `2` means nothing ran (fix the

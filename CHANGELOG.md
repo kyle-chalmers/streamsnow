@@ -32,6 +32,27 @@ entry.
 
 ### Added
 
+- **The deploy job builds app data** (#79). Views and dynamic tables an app declares in
+  `governance.app_data` (DDL in `apps/<slug>/sql_review/app_specific_reporting_objects/`, an
+  `objects:` entry with `reason: performance` or `reason: shared_logic`) are applied by the
+  deploy workflow, owned by the CI role, in dependency order across apps, before any app is
+  replaced. `streamsnow objects-sql` prints that DDL; it checks every file first and prints
+  nothing on any finding, so the deploy stops before Snowflake sees a statement. Allowed forms:
+  `CREATE OR ALTER DYNAMIC TABLE` (with `WAREHOUSE = <default_warehouse>` and
+  `INITIALIZE = ON_CREATE`), `CREATE OR REPLACE VIEW ... COPY GRANTS` (the form the docs and
+  skills propose for views) or `CREATE OR ALTER VIEW`, then only `GRANT SELECT` on the same
+  object. Tables, passthrough views, an object no query reads, one object declared by two apps
+  and dependency cycles are findings in `sql-review check` and `validate-app`. These rules apply only to files in app data. A repo whose
+  existing review-only DDL already sits in the schema it names as app data gets the findings
+  at once: move those files, or bring them into a deployable form. Run `streamsnow update
+  --apply` to pick up the new deploy workflow steps.
+- **Tombstones take `kind: view` or `kind: dynamic_table`** for app-data objects;
+  `check tombstones` requires one for an object removed since the base and checks its kind,
+  and `--drop-sql` drops by kind.
+- `deploy-setup --teardown` drops declared app-data objects before the roles that own them.
+- `verify-deploy` warns (`app-data-refresh`) when an app's dynamic table is not refreshing.
+- Git-repository deploys stop before any DDL or app change when the fetched branch is not the
+  run's commit (`streamsnow git-head`).
 - **`streamsnow doctor --live`** adds an optional `source-access` check: each governance source
   and the app-data schema are visible to your `snow` connection's role (read-only SHOW
   statements; it logs in, so it is opt-in). `streamsnow configure` runs the same check on the
@@ -57,6 +78,8 @@ entry.
 
 ### Fixed
 
+- The stage-copy deploy step now stops when `streamsnow deploy-setup` fails; under `set -e`
+  the `deploy-setup > file && snow sql -f file` form kept going.
 - **Docs no longer say `streamsnow update --apply` refreshes `review.py`.** `update` re-renders
   repo-level governance files only; `.sqlfluff` and app files are never rewritten. The docs now
   say so, name `sql-review helper` for `review.py`, and give the one-line manual change an

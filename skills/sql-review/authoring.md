@@ -53,10 +53,20 @@ regenerated. The folder's own rules are in `apps/<slug>/sql_review/AGENTS.md`.
    - `fragments`: `[{file: queries/_shared_ctes.sql, reason: "..."}]` for a query file that is a
      CTE inlined via a token: it is not runnable alone, so no metric can use it. The reason is
      required. Never rename a query to dodge coverage; declare it.
-   - `objects`: a view or table built for this app (not a shared source) goes here with its
-     `grants`, and its maintained DDL goes in `sql_review/app_specific_reporting_objects/` as
-     `<DATABASE>.<SCHEMA>.<OBJECT>.sql` with the `-- Object:` / `-- Purpose:` / `-- Used by:` /
-     `-- Grants:` header. A human applies DDL; deploy it yourself only when the user says to.
+   - `objects`: query the sources directly first. Propose an app-data object only with a
+     `reason`: `reason: performance` (a dynamic table pre-computes a slow or costly query) or
+     `reason: shared_logic` (one view replaces logic that two or more queries, pages or apps
+     repeat). It goes here with its `grants` and `reason`, and its maintained DDL goes in
+     `sql_review/app_specific_reporting_objects/` as `<DATABASE>.<SCHEMA>.<OBJECT>.sql` with the
+     `-- Object:` / `-- Purpose:` / `-- Used by:` / `-- Grants:` header. The file holds one
+     CREATE in a deployable form, then only `GRANT SELECT` on it to the roles in `grants`; never a
+     table. For a dynamic table write `CREATE OR ALTER DYNAMIC TABLE ... WAREHOUSE =
+     <default_warehouse> INITIALIZE = ON_CREATE AS ...`. For a view write
+     `CREATE OR REPLACE VIEW ... COPY GRANTS`, the default: a view holds no data, so replacing it
+     is cheap and always takes the new query. `CREATE OR ALTER VIEW` is accepted but not proposed.
+     The deploy job applies these objects; `streamsnow objects-sql` shows what it would run.
+     Objects outside app data keep today's rule: a human applies DDL outside app data, and you
+     deploy it yourself only when the user says to.
 5. **Comment the queries.** Every CTE gets a one-line comment directly above its name (for the
    first CTE, `WITH` on its own line first); every non-obvious filter, join or CASE a one-line
    "why". Never restate the SQL. `check` enforces the CTE comments and the 100-character limit,
