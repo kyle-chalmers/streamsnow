@@ -254,7 +254,7 @@ def _base_config(cfg, base_commit: str) -> tuple[Config, list[str]]:
     wrong-namespace nag beats a silent orphan, and the note says why.
     """
     try:
-        raw = _git(["show", f"{base_commit}:streamsnow.config.yaml"])
+        raw = _git(["cat-file", "-p", f"{base_commit}:streamsnow.config.yaml"])
     except ToolError:
         return cfg, ["base commit has no streamsnow.config.yaml: using current config"]
     try:
@@ -324,7 +324,7 @@ def base_app_data(base_commit: str, apps_dir: Path) -> tuple[dict[str, tuple[str
     base DDL file; "" when it cannot be told (the tombstone still needs one).
     """
     try:
-        raw_text = _git(["show", f"{base_commit}:streamsnow.config.yaml"])
+        raw_text = _git(["cat-file", "-p", f"{base_commit}:streamsnow.config.yaml"])
     except ToolError:
         return {}, []
 
@@ -381,7 +381,7 @@ def base_app_data(base_commit: str, apps_dir: Path) -> tuple[dict[str, tuple[str
             "tool cannot tell which app-data objects this app declared"
         )
         try:
-            index = yaml.safe_load(_git(["show", f"{base_commit}:{line}"]))
+            index = yaml.safe_load(_git(["cat-file", "-p", f"{base_commit}:{line}"]))
         except (ToolError, yaml.YAMLError):
             problems.append(unreadable)
             continue
@@ -409,7 +409,7 @@ def base_app_data(base_commit: str, apps_dir: Path) -> tuple[dict[str, tuple[str
             if not is_plain_fqn(display_name(parts)):
                 continue  # never buildable (like plan.unbuilt), so never in Snowflake
             path = files.get(parts)
-            kind = ddl_kind(_git(["show", f"{base_commit}:{path}"])) if path else ""
+            kind = ddl_kind(_git(["cat-file", "-p", f"{base_commit}:{path}"])) if path else ""
             out[display_name(parts).upper()] = (slug, kind)
     return out, problems
 
