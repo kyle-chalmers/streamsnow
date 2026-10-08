@@ -14,7 +14,7 @@ pipeline that stops at "the SQL ran":
    the base image passes a launcher flag the pinned Streamlit version rejects)
    while the backing service still reports healthy. Only the service logs show
    the ``No such option`` signature.
-4. **Stalled dynamic table** — a dynamic table in the app's app data that was
+4. **Stalled dynamic table**: a dynamic table in the app's app data that was
    suspended (or never refreshed) keeps serving its last rows with no error
    anywhere. Warn-only: the app itself deployed fine.
 
