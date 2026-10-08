@@ -91,6 +91,10 @@ entry.
   repo-level governance files only; `.sqlfluff` and app files are never rewritten. The docs now
   say so, name `sql-review helper` for `review.py`, and give the one-line manual change an
   existing repo needs for the glossary `%` fix and the `.sqlfluff` comment.
+- **Config values with a trailing newline are refused.** Identifier, object name, branch and
+  version checks used a pattern that also matched before a final newline, so
+  `stage_database: "OTHER_STAGE_DB\n"` loaded and split a generated SQL comment onto a live
+  line. `deploy-setup` and `--teardown` also escape every value they print in a comment.
 - **`check schema-refs` reads `//` as a comment, as Snowflake does.** An apostrophe after `//`
   opened a string literal in the relation scan, hiding the next line's `FROM` from the
   boundary and deny checks. A `WITH ... AS (` inside a quoted column alias no longer reads as a

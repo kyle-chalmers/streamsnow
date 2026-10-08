@@ -825,6 +825,12 @@ def test_one_line_keeps_any_text_on_one_physical_line():
         assert escaped.splitlines() == [escaped]
         assert "\n" not in escaped and "\r" not in escaped
         assert escaped.isascii() and escaped.isprintable()
+    # plain identifiers and paths read as written; quotes are escaped, never ambiguous
+    assert (
+        one_line("STREAMSNOW_APPS.STREAMSNOW_REPORTING") == "STREAMSNOW_APPS.STREAMSNOW_REPORTING"
+    )
+    assert one_line("apps/acme-sales/x.sql") == "apps/acme-sales/x.sql"
+    assert one_line("a'b") == ascii("a'b")
 
 
 def test_sql_never_lets_a_rendered_path_end_its_comment():

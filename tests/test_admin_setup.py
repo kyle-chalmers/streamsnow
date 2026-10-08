@@ -712,3 +712,40 @@ def test_drop_order_drops_what_reads_a_cycle_before_the_cycle(tmp_path):
     cfg = Config.from_dict(yaml.safe_load(cfg_path.read_text(encoding="utf-8")))
     order = [f for f, _ in load_app_data(tmp_path, cfg).drop_order()]
     assert order == [f"{ELSEWHERE}.C_V", f"{ELSEWHERE}.A_V", f"{ELSEWHERE}.B_V"]
+
+
+# --------------------------------------------------------------------------- #
+# Codex round 2: a config value never ends the comment it is rendered into (#79)
+# --------------------------------------------------------------------------- #
+
+
+def _unvalidated(cfg: Config, **objects) -> Config:
+    """The config with values validation would refuse, to prove the renderer holds alone."""
+    import dataclasses
+
+    sf = dataclasses.replace(
+        cfg.snowflake, objects=dataclasses.replace(cfg.snowflake.objects, **objects)
+    )
+    return dataclasses.replace(cfg, snowflake=sf)
+
+
+def _comment_tails_stay_comments(sql: str, *tails: str) -> None:
+    for tail in tails:
+        lines = [ln for ln in sql.splitlines() if tail in ln]
+        assert lines, tail
+        assert all(ln.startswith("--") for ln in lines), lines
+
+
+def test_teardown_keeps_a_newline_in_a_config_value_inside_its_comment():
+    cfg = _unvalidated(
+        _cfg(**{"governance.app_data": ELSEWHERE}), stage_database="OTHER_STAGE_DB\nX"
+    )
+    sql = generate_teardown_sql(cfg)
+    _comment_tails_stay_comments(sql, "which may hold other things")
+    assert "'OTHER_STAGE_DB\\nX'" in sql
+
+
+def test_admin_sql_keeps_a_newline_in_a_config_value_inside_its_comment():
+    cfg = _unvalidated(_cfg(), default_warehouse="STREAMSNOW_WH\nX")
+    sql = generate_admin_sql(cfg)
+    _comment_tails_stay_comments(sql, "which the CI", "refresh with WAREHOUSE")

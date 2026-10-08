@@ -1131,8 +1131,11 @@ def deploy_setup(
         _err(str(exc))
         raise typer.Exit(2) from exc
     if cfg.deploy.source != configured:
+        from .app_data import one_line
+
         sql = (
-            f"-- PREVIEW of the {cfg.deploy.source} deploy source. Your config uses {configured};\n"
+            f"-- PREVIEW of the {one_line(cfg.deploy.source)} deploy source. Your config uses "
+            f"{one_line(configured)};\n"
             "-- nothing here takes effect until you switch deploy.source (`streamsnow configure`)\n"
             "-- and re-render the deploy workflow (`streamsnow update --apply`). See\n"
             "-- docs/git-repository.md. Review only: this command never runs SQL.\n" + sql

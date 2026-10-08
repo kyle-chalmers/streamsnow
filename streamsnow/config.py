@@ -62,6 +62,8 @@ _GITHUB_ORIGIN_RE = re.compile(
     r"^https://github\.com/([A-Za-z0-9][A-Za-z0-9-]*)/[A-Za-z0-9._-]+?(?:\.git)?$"
 )
 
+# Every validator below uses fullmatch: `$` also matches before a final newline, so
+# `.match` let "DB\n" through into generated SQL comments (#79).
 # Snowflake unquoted identifier: starts with letter/underscore, then
 # letters/digits/underscore/dollar. Case-insensitive in Snowflake.
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
@@ -83,7 +85,7 @@ class ConfigError(ValueError):
 # --------------------------------------------------------------------------- #
 def validate_identifier(value: str, field_name: str) -> str:
     """Return ``value`` if it is a safe Snowflake identifier, else raise."""
-    if not isinstance(value, str) or not _IDENT_RE.match(value):
+    if not isinstance(value, str) or not _IDENT_RE.fullmatch(value):
         raise ConfigError(
             f"{field_name!r} = {value!r} is not a valid Snowflake identifier "
             r"(must match [A-Za-z_][A-Za-z0-9_$]*). This value is rendered into "
@@ -94,7 +96,7 @@ def validate_identifier(value: str, field_name: str) -> str:
 
 def validate_fqn(value: str, field_name: str) -> str:
     """Return ``value`` if it is a safe dotted identifier (DB.SCHEMA.NAME)."""
-    if not isinstance(value, str) or not _FQN_RE.match(value):
+    if not isinstance(value, str) or not _FQN_RE.fullmatch(value):
         raise ConfigError(
             f"{field_name!r} = {value!r} is not a valid Snowflake object name "
             "(expected DB.SCHEMA.OBJECT, each part a valid identifier)."
@@ -109,7 +111,7 @@ def validate_schema_ref(value: object, field_name: str) -> str:
     which is what every comparison against a quoted name in SQL assumes.
     """
     text = str(value).strip() if value is not None else ""
-    if not _SCHEMA_REF_RE.match(text):
+    if not _SCHEMA_REF_RE.fullmatch(text):
         raise ConfigError(
             f"{field_name!r} = {value!r} must be DATABASE.SCHEMA (two Snowflake identifiers "
             "joined by a dot, e.g. ANALYTICS_DB.REPORTING)."
@@ -120,7 +122,7 @@ def validate_schema_ref(value: object, field_name: str) -> str:
 def validate_deny_entry(value: object, field_name: str) -> str:
     """A deny entry: a schema name (that schema in every database) or DATABASE.SCHEMA."""
     text = str(value) if value is not None else ""
-    if _IDENT_RE.match(text) or _SCHEMA_REF_RE.match(text):
+    if _IDENT_RE.fullmatch(text) or _SCHEMA_REF_RE.fullmatch(text):
         return text
     raise ConfigError(
         f"{field_name!r} = {value!r} must be a schema name (RAW: that schema in every "
@@ -165,7 +167,7 @@ def _reject_v1(d: dict) -> None:
 
 
 def validate_branch(value: str, field_name: str) -> str:
-    if not isinstance(value, str) or ".." in value or not _BRANCH_RE.match(value):
+    if not isinstance(value, str) or ".." in value or not _BRANCH_RE.fullmatch(value):
         raise ConfigError(f"{field_name!r} = {value!r} is not a valid git branch name.")
     return value
 
@@ -204,14 +206,14 @@ def validate_name(value: str, field_name: str) -> str:
     Used for values that flow into shell (the `snow connection add` hint) and
     config files but aren't Snowflake identifiers.
     """
-    if not isinstance(value, str) or not re.match(r"^[A-Za-z0-9._-]+$", value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", value):
         raise ConfigError(f"{field_name!r} = {value!r} must match [A-Za-z0-9._-]+.")
     return value
 
 
 def validate_pyver(value: str, field_name: str) -> str:
     """Validate a Python version like '3.11'."""
-    if not isinstance(value, str) or not re.match(r"^3\.\d{1,2}$", value):
+    if not isinstance(value, str) or not re.fullmatch(r"3\.\d{1,2}", value):
         raise ConfigError(f"{field_name!r} = {value!r} must look like '3.11'.")
     return value
 
@@ -219,7 +221,7 @@ def validate_pyver(value: str, field_name: str) -> str:
 def quote_ident(name: str) -> str:
     """Render a Snowflake identifier safely. Inputs are already validated to the
     safe charset, so this is normally a no-op; quotes defensively otherwise."""
-    if _IDENT_RE.match(name):
+    if _IDENT_RE.fullmatch(name):
         return name
     return '"' + name.replace('"', '""') + '"'
 
@@ -243,7 +245,7 @@ def normalize_account(account: str) -> str:
     # Account locators are letters/digits/dot/dash/underscore (org-account or
     # legacy region forms). Reject anything else — this value flows into the
     # `snow connection add --account` shell hint and secrets.toml.
-    if not re.match(r"^[A-Za-z0-9._-]+$", a):
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", a):
         raise ConfigError(
             f"snowflake.account {account!r} normalizes to {a!r}, which is not a "
             "valid account locator (expected [A-Za-z0-9._-]+, e.g. ab12345.us-east-1)."

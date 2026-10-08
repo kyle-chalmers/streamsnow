@@ -335,11 +335,15 @@ def parse_ddl(
 
 
 def one_line(text: str) -> str:
-    """*text* escaped onto one physical line (control characters, quotes and anything
-    non-ASCII visible), safe in a ``--`` comment. Every path or name a producer of
-    printed SQL puts in a comment goes through this: a raw newline (or any other line
-    break) would end the comment and leave the rest as live SQL, and a file name can
-    hold one."""
+    """*text* safe on one physical line inside a ``--`` comment. Every path or name a
+    producer of printed SQL puts in a comment goes through this: a raw newline (or any
+    other line break) would end the comment and leave the rest as live SQL, and a file
+    name or a config value can hold one. Printable ASCII without quotes or backslashes
+    comes back as is, so plain identifiers and paths read as written; anything else is
+    ``ascii()``-escaped, quoted, with every control character visible."""
+    text = str(text)
+    if text.isascii() and text.isprintable() and not set(text) & {"'", '"', "\\"}:
+        return text
     return ascii(text)
 
 

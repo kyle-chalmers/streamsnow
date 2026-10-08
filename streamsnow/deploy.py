@@ -266,7 +266,7 @@ def generate_setup_sql(cfg: Config) -> str:
     o = cfg.snowflake.objects
     ci = cfg.snowflake.roles.ci_role
     out: list[str] = [
-        f"-- StreamSnow one-time setup ({cfg.deploy.source} deploy source)",
+        f"-- StreamSnow one-time setup ({one_line(cfg.deploy.source)} deploy source)",
         "-- Assumes the database, schema, warehouse, roles and CI user already exist;",
         "-- `streamsnow deploy-setup --admin` emits that full admin bootstrap.",
     ]
@@ -289,9 +289,11 @@ def generate_setup_sql(cfg: Config) -> str:
                 "to create."
             )
         else:
-            out.append(f"--   CREATE COMPUTE POOL {o.compute_pool} (see deploy-setup --admin);")
+            out.append(
+                f"--   CREATE COMPUTE POOL {one_line(o.compute_pool)} (see deploy-setup --admin);"
+            )
         out.append(
-            f"--   CREATE EXTERNAL ACCESS INTEGRATION {o.external_access_integration} "
+            f"--   CREATE EXTERNAL ACCESS INTEGRATION {one_line(o.external_access_integration)} "
             "(PyPI; see deploy-setup --admin);"
         )
     return "\n".join(out)
@@ -404,8 +406,8 @@ def generate_admin_sql(
 
     out: list[str] = [
         "-- StreamSnow admin bootstrap: one-time Snowflake objects for a first deploy.",
-        f"-- Generated from streamsnow.config.yaml ({cfg.runtime} runtime, "
-        f"{cfg.deploy.source} deploy source).",
+        f"-- Generated from streamsnow.config.yaml ({one_line(cfg.runtime)} runtime, "
+        f"{one_line(cfg.deploy.source)} deploy source).",
         "-- Review every statement, then run it once as an account admin (Snowsight",
         "-- worksheet, or `snow sql --stdin` on an admin connection). Safe to re-run:",
         "-- every statement skips or re-applies what already exists.",
@@ -422,7 +424,8 @@ def generate_admin_sql(
     if app_data.upper() not in {s.upper() for s in schemas}:
         if app_data_db.upper() in by_db:
             out += [
-                f"-- App data lives in source database {app_data_db}: SYSADMIN needs CREATE SCHEMA",
+                f"-- App data lives in source database {one_line(app_data_db)}: SYSADMIN needs "
+                "CREATE SCHEMA",
                 "-- on it, or run the next line as that database's owner.",
             ]
         out += [
@@ -497,7 +500,7 @@ def generate_admin_sql(
 
     out += [
         "",
-        f"-- Data the apps read: governance.sources ({', '.join(gov.sources)}).",
+        f"-- Data the apps read: governance.sources ({', '.join(map(one_line, gov.sources))}).",
         "-- Only the CI role gets it: deployed apps run with",
         "-- their owner's rights, so viewers need USAGE on the app, not SELECT on the data.",
         "-- Schema-level future grants replace database-level ones of the same object type, for",
@@ -529,25 +532,27 @@ def generate_admin_sql(
     ]
     for db in shared:
         out += [
-            f"-- {db} is a shared database: USAGE + SELECT grants do not apply to it;",
+            f"-- {one_line(db)} is a shared database: USAGE + SELECT grants do not apply to it;",
             "-- IMPORTED PRIVILEGES (below, as ACCOUNTADMIN) grants read on the whole share.",
         ]
     if granted:
         out += _data_grants(ci)
-        out += viewer_opt_in + [f"--   {g}" for g in _data_grants(viewer)]
+        out += viewer_opt_in + [f"--   {one_line(g)}" for g in _data_grants(viewer)]
         out += [
             "-- If one of these is a SHARED database (a Marketplace or data-share import),",
             "-- its grants above fail: list it under governance.imported_databases and re-run",
             "-- this command. It then gets, as ACCOUNTADMIN (covering the whole share):",
-            *[f"--   {_imported(db, ci)}" for db in granted],
+            *[f"--   {one_line(_imported(db, ci))}" for db in granted],
         ]
 
     out += [
         "",
-        f"-- App data ({app_data}): views and dynamic tables built for the apps. The deploy",
+        f"-- App data ({one_line(app_data)}): views and dynamic tables built for the apps. "
+        "The deploy",
         "-- job creates them from DDL in the repo, owned by the CI role. No CREATE TABLE:",
         "-- deployed DDL never holds a plain table, whose CREATE OR ALTER can drop column data.",
-        f"-- Dynamic tables there refresh with WAREHOUSE = {o.default_warehouse}, which the CI",
+        f"-- Dynamic tables there refresh with WAREHOUSE = {one_line(o.default_warehouse)}, "
+        "which the CI",
         "-- role already uses. Before the first one: enable change tracking on each source",
         "-- table an incremental refresh reads (its owner runs ALTER TABLE ... SET",
         "-- CHANGE_TRACKING = TRUE), or use REFRESH_MODE = FULL; and grant the CI role",
@@ -572,7 +577,7 @@ def generate_admin_sql(
     out += [
         "-- Opt-in only: let the viewer role query app data directly (local preview).",
         "-- Leave commented for least privilege:",
-        *[f"--   {g}" for g in viewer_app_data],
+        *[f"--   {one_line(g)}" for g in viewer_app_data],
     ]
 
     out += ["", "-- 4. Account-level objects -----------------------------------------------"]
@@ -580,7 +585,7 @@ def generate_admin_sql(
     account: list[str] = []
     if shared:
         account += [_imported(db, ci) for db in shared]
-        account += viewer_opt_in + [f"--   {_imported(db, viewer)}" for db in shared]
+        account += viewer_opt_in + [f"--   {one_line(_imported(db, viewer))}" for db in shared]
     if cfg.runtime == "container":
         eai = o.external_access_integration
         account += [
@@ -594,7 +599,8 @@ def generate_admin_sql(
             "  ALLOWED_NETWORK_RULES = (snowflake.external_access.pypi_rule)",
             "  ENABLED = TRUE;",
             "-- Without the managed rule, create your own and list it above instead:",
-            f"--   CREATE NETWORK RULE {app_schema}.PYPI_NETWORK_RULE MODE = EGRESS TYPE = HOST_PORT",
+            f"--   CREATE NETWORK RULE {one_line(app_schema)}.PYPI_NETWORK_RULE MODE = EGRESS "
+            "TYPE = HOST_PORT",
             "--     VALUE_LIST = ('pypi.org', 'files.pythonhosted.org');",
             f"GRANT USAGE ON INTEGRATION {eai} TO ROLE {ci};",
         ]
@@ -692,20 +698,23 @@ def generate_teardown_sql(
     out: list[str] = [
         "-- StreamSnow teardown: removes what `streamsnow deploy-setup --admin` created,",
         "-- so you can start fresh. REVIEW EVERY LINE before running; this cannot be undone.",
-        f"-- Generated from streamsnow.config.yaml ({cfg.runtime} runtime, "
-        f"{cfg.deploy.source} deploy source).",
-        f"-- Kept: the source databases ({', '.join(by_db)}) and their data, and {SYSTEM_POOL}.",
+        f"-- Generated from streamsnow.config.yaml ({one_line(cfg.runtime)} runtime, "
+        f"{one_line(cfg.deploy.source)} deploy source).",
+        f"-- Kept: the source databases ({', '.join(map(one_line, by_db))}) and their data, "
+        f"and {SYSTEM_POOL}.",
         "-- Every DROP uses IF EXISTS, so re-running a partial teardown is safe.",
         "-- Run as ACCOUNTADMIN, which owns or inherits everything the bootstrap made.",
         "USE ROLE ACCOUNTADMIN;",
         "",
-        f"-- 1. App database: every deployed app, plus the {cfg.deploy.source} objects in it.",
+        f"-- 1. App database: every deployed app, plus the {one_line(cfg.deploy.source)} "
+        "objects in it.",
         existed,
         f"DROP DATABASE IF EXISTS {o.app_database};",
     ]
     if o.stage_database.upper() != o.app_database.upper() and cfg.deploy.source == "stage-copy":
         out += [
-            f"-- The stage lives in {o.stage_database}, which may hold other things: drop the",
+            f"-- The stage lives in {one_line(o.stage_database)}, which may hold other things: "
+            "drop the",
             "-- stage only, not that database.",
             f"DROP STAGE IF EXISTS {o.stage_database}.{o.stage_schema}.{o.stage_name};",
         ]
@@ -724,9 +733,11 @@ def generate_teardown_sql(
     app_data = cfg.governance.app_data
     unsure: list[str] = []  # objects whose DROP the reviewer must pick: their owner stays too
     holds: list[str] = []  # why the CI role's DROP is held back
-    out += ["", f"-- 2. App data ({app_data})."]
+    out += ["", f"-- 2. App data ({one_line(app_data)})."]
     if app_data.split(".", 1)[0].upper() == o.app_database.upper():
-        out.append(f"-- It lives in {o.app_database}, so step 1 dropped it with everything in it.")
+        out.append(
+            f"-- It lives in {one_line(o.app_database)}, so step 1 dropped it with everything in it."
+        )
         declared = [f for f, _ in app_data_objects if is_plain_fqn(f)]
         if declared:
             out.append(
@@ -768,23 +779,24 @@ def generate_teardown_sql(
                 else:
                     unsure.append(fqn)
                     out += [
-                        f"-- {fqn}: its DDL file does not show whether it is a view or a "
+                        f"-- {one_line(fqn)}: its DDL file does not show whether it is a view or a "
                         "dynamic table. Uncomment the line that matches:",
-                        f"--   DROP VIEW IF EXISTS {fqn};",
-                        f"--   DROP DYNAMIC TABLE IF EXISTS {fqn};",
+                        f"--   DROP VIEW IF EXISTS {one_line(fqn)};",
+                        f"--   DROP DYNAMIC TABLE IF EXISTS {one_line(fqn)};",
                     ]
         out += [
             "-- It lives outside the app database. Drop it only if nothing else lives there:",
             "-- uncomment the next line.",
-            f"--   DROP SCHEMA IF EXISTS {app_data};",
+            f"--   DROP SCHEMA IF EXISTS {one_line(app_data)};",
         ]
     if unsure:
-        holds.append(f"{', '.join(unsure)} may still exist")
+        holds.append(f"{', '.join(map(one_line, unsure))} may still exist")
     ci_drop = (
         [
-            f"-- Held back: {'; '.join(holds)}, owned by {ci}. Dropping the role first would",
+            f"-- Held back: {'; '.join(holds)}, owned by {one_line(ci)}. Dropping the role first "
+            "would",
             "-- leave those objects owned by whoever runs this script. Drop them, then uncomment:",
-            f"--   DROP ROLE IF EXISTS {ci};",
+            f"--   DROP ROLE IF EXISTS {one_line(ci)};",
         ]
         if holds
         else [f"DROP ROLE IF EXISTS {ci};"]
