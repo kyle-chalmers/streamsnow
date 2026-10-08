@@ -38,12 +38,16 @@
   <sub>Offline demo: scaffold a governed repo, hit the validate-app gate, and preview a dashboard. With Claude Code, <code>/build-app</code> drives these steps and <code>/ship-app</code> opens the PR; CI deploys to Snowflake.</sub>
 </p>
 
-> **Quick start.** In the folder for your Snowflake apps, run
-> `claude plugin marketplace add --scope project kyle-chalmers/streamsnow` and
-> `claude plugin install --scope project streamsnow@streamsnow`, then type
-> `/onboard` in Claude Code (run `/reload-plugins` first only if `/onboard` isn't listed).
-> No Claude Code? `uvx streamsnow init`.
-> Using another agent? [Install with your coding agent](#install-with-your-coding-agent).
+> **Quick start.** Open your coding agent (Claude Code, Codex, Cursor, Gemini CLI and
+> others) in the folder for your Snowflake apps and say:
+>
+> *"Read the install prompt in github.com/kyle-chalmers/streamsnow and follow it."*
+>
+> The agent installs StreamSnow and walks you through setup
+> ([what the prompt does](#install-with-your-coding-agent)). To do it by hand in Claude Code,
+> run `claude plugin marketplace add --scope project kyle-chalmers/streamsnow` and
+> `claude plugin install --scope project streamsnow@streamsnow`, then type `/onboard`
+> (run `/reload-plugins` first only if `/onboard` isn't listed). No agent? `uvx streamsnow init`.
 
 > **Status: beta, functional.** The CLI and the Claude Code plugin are CI-green for
 > both runtimes and both deploy sources, and published on PyPI. APIs may still evolve
@@ -251,9 +255,13 @@ StreamSnow treats two axes as first-class, configurable options:
 
 ## Quickstart
 
-Two lanes; pick the one that matches how you work. Both end at the same governed
-repo, and both need Python 3.11+, `uv`, and `git` (`uvx streamsnow doctor` tells
-you what is missing).
+The easiest start: open your coding agent in your apps folder and say *"Read the install
+prompt in github.com/kyle-chalmers/streamsnow and follow it."* It runs the steps below for
+you ([the prompt](#install-with-your-coding-agent)).
+
+To do it yourself, there are two lanes; pick the one that matches how you work. Both end at
+the same governed repo, and both need Python 3.11+, `uv`, and `git` (`uvx streamsnow doctor`
+tells you what is missing).
 
 ### With Claude Code (recommended)
 
