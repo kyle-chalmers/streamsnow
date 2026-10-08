@@ -517,9 +517,12 @@ def test_deployed_ddl_reads_only_sources_and_app_data(tmp_path, source, needle):
 def test_an_app_data_name_must_be_unquoted(tmp_path):
     app = write_app(tmp_path, "acme-sales", {})
     name = f'{FAD}."daily_revenue"'
-    (app / "sql_review" / OBJECTS_DIR / f"{name}.sql").write_text(
-        dynamic_table('"daily_revenue"'), encoding="utf-8"
-    )
+    # Windows refuses '"' in a file name; the finding is about the index name, so
+    # the DDL file is written only where the file system allows it.
+    if sys.platform != "win32":
+        (app / "sql_review" / OBJECTS_DIR / f"{name}.sql").write_text(
+            dynamic_table('"daily_revenue"'), encoding="utf-8"
+        )
     index = app / "sql_review" / "index.yaml"
     index.write_text(
         index.read_text(encoding="utf-8").replace(
