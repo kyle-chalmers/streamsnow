@@ -119,6 +119,7 @@ import sys
 from pathlib import Path
 
 from ..config import ConfigError, find_config, load_config
+from ..policy import split_name
 from . import sql_review_index as sri
 
 #: Bumped when the rendered-file format changes shape: makes every prior file
@@ -1172,7 +1173,35 @@ def _rewrite_used_by(text: str, value: str) -> str:
     return "\n".join(lines)
 
 
-def _object_findings(app: Path, index: sri.Index) -> list[dict]:
+def _app_data_plan(repo: Path):
+    """The repo-wide app-data plan, or None when the repo has no loadable config
+    (``streamsnow doctor`` owns that finding, and nothing deploys without it)."""
+    from ..app_data import load_app_data  # noqa: PLC0415 (import cycle)
+
+    cfg_path = find_config(repo)
+    if cfg_path is None:
+        return None
+    try:
+        cfg = load_config(cfg_path)
+    except ConfigError:
+        return None
+    return load_app_data(repo, cfg)
+
+
+def _object_findings(app: Path, index: sri.Index, app_data: str = "") -> list[dict]:
+    """Per-app rules for the DDL files under ``sql_review/``.
+
+    Names inside ``app_data`` (``governance.app_data``) skip the rules that need a
+    view across apps (declared in the index, read by a metric, file present): the
+    repo-wide loader decides those, because another app may read the object or own
+    its file (#79).
+    """
+    target = tuple(app_data.split(".")) if app_data else ()
+
+    def deployed(name: str) -> bool:
+        parts = split_name(name)
+        return bool(target) and len(parts) == 3 and parts[:2] == target
+
     uses = _object_uses(index)
     declared = {o.name.upper(): o for o in index.objects}
     found: list[dict] = []
@@ -1207,9 +1236,9 @@ def _object_findings(app: Path, index: sri.Index) -> list[dict]:
         if "Purpose" in header and not header["Purpose"][0]:
             add(rel, header["Purpose"][1], "-- Purpose: is empty; say in one line why it exists")
         obj = declared.get(name.upper())
-        if obj is None:
+        if obj is None and not deployed(name):
             add(rel, 1, f"{name} is not listed under objects: in index.yaml")
-        elif "Grants" in header:
+        elif obj is not None and "Grants" in header:
             want = ", ".join(obj.grants) or "none"
             if header["Grants"][0] != want:
                 add(
@@ -1217,7 +1246,7 @@ def _object_findings(app: Path, index: sri.Index) -> list[dict]:
                     header["Grants"][1],
                     f"-- Grants: says {header['Grants'][0]!r} but index.yaml lists {want!r}",
                 )
-        if not uses.get(name.upper()):
+        if not deployed(name) and not uses.get(name.upper()):
             add(rel, 1, f"no metric reads {name}; drop the DDL file or add it to a metric's reads:")
         if "Used by" in header and header["Used by"][0] != _used_by_value(
             uses.get(name.upper(), [])
@@ -1228,7 +1257,7 @@ def _object_findings(app: Path, index: sri.Index) -> list[dict]:
                 f"-- Used by: is stale; run `streamsnow sql-review generate {app.name}`",
             )
     for key, obj in declared.items():
-        if key not in on_disk:
+        if key not in on_disk and not deployed(obj.name):
             add(
                 _rel(app, "sql_review", "index.yaml"),
                 1,
@@ -1513,11 +1542,17 @@ def _coverage_findings(app: Path, index: sri.Index) -> list[dict]:
     ]
 
 
-def _check_app(repo: Path, app: Path, lint_files: set[Path] | None = None) -> list[dict]:
+def _check_app(repo: Path, app: Path, lint_files: set[Path] | None = None, plan=None) -> list[dict]:
     """Every finding for one app. Import-free: no app code is executed."""
     from . import sql_review_lint as srl  # noqa: PLC0415
 
     index = sri.load_index(app)
+    if plan is None:
+        plan = _app_data_plan(repo)
+    # The app's share of the repo-wide app-data findings joins EVERY return below,
+    # the missing-index ones included: a stray app-data file in an app with no
+    # index.yaml would otherwise pass review and only fail at deploy.
+    app_data_findings = plan.for_app(app.name) if plan is not None else []
     old = _old_format(app)
     rel_index = _rel(app, "sql_review", sri.INDEX_NAME)
     if not index.exists:
@@ -1531,7 +1566,8 @@ def _check_app(repo: Path, app: Path, lint_files: set[Path] | None = None) -> li
                     f"({', '.join(old[:3])}{'…' if len(old) > 3 else ''}). StreamSnow 0.8 reads "
                     "sql_review/index.yaml instead; see docs/auditing-a-visual.md, write the "
                     "index, run generate, then delete manifests/ and *.review.sql",
-                }
+                },
+                *app_data_findings,
             ]
         return [
             {
@@ -1541,7 +1577,8 @@ def _check_app(repo: Path, app: Path, lint_files: set[Path] | None = None) -> li
                 "detail": "no sql_review/index.yaml, so no page of this app has review SQL; "
                 "list its pages and metrics there, then run "
                 f"`streamsnow sql-review generate {app.name}`",
-            }
+            },
+            *app_data_findings,
         ]
     findings = list(index.findings)
     if old:
@@ -1558,7 +1595,8 @@ def _check_app(repo: Path, app: Path, lint_files: set[Path] | None = None) -> li
     findings += _check_page_files(repo, app, index, cfg_text)
     findings += _check_readme(app, index)
     findings += _marker_findings(app, index)
-    findings += _object_findings(app, index)
+    findings += _object_findings(app, index, plan.app_data if plan else "")
+    findings += app_data_findings
     findings += _lint_findings(repo, app, index, cfg_text, lint_files)
     findings += _coverage_findings(app, index)
     return findings
@@ -1608,8 +1646,9 @@ def cmd_check(args: argparse.Namespace) -> int:
         else None
     )
     findings: list[dict] = []
+    plan = _app_data_plan(repo)
     for app in apps:
-        findings += _check_app(repo, app, lint_files)
+        findings += _check_app(repo, app, lint_files, plan=plan)
     policy = coverage_policy(repo)
     hard, soft = split_by_policy(findings, policy)
     result = {"ok": not hard, "coverage_policy": policy, "findings": hard, "warnings": soft}

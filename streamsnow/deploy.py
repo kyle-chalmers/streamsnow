@@ -28,6 +28,7 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
+from .app_data import SQL_KIND, is_plain_fqn, one_line
 from .config import (
     DEPLOY_SOURCES,
     GITHUB_AUTH_MODES,
@@ -265,7 +266,7 @@ def generate_setup_sql(cfg: Config) -> str:
     o = cfg.snowflake.objects
     ci = cfg.snowflake.roles.ci_role
     out: list[str] = [
-        f"-- StreamSnow one-time setup ({cfg.deploy.source} deploy source)",
+        f"-- StreamSnow one-time setup ({one_line(cfg.deploy.source)} deploy source)",
         "-- Assumes the database, schema, warehouse, roles and CI user already exist;",
         "-- `streamsnow deploy-setup --admin` emits that full admin bootstrap.",
     ]
@@ -288,9 +289,11 @@ def generate_setup_sql(cfg: Config) -> str:
                 "to create."
             )
         else:
-            out.append(f"--   CREATE COMPUTE POOL {o.compute_pool} (see deploy-setup --admin);")
+            out.append(
+                f"--   CREATE COMPUTE POOL {one_line(o.compute_pool)} (see deploy-setup --admin);"
+            )
         out.append(
-            f"--   CREATE EXTERNAL ACCESS INTEGRATION {o.external_access_integration} "
+            f"--   CREATE EXTERNAL ACCESS INTEGRATION {one_line(o.external_access_integration)} "
             "(PyPI; see deploy-setup --admin);"
         )
     return "\n".join(out)
@@ -403,8 +406,8 @@ def generate_admin_sql(
 
     out: list[str] = [
         "-- StreamSnow admin bootstrap: one-time Snowflake objects for a first deploy.",
-        f"-- Generated from streamsnow.config.yaml ({cfg.runtime} runtime, "
-        f"{cfg.deploy.source} deploy source).",
+        f"-- Generated from streamsnow.config.yaml ({one_line(cfg.runtime)} runtime, "
+        f"{one_line(cfg.deploy.source)} deploy source).",
         "-- Review every statement, then run it once as an account admin (Snowsight",
         "-- worksheet, or `snow sql --stdin` on an admin connection). Safe to re-run:",
         "-- every statement skips or re-applies what already exists.",
@@ -421,7 +424,8 @@ def generate_admin_sql(
     if app_data.upper() not in {s.upper() for s in schemas}:
         if app_data_db.upper() in by_db:
             out += [
-                f"-- App data lives in source database {app_data_db}: SYSADMIN needs CREATE SCHEMA",
+                f"-- App data lives in source database {one_line(app_data_db)}: SYSADMIN needs "
+                "CREATE SCHEMA",
                 "-- on it, or run the next line as that database's owner.",
             ]
         out += [
@@ -496,7 +500,7 @@ def generate_admin_sql(
 
     out += [
         "",
-        f"-- Data the apps read: governance.sources ({', '.join(gov.sources)}).",
+        f"-- Data the apps read: governance.sources ({', '.join(map(one_line, gov.sources))}).",
         "-- Only the CI role gets it: deployed apps run with",
         "-- their owner's rights, so viewers need USAGE on the app, not SELECT on the data.",
         "-- Schema-level future grants replace database-level ones of the same object type, for",
@@ -528,25 +532,27 @@ def generate_admin_sql(
     ]
     for db in shared:
         out += [
-            f"-- {db} is a shared database: USAGE + SELECT grants do not apply to it;",
+            f"-- {one_line(db)} is a shared database: USAGE + SELECT grants do not apply to it;",
             "-- IMPORTED PRIVILEGES (below, as ACCOUNTADMIN) grants read on the whole share.",
         ]
     if granted:
         out += _data_grants(ci)
-        out += viewer_opt_in + [f"--   {g}" for g in _data_grants(viewer)]
+        out += viewer_opt_in + [f"--   {one_line(g)}" for g in _data_grants(viewer)]
         out += [
             "-- If one of these is a SHARED database (a Marketplace or data-share import),",
             "-- its grants above fail: list it under governance.imported_databases and re-run",
             "-- this command. It then gets, as ACCOUNTADMIN (covering the whole share):",
-            *[f"--   {_imported(db, ci)}" for db in granted],
+            *[f"--   {one_line(_imported(db, ci))}" for db in granted],
         ]
 
     out += [
         "",
-        f"-- App data ({app_data}): views and dynamic tables built for the apps. The deploy",
+        f"-- App data ({one_line(app_data)}): views and dynamic tables built for the apps. "
+        "The deploy",
         "-- job creates them from DDL in the repo, owned by the CI role. No CREATE TABLE:",
         "-- deployed DDL never holds a plain table, whose CREATE OR ALTER can drop column data.",
-        f"-- Dynamic tables there refresh with WAREHOUSE = {o.default_warehouse}, which the CI",
+        f"-- Dynamic tables there refresh with WAREHOUSE = {one_line(o.default_warehouse)}, "
+        "which the CI",
         "-- role already uses. Before the first one: enable change tracking on each source",
         "-- table an incremental refresh reads (its owner runs ALTER TABLE ... SET",
         "-- CHANGE_TRACKING = TRUE), or use REFRESH_MODE = FULL; and grant the CI role",
@@ -571,7 +577,7 @@ def generate_admin_sql(
     out += [
         "-- Opt-in only: let the viewer role query app data directly (local preview).",
         "-- Leave commented for least privilege:",
-        *[f"--   {g}" for g in viewer_app_data],
+        *[f"--   {one_line(g)}" for g in viewer_app_data],
     ]
 
     out += ["", "-- 4. Account-level objects -----------------------------------------------"]
@@ -579,7 +585,7 @@ def generate_admin_sql(
     account: list[str] = []
     if shared:
         account += [_imported(db, ci) for db in shared]
-        account += viewer_opt_in + [f"--   {_imported(db, viewer)}" for db in shared]
+        account += viewer_opt_in + [f"--   {one_line(_imported(db, viewer))}" for db in shared]
     if cfg.runtime == "container":
         eai = o.external_access_integration
         account += [
@@ -593,7 +599,8 @@ def generate_admin_sql(
             "  ALLOWED_NETWORK_RULES = (snowflake.external_access.pypi_rule)",
             "  ENABLED = TRUE;",
             "-- Without the managed rule, create your own and list it above instead:",
-            f"--   CREATE NETWORK RULE {app_schema}.PYPI_NETWORK_RULE MODE = EGRESS TYPE = HOST_PORT",
+            f"--   CREATE NETWORK RULE {one_line(app_schema)}.PYPI_NETWORK_RULE MODE = EGRESS "
+            "TYPE = HOST_PORT",
             "--     VALUE_LIST = ('pypi.org', 'files.pythonhosted.org');",
             f"GRANT USAGE ON INTEGRATION {eai} TO ROLE {ci};",
         ]
@@ -639,7 +646,13 @@ def generate_admin_sql(
     return "\n".join(out)
 
 
-def generate_teardown_sql(cfg: Config) -> str:
+def generate_teardown_sql(
+    cfg: Config,
+    app_data_objects: Sequence[tuple[str, str]] = (),
+    *,
+    inventory_incomplete: Sequence[str] = (),
+    skipped: Sequence[str] = (),
+) -> str:
     """Reviewable reverse of :func:`generate_admin_sql`: the start-fresh path.
 
     Printed, never run. Everything the bootstrap created goes, in an order
@@ -651,8 +664,16 @@ def generate_teardown_sql(cfg: Config) -> str:
     something that may predate StreamSnow says so. Every statement uses
     ``IF EXISTS``, so a partial teardown can simply be re-run. App data in the
     app database goes with it; elsewhere its DROP SCHEMA is printed commented.
-    PR 3 adds the declared app-data objects' DROPs at the top of section 2,
-    before any role is dropped.
+    Elsewhere, the views and dynamic tables the deploy job built there are
+    dropped first (``app_data_objects``, dependents first), before the CI role
+    that owns them, so nothing is left owned by a dropped role; when an
+    object's kind is unknown, or the inventory is incomplete
+    (``inventory_incomplete``), the CI role's DROP is printed commented with the
+    reason, for the reviewer to finish in that order. ``skipped`` names declared
+    objects the loader rejected for their form: they are listed, escaped, in one
+    comment line and never dropped. They also hold the CI role's DROP back: a name
+    malformed now (a stray newline or quotes added after a deploy) cannot prove the
+    object it named was never built and owned by that role.
     """
     o = cfg.snowflake.objects
     ci = cfg.snowflake.roles.ci_role
@@ -677,20 +698,23 @@ def generate_teardown_sql(cfg: Config) -> str:
     out: list[str] = [
         "-- StreamSnow teardown: removes what `streamsnow deploy-setup --admin` created,",
         "-- so you can start fresh. REVIEW EVERY LINE before running; this cannot be undone.",
-        f"-- Generated from streamsnow.config.yaml ({cfg.runtime} runtime, "
-        f"{cfg.deploy.source} deploy source).",
-        f"-- Kept: the source databases ({', '.join(by_db)}) and their data, and {SYSTEM_POOL}.",
+        f"-- Generated from streamsnow.config.yaml ({one_line(cfg.runtime)} runtime, "
+        f"{one_line(cfg.deploy.source)} deploy source).",
+        f"-- Kept: the source databases ({', '.join(map(one_line, by_db))}) and their data, "
+        f"and {SYSTEM_POOL}.",
         "-- Every DROP uses IF EXISTS, so re-running a partial teardown is safe.",
         "-- Run as ACCOUNTADMIN, which owns or inherits everything the bootstrap made.",
         "USE ROLE ACCOUNTADMIN;",
         "",
-        f"-- 1. App database: every deployed app, plus the {cfg.deploy.source} objects in it.",
+        f"-- 1. App database: every deployed app, plus the {one_line(cfg.deploy.source)} "
+        "objects in it.",
         existed,
         f"DROP DATABASE IF EXISTS {o.app_database};",
     ]
     if o.stage_database.upper() != o.app_database.upper() and cfg.deploy.source == "stage-copy":
         out += [
-            f"-- The stage lives in {o.stage_database}, which may hold other things: drop the",
+            f"-- The stage lives in {one_line(o.stage_database)}, which may hold other things: "
+            "drop the",
             "-- stage only, not that database.",
             f"DROP STAGE IF EXISTS {o.stage_database}.{o.stage_schema}.{o.stage_name};",
         ]
@@ -707,15 +731,76 @@ def generate_teardown_sql(cfg: Config) -> str:
         if outside:
             out += ["-- Deploy-source objects that live outside the app database:", *outside]
     app_data = cfg.governance.app_data
-    out += ["", f"-- 2. App data ({app_data})."]
+    unsure: list[str] = []  # objects whose DROP the reviewer must pick: their owner stays too
+    holds: list[str] = []  # why the CI role's DROP is held back
+    out += ["", f"-- 2. App data ({one_line(app_data)})."]
     if app_data.split(".", 1)[0].upper() == o.app_database.upper():
-        out.append(f"-- It lives in {o.app_database}, so step 1 dropped it with everything in it.")
+        out.append(
+            f"-- It lives in {one_line(o.app_database)}, so step 1 dropped it with everything in it."
+        )
+        declared = [f for f, _ in app_data_objects if is_plain_fqn(f)]
+        if declared:
+            out.append(
+                f"-- That includes the {len(declared)} view(s) and dynamic table(s) "
+                "the deploy job built there (as declared)."
+            )
     else:
+        if inventory_incomplete:
+            listed = ", ".join(one_line(i) for i in inventory_incomplete)
+            holds.append(
+                f"objects: in {listed} did not load in full, so this script may not list "
+                "every object the deploy job built"
+            )
+            out += [
+                f"-- Incomplete inventory: objects: in {listed} did not load in full. Objects",
+                "-- the deploy job built there may exist that this script cannot list.",
+            ]
+        odd = [*skipped, *(f for f, _ in app_data_objects if not is_plain_fqn(f))]
+        if odd:
+            # Never rendered into a DROP; but an earlier deploy may have built what the name
+            # meant before it went bad, so the inventory is uncertain and the role stays.
+            out.append(
+                "-- Skipped (the declared name is not a plain DATABASE.SCHEMA.NAME, so this "
+                "script cannot drop it): " + ", ".join(dict.fromkeys(one_line(f) for f in odd))
+            )
+            holds.append(
+                "the skipped name(s) above are not a plain DATABASE.SCHEMA.NAME, so this "
+                "script cannot tell whether the deploy job built them"
+            )
+        app_data_objects = [(f, k) for f, k in app_data_objects if is_plain_fqn(f)]
+        if app_data_objects:
+            out.append(
+                "-- The views and dynamic tables the deploy job built there go first, before "
+                "the CI role that owns them:"
+            )
+            for fqn, kind in app_data_objects:
+                if kind in SQL_KIND:
+                    out.append(f"DROP {SQL_KIND[kind]} IF EXISTS {fqn};")
+                else:
+                    unsure.append(fqn)
+                    out += [
+                        f"-- {one_line(fqn)}: its DDL file does not show whether it is a view or a "
+                        "dynamic table. Uncomment the line that matches:",
+                        f"--   DROP VIEW IF EXISTS {one_line(fqn)};",
+                        f"--   DROP DYNAMIC TABLE IF EXISTS {one_line(fqn)};",
+                    ]
         out += [
             "-- It lives outside the app database. Drop it only if nothing else lives there:",
             "-- uncomment the next line.",
-            f"--   DROP SCHEMA IF EXISTS {app_data};",
+            f"--   DROP SCHEMA IF EXISTS {one_line(app_data)};",
         ]
+    if unsure:
+        holds.append(f"{', '.join(map(one_line, unsure))} may still exist")
+    ci_drop = (
+        [
+            f"-- Held back: {'; '.join(holds)}, owned by {one_line(ci)}. Dropping the role first "
+            "would",
+            "-- leave those objects owned by whoever runs this script. Drop them, then uncomment:",
+            f"--   DROP ROLE IF EXISTS {one_line(ci)};",
+        ]
+        if holds
+        else [f"DROP ROLE IF EXISTS {ci};"]
+    )
     out += [
         "",
         "-- 3. Warehouse, CI service user, roles (after the objects they own are gone).",
@@ -723,7 +808,7 @@ def generate_teardown_sql(cfg: Config) -> str:
         f"DROP WAREHOUSE IF EXISTS {o.default_warehouse};",
         f"DROP USER IF EXISTS {ci_user_name(ci)};",
         f"DROP ROLE IF EXISTS {viewer};",
-        f"DROP ROLE IF EXISTS {ci};",
+        *ci_drop,
         "",
         "-- 4. Account-level objects.",
     ]

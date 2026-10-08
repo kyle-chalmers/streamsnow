@@ -41,9 +41,12 @@ From the DDL plus the app's predicates:
   columns. For an app-side `SELECT *`, inline the object's real columns (from `probe`) in the
   finding's fix: that makes it mechanical instead of a judgment call.
 - **Materialization candidates:** a heavy aggregation or window function recomputed on every load,
-  or an object several apps read, is better pre-computed in the app-data schema. Tailor to runtime:
+  or an object several apps read, may be worth pre-computing in the app-data schema. Propose an
+  app-data object only with a reason (`performance` or `shared_logic`), in the deployable forms
+  (`CREATE OR ALTER DYNAMIC TABLE`, `CREATE OR REPLACE VIEW ... COPY GRANTS`), as a file change
+  the deploy job applies; never run the DDL. Tailor to runtime:
   container apps can lean on app-side caching for some of this; warehouse apps benefit more from a
-  pre-aggregated / dynamic table. Proposals only, never applied DDL. Dynamic-table proposals must
+  pre-aggregated / dynamic table. Dynamic-table proposals must
   respect the platform rules (refresh runs as the owner's primary role only; a DT can't read
   DT-backed views) — see [_shared/production-gotchas.md](../_shared/production-gotchas.md).
 - **Grant reachability:** the deployed app reads with the **ci_role's** grants, not the previewer's.
@@ -56,7 +59,11 @@ What the review learned belongs in the index, so the next review starts from it:
 
 1. **Record what was traced** in `sql_review/index.yaml`: each metric's `reads:` lists the
    fully-qualified objects its query reads (`probe` checks every one). A view or table built for
-   this app goes under `objects:` with its DDL in `sql_review/app_specific_reporting_objects/`.
+   this app goes under `objects:` with its `reason:` and its DDL in
+   `sql_review/app_specific_reporting_objects/`; removing an object later needs a tombstone with
+   its `kind` (`view` or `dynamic_table`). Report the review surface: for each traced query, the
+   app-data objects it passes through (`streamsnow sql-review check` advises on chains and on
+   shared logic read once).
    Data facts a reviewer needs (grain, a quirk, a load cadence) go in the app `AGENTS.md` Data
    notes, not in `index.yaml`. Then `streamsnow sql-review generate <slug>`, committed on its own.
 2. **On coverage gaps** (a nav page or query `index.yaml` does not cover): interactively, offer to

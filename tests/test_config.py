@@ -347,3 +347,39 @@ def test_boundary_is_warn_or_enforce():
     d["governance"]["boundary"] = "strict"
     with pytest.raises(ConfigError, match="governance.boundary"):
         Config.from_dict(d)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("snowflake", "objects", "stage_database"), "OTHER_STAGE_DB\n"),
+        (("snowflake", "objects", "app_database"), "STREAMSNOW_APPS\n"),
+        (("snowflake", "objects", "default_warehouse"), "STREAMSNOW_WH\n"),
+        (("snowflake", "roles", "ci_role"), "STREAMSNOW_DEPLOY_ROLE\n"),
+        (("snowflake", "connection_name"), "acme\n"),
+        (("snowflake", "objects", "container_python"), "3.11\n"),
+        (("project", "slug"), "acme-dashboards\n"),
+        (("governance", "schema_deny"), ["RAW\n"]),
+        (("governance", "read_exceptions"), ["ANALYTICS_DB.RAW.EVENTS\n"]),
+        (("deploy", "git_branch"), "main\n"),
+        (("deploy", "git_repository_fqn"), "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO\n"),
+    ],
+)
+def test_a_trailing_newline_in_a_rendered_value_is_rejected(path, value):
+    """`$` matches before a final newline, so `OTHER_STAGE_DB\\n` passed and teardown's
+    `-- The stage lives in OTHER_STAGE_DB\\n, ...` comment broke onto a live line (#79)."""
+    d = _base()
+    if path[0] == "deploy":
+        d["deploy"] = {
+            "source": "git-repository",
+            "git_repository_fqn": "STREAMSNOW_APPS.DASHBOARDS.STREAMLIT_REPO",
+            "api_integration_name": "GITHUB_API_INTEGRATION",
+            "secret_name": "STREAMSNOW_APPS.DASHBOARDS.GITHUB_PAT_SECRET",
+        }
+    node = d
+    for k in path[:-1]:
+        node = node[k]
+    node[path[-1]] = value
+    with pytest.raises(ConfigError) as exc:
+        Config.from_dict(d)
+    assert path[-1] in str(exc.value)

@@ -339,6 +339,28 @@ CORPUS = [
     # a title-case opener is prose: no two-part finding
     ("py", 'raise ValueError("Update from data.csv failed")\n', [], []),
     ("py", 'st_note = "With data from orders.csv"\n', [], []),
+    # `//` starts a comment in Snowflake: the apostrophe after it opens no string
+    (
+        "sql",
+        "SELECT COUNT(*) AS n // '\nFROM SALES_DB.PUBLIC.X // '\n",
+        [],
+        [(2, "outside_boundary", "SALES_DB.PUBLIC.X")],
+    ),
+    (
+        "py",
+        "session.sql(\"SELECT 1 AS n // '\\nFROM SALES_DB.PUBLIC.X // '\")\n",
+        [],
+        [(2, "outside_boundary", "SALES_DB.PUBLIC.X")],
+    ),
+    # ... and the deny scan agrees: a denied name after `//` is commented out
+    ("sql", "SELECT 1 // FROM DB.RAW.T\n", [], []),
+    ("py", 'session.sql("SELECT 1 // FROM DB.RAW.T")\n', [], []),
+    # `//`, `--` and `/*` inside a string literal start no comment: the name after it counts
+    ("sql", "SELECT '//' AS s FROM DB.RAW.T\n", [(1, "RAW")], []),
+    ("sql", "SELECT 'a--b' AS s, DB.RAW.T.c FROM ANALYTICS_DB.REPORTING.X\n", [(1, "RAW")], []),
+    ("sql", "SELECT '/*' AS s, DB.RAW.T.c FROM ANALYTICS_DB.REPORTING.X -- */\n", [(1, "RAW")], []),
+    # a block comment still hides a name, and keeps the line numbers after it
+    ("sql", "SELECT 1 /* DB.RAW.T\n */ FROM DB.RAW.U\n", [(2, "RAW")], []),
     # a file the parser rejects is read in full, the boundary included
     (
         "py",

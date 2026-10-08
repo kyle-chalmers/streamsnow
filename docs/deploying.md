@@ -20,12 +20,21 @@ On merge to `main`, the workflow:
    `config.toml` (see [Deploy setup](deploy-setup.md#2-ci-auth-key-pair--jwt)).
 2. Makes the app source available to Snowflake — how depends on your
    **[deploy source](#two-deploy-sources)**.
-3. Runs `CREATE OR REPLACE STREAMLIT` for each app under `apps/` via
+3. **Builds app data.** `streamsnow objects-sql` prints every view and dynamic
+   table the apps declare in `governance.app_data`, in dependency order across
+   apps, and the job runs it once before any app. Any finding prints nothing and
+   stops the deploy. The job writes every deploy file into a private work
+   directory before its first `snow` call, and skips this step when no app
+   declares an object. With the git-repository source,
+   `streamsnow git-head --expect $GITHUB_SHA` runs after the fetch and stops the
+   deploy when another merge moved the branch, because the apps would then come
+   from a newer commit than the app data.
+4. Runs `CREATE OR REPLACE STREAMLIT` for each app under `apps/` via
    `streamsnow deploy-sql`.
-4. **Reconciles tombstones** — drops every retired identifier listed in
+5. **Reconciles tombstones**: drops every retired identifier listed in
    `deploy/tombstones.yml` (see
    [Retiring or renaming an app](#retiring-or-renaming-an-app)).
-5. **Verifies deploy health** per app (`streamsnow verify-deploy`) — object
+6. **Verifies deploy health** per app (`streamsnow verify-deploy`): object
    exists, live version set, no container crash-loop signature. With the
    **stage-copy** source it also confirms the version source matches the merge
    SHA. The **git-repository** workflow passes the merge SHA too, and the
@@ -141,6 +150,25 @@ The delete path is explicit and consent-based:
    very deploy just created (the reconcile step re-checks this itself because
    a direct push to `main` never went through the PR check).
 
+### App-data objects
+
+A view or dynamic table in `governance.app_data` is retired the same way, with
+one addition: the tombstone carries `kind: view` or `kind: dynamic_table`, and
+`--drop-sql` emits `DROP VIEW IF EXISTS` or `DROP DYNAMIC TABLE IF EXISTS` by
+that kind (never `DROP STREAMLIT` for a name in app data). A tombstone with a
+kind may only name an object in the current `governance.app_data`; objects
+left behind in an old schema after `app_data` moves are dropped by hand, and
+`check tombstones` prints a note with the exact `DROP` instead of demanding a
+tombstone. A
+kindless tombstone for an app-data name is refused, and an inventory the check
+cannot read completely fails closed. Changing an object's kind (view to
+dynamic table) needs a new name: tombstone the old one. `deploy-setup
+--teardown` drops declared app-data objects, dependents first, before the role
+drops, when app data lives outside the app database. When it cannot be sure what
+the deploy job built (an incomplete inventory, an object of unknown kind, or a
+declared name that is not a plain `DATABASE.SCHEMA.NAME`), it prints the CI
+role's `DROP` commented, with the reason.
+
 ## Two deploy sources
 
 Set `deploy.source` in `streamsnow.config.yaml`:
@@ -231,6 +259,11 @@ Open it in Snowsight under **Projects → Streamlit**. If a container app fails 
 start, the usual causes are a missing compute pool / EAI, or the `query_warehouse`
 not being granted to `viewer_role` (the manifest check flags an unlisted
 warehouse before deploy).
+
+When an app owns a dynamic table, `verify-deploy` also runs the warn-only
+`app-data-refresh` check: it warns when the table's `scheduling_state` is not
+`RUNNING` or `ACTIVE`, when it has never refreshed, or when it is not found,
+and reports it as skipped when the query fails.
 
 ## Re-rendering the pipeline after a config change
 

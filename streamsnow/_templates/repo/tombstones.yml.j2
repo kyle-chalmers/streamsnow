@@ -12,5 +12,12 @@
 #     reason: renamed to SOME_NEW_APP
 #     date: 2026-01-01
 #
+# An app-data view or dynamic table you remove needs an entry too, with its kind
+# (view or dynamic_table), so the deploy job runs the right DROP:
+#   - identifier: {{ app_data }}.SOME_RETIRED_TABLE
+#     kind: dynamic_table
+#     reason: replaced by a view
+#     date: 2026-01-01
+#
 # This file is yours — StreamSnow scaffolds it once and never rewrites it.
 tombstones: []

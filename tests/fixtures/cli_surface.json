@@ -218,6 +218,14 @@
       ],
       "arguments": []
     },
+    "git-head": {
+      "options": [
+        "--config",
+        "--expect",
+        "--temporary-connection"
+      ],
+      "arguments": []
+    },
     "init": {
       "options": [
         "--account",
@@ -253,6 +261,12 @@
         "domain",
         "function"
       ]
+    },
+    "objects-sql": {
+      "options": [
+        "--config"
+      ],
+      "arguments": []
     },
     "stage-bundle": {
       "options": [

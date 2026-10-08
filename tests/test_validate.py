@@ -1937,3 +1937,35 @@ def test_starter_text_only_the_first_apps_table_counts(tmp_path):
         "| Notes | Path |\n|-----|------|\n| Sales | `apps/acme-sales/` |\n",
     )
     assert len(found) == 1 and "no row" in found[0]["detail"]
+
+
+def test_validate_app_gates_on_app_data_and_app_security_reads_the_config(tmp_path):
+    from _app_data_fixtures import AD, OBJECTS_DIR, dynamic_table, write_app, write_config
+
+    from streamsnow.config import load_config
+    from streamsnow.tools import check_app_security
+    from streamsnow.tools.validate_app import validate_app
+
+    cfg = load_config(write_config(tmp_path))
+    app_dir = write_app(
+        tmp_path,
+        "acme-sales",
+        {
+            "DAILY_REVENUE": dynamic_table("DAILY_REVENUE")
+            + f"ALTER DYNAMIC TABLE {AD}.DAILY_REVENUE SUSPEND;\n"
+        },
+    )
+    result = validate_app(app_dir, SchemaPolicy.from_governance(cfg.governance), cfg)
+    checks = {c["name"].split(" ")[0]: c for c in result["checks"]}
+    assert not checks["sql-review"]["ok"]
+    assert any("may follow the CREATE" in f["detail"] for f in checks["sql-review"]["findings"])
+    deployed = app_dir / "sql_review" / OBJECTS_DIR / f"{AD}.DAILY_REVENUE.sql"
+    sec = check_app_security.scan_paths([deployed], tmp_path)
+    assert not sec["ok"] and "only CREATE and GRANT" in sec["findings"][0]["detail"]
+    legacy = app_dir / "sql_review" / OBJECTS_DIR / "ANALYTICS_DB.REPORTING.LEGACY.sql"
+    legacy.write_text(
+        "CREATE VIEW ANALYTICS_DB.REPORTING.LEGACY AS SELECT 1 AS x;\n"
+        "ALTER VIEW ANALYTICS_DB.REPORTING.LEGACY SET COMMENT = 'review only';\n",
+        encoding="utf-8",
+    )
+    assert check_app_security.scan_paths([legacy], tmp_path)["ok"]

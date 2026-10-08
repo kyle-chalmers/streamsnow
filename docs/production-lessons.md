@@ -83,7 +83,41 @@ Three platform constraints that only surface at refresh time:
   scheduled `TARGET_LAG` refresh, or (for `DOWNSTREAM` lag) query a downstream
   consumer to trigger it.
 
+## App data: the deploy job builds views and dynamic tables from the repo
+
+Objects an app declares in `governance.app_data` are applied by the deploy job
+(`streamsnow objects-sql`), owned by the CI role. Each rule came from a
+failure:
+
+- *An object nobody created.* A page read an app-data view whose DDL sat in
+  `sql_review/` as review-only text. The deploy succeeded and the page failed
+  at first load. The deploy job now applies the file, so the repo is what runs.
+- *`CREATE OR REPLACE` on a dynamic table.* It recreates the table: a full
+  refresh and new grants on every deploy. Dynamic tables deploy as
+  `CREATE OR ALTER DYNAMIC TABLE`; views deploy as
+  `CREATE OR REPLACE VIEW ... COPY GRANTS`, which is cheap because a view holds
+  no data and always takes the new query.
+- *`CREATE OR ALTER TABLE` data loss.* It drops the data in a renamed or
+  removed column. App data holds no tables; pre-compute with a dynamic table.
+- *`INITIALIZE = ON_CREATE`.* Without it a dynamic table can build lazily, and
+  the first page load pays for the build or fails. With it the deploy fails
+  early, at the statement that is wrong.
+- *One owner per object.* Two apps declaring the same name would fight over
+  its definition; the second is a finding.
+- *Order across apps.* A view one app reads may select from another app's
+  object, so the job applies app data once, repo-wide, in dependency order,
+  before any app is replaced.
+- *Few objects, each with a reason.* Every object is a thing to refresh, grant
+  and retire. `index.yaml` requires `reason: performance` or
+  `reason: shared_logic`; passthrough views and objects no query reads are
+  findings, and chains or a `shared_logic` object read once are advisories.
+
+These rules apply to files in app data. A repo whose review-only DDL already
+sits in the schema it names as app data gets the findings at once.
+
 ## Keep an audit trail for out-of-band DDL
+
+This covers objects outside app data; the deploy job applies the ones inside it.
 
 Apps often consume objects (passthrough views, grants, dynamic tables) that
 live outside the app repo's deploy scope. Record that DDL as dated SQL files in
@@ -219,6 +253,13 @@ requires explicit committed consent.**
   makes re-runs no-ops; a malformed registry exits 2 before any DROP; and the
   step refuses outright if a tombstone matches a currently-declared app —
   dropping that would kill the app the same deploy just created.
+
+An app-data view or dynamic table is abandoned the same way (a removed file,
+a rename). Its tombstone carries `kind: view` or `kind: dynamic_table`, so
+`--drop-sql` emits the matching `DROP`, and `check tombstones` requires a kind
+for every object removed since the base. The kind must name an object in the
+current `governance.app_data`; an inventory the check cannot read fails closed
+rather than passing quietly.
 
 ## Review coverage is per-change, not per-app (and never time-based)
 

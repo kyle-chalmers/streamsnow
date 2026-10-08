@@ -100,8 +100,9 @@ returns their inputs instead of editing shared files.
       one. Keep `review_window` anchored to the data's latest date, never today:
       `end_date: "(SELECT MAX(<date_col>) FROM <db>.<schema>.<table>)::DATE"`. Leave
       `review_window` out entirely when no metric binds a `params.*` value: an unused window
-      is dead weight in every generated section. A view or table you
-      built for this app goes under `objects:` with its DDL in
+      is dead weight in every generated section. Query the
+      sources directly. Add an app-data object only for a stated reason (performance or shared
+      logic); `/sql-review` authoring explains the form. It goes under `objects:` with its DDL in
       `sql_review/app_specific_reporting_objects/` (see that folder's rules in
       `sql_review/AGENTS.md`).
    3. **Comment the queries.** Every CTE gets a one-line comment directly above its name; every
