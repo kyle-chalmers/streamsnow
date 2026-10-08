@@ -493,7 +493,7 @@ def test_stage_copy_deploy_step_still_copies_when_an_app_exists(tmp_path):
     assert (bundle / "acme-sales" / "streamlit_app.py").is_file()
     assert not (bundle / "acme-sales" / "AGENTS.md").exists()
     assert not (bundle / "acme-sales" / "sql_review").exists()
-    assert any(c.startswith("sql") and "/tmp/ss-acme-sales.sql" in c for c in calls.splitlines())
+    assert any(c.startswith("sql") and "/app-acme-sales.sql" in c for c in calls.splitlines())
 
 
 def test_generated_precommit_enforces_sql_review_and_vulns(tmp_path):
@@ -1379,9 +1379,9 @@ def test_stage_copy_deploy_applies_app_data_before_any_app(tmp_path):
     step = _deploy_steps(repo)["Deploy changed apps (stage-copy)"]
     proc, calls = _run_deploy_step(repo, step, tmp_path / "bin", OBJECTS_SQL=OBJECTS)
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
-    setup = _sql_call(calls, "-f /tmp/ss-setup.sql")
-    objects = _sql_call(calls, "-f /tmp/ss-objects.sql")
-    app_sql = _sql_call(calls, "-f /tmp/ss-acme-sales.sql")
+    setup = _sql_call(calls, "/setup.sql")
+    objects = _sql_call(calls, "/objects.sql")
+    app_sql = _sql_call(calls, "/app-acme-sales.sql")
     assert None not in (setup, objects, app_sql), calls
     assert setup < objects < app_sql, calls
 
@@ -1393,8 +1393,8 @@ def test_stage_copy_deploy_skips_empty_app_data(tmp_path):
     step = _deploy_steps(repo)["Deploy changed apps (stage-copy)"]
     proc, calls = _run_deploy_step(repo, step, tmp_path / "bin", OBJECTS_SQL="")
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
-    assert _sql_call(calls, "ss-objects.sql") is None
-    assert _sql_call(calls, "-f /tmp/ss-acme-sales.sql") is not None
+    assert _sql_call(calls, "/objects.sql") is None
+    assert _sql_call(calls, "/app-acme-sales.sql") is not None
 
 
 @_workflow_bash
@@ -1428,8 +1428,8 @@ def test_git_deploy_checks_the_branch_head_then_applies_app_data_then_apps(tmp_p
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
     fetch = next(i for i, c in enumerate(calls) if c.startswith("git fetch"))
     head = _sql_call(calls, "SHOW GIT BRANCHES")
-    objects = _sql_call(calls, "-f /tmp/ss-objects.sql")
-    app_sql = _sql_call(calls, "-f /tmp/ss-acme-sales.sql")
+    objects = _sql_call(calls, "/objects.sql")
+    app_sql = _sql_call(calls, "/app-acme-sales.sql")
     assert None not in (head, objects, app_sql), calls
     assert fetch < head < objects < app_sql, calls
 
@@ -1444,5 +1444,42 @@ def test_git_deploy_stops_before_any_ddl_when_the_branch_moved(tmp_path):
     )
     assert proc.returncode == 1
     assert "Stopping before any DDL or app change" in proc.stderr
-    assert _sql_call(calls, "-f /tmp/ss-objects.sql") is None, calls
-    assert _sql_call(calls, "-f /tmp/ss-acme-sales.sql") is None, calls
+    assert _sql_call(calls, "/objects.sql") is None, calls
+    assert _sql_call(calls, "/app-acme-sales.sql") is None, calls
+
+
+@_workflow_bash
+@pytest.mark.parametrize(
+    ("source", "slug"),
+    [("stage-copy", "objects"), ("stage-copy", "setup"), ("git-repository", "objects")],
+)
+def test_an_app_named_like_a_step_file_cannot_overwrite_it(tmp_path, source, slug):
+    """Every producer now runs before the first snow call, so an app whose slug
+    matched a step file (objects, setup) would overwrite that file and the real SQL
+    would never run. The step writes into its own directory with app- prefixed names."""
+    _need_bash_and_streamsnow()
+    repo = _init_repo(tmp_path, source=source, app_slug=slug)
+    step = _deploy_steps(repo)[f"Deploy changed apps ({source})"]
+    proc, calls = _run_deploy_step(repo, step, tmp_path / "bin", OBJECTS_SQL=OBJECTS)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    objects = [i for i, c in enumerate(calls) if c.startswith("sql") and "/objects.sql" in c]
+    setup = [i for i, c in enumerate(calls) if c.startswith("sql") and "/setup.sql" in c]
+    app_sql = [i for i, c in enumerate(calls) if c.startswith("sql") and f"/app-{slug}.sql" in c]
+    assert len(objects) == 1 and len(app_sql) == 1, calls
+    assert objects[0] < app_sql[0], calls
+    if source == "stage-copy":
+        assert len(setup) == 1 and setup[0] < objects[0], calls
+
+
+@_workflow_bash
+def test_git_deploy_stops_before_any_ddl_when_the_branch_head_cannot_be_checked(tmp_path):
+    """git-head exits 2 when the branch is not found after the fetch: same stop."""
+    _need_bash_and_streamsnow()
+    repo = _init_repo(tmp_path, source="git-repository", app_slug="acme-sales")
+    step = _deploy_steps(repo)["Deploy changed apps (git-repository)"]
+    proc, calls = _run_deploy_step(
+        repo, step, tmp_path / "bin", OBJECTS_SQL=OBJECTS, BRANCH_HEAD=""
+    )
+    assert proc.returncode == 2, (proc.returncode, proc.stderr)
+    assert _sql_call(calls, "/objects.sql") is None, calls
+    assert _sql_call(calls, "/app-acme-sales.sql") is None, calls

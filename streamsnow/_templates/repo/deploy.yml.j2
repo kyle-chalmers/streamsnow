@@ -81,26 +81,30 @@ jobs:
             echo "No app directories under apps/ yet: nothing to deploy."
             exit 0
           fi
+          # One private directory holds every file this step writes, and per-app files
+          # carry an app- prefix, so no app slug (objects, setup) can name the same file
+          # as the app-data or setup SQL.
+          work="$(mktemp -d "${RUNNER_TEMP:-/tmp}/ss-deploy.XXXXXX")"
           # Every file this step runs is written first, each producer on a line of its
           # own (under `set -e` a failure on the left of `&&` does not stop the script),
           # so any producer failure stops the step before Snowflake is touched. App data
           # (#79) is every view and dynamic table the apps declare in governance.app_data,
           # in dependency order; objects-sql checks every file and prints nothing at all
           # on any finding.
-          streamsnow objects-sql > /tmp/ss-objects.sql
+          streamsnow objects-sql > "$work/objects.sql"
           STAGE="$(streamsnow stage-path)"
-          streamsnow deploy-setup > /tmp/ss-setup.sql
+          streamsnow deploy-setup > "$work/setup.sql"
           BUNDLE="${RUNNER_TEMP:-/tmp}/ss-bundle"
           rm -rf "$BUNDLE"
           streamsnow stage-bundle --out "$BUNDLE"
           for d in "${apps[@]}"; do
             slug="$(basename "$d")"
-            streamsnow deploy-sql "$slug" --sha "$GITHUB_SHA" > "/tmp/ss-$slug.sql"
+            streamsnow deploy-sql "$slug" --sha "$GITHUB_SHA" > "$work/app-$slug.sql"
           done
           # Snowflake from here on: setup, app data, then the apps.
-          snow sql --temporary-connection -f /tmp/ss-setup.sql
-          if [ -s /tmp/ss-objects.sql ]; then
-            snow sql --temporary-connection -f /tmp/ss-objects.sql
+          snow sql --temporary-connection -f "$work/setup.sql"
+          if [ -s "$work/objects.sql" ]; then
+            snow sql --temporary-connection -f "$work/objects.sql"
           fi
           snow stage copy --temporary-connection "$BUNDLE/" "$STAGE/commits/$GITHUB_SHA/apps/" --recursive --overwrite
           for d in "${apps[@]}"; do
@@ -108,7 +112,7 @@ jobs:
             [ -f "$cfg" ] && snow stage copy --temporary-connection "$cfg" "$STAGE/commits/$GITHUB_SHA/apps/$(basename "$d")/.streamlit/" --overwrite
           done
           for d in "${apps[@]}"; do
-            snow sql --temporary-connection -f "/tmp/ss-$(basename "$d").sql"
+            snow sql --temporary-connection -f "$work/app-$(basename "$d").sql"
           done
 
       # A CREATE OR REPLACE pipeline has no delete path — this is it. Every
