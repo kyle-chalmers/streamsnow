@@ -339,6 +339,19 @@ CORPUS = [
     # a title-case opener is prose: no two-part finding
     ("py", 'raise ValueError("Update from data.csv failed")\n', [], []),
     ("py", 'st_note = "With data from orders.csv"\n', [], []),
+    # `//` starts a comment in Snowflake: the apostrophe after it opens no string
+    (
+        "sql",
+        "SELECT COUNT(*) AS n // '\nFROM SALES_DB.PUBLIC.X // '\n",
+        [],
+        [(2, "outside_boundary", "SALES_DB.PUBLIC.X")],
+    ),
+    (
+        "py",
+        "session.sql(\"SELECT 1 AS n // '\\nFROM SALES_DB.PUBLIC.X // '\")\n",
+        [],
+        [(2, "outside_boundary", "SALES_DB.PUBLIC.X")],
+    ),
     # a file the parser rejects is read in full, the boundary included
     (
         "py",

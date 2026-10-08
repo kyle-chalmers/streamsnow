@@ -89,6 +89,10 @@ entry.
   repo-level governance files only; `.sqlfluff` and app files are never rewritten. The docs now
   say so, name `sql-review helper` for `review.py`, and give the one-line manual change an
   existing repo needs for the glossary `%` fix and the `.sqlfluff` comment.
+- **`check schema-refs` reads `//` as a comment, as Snowflake does.** An apostrophe after `//`
+  opened a string literal in the relation scan, hiding the next line's `FROM` from the
+  boundary and deny checks. A `WITH ... AS (` inside a quoted column alias no longer reads as a
+  CTE that hides the table of the same name.
 - **`stage-bundle` leaves out `*.egg-info` directories, `*.pyc` and `.DS_Store`.** A local
   editable install's ignored build metadata reached the stage in a live test; it is never read
   at runtime.

@@ -655,12 +655,14 @@ def _mask_sql(text: str) -> str:
     """Comments to spaces; string and ``$$`` literal CONTENTS to spaces with their
     delimiters kept; double-quoted identifiers untouched. Same length, newlines
     kept, so offsets and line numbers match the original text, which is where
-    an IDENTIFIER literal's value is read back from."""
+    an IDENTIFIER literal's value is read back from. ``//`` starts a line comment
+    too, as in Snowflake: read as text, an apostrophe after it opened a phantom
+    string that hid the next line's FROM from every scan (#79)."""
     out: list[str] = []
     i, n = 0, len(text)
     while i < n:
         two, ch = text[i : i + 2], text[i]
-        if two == "--":
+        if two in ("--", "//"):
             j = text.find("\n", i)
             j = n if j == -1 else j
             out.append(_blank(text[i:j]))
@@ -998,26 +1000,37 @@ _CTE_RE = re.compile(
 )
 
 
+def _blank_quoted_identifiers(masked: str) -> str:
+    """Double-quoted identifier contents to spaces, quotes kept, same length. Structure
+    is read from this: ``AS "WITH Z AS ("`` is a column alias, and matched as text it
+    opened a CTE named Z that hid the table Z the query reads (#79)."""
+    return re.sub(r'"(?:[^"]|"")*"', lambda m: '"' + _blank(m.group(0)[1:-1]) + '"', masked)
+
+
 def _cte_scopes(masked: str) -> list[tuple[tuple[str, ...], int, int]]:
     """``(name parts, start, end)`` per CTE: visible from its definition until the
     parenthesis level it was defined at closes, or (at the top level) until the
-    statement ends. A WITH inside a subquery is invisible outside that subquery."""
+    statement ends. A WITH inside a subquery is invisible outside that subquery.
+    Keywords and parentheses count only outside literals, comments and quoted
+    identifiers; a quoted CTE name is read back from *masked*."""
+    structure = _blank_quoted_identifiers(masked)
     depth, depths = 0, []
-    for ch in masked:
+    for ch in structure:
         if ch == ")":
             depth -= 1
         depths.append(depth)  # "(" belongs to the outer level, ")" too
         if ch == "(":
             depth += 1
     scopes = []
-    for m in _CTE_RE.finditer(masked):
+    for m in _CTE_RE.finditer(structure):
         level = depths[m.start("name")]
         end = len(masked)
         for i in range(m.end(), len(masked)):
-            if depths[i] < level or (level == 0 and masked[i] == ";"):
+            if depths[i] < level or (level == 0 and structure[i] == ";"):
                 end = i
                 break
-        scopes.append((split_name(m.group("name")), m.start("name"), end))
+        name = masked[m.start("name") : m.end("name")]
+        scopes.append((split_name(name), m.start("name"), end))
     return scopes
 
 

@@ -694,3 +694,32 @@ def test_relation_lines_survive_cr_only_breaks():
         2,
         3,
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Codex review of #79: quoted identifiers and `//` comments
+# --------------------------------------------------------------------------- #
+
+
+def test_a_with_inside_a_quoted_identifier_is_no_cte():
+    rels = relation_names('SELECT COUNT(*) AS "WITH Z AS (" FROM Z')
+    assert [(r.parts, r.cte) for r in rels] == [(("Z",), False)]
+
+
+def test_a_paren_inside_a_quoted_identifier_does_not_end_a_cte_scope():
+    sql = 'WITH Z AS (SELECT 1 AS ")") SELECT * FROM Z'
+    assert [(r.parts, r.cte) for r in relation_names(sql)] == [(("Z",), True)]
+
+
+def test_a_real_cte_is_still_a_cte():
+    rels = relation_names("WITH Z AS (SELECT 1 AS x) SELECT * FROM Z")
+    assert [(r.parts, r.cte) for r in rels] == [(("Z",), True)]
+
+
+def test_a_slash_slash_comment_hides_no_relation():
+    rels = relation_names("SELECT COUNT(*) AS n // '\nFROM DB.SC.Z // '")
+    assert [(r.line, r.parts) for r in rels] == [(2, ("DB", "SC", "Z"))]
+
+
+def test_a_slash_slash_comment_names_no_relation():
+    assert relation_names("SELECT 1 // FROM DB.SC.Z\n") == []
