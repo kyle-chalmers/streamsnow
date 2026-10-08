@@ -80,7 +80,9 @@ Modes
     EXISTS`` statement per tombstone, by its recorded kind: the shape the deploy
     workflow's reconcile step consumes. Prints nothing on a registry error, so a
     malformed file can never be turned into DROP statements, and refuses (exit 2)
-    while the live app-data inventory is incomplete.
+    while the live app-data inventory is incomplete (an empty registry exits 0
+    without checking: it prints no DROP, so there is nothing to get wrong). A
+    tombstone with a kind must name an object in ``governance.app_data``.
 
 Exit codes: 0 = clean, 1 = finding (missing tombstone / live-app tombstone),
 2 = cannot verify (unreadable or invalid registry, missing config, git or
@@ -104,6 +106,7 @@ import yaml
 
 from ..app_data import OBJECT_KINDS, SQL_KIND, ddl_kind, load_app_data
 from ..config import (
+    CONFIG_SCHEMA_VERSION,
     DEFAULT_APP_DATA_SCHEMA,
     Config,
     ConfigError,
@@ -340,11 +343,14 @@ def base_app_data(base_commit: str, apps_dir: Path) -> tuple[dict[str, tuple[str
     gov = raw.get("governance") or {}
     if not isinstance(gov, dict):
         return {}, unverifiable("has a governance: that is not a mapping")
-    version = raw.get("schema_version")
-    if version == 1 or "database" in gov or "schema_allow" in gov:
+    try:  # mirror Config.from_dict: a missing key is the current version, "2" is 2
+        version = int(raw.get("schema_version", CONFIG_SCHEMA_VERSION))
+    except (TypeError, ValueError):
+        return {}, unverifiable(f"has schema_version {raw.get('schema_version')!r}, not a number")
+    if version < CONFIG_SCHEMA_VERSION or "database" in gov or "schema_allow" in gov:
         return {}, []  # schema_version 1: no app data existed, nothing was deployed there
-    if version != 2:
-        return {}, unverifiable(f"has schema_version {version!r}, neither 1 nor 2")
+    if version > CONFIG_SCHEMA_VERSION:
+        return {}, unverifiable(f"has schema_version {version}, newer than this streamsnow")
     snowflake = raw.get("snowflake")
     objects = snowflake.get("objects") if isinstance(snowflake, dict) else None
     app_db = objects.get("app_database") if isinstance(objects, dict) else None
@@ -405,8 +411,13 @@ def base_app_data(base_commit: str, apps_dir: Path) -> tuple[dict[str, tuple[str
 
 def _in_app_data(cfg, identifier: str) -> bool:
     parts = split_name(identifier)
-    return len(parts) == 3 and ".".join(parts[:2]) == cfg.governance.app_data.upper()
+    return len(parts) == 3 and parts[:2] == split_name(cfg.governance.app_data)
 
+
+_OUTSIDE_APP_DATA = (
+    "is outside governance.app_data: a tombstone with a kind retires objects in "
+    "governance.app_data only; drop objects in other schemas by hand"
+)
 
 _NEEDS_KIND = (
     "needs kind: view or kind: dynamic_table: a tombstone without one is a Streamlit "
@@ -538,6 +549,7 @@ def run_check(cfg, registry_path: Path, apps_dir: Path, base_ref: str) -> Result
                 }
             )
 
+    rel_apps = str(apps_dir).strip("/")
     live_objects, incomplete = live_app_data(cfg, apps_dir)
     for path in incomplete:
         result.findings.append(
@@ -557,9 +569,17 @@ def run_check(cfg, registry_path: Path, apps_dir: Path, base_ref: str) -> Result
                     "line": 1,
                     "detail": (
                         f"tombstone {stone.identifier} is still declared as an app-data object "
-                        f"by apps/{owner[0]}/: the deploy job would build it and the reconcile "
+                        f"by {rel_apps}/{owner[0]}/: the deploy job would build it and the reconcile "
                         "step drop it in the same run. Remove this entry, or remove the object."
                     ),
+                }
+            )
+        if stone.kind and not _in_app_data(cfg, stone.identifier):
+            result.findings.append(
+                {
+                    "file": str(registry_path),
+                    "line": 1,
+                    "detail": f"tombstone {stone.identifier} {_OUTSIDE_APP_DATA}",
                 }
             )
         if not stone.kind and _in_app_data(cfg, stone.identifier):
@@ -619,7 +639,7 @@ def run_check(cfg, registry_path: Path, apps_dir: Path, base_ref: str) -> Result
         if was and now and was != now:
             result.findings.append(
                 {
-                    "file": f"apps/{_owner}/sql_review/{OBJECTS_DIR}/{fqn}.sql",
+                    "file": f"{rel_apps}/{_owner}/sql_review/{OBJECTS_DIR}/{fqn}.sql",
                     "line": 1,
                     "detail": (
                         f"{fqn} was a {was.replace('_', ' ')} at base and is a "
@@ -635,10 +655,10 @@ def run_check(cfg, registry_path: Path, apps_dir: Path, base_ref: str) -> Result
         if stone is None:
             result.findings.append(
                 {
-                    "file": f"apps/{slug}/sql_review/index.yaml",
+                    "file": f"{rel_apps}/{slug}/sql_review/index.yaml",
                     "line": 1,
                     "detail": (
-                        f"removed app-data object {fqn} (declared by apps/{slug}/ at base "
+                        f"removed app-data object {fqn} (declared by {rel_apps}/{slug}/ at base "
                         f"{base_commit[:12]}, not in {registry_path}) stays in Snowflake, still "
                         "refreshing if it is a dynamic table. Fix in THIS change: add to "
                         f"{registry_path}:  - identifier: {fqn}  kind: "
@@ -741,6 +761,14 @@ def main(argv: list[str] | None = None) -> int:
         kindless = [
             t.identifier for t in tombstones if not t.kind and _in_app_data(cfg, t.identifier)
         ]
+        outside = [
+            t.identifier for t in tombstones if t.kind and not _in_app_data(cfg, t.identifier)
+        ]
+        for ident in outside:
+            print(
+                f"{_KIND}: refusing --drop-sql: tombstone {ident} {_OUTSIDE_APP_DATA}",
+                file=sys.stderr,
+            )
         for ident in kindless:
             print(f"{_KIND}: refusing --drop-sql: tombstone {ident} {_NEEDS_KIND}", file=sys.stderr)
         conflicts = [t.identifier for t in tombstones if t.identifier.upper() in live]
@@ -757,11 +785,11 @@ def main(argv: list[str] | None = None) -> int:
                 conflicts.append(t.identifier)
                 print(
                     f"{_KIND}: refusing --drop-sql: tombstone {t.identifier} is still declared "
-                    f"as an app-data object by apps/{owner[0]}/; dropping it would remove what "
+                    f"as an app-data object by {args.apps_dir}/{owner[0]}/; dropping it would remove what "
                     "this very deploy just built",
                     file=sys.stderr,
                 )
-        if kindless or conflicts:
+        if kindless or conflicts or outside:
             return 2
         sql = drop_sql(tombstones)
         if sql:

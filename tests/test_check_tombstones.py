@@ -652,3 +652,53 @@ def test_retired_object_is_dropped_by_kind_on_a_later_unrelated_deploy(
     assert main(["--drop-sql"]) == 0
     assert capsys.readouterr().out.strip() == f"DROP DYNAMIC TABLE IF EXISTS {DT_FQN};"
     assert not list(tmp_path.rglob(f"{DT_FQN}.sql"))
+
+
+def _kind_stone(identifier: str, kind: str = "view") -> str:
+    return (
+        "tombstones:\n"
+        f"  - identifier: {identifier}\n"
+        f"    kind: {kind}\n"
+        "    reason: probe\n"
+        "    date: 2026-10-06\n"
+    )
+
+
+def test_a_kinded_tombstone_outside_app_data_is_a_finding(tmp_path, monkeypatch, capsys):
+    base = _init_repo(tmp_path)
+    _tombstone(tmp_path, _kind_stone("ANALYTICS_DB.REPORTING.ORDERS"))
+    monkeypatch.chdir(tmp_path)
+    assert main(["--base-ref", base]) == 1
+    out = capsys.readouterr().out
+    assert "retires objects in governance.app_data only" in out
+
+
+def test_drop_sql_refuses_a_kinded_tombstone_outside_app_data(tmp_path, monkeypatch, capsys):
+    _init_repo(tmp_path)
+    _tombstone(tmp_path, _kind_stone("ANALYTICS_DB.REPORTING.ORDERS"))
+    monkeypatch.chdir(tmp_path)
+    assert main(["--drop-sql"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "retires objects in governance.app_data only" in captured.err
+
+
+def test_a_lower_case_app_data_name_is_still_accepted(tmp_path, monkeypatch, capsys):
+    _init_repo(tmp_path)
+    _tombstone(tmp_path, _kind_stone("streamsnow_apps.streamsnow_reporting.old_view"))
+    monkeypatch.chdir(tmp_path)
+    assert main(["--drop-sql"]) == 0
+    assert "DROP VIEW IF EXISTS" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("version", [None, "2"], ids=["key-omitted", "string-two"])
+def test_a_base_config_schema_version_is_read_like_the_loader(tmp_path, monkeypatch, version):
+    data = yaml.safe_load(CONFIG)
+    if version is None:
+        del data["schema_version"]
+    else:
+        data["schema_version"] = version
+    _init_repo(tmp_path, config=yaml.safe_dump(data))
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    monkeypatch.chdir(tmp_path)
+    assert main(["--base-ref", base]) == 0
