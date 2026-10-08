@@ -868,3 +868,105 @@ def test_verify_deploy_json_reports_status_per_check(monkeypatch):
         "version-source": ("pass", True),
         "service-logs": ("skipped", False),
     }
+
+
+DT = "STREAMSNOW_APPS.STREAMSNOW_REPORTING.DAILY_REVENUE"
+
+
+def _dt_row(state: str = "RUNNING", ts: object = "2026-10-06 09:00:00.000 -0700") -> dict:
+    return {"name": "DAILY_REVENUE", "scheduling_state": state, "data_timestamp": ts}
+
+
+@pytest.mark.parametrize("state", ["RUNNING", "ACTIVE", "running"])
+def test_app_data_refresh_passes_when_scheduled_and_refreshed(state):
+    """The docs say RUNNING; ACTIVE is accepted too, so either spelling reads healthy."""
+    c = verify.check_app_data_refresh({DT: _dt_row(state=state)})
+    assert c["status"] == "pass" and c["level"] == "warn"
+
+
+@pytest.mark.parametrize(
+    ("row", "needle"),
+    [
+        (_dt_row(state="SUSPENDED"), f"ALTER DYNAMIC TABLE {DT} RESUME;"),
+        (_dt_row(state="FAILED"), "not RUNNING"),
+        (_dt_row(state=""), "not RUNNING"),
+        (_dt_row(ts=None), "has never refreshed"),
+        (None, "not found"),
+    ],
+)
+def test_app_data_refresh_warns(row, needle):
+    c = verify.check_app_data_refresh({DT: row})
+    assert c["status"] == "fail" and c["level"] == "warn"
+    assert needle in " ".join(c["findings"])
+
+
+def test_verify_app_checks_only_the_apps_dynamic_tables_and_never_fails_on_them():
+    seen: list[str] = []
+    base = _run_query_factory([[_show_row()]], seen=seen)
+
+    def run_query(sql: str) -> list[dict]:
+        if sql.upper().startswith("SHOW DYNAMIC TABLES"):
+            seen.append(sql)
+            return [_dt_row(state="SUSPENDED")]
+        return base(sql)
+
+    result = verify_app(
+        _cfg(), "my-app", sha=SHA, run_query=run_query, sleep=lambda _: None, app_data_tables=[DT]
+    )
+    assert result["ok"]  # warn level: reported, never fails the run
+    checks = _by_name(result)
+    assert checks["app-data-refresh"]["status"] == "fail"
+    assert (
+        "SHOW DYNAMIC TABLES LIKE 'DAILY_REVENUE' IN SCHEMA STREAMSNOW_APPS.STREAMSNOW_REPORTING"
+        in seen
+    )
+    assert "warned: app-data-refresh" in summary_line(result)
+    plain = verify_app(_cfg(), "my-app", sha=SHA, run_query=base, sleep=lambda _: None)
+    assert "app-data-refresh" not in _by_name(plain)
+
+
+def test_verify_app_skips_the_refresh_check_when_show_fails():
+    base = _run_query_factory([[_show_row()]])
+
+    def run_query(sql: str) -> list[dict]:
+        if sql.upper().startswith("SHOW DYNAMIC TABLES"):
+            raise RuntimeError("snow sql failed (1): insufficient privileges")
+        return base(sql)
+
+    result = verify_app(
+        _cfg(), "my-app", run_query=run_query, sleep=lambda _: None, app_data_tables=[DT]
+    )
+    assert _by_name(result)["app-data-refresh"]["status"] == "skipped"
+
+
+def test_verify_app_never_renders_a_non_plain_name_into_show():
+    """A name that is not three plain identifiers is skipped, never put into SQL."""
+    seen: list[str] = []
+    base = _run_query_factory([[_show_row()]], seen=seen)
+    bad = "A.B.C'; DROP TABLE X; --"
+    result = verify_app(
+        _cfg(), "my-app", run_query=base, sleep=lambda _: None, app_data_tables=[bad]
+    )
+    assert _by_name(result)["app-data-refresh"]["status"] == "skipped"
+    assert not any(s.upper().startswith("SHOW DYNAMIC TABLES") for s in seen)
+
+
+def test_plan_lists_an_apps_dynamic_tables(tmp_path):
+    from _app_data_fixtures import dynamic_table, view, write_app, write_config
+
+    from streamsnow.app_data import load_app_data
+    from streamsnow.config import load_config
+
+    cfg = load_config(write_config(tmp_path))
+    write_app(
+        tmp_path,
+        "my-app",
+        {
+            "DAILY_REVENUE": dynamic_table("DAILY_REVENUE"),
+            "REGION_REVENUE": view(
+                "REGION_REVENUE",
+                "SELECT region, SUM(revenue) AS r\nFROM ANALYTICS_DB.REPORTING.ORDERS\nGROUP BY region",
+            ),
+        },
+    )
+    assert load_app_data(tmp_path, cfg).dynamic_tables("my-app") == [DT]

@@ -1512,6 +1512,9 @@ def verify_deploy_cmd(
     # next to the config. No such directory: the check does not run.
     cfg_path = Path(config) if config else find_config()
     app_dir = cfg_path.resolve().parent / "apps" / slug if cfg_path else None
+    from .app_data import load_app_data
+
+    tables = load_app_data(cfg_path.resolve().parent, cfg).dynamic_tables(slug) if cfg_path else []
     try:
         result = verify_app(
             cfg,
@@ -1521,6 +1524,7 @@ def verify_deploy_cmd(
             attempts=attempts,
             delay=delay,
             app_dir=app_dir if app_dir is not None and app_dir.is_dir() else None,
+            app_data_tables=tables,
         )
     except ValueError as exc:  # invalid slug
         _err(str(exc))
