@@ -352,6 +352,15 @@ CORPUS = [
         [],
         [(2, "outside_boundary", "SALES_DB.PUBLIC.X")],
     ),
+    # ... and the deny scan agrees: a denied name after `//` is commented out
+    ("sql", "SELECT 1 // FROM DB.RAW.T\n", [], []),
+    ("py", 'session.sql("SELECT 1 // FROM DB.RAW.T")\n', [], []),
+    # `//`, `--` and `/*` inside a string literal start no comment: the name after it counts
+    ("sql", "SELECT '//' AS s FROM DB.RAW.T\n", [(1, "RAW")], []),
+    ("sql", "SELECT 'a--b' AS s, DB.RAW.T.c FROM ANALYTICS_DB.REPORTING.X\n", [(1, "RAW")], []),
+    ("sql", "SELECT '/*' AS s, DB.RAW.T.c FROM ANALYTICS_DB.REPORTING.X -- */\n", [(1, "RAW")], []),
+    # a block comment still hides a name, and keeps the line numbers after it
+    ("sql", "SELECT 1 /* DB.RAW.T\n */ FROM DB.RAW.U\n", [(2, "RAW")], []),
     # a file the parser rejects is read in full, the boundary included
     (
         "py",

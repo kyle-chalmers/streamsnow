@@ -97,7 +97,8 @@ entry.
   line. `deploy-setup` and `--teardown` also escape every value they print in a comment.
 - **`check schema-refs` reads `//` as a comment, as Snowflake does.** An apostrophe after `//`
   opened a string literal in the relation scan, hiding the next line's `FROM` from the
-  boundary and deny checks. A `WITH ... AS (` inside a quoted column alias no longer reads as a
+  boundary and deny checks, and the deny check flagged a name commented out by `//`. A comment
+  opener inside a string literal no longer starts a comment for the deny check. A `WITH ... AS (` inside a quoted column alias no longer reads as a
   CTE that hides the table of the same name.
 - **`stage-bundle` leaves out `*.egg-info` directories, `*.pyc` and `.DS_Store`.** A local
   editable install's ignored build metadata reached the stage in a live test; it is never read

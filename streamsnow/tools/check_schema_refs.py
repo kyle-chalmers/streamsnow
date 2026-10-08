@@ -113,10 +113,12 @@ _USE = re.compile(
 
 
 def _strip_sql_comments(text: str) -> str:
-    # Drop -- line comments and /* */ block comments so commented refs don't trip. Block
-    # comments become blanks of the same length, so line numbers and offsets still match.
-    text = re.sub(r"/\*.*?\*/", lambda m: _blank(m.group(0)), text, flags=re.DOTALL)
-    return "\n".join(line.split("--", 1)[0] for line in text.split("\n"))
+    """Comments (``--``, ``//``, ``/* */``) to spaces, same length and lines, so commented
+    refs don't trip the deny line scan. Literals and quoted identifiers are kept as
+    written (the line scan reads names inside them) and are lexed exactly as the
+    relation scan lexes them: a comment opener inside a string is text, and ``//``
+    ends a line as it does in Snowflake (#79)."""
+    return _lex_sql(text, keep_literals=True)
 
 
 # `USE ROLE <name>` and `USE SECONDARY ROLES ...` name roles, never schemas: a role
@@ -658,6 +660,13 @@ def _mask_sql(text: str) -> str:
     an IDENTIFIER literal's value is read back from. ``//`` starts a line comment
     too, as in Snowflake: read as text, an apostrophe after it opened a phantom
     string that hid the next line's FROM from every scan (#79)."""
+    return _lex_sql(text, keep_literals=False)
+
+
+def _lex_sql(text: str, *, keep_literals: bool) -> str:
+    """The one SQL lexer behind :func:`_mask_sql` and :func:`_strip_sql_comments`:
+    comments always become spaces; literal contents too unless ``keep_literals``."""
+    lit = (lambda span: span) if keep_literals else _blank
     out: list[str] = []
     i, n = 0, len(text)
     while i < n:
@@ -675,9 +684,9 @@ def _mask_sql(text: str) -> str:
         elif two == "$$":
             j = text.find("$$", i + 2)
             if j == -1:
-                out.append(_blank(text[i:]))
+                out.append(lit(text[i:]))
                 break
-            out.append("$$" + _blank(text[i + 2 : j]) + "$$")
+            out.append("$$" + lit(text[i + 2 : j]) + "$$")
             i = j + 2
         elif ch == '"':
             j = i + 1
@@ -704,9 +713,9 @@ def _mask_sql(text: str) -> str:
                     break
                 j += 1
             if j >= n:
-                out.append(_blank(text[i:]))
+                out.append(lit(text[i:]))
                 break
-            out.append("'" + _blank(text[i + 1 : j]) + "'")
+            out.append("'" + lit(text[i + 1 : j]) + "'")
             i = j + 1
         else:
             out.append(ch)
