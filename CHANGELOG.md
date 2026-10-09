@@ -69,6 +69,10 @@ entry.
   but not `ruff format`, so the commit hook rewrote files and failed every build round. Builders
   now run `pre-commit run ruff-check` and `ruff-format` on their files from the repo root, and
   the orchestrator runs every hook on the round's files before committing it.
+- **Walkthrough screenshots show the whole page, from its title** (#99). Streamlit scrolls the
+  page inside its own container, so `--full-page` captured the window: a page taller than the
+  window lost its bottom, and a container left scrolled showed the middle. The walk now resets
+  the inner scroll, grows the window to the content, and waits for the script run to finish.
 - **`/ship-app` always watches the deploy run** (#103). Step 11's fallback for hosts that forbid
   polling CI now names PR checks only, so an agent no longer hands the post-merge deploy run
   back to the user instead of reporting its outcome.

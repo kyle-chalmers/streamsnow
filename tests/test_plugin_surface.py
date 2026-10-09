@@ -390,6 +390,18 @@ def test_ship_app_always_watches_the_deploy_run():
     assert "Polling PR checks not allowed" in done
 
 
+def test_walkthrough_screenshots_the_whole_page_from_its_top():
+    """#99: Streamlit scrolls inside its own container, so `--full-page` captured the
+    window, not the page: a page taller than the window lost its bottom, and a container
+    left scrolled showed the middle. Reset the inner scroll, grow the window to the
+    content, and wait for the script run, not just the first caption."""
+    recipe = (SKILLS_DIR / "_shared" / "playwright-walkthrough.md").read_text(encoding="utf-8")
+    walk = _flat(recipe[recipe.index("## Steps") : recipe.index("## Output contract")])
+    assert "screenshot --full-page" not in recipe
+    assert "e.scrollTop = 0" in walk and "setViewportSize" in walk
+    assert walk.index("data-test-script-state=notRunning") < walk.index("P S screenshot")
+
+
 def test_skills_say_who_applies_app_data_ddl():
     """#79: the deploy job applies app-data DDL. "A human applies DDL" without that
     qualifier would send an agent to ask for a manual apply the deploy already does."""
