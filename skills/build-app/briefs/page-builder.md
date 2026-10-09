@@ -27,14 +27,21 @@ another page, or a shared query. Need something there? Return it as a request.
 
 1. Write the queries with their header blocks; real SQL against the profiled objects.
 2. Write the page: the design's caption and sections, `help=` from the glossary keys,
-   `definitions_expander(<keys>)` and `sources_footer(...)` at the end, `date_range` for the
-   period, shared data from `pages/_data.py`, `show_sql` where the design says so. Mark each
-   visual with `review_value("<key>", value)` in this file.
+   `definitions_expander(<keys>)` and `sources_footer(...)` at the end, the period from
+   `current_filters()` (never a page-level picker for a filter other pages share; need a new
+   global filter? request it in `data_requests`), shared data from `pages/_data.py`, `show_sql`
+   where the design says so. Mark each visual with `review_value("<key>", value)` in this file.
 3. Run `streamsnow check page-imports apps/<slug>`, `streamsnow check caching apps/<slug>`,
    `streamsnow check schema-refs apps/<slug>`, `streamsnow check bind-predicates apps/<slug>` and
    `streamsnow check sql-tokens apps/<slug>`; fix findings in your own files. In a query header,
    name tokens without braces (`-- Tokens: REGION_FILTER (what it filters)`): `sql-tokens` flags
    a `{TOKEN}` inside any SQL comment.
+4. From the repo root (never inside `apps/<slug>`, so ruff reads the configuration the commit
+   hook reads), run the repo's ruff hooks on your files:
+   `pre-commit run ruff-check --files <the files you wrote>`, then
+   `pre-commit run ruff-format --files <the files you wrote>`. The five checks above do not cover
+   them, and both rewrite files in place: re-run each until it exits 0. Only these two: the
+   `sql-review` hook reads `index.yaml`, which the orchestrator fills after you return.
 
 ## Returns
 
@@ -45,15 +52,17 @@ another page, or a shared query. Need something there? Return it as a request.
  "glossary_entries": [{"key": "...", "label": "...", "definition": "...", "formula": "..."}],
  "data_requests": ["a loader or query another page also needs"],
  "checks": {"page-imports": 0, "caching": 0, "schema-refs": 0, "bind-predicates": 0,
-            "sql-tokens": 0}}
+            "sql-tokens": 0, "pre-commit": 0}}
 ```
 
 ## Verify
 
 The orchestrator re-runs the five checks, rejects any write outside `files_written` ∩ Owns, merges
 the entries, runs `streamsnow sql-review generate <slug>` once for all pages, then
-`streamsnow sql-review check <slug>`.
+`streamsnow sql-review check <slug>`, and runs every repo hook on the round's files before
+committing it.
 
 ## Degrade
 
-A check that can't run (missing tool) is reported in `checks` as `"skipped"`, never as 0.
+A check that can't run (missing tool, or no `pre-commit` on PATH) is reported in `checks` as
+`"skipped"`, never as 0.

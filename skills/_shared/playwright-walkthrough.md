@@ -34,9 +34,8 @@ session names are machine-wide, and `open` on a name already in use closes that 
    `(cd D && P S open <base_url> --browser=chromium --idle-timeout=600000)`.
    Always start at the app **root**, never a `/<page>` deep link (Streamlit serves the navigation
    shell from root; a direct page URL can render a stale or unbranded fallback). Then
-   `P S resize 1280 4000`: Streamlit scrolls inside its own container, so a full-page screenshot
-   of a normal-height window captures only the first screen. Every later command writes to
-   absolute paths under `D`, so they work from wherever you are.
+   `P S resize 1280 4000`, a tall window, so most pages fit before step 3 grows it for the rest.
+   Every later command writes to absolute paths under `D`, so they work from wherever you are.
 2. If `open` fails because the browser is not installed (the error names `install-browser`), run
    `P install-browser chrome-for-testing` once (no sudo needed) and retry. Still failing: degrade
    as above, with the error's first line.
@@ -48,8 +47,17 @@ session names are machine-wide, and `open` on a name already in use closes that 
      `'` in the label. With more than about 10 pages, click "View more" in the sidebar first.
    - Wait for the success sentinel, the `Data as of:` caption:
      `P S run-code "async page => { await page.getByText('Data as of').first().waitFor({ timeout: 30000 }); }"`.
-     For pages without a freshness caption, wait for the first heading the same way.
-   - Screenshot: `P S screenshot --full-page --filename=D/<page-stem>.png`.
+     For pages without a freshness caption, wait for the first heading the same way. The caption
+     can render before the data does, so then wait for the page's script run to finish:
+     `P S run-code "async page => { await page.locator('[data-test-script-state=notRunning]').waitFor({ timeout: 60000 }); }"`.
+   - Screenshot. Streamlit scrolls the page inside its own container, so `--full-page` captures
+     the window, not the page: a page taller than the window loses its bottom, and a container
+     left scrolled shows the middle. Reset every inner scroll to the top and grow the window by
+     what the page's full-height container still overflows (not a table's own scroller, whose
+     height covers all its rows), up to 16000 px, then capture the viewport and restore the window
+     for the next page:
+     `P S run-code "async page => { const extra = await page.evaluate(() => { let extra = 0; for (const e of document.querySelectorAll('*')) { if (!/auto|scroll/.test(getComputedStyle(e).overflowY)) continue; e.scrollTop = 0; if (e.clientHeight >= window.innerHeight * 0.9) extra = Math.max(extra, e.scrollHeight - e.clientHeight); } return extra; }); const v = page.viewportSize(); await page.setViewportSize({ width: v.width, height: Math.min(v.height + extra, 16000) }); await page.waitForTimeout(500); }"`,
+     then `P S screenshot --filename=D/<page-stem>.png`, then `P S resize 1280 4000`.
    - Console: `P S console error > D/<page-stem>-console.log`, then `P S console --clear`, so each
      page's errors stay with that page. Read the log; record `error`-level entries with the page
      name (an analytics call blocked by a proxy is noise, not an app error).
@@ -77,9 +85,8 @@ was started with `--review-capture`. Steps 1 to 5 apply, with these differences:
   snapshots there hold cell text, which must not outlive the walk.
 - Never touch a widget, and take no screenshots: the page must render at its default filters,
   and a screenshot is a copy of the data.
-- The `Data as of:` caption renders before the data does. After it, also wait for the page's
-  script run to finish: `P S run-code "async page => { await page.locator('[data-test-script-state=notRunning]').waitFor({ timeout: 60000 }); }"`.
-  Then run screen.md's snippet once, from the file screen.md says to save it in:
+- After step 3's two waits (the caption, then the finished script run), run screen.md's snippet
+  once, from the file screen.md says to save it in:
   `P S eval "$(cat D/snippet.js)"`.
   It returns counts and displayed numbers only. Write the readings to `<run_dir>/screen.json`
   as screen.md says, and never repeat them in chat.
