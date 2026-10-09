@@ -403,7 +403,9 @@ def _state_owns_pid(state: dict[str, Any]) -> bool:
     pid = int(state.get("pid", 0))
     if not _pid_alive(pid):
         return False
-    recorded: list[str] = [str(t) for t in state.get("cmd") or []]
+    # cmd[0] is the launcher (the venv's streamlit), which every app previewed
+    # from the same venv shares, so it identifies the tool, not this app.
+    recorded: list[str] = [str(t) for t in (state.get("cmd") or [])[1:]]
     if entry := state.get("entrypoint"):
         recorded.append(str(entry))
     # Identity tokens are the PATH-bearing arguments (the entrypoint / script

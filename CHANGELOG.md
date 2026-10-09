@@ -8,6 +8,27 @@ entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Deploy honors an app's own runtime.** `deploy-sql` reads the runtime from
+  `apps/<slug>/snowflake.yml`, as `validate-app` already did, so a warehouse app in a
+  container-default repo no longer deploys with the container `ALTER`. A container app in a
+  repo without a compute pool and external-access integration now fails with a clear config
+  error.
+- **The deploy guard reads `~/` SQL files.** `snow sql -f ~/x.sql` was skipped unscanned
+  because the hook did not expand `~`, so a destructive statement in that file ran without the
+  confirmation prompt.
+- **`ci-key create` works on Windows without the symlink privilege.** It writes a private copy
+  of the key as `secrets/SNOWFLAKE_PRIVATE_KEY_RAW` instead of crashing, and a re-run flags the
+  copy when the key has changed.
+- **Retiring the last app passes the tombstone check.** With `apps/` gone, the check and
+  `--drop-sql` treat the repo root as having no apps instead of failing; run from the wrong
+  directory, they still refuse.
+- **`preview stop` no longer claims another app's preview.** The shared `streamlit` launcher
+  path no longer counts as proof that a reused PID belongs to this app.
+- **Malformed config values are config errors.** A non-integer `schema_version` or a scalar
+  where a block belongs exits 2 with a message instead of a traceback.
+
 ### Changed
 
 - **The README demo GIF shows the journey in Claude.** It plays `/build-app`, `/review-app`,

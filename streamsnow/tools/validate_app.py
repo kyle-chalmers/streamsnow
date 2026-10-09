@@ -39,7 +39,7 @@ except ImportError:  # pragma: no cover
         return re.sub(r"[-_.]+", "-", name).lower()
 
 
-from ..config import Config, ConfigError, find_config, load_config
+from ..config import Config, ConfigError, app_runtime, find_config, load_config
 from ..policy import BOUNDARY_VERDICTS, SchemaPolicy
 from . import (
     check_app_security,
@@ -182,20 +182,7 @@ def _walk_app_files(app_dir: Path) -> list[Path]:
     return files
 
 
-def _detect_runtime(app_dir: Path, default: str) -> str:
-    yml = app_dir / "snowflake.yml"
-    if yml.is_file():
-        try:
-            data = yaml.safe_load(yml.read_text(encoding="utf-8")) or {}
-            entities = data.get("entities")
-            if isinstance(entities, dict) and entities:
-                for entity in entities.values():
-                    if isinstance(entity, dict) and entity.get("runtime_name"):
-                        return "container"
-                return "warehouse"
-        except yaml.YAMLError:
-            pass
-    return default
+_detect_runtime = app_runtime  # one reader for validate and deploy
 
 
 def _check_pyproject(app_dir: Path, container_python: str) -> list[str]:

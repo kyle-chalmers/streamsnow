@@ -588,3 +588,56 @@ def test_teardown_refuses_an_app_database_that_holds_any_source():
     moved = dataclasses.replace(cfg, snowflake=dataclasses.replace(cfg.snowflake, objects=objects))
     with pytest.raises(ConfigError, match="holds a governance source"):
         generate_teardown_sql(moved)
+
+
+def test_create_sql_follows_the_app_runtime_over_the_repo_default():
+    """A warehouse app in a container-default repo must not get the container ALTER."""
+    sql = generate_create_sql(_cfg(), "ops", sha="def4567", runtime="warehouse")
+    assert "RUNTIME_NAME" not in sql
+    assert "COMPUTE_POOL" not in sql
+    assert "ADD LIVE VERSION FROM LAST" in sql
+
+
+def test_container_app_in_a_warehouse_repo_needs_the_container_objects():
+    data = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
+    data["runtime"] = "warehouse"
+    data["snowflake"]["objects"]["compute_pool"] = ""
+    data["snowflake"]["objects"]["external_access_integration"] = ""
+    with pytest.raises(ConfigError, match="compute_pool"):
+        generate_create_sql(Config.from_dict(data), "ops", sha="def4567", runtime="container")
+
+
+def test_deploy_sql_cli_reads_the_app_snowflake_yml(tmp_path):
+    from typer.testing import CliRunner
+
+    from streamsnow.cli import app
+
+    (tmp_path / "streamsnow.config.yaml").write_text(
+        EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    app_dir = tmp_path / "apps" / "sales-ops"
+    app_dir.mkdir(parents=True)
+    (app_dir / "snowflake.yml").write_text(
+        "definition_version: 2\n"
+        "entities:\n"
+        "  sales_ops:\n"
+        "    type: streamlit\n"
+        "    main_file: streamlit_app.py\n",
+        encoding="utf-8",
+    )
+    cfg_file = str(tmp_path / "streamsnow.config.yaml")
+    result = CliRunner().invoke(app, ["deploy-sql", "sales-ops", "--config", cfg_file])
+    assert result.exit_code == 0, result.output
+    assert "RUNTIME_NAME" not in result.output
+
+    (app_dir / "snowflake.yml").write_text(
+        "definition_version: 2\n"
+        "entities:\n"
+        "  sales_ops:\n"
+        "    type: streamlit\n"
+        "    runtime_name: SYSTEM$ST_CONTAINER_RUNTIME_PY3_11\n",
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(app, ["deploy-sql", "sales-ops", "--config", cfg_file])
+    assert result.exit_code == 0, result.output
+    assert "RUNTIME_NAME" in result.output
