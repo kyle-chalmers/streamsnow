@@ -12,8 +12,6 @@ leaks into the image. Very long lines are cut with an ellipsis; nothing is
 reworded.
 
     uv run python scripts/readme_media/render_terminal.py
-
-render_gif.py imports ``run_flow`` from here so the GIF plays the same transcript.
 """
 
 from __future__ import annotations

@@ -38,6 +38,14 @@ entry.
   fails.
 - Git-repository deploys stop before any DDL or app change when the fetched branch is not the
   run's commit (`streamsnow git-head`).
+- **The README demo GIF shows the journey in Claude.** It plays `/build-app`, `/review-app`,
+  `/preview-app` and `/ship-app` in a Claude chat, then the PR checks, the merge and the deploy
+  run, and ends on the app live in Snowsight. The scenes come from a real run over the TPC-H
+  sample; `scripts/readme_media/render_gif.py` regenerates it without a Snowflake account.
+- **The README diagrams match the current flow.** The repos diagram shows the deploy job
+  building app views and dynamic tables before the apps, the skills diagram shows `/ship-app`
+  watching the deploy and handing over the app link, and the CI key diagram notes the other
+  four secrets `ci-key push` sets.
 
 ### Fixed
 
