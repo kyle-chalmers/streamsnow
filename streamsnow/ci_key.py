@@ -80,10 +80,11 @@ def fingerprint(public_der: bytes) -> str:
     return "SHA256:" + base64.b64encode(hashlib.sha256(public_der).digest()).decode()
 
 
-def _write_private(path: Path, value: str) -> None:
+def _write_private(path: Path, value: str | bytes) -> None:
+    data = value.encode("utf-8") if isinstance(value, str) else value
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        fh.write(value)
+    with os.fdopen(fd, "wb") as fh:  # bytes as given: no newline translation on Windows
+        fh.write(data)
 
 
 def _inside_git_worktree(path: Path) -> bool:
@@ -179,10 +180,25 @@ def create(
             target = Path("..") / p8.name
             if path.is_symlink() or path.exists():
                 kept.append(name)
-                if path.resolve() != p8.resolve():
+                if path.is_symlink() or not path.is_file():
+                    if path.resolve() != p8.resolve():
+                        mismatched.append(name)
+                elif path.read_bytes() != p8.read_bytes():  # the Windows copy below
                     mismatched.append(name)
             else:
-                path.symlink_to(target)
+                try:
+                    path.symlink_to(target)
+                except OSError:
+                    # Native Windows without Developer Mode or the symlink
+                    # privilege refuses symlink_to (WinError 1314), which crashed
+                    # onboarding after the key pair already existed. A private
+                    # copy works the same for `ci-key push`; re-runs compare its
+                    # bytes with the .p8 so a rotated key still shows as mismatched.
+                    _write_private(path, p8.read_bytes())
+                    warnings.append(
+                        f"{path} is a copy of {p8.name}, not a symlink (this system does not "
+                        "allow symlinks). Re-run `streamsnow ci-key create` after rotating the key."
+                    )
                 written.append(name)
             continue
         if path.exists():

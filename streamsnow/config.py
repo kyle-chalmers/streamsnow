@@ -160,7 +160,7 @@ def _reject_v1(d: dict) -> None:
     gov = d.get("governance") if isinstance(d.get("governance"), dict) else {}
     retired = [f"governance.{k}" for k in RETIRED_GOVERNANCE_KEYS if k in gov]
     version = d.get("schema_version")
-    old = version is not None and int(version) < CONFIG_SCHEMA_VERSION
+    old = version is not None and _int(version, "schema_version") < CONFIG_SCHEMA_VERSION
     if old or retired:
         found = f" (found {', '.join(retired)})" if retired else ""
         raise ConfigError(V1_CONFIG_ERROR + found)
@@ -276,6 +276,24 @@ def _require(d: dict, key: str, ctx: str) -> Any:
     return d[key]
 
 
+def _require_mapping(d: dict, key: str, ctx: str) -> dict:
+    """A required block that must be a mapping: ``snowflake: x`` is a ConfigError, not a traceback."""
+    value = _require(d, key, ctx)
+    if not isinstance(value, dict):
+        raise ConfigError(f"config value {ctx}.{key} must be a mapping, got {type(value).__name__}")
+    return value
+
+
+def _int(value: Any, field_name: str) -> int:
+    """An integer config value; ``schema_version: two`` is a ConfigError (exit 2), not a traceback."""
+    if isinstance(value, bool):
+        raise ConfigError(f"config value {field_name} must be an integer, got {value!r}")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ConfigError(f"config value {field_name} must be an integer, got {value!r}") from None
+
+
 # --------------------------------------------------------------------------- #
 # Typed model
 # --------------------------------------------------------------------------- #
@@ -290,7 +308,11 @@ class ProjectCfg:
         name = str(_require(d, "name", "project"))
         slug = validate_branch(str(_require(d, "slug", "project")), "project.slug")
         return cls(
-            name=name, slug=slug, agents_md_char_limit=int(d.get("agents_md_char_limit", 40000))
+            name=name,
+            slug=slug,
+            agents_md_char_limit=_int(
+                d.get("agents_md_char_limit", 40000), "project.agents_md_char_limit"
+            ),
         )
 
 
@@ -390,8 +412,8 @@ class SnowflakeCfg:
             connection_name=validate_name(
                 str(_require(d, "connection_name", "snowflake")), "snowflake.connection_name"
             ),
-            objects=SnowflakeObjects.from_dict(dict(_require(d, "objects", "snowflake"))),
-            roles=SnowflakeRoles.from_dict(dict(_require(d, "roles", "snowflake"))),
+            objects=SnowflakeObjects.from_dict(_require_mapping(d, "objects", "snowflake")),
+            roles=SnowflakeRoles.from_dict(_require_mapping(d, "roles", "snowflake")),
         )
 
 
@@ -610,14 +632,14 @@ class Config:
         if not isinstance(d, dict):
             raise ConfigError("config root must be a mapping")
         _reject_v1(d)
-        schema_version = int(d.get("schema_version", CONFIG_SCHEMA_VERSION))
+        schema_version = _int(d.get("schema_version", CONFIG_SCHEMA_VERSION), "schema_version")
         if schema_version > CONFIG_SCHEMA_VERSION:
             raise ConfigError(
                 f"config schema_version {schema_version} is newer than this "
                 f"streamsnow ({CONFIG_SCHEMA_VERSION}); upgrade streamsnow."
             )
         runtime = validate_choice(str(d.get("runtime", "container")), RUNTIMES, "runtime")
-        snowflake = SnowflakeCfg.from_dict(dict(_require(d, "snowflake", "<root>")))
+        snowflake = SnowflakeCfg.from_dict(_require_mapping(d, "snowflake", "<root>"))
         if runtime == "container" and not (
             snowflake.objects.compute_pool and snowflake.objects.external_access_integration
         ):
@@ -627,16 +649,41 @@ class Config:
             )
         return cls(
             schema_version=schema_version,
-            project=ProjectCfg.from_dict(dict(_require(d, "project", "<root>"))),
+            project=ProjectCfg.from_dict(_require_mapping(d, "project", "<root>")),
             snowflake=snowflake,
             governance=GovernanceCfg.from_dict(
-                dict(_require(d, "governance", "<root>")), snowflake.objects.app_database
+                _require_mapping(d, "governance", "<root>"), snowflake.objects.app_database
             ),
             deploy=DeployCfg.from_dict(_mapping(d, "deploy")),
             runtime=runtime,
             sql_review=SqlReviewCfg.from_dict(_mapping(d, "sql_review")),
             raw=d,
         )
+
+
+def app_runtime(app_dir: Path, default: str) -> str:
+    """The runtime one app declares in its ``snowflake.yml``, else ``default``.
+
+    The repo's ``runtime:`` is only a default: an app may deviate, and its
+    ``snowflake.yml`` is where that choice lives (a ``runtime_name`` key means
+    container). Validation and deploy must read the same answer, or a
+    warehouse app in a container-default repo validates clean and then deploys
+    with container settings. A missing or unparseable file falls back to the
+    default rather than guessing.
+    """
+    yml = app_dir / "snowflake.yml"
+    if yml.is_file():
+        try:
+            data = yaml.safe_load(yml.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            return default
+        entities = data.get("entities") if isinstance(data, dict) else None
+        if isinstance(entities, dict) and entities:
+            for entity in entities.values():
+                if isinstance(entity, dict) and entity.get("runtime_name"):
+                    return "container"
+            return "warehouse"
+    return default
 
 
 def find_config(start: Path | None = None) -> Path | None:

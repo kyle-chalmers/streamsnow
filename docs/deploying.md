@@ -222,6 +222,10 @@ streamsnow deploy-sql <slug>                 # CREATE OR REPLACE STREAMLIT (stag
 streamsnow deploy-sql <slug> --sha <sha>     # pin a specific commit (stage-copy)
 ```
 
+The runtime comes from the app's own `snowflake.yml` (a `runtime_name` key means container),
+the same reading `validate-app` uses, so an app that differs from the repo's `runtime:` default
+deploys as itself.
+
 `streamsnow stage-path` prints the stage base path (`@DB.SCHEMA.STAGE`) the
 stage-copy upload targets, and `streamsnow stage-bundle --out <dir>` builds the
 per-app bundle that upload copies.

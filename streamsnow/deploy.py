@@ -32,6 +32,7 @@ from .app_data import SQL_KIND, is_plain_fqn, one_line
 from .config import (
     DEPLOY_SOURCES,
     GITHUB_AUTH_MODES,
+    RUNTIMES,
     SHARED_DATABASES,
     Config,
     ConfigError,
@@ -86,9 +87,18 @@ def _from_clause(cfg: Config, slug: str, sha: str) -> str:
     return f"FROM '@{repo}/branches/{branch}/apps/{slug}/'"
 
 
-def generate_create_sql(cfg: Config, slug: str, sha: str = "<sha>") -> str:
-    """The create/replace statement + container ALTER + live-version + grant."""
+def generate_create_sql(
+    cfg: Config, slug: str, sha: str = "<sha>", runtime: str | None = None
+) -> str:
+    """The create/replace statement + container ALTER + live-version + grant.
+
+    ``runtime`` is the app's own runtime (:func:`~streamsnow.config.app_runtime`);
+    ``None`` means the repo default. Keying the ALTER off the repo default alone
+    deployed a warehouse app in a container-default repo with container settings
+    after validation had passed it as warehouse.
+    """
     o = cfg.snowflake.objects
+    runtime = validate_choice(runtime or cfg.runtime, RUNTIMES, "runtime")
     fqn = streamlit_fqn(cfg, slug)
     lines = [
         f"CREATE OR REPLACE STREAMLIT {fqn}",
@@ -97,7 +107,13 @@ def generate_create_sql(cfg: Config, slug: str, sha: str = "<sha>") -> str:
         f"  QUERY_WAREHOUSE = {o.default_warehouse}",
         f"  TITLE = '{_title(slug)}';",
     ]
-    if cfg.runtime == "container":
+    if runtime == "container":
+        if not (o.compute_pool and o.external_access_integration):
+            raise ConfigError(
+                f"apps/{slug} uses the container runtime, which needs "
+                "snowflake.objects.compute_pool and "
+                "snowflake.objects.external_access_integration in streamsnow.config.yaml."
+            )
         lines.append(
             f"ALTER STREAMLIT {fqn} SET\n"
             f"  RUNTIME_NAME = '{o.runtime_name}'\n"

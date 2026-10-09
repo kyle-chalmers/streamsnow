@@ -106,6 +106,7 @@ import yaml
 
 from ..app_data import OBJECT_KINDS, SQL_KIND, ddl_kind, is_plain_fqn, load_app_data
 from ..config import (
+    CONFIG_FILENAME,
     CONFIG_SCHEMA_VERSION,
     DEFAULT_APP_DATA_SCHEMA,
     Config,
@@ -221,7 +222,21 @@ def worktree_identifiers(cfg, apps_dir: Path) -> dict[str, str]:
         # glob on a missing directory silently yields [] — and an empty live
         # map would let the --drop-sql live guard pass a DROP for a declared
         # app when the tool is run from the wrong cwd. "Cannot see the apps"
-        # must never read as "no apps exist".
+        # must never read as "no apps exist", unless the config file sits
+        # beside where apps/ would be (the repo root) AND git tracks no app
+        # manifest anywhere: git leaves no apps/ behind once the last app is
+        # deleted and tombstoned, but apps kept under another directory
+        # without --apps-dir are still live.
+        root = apps_dir.parent if apps_dir.is_absolute() else Path.cwd() / apps_dir.parent
+        if not apps_dir.exists() and (root / CONFIG_FILENAME).is_file():
+            try:
+                tracked = _git(["ls-files"]).splitlines()
+            except OSError as exc:  # no git binary: cannot prove there are no apps
+                raise ToolError(
+                    f"cannot list tracked files to confirm no apps remain: {exc}"
+                ) from exc
+            if not any(Path(name).name == "snowflake.yml" for name in tracked):
+                return {}
         raise ToolError(
             f"apps directory {apps_dir} not found from cwd {Path.cwd()} — run from "
             "the repo root (or pass --apps-dir)"

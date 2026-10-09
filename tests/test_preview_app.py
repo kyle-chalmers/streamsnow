@@ -331,6 +331,32 @@ def test_windows_owner_check_is_case_and_separator_blind(monkeypatch):
     assert preview_app._state_owns_pid(state)
 
 
+def test_shared_launcher_path_does_not_claim_another_apps_preview(monkeypatch):
+    """A reused PID now running a DIFFERENT app from the same venv's streamlit
+    must not read as ours: stop would kill it, start would report it running."""
+    monkeypatch.setattr(preview_app, "_WINDOWS", False)
+    monkeypatch.setattr(preview_app, "_pid_alive", lambda _pid: True)
+    monkeypatch.setattr(
+        preview_app,
+        "_process_command",
+        lambda _pid: "/repo/.venv/bin/streamlit run /repo/apps/acme-ops/streamlit_app.py",
+    )
+    state = {
+        "pid": 4242,
+        "entrypoint": "/repo/apps/acme-sales/streamlit_app.py",
+        "cmd": [
+            "/repo/.venv/bin/streamlit",
+            "run",
+            "/repo/apps/acme-sales/streamlit_app.py",
+            "--server.port",
+            "8501",
+        ],
+    }
+    assert not preview_app._state_owns_pid(state)
+    state["entrypoint"] = state["cmd"][2] = "/repo/apps/acme-ops/streamlit_app.py"
+    assert preview_app._state_owns_pid(state)
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows creation flags")
 def test_windows_launch_falls_back_when_the_job_forbids_breakaway(monkeypatch, tmp_path):
     calls = []
