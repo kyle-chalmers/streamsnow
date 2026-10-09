@@ -37,5 +37,6 @@ One connection store: `st.connection("snowflake")` reads the `snow` CLI's defaul
 connection locally, so the per-app `secrets.toml` is an optional override, not a
 second place to type the same values.
 
-Next: [Getting started](getting-started.md) walks the example app and your first preview, and
-the [CLI reference](cli-reference.md) lists every command.
+For the same setup one step at a time, with what each command checks, see
+[Getting started, Path C](getting-started.md#path-c--cli-only). The
+[CLI reference](cli-reference.md) lists every command.
