@@ -8,6 +8,18 @@ entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **README diagrams use the StreamSnow brand.** The skills, repos and CI key diagrams are
+  recolored to the logo's Snowflake blue, ice and coral on a deep navy canvas; layout and
+  wording are unchanged apart from the repos diagram's color legend. Each diagram
+  carries the StreamSnow logo in its top-right corner.
+- **README is easier to scan.** A Prerequisites table lists what you need and why; the CLI-only
+  setup moves to [docs/cli-only.md](docs/cli-only.md); the skills table and repository layout
+  sit right after the Claude Code quickstart, with Upgrading after them; and long passages
+  are tightened. The star-history chart is gone, and the ask to star the repo moves into
+  Feedback and community.
+
 ## [0.12.1] - 2026-10-08
 
 ### Fixed

@@ -38,16 +38,15 @@
   <sub>One real run, condensed: <code>/build-app</code>, <code>/review-app</code>, <code>/preview-app</code> and <code>/ship-app</code> in Claude, then CI checks, the merge and the deploy to Snowflake.</sub>
 </p>
 
-> **Quick start.** Open your coding agent (Claude Code, Codex, Cursor, Gemini CLI and
-> others) in the folder for your Snowflake apps and say:
+> **Quick start.** Check the [prerequisites](#prerequisites), then open your coding agent
+> (Claude Code, Codex, Cursor, Gemini CLI and others) in the folder for your Snowflake apps
+> and say:
 >
 > *"Read the install prompt in github.com/kyle-chalmers/streamsnow and follow it."*
 >
 > The agent installs StreamSnow and walks you through setup
-> ([what the prompt does](#install-with-your-coding-agent)). To do it by hand in Claude Code,
-> run `claude plugin marketplace add --scope project kyle-chalmers/streamsnow` and
-> `claude plugin install --scope project streamsnow@streamsnow`, then type `/onboard`
-> (run `/reload-plugins` first only if `/onboard` isn't listed). No agent? `uvx streamsnow init`.
+> ([what the prompt does](#install-with-your-coding-agent)). To type the steps yourself, see
+> [Quickstart](#quickstart).
 
 > **Status: beta, functional.** The CLI and the Claude Code plugin are CI-green for
 > both runtimes and both deploy sources, and published on PyPI. APIs may still evolve
@@ -85,12 +84,26 @@ understand it, and act on it without a walkthrough.**
 - ❌ your dashboards are for people without Snowflake logins, out of the box
   (possible with customization)
 
-**Prerequisites:** a Snowflake account, an AI coding agent, and either knowing
-or being a Snowflake administrator (the one-time setup is in
-[Deploy setup](docs/deploy-setup.md)).
-
 **Principles:** every change is judged against [nine principles](docs/principles.md),
 from *one implementation, many consumers* to *design is a default, not a gate*.
+
+## Prerequisites
+
+| You need | What it's for |
+|---|---|
+| A Snowflake account | Where the apps run, on the container runtime (default) or the warehouse runtime |
+| You or your Snowflake admin, once | Runs the admin script that creates the roles, CI user and grants, as `SYSADMIN`, `USERADMIN`, `SECURITYADMIN` and `ACCOUNTADMIN` ([Deploy setup](docs/deploy-setup.md)) |
+| A GitHub repository for your apps | GitHub Actions runs the checks on every pull request and deploys on merge |
+| Claude Code (recommended) or another coding agent | Runs the skills. Claude Code and Codex are the two tested |
+| Python 3.11+, `uv` and `git` | The `streamsnow` CLI and its checks |
+| The Snowflake CLI (`snow`) | Your local connection for setup and preview; sign-in happens in your browser |
+| The GitHub CLI (`gh`) | Sets the deploy secrets and opens pull requests from `/ship-app` |
+| `pre-commit` | Runs the same checks on every commit |
+| Node.js 20+ (optional) | The browser walkthroughs of your app; without it they are skipped |
+
+You don't have to install the command-line tools first: `/onboard` checks for them and
+installs what is missing after one approval, and `uvx streamsnow doctor` lists what is
+missing at any time.
 
 ## What Claude can and can't see
 
@@ -129,10 +142,8 @@ detail is in [SECURITY.md](SECURITY.md#how-streamsnow-handles-secrets).
 
 ## Install with your coding agent
 
-Point any coding agent (Claude Code, Codex, Cursor, Gemini CLI, and others) at
-this repo and say: *"Read the install prompt in
-github.com/kyle-chalmers/streamsnow and follow it."* Or paste the prompt in
-yourself:
+This is the prompt the Quick start line at the top points your agent at. You can also paste
+it in yourself:
 
 <details>
 <summary><b>Show the install prompt</b></summary>
@@ -206,14 +217,13 @@ PNG with [scripts/readme_media](scripts/readme_media/README.md).
 
 StreamSnow is a **hybrid** of two things that work together:
 
-1. **A `streamsnow` CLI** (PyPI) — scaffolds a governed Streamlit-in-Snowflake
-   monorepo, runs an interactive setup wizard, renders the CI, pre-commit
-   hooks and branding your repo needs, and runs the governance checks (from the
-   installed package, so your repo carries no copied tool code).
-2. **A Claude Code plugin** (marketplace) — ships the skills and
-   hooks that turn Claude Code into a domain expert for this stack:
-   `/build-app` (the front door), `/preview-app`, `/validate-app`,
-   `/review-app`, `/ship-app`, and more.
+1. **A `streamsnow` CLI** (PyPI) scaffolds a governed Streamlit-in-Snowflake
+   monorepo, runs the setup wizard, renders the CI, pre-commit hooks and branding
+   your repo needs, and runs the governance checks from the installed package, so
+   your repo carries no copied tool code.
+2. **A Claude Code plugin** (marketplace) ships the skills and hooks that turn
+   Claude Code into a domain expert for this stack: `/build-app` (the front door),
+   `/preview-app`, `/validate-app`, `/review-app`, `/ship-app`, and more.
 
 Think **a Claude Code skill pack fused with an installable system + setup**.
 The CLI gives you the substrate; the plugin gives Claude the playbook. A single
@@ -225,8 +235,8 @@ Building Streamlit apps on Snowflake well means getting a hundred small things
 right: caching with TTLs, parameterized SQL that survives the deployed Go
 driver, runtime selection (container vs. warehouse), schema access guardrails,
 a deploy pipeline, branding, and review discipline. StreamSnow encodes those as
-**executable guardrails** — pre-commit + CI gates, scaffolding templates, and
-Claude Code skills — so every developer (and every Claude session) follows the
+**executable guardrails** (pre-commit and CI gates, scaffolding templates, and
+Claude Code skills), so every developer and every Claude session follows the
 same rules and ships safely.
 
 ## Without StreamSnow / with StreamSnow
@@ -250,18 +260,14 @@ StreamSnow treats two axes as first-class, configurable options:
 
 | Axis | Options |
 |------|---------|
-| **Runtime** | **Container** (default — GA since March 2026, full PyPI, local preview matches deploy) or **Warehouse** (instant start, Anaconda channel, no compute-pool cost). Snowflake's own comparison: [runtime environments](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/runtime-environments) |
+| **Runtime** | **Container** (default; GA since March 2026, full PyPI, local preview matches deploy) or **Warehouse** (instant start, Anaconda channel, no compute-pool cost). Snowflake's own comparison: [runtime environments](https://docs.snowflake.com/en/developer-guide/streamlit/app-development/runtime-environments) |
 | **Deploy source** | **Stage-copy** (default: CI uploads to an internal stage) or **Snowflake `GIT REPOSITORY`** (Snowflake pulls from your Git repo; see [Switching to Git repository](docs/git-repository.md)) |
 
 ## Quickstart
 
-The easiest start: open your coding agent in your apps folder and say *"Read the install
-prompt in github.com/kyle-chalmers/streamsnow and follow it."* It runs the steps below for
-you ([the prompt](#install-with-your-coding-agent)).
-
-To do it yourself, there are two lanes; pick the one that matches how you work. Both end at
-the same governed repo, and both need Python 3.11+, `uv`, and `git` (`uvx streamsnow doctor`
-tells you what is missing).
+Check the [prerequisites](#prerequisites) first. Then pick a lane: Claude Code, below, or
+the CLI on its own ([CLI only](docs/cli-only.md)). Both end at the same governed repo. To have
+your agent run these steps for you, use the [install prompt](#install-with-your-coding-agent).
 
 ### With Claude Code (recommended)
 
@@ -279,71 +285,85 @@ Then, in a Claude Code session in that repo, start setup:
 /onboard
 ```
 
-The plugin's skills are normally available straight away, even in a session that was
-already open. If `/onboard` isn't listed, run `/reload-plugins` (no restart needed) and
-try again. StreamSnow's one-line session-start message first appears in your next session.
+The skills are normally available straight away, even in a session that was already open. If
+`/onboard` isn't listed, run `/reload-plugins` (no restart needed) and try again.
+StreamSnow's one-line session-start message first appears in your next session.
 
-`/onboard` gets your machine, repo and Snowflake account ready, in four stages,
-and says what it is doing at every step:
+`/onboard` gets your machine, repo and Snowflake account ready in four stages, and says
+what it is doing at every step:
 
 1. **Check and prepare.** It works out what is already set up, reads your
    Snowflake account with read-only queries over whatever access you have (a
    `snow` connection, a Snowflake MCP server, a dbt profile), and installs any
    missing tools after one approval.
-2. **One round of questions.** Clickable choices, each explained first: the
-   setup answers (runtime, sources, app-data schema, deploy source, and the
-   schemas apps may not query), the defaults the wizard does not ask about, your git name if it is missing, and who runs the
-   Snowflake admin script, which it describes before asking, plus which of
-   your Snowflake roles can open the apps.
+2. **One round of questions.** Clickable choices, each explained first: runtime,
+   sources, app-data schema, deploy source, the schemas apps may not query, the
+   defaults the wizard does not ask about, your git name if it is missing, who runs
+   the Snowflake admin script (described before it asks), and which of your
+   Snowflake roles can open the apps.
 3. **Build.** The config and the governed repo files (`AGENTS.md`, `CLAUDE.md`,
    pre-commit hooks, CI, `.gitignore`, README), only after you confirm.
 4. **Finish.** The CI key, the admin script (copied for you to run in
    Snowsight, or written up for your admin), and the deploy secrets.
 
 It ends "ready to build and preview" (next: `/build-app`) or "ready to deploy".
-Your part: approve installs, answer one round of questions, approve sign-ins in
-your browser, and run the admin script in Snowsight if you are the admin. In a
-repo that already has Streamlit apps it maps onto them and writes a
-`MIGRATION.md`, never scaffolding over you. Re-run `/onboard` any time to check.
+Your part: approve installs, answer one round of questions, approve sign-ins in your
+browser, and run the admin script in Snowsight if you are the admin. In a repo that
+already has Streamlit apps it maps onto them and writes a `MIGRATION.md` instead of
+scaffolding over them. Re-run `/onboard` any time to check.
 
-### CLI only
+## The skills
 
-```bash
-uv tool install streamsnow           # persistent `streamsnow` on your PATH
-mkdir my-snowflake-apps && cd my-snowflake-apps
-streamsnow init                      # setup wizard (every answer prefilled), then a governed scaffold
-# or skip the prompts: streamsnow init --runtime warehouse --account <locator> \
-#   --sources ANALYTICS.MARTS,ANALYTICS.REPORTING \
-#   --app-data STREAMSNOW_APPS.STREAMSNOW_REPORTING --deploy-source stage-copy
-snow connection add --connection-name <name> --account <locator> \
-  --user <you> --authenticator externalbrowser --default   # init prints the exact command
-uv tool install pre-commit && pre-commit install
-streamsnow validate-app example-dashboard   # FAILS on the starter placeholders until you replace them
-uv venv --python 3.11 && uv pip install -e apps/example-dashboard   # container runtime
-streamsnow preview example-dashboard
+One front door plus focused verbs. Each skill's `SKILL.md` stays under 80 lines, with
+depth in per-skill reference files:
+
+| Skill | What it does |
+|---|---|
+| `/onboard` | Machine, repo and Snowflake setup in four stages; detects what is done and does only what is missing. Also adopts repos that already have apps (maps onto them, writes `MIGRATION.md`) |
+| `/build-app` | The front door for apps: spec (incl. backfill from existing source) → data discovery → page design → scaffold → pages built in parallel by subagents → review → ship, with checkpoints. `--feedback` turns feedback on a live app into classified fixes built the same way. Hands off to `/onboard` if the machine or repo isn't set up |
+| `/preview-app` | Run an app locally against live Snowflake |
+| `/validate-app` | The pass/fail check that must be clean before shipping |
+| `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` runs `/sql-review` |
+| `/sql-review` | Proves an app's numbers against live Snowflake: page files, objects, grants and drift, every section run as aggregates, reviewer agents with a verifier, and a committed review log a person signs |
+| `/ship-app` | Validate-gated stage → commit → push → PR → watch CI. You type it; the agent cannot start it, and it never merges |
+| `/migrate-app` | Port an external Streamlit app in: lift it, then conform it through `/build-app`'s phases |
+
+## How it's organized
+
+<details>
+<summary><b>Show the repository layout</b></summary>
+
+```
+streamsnow/            the PyPI package: CLI, config, policy, scaffolder, tools
+  ├── cli.py           every command (see docs/cli-reference.md)
+  ├── config.py        typed + validated streamsnow.config.yaml model
+  ├── policy.py        schema allow/deny single source of truth
+  ├── scaffolder.py    renders a governed repo from config
+  ├── deploy.py        deploy-setup and deploy-sql
+  ├── app_data.py      app-data objects: checks, order, objects-sql
+  ├── verify.py        verify-deploy
+  ├── ci_key.py        ci-key create / push
+  ├── agent_skills.py  agent-skills (Codex and other agents)
+  ├── _templates/      the Jinja scaffold templates (repo/ + app/)
+  └── tools/           governance checks + engines (schema refs, security,
+                       caching, dependency vulns, tombstones, path leaks,
+                       sql_review generator, review gate/loop, migrate, preview)
+.claude-plugin/        Claude Code plugin manifest + marketplace
+skills/  hooks/        Claude Code plugin surface (8 skills, incl. onboard/; hooks)
+docs/  examples/       guides + a runnable no-Snowflake example app
+scripts/               maintainer tools (docs link check, README media)
 ```
 
-<p align="center">
-  <img alt="Terminal: streamsnow init scaffolds the repo, then validate-app reports PASS for every check except placeholders, which fails until the starter query is replaced." src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/demo-terminal.svg" width="100%">
-</p>
+</details>
 
-`validate-app` fails on purpose until you repoint the starter query
-(`queries/example_metric.sql`) and the review window in `sql_review/index.yaml`
-at your own table and replace the sample numbers in `pages/overview.py`; every
-other check passing is what proves the scaffold is whole.
+The `streamsnow` Python package is the **single source of truth** for tool
+logic: the CLI, the Claude Code plugin, pre-commit, and CI all call the same
+code: one implementation, many consumers.
 
-On the warehouse runtime an app has `environment.yml` instead of `pyproject.toml`,
-so install its packages directly (`init` and `streamsnow preview` print the exact
-line).
-
-One connection store: `st.connection("snowflake")` reads the `snow` CLI's default
-connection locally, so the per-app `secrets.toml` is an optional override, not a
-second place to type the same values.
-
-### Upgrading
+## Upgrading
 
 The two halves upgrade separately, and the plugin half does **not** pick up
-hook or skill changes on its own — an installed copy stays at the version it
+hook or skill changes on its own: an installed copy stays at the version it
 was installed at until you reinstall it.
 
 ```bash
@@ -366,7 +386,10 @@ Generated CI and deploy workflows pin `streamsnow>=0.12.0,<0.13`; bump the pin w
 Refresh a stale `review.py` with `streamsnow sql-review helper <slug> --apply` (a dry run
 without `--apply`; `--force` as well when it reports `modified`).
 
-Two small template fixes reach new repos only, so an existing repo makes them by hand:
+<details>
+<summary><b>Two template fixes an existing repo makes by hand</b></summary>
+
+These reach new repos only.
 
 - In `apps/<slug>/pages/_glossary.py`, change the last line of `hover_definition` from
   `return metric_help(key).replace("%", "%%")` to `return metric_help(key)`.
@@ -382,26 +405,12 @@ Two small template fixes reach new repos only, so an existing repo makes them by
   # tokens first, so the same files lint cleanly there.
   ```
 
+</details>
+
 A plugin update does not apply to a session that is already running: restart the
 session (or run `/reload-plugins`) before relying on the new skill text.
 
-`claude plugin details streamsnow@streamsnow` lists the 8 skills below.
-
-## The skills
-
-One front door plus focused verbs — each skill's `SKILL.md` stays under 80
-lines, with depth in per-skill reference files:
-
-| Skill | What it does |
-|---|---|
-| `/onboard` | Machine, repo and Snowflake setup in four stages; detects what is done and does only what is missing. Also adopts repos that already have apps (maps onto them, writes `MIGRATION.md`) |
-| `/build-app` | The front door for apps: spec (incl. backfill from existing source) → data discovery → page design → scaffold → pages built in parallel by subagents → review → ship, with checkpoints. `--feedback` turns feedback on a live app into classified fixes built the same way. Hands off to `/onboard` if the machine or repo isn't set up |
-| `/preview-app` | Run an app locally against live Snowflake |
-| `/validate-app` | The pass/fail check that must be clean before shipping |
-| `/review-app` | Senior-reviewer-grade review; `--fix` applies findings, `--auto` loops to clean (executable loop primitives + per-change coverage stamping), `--sql` runs `/sql-review` |
-| `/sql-review` | Proves an app's numbers against live Snowflake: page files, objects, grants and drift, every section run as aggregates, reviewer agents with a verifier, and a committed review log a person signs |
-| `/ship-app` | Validate-gated stage → commit → push → PR → watch CI. You type it; the agent cannot start it, and it never merges |
-| `/migrate-app` | Port an external Streamlit app in: lift it, then conform it through `/build-app`'s phases |
+`claude plugin details streamsnow@streamsnow` lists the 8 skills above.
 
 ## Use with other agents
 
@@ -457,22 +466,27 @@ to overwrite an edited skill without `--force`.
 
 </details>
 
-## SQL review (redesigned in 0.8)
+## SQL review
 
 Every page of an app gets **SQL a person can run**: `apps/<slug>/sql_review/NN_<page>.sql`,
-one section per metric in on-screen order, each runnable on its own (cursor + Cmd/Ctrl+Enter in
-DataGrip, or pasted into Snowsight) with its review window in its own `params` CTE. The files are
-generated from `sql_review/index.yaml`, which lists each page's metrics and the app query behind
-each, and verified by an import-free gate (`streamsnow sql-review check`): provenance digests,
-the `review_value("<key>", value)` markers that tie each visual in page code to its section,
-sqlfluff lint and comment rules for the app's queries, and a folder of maintained DDL
-(`app_specific_reporting_objects/`) for views built just for the app. Drift, hand edits, marker
-mismatches and lint always fail the gate; whether an *uncovered* page or query fails or warns is
-your repo's call — `sql_review: {coverage: warn | fail}` in `streamsnow.config.yaml` (default
-`warn`, so an adopting fleet backfills on its own schedule). A person with nothing but a SQL editor
-can trace a covered visual back to the data and confirm it — see
-**[Auditing a visual](docs/auditing-a-visual.md)**. 0.8.0 replaced the 0.6/0.7 manifest format with
-no automatic migration (the same page has the upgrade steps).
+one section per metric in on-screen order. Each section runs on its own (cursor +
+Cmd/Ctrl+Enter in DataGrip, or pasted into Snowsight), with its review window in its own
+`params` CTE.
+
+- **Generated** from `sql_review/index.yaml`, which lists each page's metrics and the app
+  query behind each.
+- **Verified** by an import-free gate, `streamsnow sql-review check`: provenance digests, the
+  `review_value("<key>", value)` markers that tie each visual in page code to its section,
+  sqlfluff lint and comment rules for the app's queries, and a folder of maintained DDL
+  (`app_specific_reporting_objects/`) for views built just for the app.
+- **Strict on drift.** Drift, hand edits, marker mismatches and lint always fail the gate.
+  Whether an *uncovered* page or query fails or warns is your repo's call:
+  `sql_review: {coverage: warn | fail}` in `streamsnow.config.yaml` (default `warn`, so an
+  adopting fleet backfills on its own schedule).
+
+A person with nothing but a SQL editor can trace a covered visual back to the data and confirm
+it; see **[Auditing a visual](docs/auditing-a-visual.md)**. 0.8.0 replaced the 0.6/0.7 manifest
+format with no automatic migration (the same page has the upgrade steps).
 
 **`/sql-review <slug>`** is the live review. `streamsnow sql-review probe` and `run` check every
 object, grant and DDL file and run every section against Snowflake as aggregates (row counts,
@@ -485,7 +499,7 @@ block for a person. `bench` proves an optimization returns the same result befor
 
 The skills are generic procedures; your org's knowledge layers on top without
 forking them. Commit `.streamsnow/overlays/<skill>.md` files and every skill
-reads its overlay first — extra steps, local failure signatures, environment
+reads its overlay first: extra steps, local failure signatures, environment
 specifics, explicit overrides. Plugin upgrades never touch them; overlays may not
 skip mandatory gate invocations, and the coded gates (hooks, CI, pre-commit)
 run outside skill prose entirely. See
@@ -501,16 +515,16 @@ which denies rather than asks, and denies even if it hits an error on a call tha
 
 | Event | Script | What it does |
 |---|---|---|
-| PreToolUse (Bash, PowerShell) | `hooks/deploy_safety.py` | Pauses before destructive Streamlit/SQL commands (`snow streamlit deploy/drop`, `CREATE OR REPLACE / DROP / ALTER STREAMLIT`, stage `REMOVE`, destructive SQL incl. `-f` files / stdin) — `/ship-app` is the sanctioned deploy path |
+| PreToolUse (Bash, PowerShell) | `hooks/deploy_safety.py` | Pauses before destructive Streamlit/SQL commands (`snow streamlit deploy/drop`, `CREATE OR REPLACE / DROP / ALTER STREAMLIT`, stage `REMOVE`, destructive SQL incl. `-f` files / stdin); `/ship-app` is the sanctioned deploy path |
 | PreToolUse (shell, file and search tools) | `hooks/secret_guard.py` | Denies any tool call that names the CI key directory (`~/.streamsnow-ci`) or key file, apart from `streamsnow ci-key ...` and `streamsnow deploy-setup ...`. Covers the shell (Bash, PowerShell), file and search tools. Not repo-gated, because the key is sensitive in any repo. See [What Claude can and can't see](#what-claude-can-and-cant-see) |
 | SessionStart | `hooks/session_start.sh` | One line inside a StreamSnow repo (plugin version, skills, which guards are active, and a nudge when this clone has no pre-commit hook); a one-line `/onboard` nudge in a repo that has Streamlit apps or the plugin enabled but no config; silence everywhere else |
-| Stop | `hooks/review_gate_stop.py` | Warn-only nudge (a `systemMessage`, never a turn continuation) when a substantive app change ends with no review covering it — points at `/review-app <slug> --auto`. Off-switches: `REVIEW_GATE_OFF=1`, `apps/<slug>/.review/SKIP`, or `review_gate: {enabled: false}` in config |
+| Stop | `hooks/review_gate_stop.py` | Warn-only nudge (a `systemMessage`, never a turn continuation) when a substantive app change ends with no review covering it, pointing at `/review-app <slug> --auto`. Off-switches: `REVIEW_GATE_OFF=1`, `apps/<slug>/.review/SKIP`, or `review_gate: {enabled: false}` in config |
 
 All hooks except the key guard are repo-gated on `streamsnow.config.yaml` (zero cost in unrelated repos; the
 SessionStart `/onboard` nudge above is the one line that also appears in a repo without a config) and
 declare explicit timeouts so a hung hook can never stall a session. To turn them off, disable
 the plugin (`claude plugin disable streamsnow`). Hook additions do not reach installed copies
-automatically — see [Upgrading](#upgrading).
+automatically; see [Upgrading](#upgrading).
 
 ### The browser tool
 
@@ -522,68 +536,38 @@ pinned package from npm the first time, and the CLI downloads its own browser on
 Node.js 20+; without Node the walkthroughs are skipped and everything else works.
 `streamsnow doctor` checks Node, and `/onboard` downloads the CLI and its browser ahead of time.
 
-## How it's organized
-
-<details>
-<summary><b>Show the repository layout</b></summary>
-
-```
-streamsnow/            the PyPI package — CLI, config, policy, scaffolder, tools
-  ├── cli.py           every command (see docs/cli-reference.md)
-  ├── config.py        typed + validated streamsnow.config.yaml model
-  ├── policy.py        schema allow/deny single source of truth
-  ├── scaffolder.py    renders a governed repo from config
-  ├── deploy.py        deploy-setup and deploy-sql
-  ├── app_data.py      app-data objects: checks, order, objects-sql
-  ├── verify.py        verify-deploy
-  ├── ci_key.py        ci-key create / push
-  ├── agent_skills.py  agent-skills (Codex and other agents)
-  ├── _templates/      the Jinja scaffold templates (repo/ + app/)
-  └── tools/           governance checks + engines (schema refs, security,
-                       caching, dependency vulns, tombstones, path leaks,
-                       sql_review generator, review gate/loop, migrate, preview)
-.claude-plugin/        Claude Code plugin manifest + marketplace
-skills/  hooks/        Claude Code plugin surface (8 skills, incl. onboard/; hooks)
-docs/  examples/       guides + a runnable no-Snowflake example app
-scripts/               maintainer tools (docs link check, README media)
-```
-
-</details>
-
-The `streamsnow` Python package is the **single source of truth** for tool
-logic: the CLI, the Claude Code plugin, pre-commit, and CI all call the same
-code — one implementation, many consumers.
-
 ## Documentation
 
-- **[Getting started](docs/getting-started.md)** — run the example with no
+- **[Getting started](docs/getting-started.md)**: run the example with no
   Snowflake, then scaffold and preview your own governed app.
-- **[CLI reference](docs/cli-reference.md)** — every command, flag and check,
+- **[CLI only](docs/cli-only.md)**: set up and preview from the terminal, without Claude
+  Code.
+- **[CLI reference](docs/cli-reference.md)**: every command, flag and check,
   with exit codes and JSON output.
-- **[Principles](docs/principles.md)** — the nine rules every change is judged
+- **[Principles](docs/principles.md)**: the nine rules every change is judged
   against, and where each one shows up.
-- **[Data discovery](docs/data-discovery.md)** — find tables and wire queries
+- **[Data discovery](docs/data-discovery.md)**: find tables and wire queries
   inside the schema-access guardrails.
-- **[Deploying](docs/deploying.md)** — ship apps to Snowflake on merge, for both
+- **[Deploying](docs/deploying.md)**: ship apps to Snowflake on merge, for both
   deploy sources.
-- **[Deploy setup](docs/deploy-setup.md)** — the one-time Snowflake objects and
+- **[Deploy setup](docs/deploy-setup.md)**: the one-time Snowflake objects and
   CI secrets the pipeline needs.
 - **[Switching to Git repository](docs/git-repository.md)**: when to deploy
   from a Snowflake `GIT REPOSITORY` instead of a stage, and how to switch.
-- **[Auditing a visual](docs/auditing-a-visual.md)** — the five-minute runbook
+- **[Auditing a visual](docs/auditing-a-visual.md)**: the five-minute runbook
   for confirming any dashboard number against the warehouse, no code required.
-- **[Production lessons](docs/production-lessons.md)** — the incidents behind
+- **[Production lessons](docs/production-lessons.md)**: the incidents behind
   the guardrails, genericized.
-- **[Troubleshooting](docs/troubleshooting.md)** — numbered symptom / cause /
+- **[Troubleshooting](docs/troubleshooting.md)**: numbered symptom / cause /
   fix entries for the first-run and deploy failures people actually hit.
-- **[Official Snowflake docs, by topic](docs/snowflake-docs.md)** — every
+- **[Official Snowflake docs, by topic](docs/snowflake-docs.md)**: every
   external docs link the toolkit relies on, with scope, retrieved date, and
   where StreamSnow deliberately differs.
-- **[Distribution](docs/distribution.md)** — how StreamSnow ships (PyPI CLI +
+- **[Distribution](docs/distribution.md)**: how StreamSnow ships (PyPI CLI +
   plugin) and why there's no separate copy-paste kit.
-- **[Migrating a consumer repo](docs/migrating-a-consumer-repo.md)** — bring a
+- **[Migrating a consumer repo](docs/migrating-a-consumer-repo.md)**: bring a
   repo with home-grown skills onto the plugin (skill map + incremental path).
-- **[Versioning and stability](docs/versioning.md)** — what counts as a breaking
+- **[Versioning and stability](docs/versioning.md)**: what counts as a breaking
   change, the deprecation policy, and the path to 1.0.
 
 ## Feedback and community
@@ -597,19 +581,9 @@ code — one implementation, many consumers.
   contribution policy. Everyone agrees to the [Code of Conduct](CODE_OF_CONDUCT.md).
 - **Security:** report privately, per [SECURITY.md](SECURITY.md).
 
-## Star history
-
 If StreamSnow saves you a production incident (or a week of dragging boxes around a
 BI tool), ⭐ **star the repo** so you can find it again when you ship your next app,
 and so other data teams can find it too.
-
-<a href="https://www.star-history.com/#kyle-chalmers/streamsnow&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=kyle-chalmers/streamsnow&type=Date&theme=dark">
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=kyle-chalmers/streamsnow&type=Date">
-    <img alt="Star history of kyle-chalmers/streamsnow" src="https://api.star-history.com/svg?repos=kyle-chalmers/streamsnow&type=Date" width="600">
-  </picture>
-</a>
 
 ## License
 

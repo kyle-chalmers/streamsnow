@@ -184,6 +184,9 @@ says `CLI not on PATH`, re-open your shell (or run the install it names).
 
 ## Path C — CLI only
 
+The short version of this path, as one block of commands, is [CLI only](cli-only.md).
+The steps below walk the same commands one at a time, with what each one checks.
+
 ### 1. Check your machine
 
 ```bash
