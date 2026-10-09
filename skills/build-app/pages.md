@@ -16,8 +16,9 @@ The orchestrator builds every §4 page at once and owns every file pages share; 
    `st.navigation` in §4 order (About stays last); add `index_entry` under `pages:`; add
    `glossary_entries` to `pages/_glossary.py`; resolve `data_requests` by adding the loader to
    `pages/_data.py` and re-dispatching the pages that asked. Turn on the global filters in
-   `streamlit_app.py` (step 5 below) before the first page that reads `current_filters()` runs,
-   and add any global filter a builder requested to `sidebar_filters`.
+   `streamlit_app.py` before the first page that reads `current_filters()` runs, as the one-page
+   build's step 5 (**Register the page**) says, and add any global filter a builder requested to
+   `sidebar_filters`.
 4. **Generate once:** `streamsnow sql-review generate <slug>`, then `streamsnow sql-review check
    <slug>` and the page-builder brief's five `check` commands. Fix shared files yourself; send page
    findings back to that page's builder in `fix` mode.

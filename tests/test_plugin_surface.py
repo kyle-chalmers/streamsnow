@@ -399,6 +399,8 @@ def test_walkthrough_screenshots_the_whole_page_from_its_top():
     walk = _flat(recipe[recipe.index("## Steps") : recipe.index("## Output contract")])
     assert "screenshot --full-page" not in recipe
     assert "e.scrollTop = 0" in walk and "setViewportSize" in walk
+    # Only the full-height container sets the growth: a table's grid scroller spans all its rows.
+    assert "window.innerHeight" in walk
     assert walk.index("data-test-script-state=notRunning") < walk.index("P S screenshot")
 
 

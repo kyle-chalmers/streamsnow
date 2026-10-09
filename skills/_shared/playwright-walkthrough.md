@@ -53,8 +53,10 @@ session names are machine-wide, and `open` on a name already in use closes that 
    - Screenshot. Streamlit scrolls the page inside its own container, so `--full-page` captures
      the window, not the page: a page taller than the window loses its bottom, and a container
      left scrolled shows the middle. Reset every inner scroll to the top and grow the window by
-     what still overflows, then capture the viewport and restore the window for the next page:
-     `P S run-code "async page => { const extra = await page.evaluate(() => { let extra = 0; for (const e of document.querySelectorAll('*')) { if (!/auto|scroll/.test(getComputedStyle(e).overflowY)) continue; e.scrollTop = 0; extra = Math.max(extra, e.scrollHeight - e.clientHeight); } return extra; }); const v = page.viewportSize(); await page.setViewportSize({ width: v.width, height: v.height + extra }); await page.waitForTimeout(500); }"`,
+     what the page's full-height container still overflows (not a table's own scroller, whose
+     height covers all its rows), up to 16000 px, then capture the viewport and restore the window
+     for the next page:
+     `P S run-code "async page => { const extra = await page.evaluate(() => { let extra = 0; for (const e of document.querySelectorAll('*')) { if (!/auto|scroll/.test(getComputedStyle(e).overflowY)) continue; e.scrollTop = 0; if (e.clientHeight >= window.innerHeight * 0.9) extra = Math.max(extra, e.scrollHeight - e.clientHeight); } return extra; }); const v = page.viewportSize(); await page.setViewportSize({ width: v.width, height: Math.min(v.height + extra, 16000) }); await page.waitForTimeout(500); }"`,
      then `P S screenshot --filename=D/<page-stem>.png`, then `P S resize 1280 4000`.
    - Console: `P S console error > D/<page-stem>-console.log`, then `P S console --clear`, so each
      page's errors stay with that page. Read the log; record `error`-level entries with the page
