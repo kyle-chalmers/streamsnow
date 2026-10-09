@@ -2,15 +2,15 @@
 
 Scripts that produce the images the top-level README and the GitHub social preview use.
 They are maintainer tools, not part of the `streamsnow` package, and they are not run in
-CI. Every image is regenerated from real sources (the real CLI, the real sample dashboard,
-the hand-authored logo), so rerun them when the CLI output or the dashboard changes.
+CI. Every image is regenerated from real sources (the real CLI, a real end-to-end run, the
+hand-authored logo), so rerun them when the CLI output or a skill's output changes.
 
 | Output (in `docs/images/`) | Produced by | Source |
 | --- | --- | --- |
 | `logo-light.svg`, `logo-dark.svg` | hand-authored, no script | the SVGs themselves |
 | `social-preview.png` (1280x640) | `render_social.py` | `social_preview.html` |
 | `demo-terminal.svg` | `render_terminal.py` | the real offline CLI flow |
-| `demo.gif` | `render_gif.py` | the same CLI flow plus `examples/sample-dashboard` |
+| `demo.gif` | `render_gif.py` + `claude_flow.py` | a real Claude run, with its app screenshots in `assets/sales-performance/` |
 | `skills-flow.png`, `repos-flow.png`, `secrets-flow.png` | `export_excalidraw.py` | the `.excalidraw` file next to each PNG |
 
 ## The logo
@@ -25,9 +25,8 @@ switch between them with a `<picture>` element and `prefers-color-scheme`.
 
 ## Regenerate
 
-Run from the repo root after `uv sync --extra dev`. Playwright, Streamlit, pandas and
-Plotly are pulled in for the one run with `uv run --with`, so nothing is added to
-`pyproject.toml`.
+Run from the repo root after `uv sync --extra dev`. Playwright is pulled in for the one run
+with `uv run --with`, so nothing is added to `pyproject.toml`.
 
 ```bash
 # Terminal transcript SVG: only the dev environment is needed.
@@ -37,8 +36,7 @@ uv run python scripts/readme_media/render_terminal.py
 uv run --with playwright python scripts/readme_media/render_social.py
 
 # Demo GIF: needs ffmpeg on PATH as well.
-uv run --with playwright --with streamlit --with "pandas>=2,<3" --with "plotly>=5,<6" \
-    python scripts/readme_media/render_gif.py
+uv run --with playwright python scripts/readme_media/render_gif.py
 
 # Diagram PNGs, after editing the .excalidraw JSON (at excalidraw.com or by hand).
 uv run --with playwright --with pillow python scripts/readme_media/export_excalidraw.py \
@@ -64,12 +62,19 @@ What each script does:
   write an SVG that still contains a home or temp path.
 - `render_social.py` screenshots `social_preview.html` at 1280x640. Upload the PNG under
   the repository's Settings, General, Social preview.
-- `render_gif.py` replays the same transcript as typed commands in a dark terminal scene,
-  then starts `examples/sample-dashboard` with Streamlit on a free local port, screenshots
-  its Overview and Trends pages (with a chart hover on each), and stitches title card,
-  terminal, dashboard and end card into a looping 960x600 GIF at 10 fps with an ffmpeg
-  palette (about 28 seconds, about 1.5 MB). Pass `--work DIR` to keep the frames,
-  `--width` to scale, or `--skip-dashboard` for the terminal part only.
+- `render_gif.py` plays the StreamSnow journey in a Claude desktop chat: `/build-app` (with
+  its checkpoints and subagents), `/review-app`, `/preview-app` (the app in a local browser
+  window) and `/ship-app`, then the pull request's checks, the merge, the deploy run's steps,
+  and the app live in a Snowsight frame. It stitches title card, scenes and end card into a
+  looping 960x600 GIF at 10 fps with an ffmpeg palette (about 48 seconds, about 1.3 MB).
+  Pass `--work DIR` to keep the frames, or `--width` to scale.
+- `claude_flow.py` holds those scenes and their words. The words are condensed from one real
+  end-to-end run over the TPC-H sample (`SNOWFLAKE_SAMPLE_DATA.TPCH_SF1`), with account, user
+  and repository names replaced by the fictional `acme-analytics` ones; the app pictures in
+  `assets/sales-performance/` are that run's preview screenshots, cropped and quantized. Edit
+  the `STEPS` list when a skill's output changes. Every scene passes `check_clean()`, which
+  refuses home paths, Snowflake account URLs and email addresses outside `example.com`.
+  Replacing a screenshot means checking it by eye for account names, hostnames and emails.
 - `export_excalidraw.py` renders each `.excalidraw` file to a PNG beside it with
   Excalidraw's own exporter (`@excalidraw/utils`) in headless Chromium at 2x, in the
   diagrams' Space Grotesk face. It downloads the library from jsDelivr; where that is
@@ -78,9 +83,10 @@ What each script does:
 
 ## Record the full Claude Code to Snowflake demo
 
-The offline GIF stops where Snowflake starts. A recording of the whole path (an idea typed
-into Claude Code, the governed app it builds, the pull request, and the live app in
-Snowsight) is the stronger demo, and it needs a real account, so it is recorded by hand.
+`demo.gif` draws the whole path from a real run's words and screenshots. A screen recording
+of the same path (an idea typed into Claude Code, the governed app it builds, the pull
+request, and the live app in Snowsight) shows the real interface instead, and it needs a real
+account, so it is recorded by hand.
 Use a scratch Snowflake account or a sandbox database with sample data only, and nothing
 from a real company.
 
@@ -110,5 +116,5 @@ ffmpeg -i demo.mov -vf "fps=10,scale=960:-1:flags=lanczos,split[a][b];[a]palette
 
 Keep the result under 5 MB (lower the fps to 8, the width to 800, or `max_colors` to 128
 if it is larger) and check every frame for account names, hostnames, emails and table
-names before committing. Writing it to `docs/images/demo.gif` replaces the offline GIF,
-and the README needs no change because it already points at that path.
+names before committing. Writing it to `docs/images/demo.gif` replaces the rendered GIF;
+update the README's alt text to describe the recording.
