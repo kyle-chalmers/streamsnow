@@ -80,6 +80,12 @@ What each script does:
   diagrams' Space Grotesk face. It downloads the library from jsDelivr; where that is
   blocked, `npm install @excalidraw/utils@0.1.5` somewhere and pass `--lib-dir` to its
   folder. A PNG over `--max-kb` (default 500) is re-saved as a palette image.
+  The diagrams use the logo's palette on the deep navy `#07182A` canvas: Snowflake blue
+  `#29B5E8` for the main steps and arrows, its tints `#BFE6F6` and `#9CCFE6` for secondary
+  boxes and labels, ice `#E8F4FA` for titles and body text, and coral `#D97757` only for
+  what you do or own (your input, checkpoints, your files).
+  Each diagram embeds `logo-dark.svg` as an image element in its top-right corner; when the
+  logo changes, re-embed it in the three files and re-export.
 
 ## Record the full Claude Code to Snowflake demo
 
