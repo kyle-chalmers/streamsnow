@@ -369,6 +369,44 @@ def test_drop_sql_from_wrong_cwd_fails_closed(tmp_path, monkeypatch, capsys):
     assert "not found from cwd" in captured.err
 
 
+def test_retiring_the_last_app_passes_and_drops(tmp_path, monkeypatch, capsys):
+    """Deleting every app leaves no apps/ in a git checkout. At the repo root
+    (config beside it) that means "no apps", not "cannot see the apps"."""
+    base = _init_repo(tmp_path)
+    _git(tmp_path, "rm", "-r", "-q", "apps")
+    assert not (tmp_path / "apps").exists()
+    _tombstone(
+        tmp_path,
+        "tombstones:\n"
+        f"  - identifier: {SALES_FQN}\n    reason: retired\n    date: 2026-10-08\n"
+        f"  - identifier: {CAMPAIGN_FQN}\n    reason: retired\n    date: 2026-10-08\n",
+    )
+    monkeypatch.chdir(tmp_path)
+    assert main(["--base-ref", base]) == 0, capsys.readouterr()
+    capsys.readouterr()
+    assert main(["--drop-sql"]) == 0
+    out = capsys.readouterr().out
+    assert f"DROP STREAMLIT IF EXISTS {SALES_FQN};" in out
+    assert f"DROP STREAMLIT IF EXISTS {CAMPAIGN_FQN};" in out
+
+
+def test_drop_sql_refuses_when_apps_live_outside_the_default_dir(tmp_path, monkeypatch, capsys):
+    """No apps/ at the repo root, but tracked apps under another directory and
+    no --apps-dir: the live guard must still refuse, never DROP a live app."""
+    _init_repo(tmp_path)
+    _git(tmp_path, "mv", "apps", "dashboards")
+    _git(tmp_path, "commit", "-q", "-m", "move apps")
+    _tombstone(
+        tmp_path,
+        f"tombstones:\n  - identifier: {SALES_FQN}\n    reason: retired\n    date: 2026-10-08\n",
+    )
+    monkeypatch.chdir(tmp_path)
+    assert main(["--drop-sql"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "not found from cwd" in captured.err
+
+
 DT_FQN = "STREAMSNOW_APPS.STREAMSNOW_REPORTING.DAILY_REVENUE"
 DT_DDL = (
     f"CREATE OR ALTER DYNAMIC TABLE {DT_FQN}\n"

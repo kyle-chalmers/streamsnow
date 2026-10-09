@@ -149,8 +149,9 @@ def invokes_warehouse(command: str) -> str | None:
 def referenced_sql(command: str, cwd: str) -> tuple[str, bool]:
     """Return (concatenated SQL text from -f/--file/< files, unscannable_flag).
 
-    unscannable is True if a referenced file exists but is too large to read — the
-    caller treats that as a reason to ask, since we can't prove it's safe.
+    unscannable is True if a referenced file exists but is too large to read, or names
+    a ``~user`` home that cannot be resolved. The caller treats that as a reason to
+    ask, since we can't prove it's safe.
     """
     text = ""
     unscannable = False
@@ -164,7 +165,14 @@ def referenced_sql(command: str, cwd: str) -> tuple[str, bool]:
         raw = raw.strip("'\"")  # `-f "deploy.sql"` -> deploy.sql
         if not raw:
             continue
-        p = Path(raw)
+        # The shell expands `~` before snow runs, so the guard must too: a
+        # literal `~/x.sql` joined to cwd names no file, and the DROP inside
+        # ran unscanned. A `~user` that cannot be resolved fails closed.
+        try:
+            p = Path(raw).expanduser()
+        except RuntimeError:
+            unscannable = True
+            continue
         if not p.is_absolute() and cwd:
             p = Path(cwd) / raw
         try:
@@ -236,8 +244,9 @@ def main() -> int:
             return 0
         if unscannable:
             emit_ask(
-                f"streamsnow deploy-safety: this `{cli}` command runs a SQL file too large to scan "
-                f"({_MAX_SCAN_BYTES} byte cap). Confirm it contains no destructive statements before running."
+                f"streamsnow deploy-safety: this `{cli}` command runs a SQL file it could not scan "
+                f"(over the {_MAX_SCAN_BYTES} byte cap, or a `~user` path it cannot resolve). "
+                "Confirm it contains no destructive statements before running."
             )
             return 0
 

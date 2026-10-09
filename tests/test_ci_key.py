@@ -196,3 +196,82 @@ def test_rerun_with_a_differing_file_does_not_claim_a_match(tmp_path):
     second = _create(tmp_path, "--account", "other-acct")
     assert "all match this config" not in second.output
     assert "secrets/SNOWFLAKE_ACCOUNT differs" in second.output
+
+
+def test_falls_back_to_a_private_copy_when_symlinks_are_refused(tmp_path, monkeypatch):
+    """Native Windows without the symlink privilege raises on symlink_to (WinError 1314)."""
+
+    def refuse(self, target, target_is_directory=False):
+        raise OSError(1314, "A required privilege is not held by the client")
+
+    monkeypatch.setattr(Path, "symlink_to", refuse)
+    res = _create(tmp_path)
+    assert res.exit_code == 0, res.output
+    d = tmp_path / "ci"
+    p8 = d / "streamsnow_ci_rsa_key.p8"
+    copy = d / "secrets" / "SNOWFLAKE_PRIVATE_KEY_RAW"
+    assert copy.is_file() and not copy.is_symlink()
+    assert copy.read_bytes() == p8.read_bytes()
+    if _POSIX:
+        assert _mode(copy) == 0o600
+    assert "not a symlink" in res.output
+
+    assert _create(tmp_path).exit_code == 0  # a re-run keeps the copy
+
+
+def test_a_stale_private_key_copy_reads_as_mismatched(tmp_path, monkeypatch):
+    def refuse(self, target, target_is_directory=False):
+        raise OSError(1314, "A required privilege is not held by the client")
+
+    monkeypatch.setattr(Path, "symlink_to", refuse)
+    assert _create(tmp_path).exit_code == 0
+    d = tmp_path / "ci"
+    res = ci_key.create(
+        d,
+        account=ACCOUNT,
+        user="STREAMSNOW_DEPLOY_USER",
+        warehouse="STREAMSNOW_WH",
+        role="STREAMSNOW_CI_ROLE",
+    )
+    assert "SNOWFLAKE_PRIVATE_KEY_RAW" not in res.mismatched
+    copy = d / "secrets" / "SNOWFLAKE_PRIVATE_KEY_RAW"
+    copy.write_bytes(copy.read_bytes() + b"stale\n")
+    res = ci_key.create(
+        d,
+        account=ACCOUNT,
+        user="STREAMSNOW_DEPLOY_USER",
+        warehouse="STREAMSNOW_WH",
+        role="STREAMSNOW_CI_ROLE",
+    )
+    assert "SNOWFLAKE_PRIVATE_KEY_RAW" in res.mismatched
+
+
+def test_private_key_copy_keeps_the_key_bytes_exactly(tmp_path, monkeypatch):
+    """openssl on Windows can write CRLF PEM files; a text round trip would turn
+    them into LF and every re-run would then report the copy as mismatched."""
+    assert _create(tmp_path).exit_code == 0
+    d = tmp_path / "ci"
+    p8 = d / "streamsnow_ci_rsa_key.p8"
+    p8.write_bytes(p8.read_bytes().replace(b"\n", b"\r\n"))
+    (d / "secrets" / "SNOWFLAKE_PRIVATE_KEY_RAW").unlink()
+
+    def refuse(self, target, target_is_directory=False):
+        raise OSError(1314, "A required privilege is not held by the client")
+
+    monkeypatch.setattr(Path, "symlink_to", refuse)
+    res = ci_key.create(
+        d,
+        account=ACCOUNT,
+        user="STREAMSNOW_DEPLOY_USER",
+        warehouse="STREAMSNOW_WH",
+        role="STREAMSNOW_CI_ROLE",
+    )
+    assert (d / "secrets" / "SNOWFLAKE_PRIVATE_KEY_RAW").read_bytes() == p8.read_bytes()
+    res = ci_key.create(
+        d,
+        account=ACCOUNT,
+        user="STREAMSNOW_DEPLOY_USER",
+        warehouse="STREAMSNOW_WH",
+        role="STREAMSNOW_CI_ROLE",
+    )
+    assert "SNOWFLAKE_PRIVATE_KEY_RAW" not in res.mismatched

@@ -383,3 +383,33 @@ def test_a_trailing_newline_in_a_rendered_value_is_rejected(path, value):
     with pytest.raises(ConfigError) as exc:
         Config.from_dict(d)
     assert path[-1] in str(exc.value)
+
+
+@pytest.mark.parametrize("version", ["oops", None, [2], True])
+def test_malformed_schema_version_is_a_config_error(version):
+    data = _base()
+    data["schema_version"] = version
+    with pytest.raises(ConfigError, match="schema_version"):
+        Config.from_dict(data)
+
+
+@pytest.mark.parametrize("block", ["snowflake", "project", "governance"])
+def test_scalar_required_block_is_a_config_error(block):
+    data = _base()
+    data[block] = "oops"
+    with pytest.raises(ConfigError, match="must be a mapping"):
+        Config.from_dict(data)
+
+
+def test_malformed_config_exits_2_from_the_cli(tmp_path):
+    from typer.testing import CliRunner
+
+    from streamsnow.cli import app
+
+    data = _base()
+    data["schema_version"] = "two"
+    cfg = tmp_path / "streamsnow.config.yaml"
+    cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
+    result = CliRunner().invoke(app, ["deploy-sql", "acme-sales", "--config", str(cfg)])
+    assert result.exit_code == 2
+    assert "schema_version" in result.output

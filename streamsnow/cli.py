@@ -59,6 +59,7 @@ from .config import (
     RUNTIMES,
     Config,
     ConfigError,
+    app_runtime,
     find_config,
     governance_overlaps,
     load_config,
@@ -67,6 +68,7 @@ from .config import (
     validate_schema_ref,
 )
 from .deploy import (
+    _safe_slug,
     ci_user_name,
     generate_admin_sql,
     generate_create_sql,
@@ -1431,7 +1433,14 @@ def deploy_sql(
 ) -> None:
     """Emit the CREATE OR REPLACE STREAMLIT SQL for one app (used by the deploy workflow)."""
     try:
-        cfg = load_config(Path(config) if config else None)
+        cfg_path = Path(config) if config else find_config()
+        cfg = load_config(cfg_path)
+        # The app's own runtime, as validate-app reads it, not just the repo default.
+        runtime = (
+            app_runtime(cfg_path.parent / "apps" / _safe_slug(slug), cfg.runtime)
+            if cfg_path is not None
+            else None
+        )
         # Workflows rendered before 0.7.4 still run `deploy-sql --refresh` (an
         # ABORT/PULL/COMMIT refresh, piped to `snow sql ... || true`) after the
         # create step. The create step now redeploys on its own, so the refresh
@@ -1439,7 +1448,7 @@ def deploy_sql(
         sql = (
             "-- refresh is no longer needed: the create step redeploys with CREATE OR REPLACE."
             if refresh
-            else generate_create_sql(cfg, slug, sha)
+            else generate_create_sql(cfg, slug, sha, runtime)
         )
     except ConfigError as exc:
         _err(str(exc))

@@ -20,7 +20,12 @@ HOOK = REPO_ROOT / "hooks" / "deploy_safety.py"
 
 
 def _run_guard(
-    command: str, project_dir: Path, *, tool: str = "Bash", stdin_encoding: str | None = None
+    command: str,
+    project_dir: Path,
+    *,
+    tool: str = "Bash",
+    stdin_encoding: str | None = None,
+    home: Path | None = None,
 ) -> str:
     payload = json.dumps(
         {"tool_name": tool, "tool_input": {"command": command}, "cwd": str(project_dir)},
@@ -29,6 +34,8 @@ def _run_guard(
     env = bare_env(CLAUDE_PROJECT_DIR=str(project_dir), PATH="")
     if stdin_encoding:
         env["PYTHONIOENCODING"] = stdin_encoding  # the Windows default for pipes
+    if home is not None:
+        env["HOME"] = env["USERPROFILE"] = str(home)  # expanduser reads USERPROFILE on Windows
     proc = subprocess.run(
         [sys.executable, str(HOOK)],
         input=payload.encode("utf-8"),  # Claude Code always sends UTF-8
@@ -92,6 +99,16 @@ def test_guard_asks_on_sql_hidden_in_file(tmp_path):
         "CREATE OR REPLACE STREAMLIT my_app ROOT_LOCATION = @stage;\n", encoding="utf-8"
     )
     assert _asks(_run_guard("snow sql -f deploy.sql", project))
+
+
+def test_guard_scans_a_home_relative_sql_file(tmp_path):
+    """`snow sql -f ~/x.sql`: the shell expands ~, so the guard must read that file."""
+    (tmp_path / "project").mkdir()
+    project = _project(tmp_path / "project")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "teardown.sql").write_text("DROP STREAMLIT my_app;\n", encoding="utf-8")
+    assert _asks(_run_guard("snow sql -f ~/teardown.sql", project, home=home))
 
 
 def test_guard_defends_quote_and_path_evasion(tmp_path):
