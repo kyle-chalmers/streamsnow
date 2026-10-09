@@ -13,8 +13,8 @@ draws the scene in headless Chromium driven by Playwright, so shapes, arrows and
 bindings look exactly as they do in the editor. Two choices keep the look of the
 existing diagrams:
 
-- The canvas colour is the file's ``appState.viewBackgroundColor`` (the dark
-  ``#0a0a0a`` the README diagrams use), exported with the background on.
+- The canvas colour is the file's ``appState.viewBackgroundColor`` (the deep
+  navy ``#07182A`` the README diagrams use), exported with the background on.
 - Text is set in Space Grotesk (``--font``) instead of Excalidraw's built-in
   font for the elements' ``fontFamily``, because that is the face the README
   diagrams were drawn in. Positions and alignment still come from the JSON.
