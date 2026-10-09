@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-08
+
 ### Fixed
 
 - **Deploy honors an app's own runtime.** `deploy-sql` reads the runtime from
