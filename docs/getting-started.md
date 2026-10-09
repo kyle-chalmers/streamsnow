@@ -226,7 +226,7 @@ apps/<slug>/
   pages/about.py           # "About this app": purpose, pages, metric definitions, data sources
   pages/_glossary.py       # one definition per metric, reused by tooltips, expanders and About
   pages/_layout.py         # shared page pieces: definitions, empty state, sources, "show the SQL"
-  pages/_time_controls.py  # the period picker every page shares, bounded by the data
+  pages/_time_controls.py  # the period every page shares, set in streamlit_app.py
   pages/_data.py           # cached loaders for data more than one page uses
   queries/example_metric.sql   # starter placeholder: reads YOUR_TABLE
   sql_review/              # runnable SQL per page (streamsnow sql-review)

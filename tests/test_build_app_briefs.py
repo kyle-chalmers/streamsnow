@@ -76,6 +76,20 @@ def test_page_builder_runs_and_returns_the_sql_tokens_check():
     assert "five checks" in sections["Verify"]
 
 
+def test_page_builder_runs_the_repo_hooks_before_handing_back():
+    """#102: the repo's pre-commit hooks include ruff-format, which the five checks do not
+    cover, so every build round's commit failed and had to be re-staged."""
+    sections = _sections("page-builder")
+    # Only the ruff hooks: the sql-review hook reads index.yaml, filled after the builder returns.
+    assert "pre-commit run ruff-format --files" in sections["Steps"]
+    assert "pre-commit run ruff-check --files" in sections["Steps"]
+    assert "repo root" in sections["Steps"]
+    block = re.search(r"```json\n(.*?)```", sections["Returns"], flags=re.DOTALL)
+    assert "pre-commit" in json.loads(block.group(1))["checks"]
+    pages = (BRIEFS.parent / "pages.md").read_text(encoding="utf-8")
+    assert pages.count("pre-commit run --files") >= 2  # the round's commit and step 8's
+
+
 def test_query_header_template_names_tokens_without_braces():
     pages = (BRIEFS.parent / "pages.md").read_text(encoding="utf-8")
     header = [line for line in pages.splitlines() if line.strip().startswith("-- Tokens:")]

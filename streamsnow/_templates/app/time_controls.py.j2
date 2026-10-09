@@ -1,19 +1,39 @@
 """The period picker every page of {{ app_title }} shares, so pages never disagree on a period.
 
-Import package-qualified: ``from pages._time_controls import date_range``. The bounds come
+Import package-qualified: ``from pages._time_controls import current_filters``. The bounds come
 from the data (``MAX(<date_col>)``, loaded once and cached), never from ``date.today()``.
+
+Global filters (the period, and any filter every page applies) render once, in
+``streamlit_app.py``, through ``sidebar_filters``. Streamlit drops a widget's value when the page
+that rendered it stops running, so a picker inside a page resets to its default each time the
+reader switches pages; one rendered by the entrypoint runs on every page and keeps its value.
+Pages read the values with ``current_filters()``. A filter only one page uses stays in that page.
+
+Every range here is inclusive at both ends, as ``BETWEEN :1 AND :2`` is.
 """
 
 from datetime import date, timedelta
 
 import streamlit as st
 
+FILTERS_KEY = "filters"
+
+
+def default_period(
+    min_date: date, max_date: date, default_days: int = 365
+) -> tuple[date, date]:
+    """The last ``default_days`` days of data, both ends counted, never before ``min_date``."""
+    return max(min_date, max_date - timedelta(days=default_days - 1)), max_date
+
 
 def date_range(
     min_date: date, max_date: date, default_days: int = 365, key: str = "date_range"
 ) -> tuple[date, date]:
-    """A date-range picker bounded by the data, defaulting to the last ``default_days``."""
-    default_start = max(min_date, max_date - timedelta(days=default_days))
+    """A date-range picker bounded by the data, defaulting to the last ``default_days``.
+
+    Returns ``(start, end)``, both inclusive.
+    """
+    default_start, _ = default_period(min_date, max_date, default_days)
     picked = st.date_input(
         "Period",
         value=(default_start, max_date),
@@ -29,3 +49,25 @@ def date_range(
     )
     st.caption(f"Selected: {start:%b %d, %Y} to {end:%b %d, %Y}")
     return start, end
+
+
+def sidebar_filters(min_date: date, max_date: date, default_days: int = 365) -> dict:
+    """Render the global filters in the sidebar; call once, in ``streamlit_app.py``.
+
+    Call it after ``st.navigation(...)`` and before ``nav.run()``. Add any other filter every
+    page applies here, under its own key in the returned dict.
+    """
+    with st.sidebar:
+        start, end = date_range(min_date, max_date, default_days, key="period")
+    st.session_state[FILTERS_KEY] = {"start_date": start, "end_date": end}
+    return st.session_state[FILTERS_KEY]
+
+
+def current_filters() -> dict:
+    """The global filters ``sidebar_filters`` set on this run: ``start_date``, ``end_date``."""
+    if FILTERS_KEY not in st.session_state:
+        raise RuntimeError(
+            "No global filters yet: call sidebar_filters(...) in streamlit_app.py, "
+            "after st.navigation(...) and before nav.run()."
+        )
+    return st.session_state[FILTERS_KEY]

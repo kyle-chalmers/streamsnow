@@ -3,6 +3,11 @@
 import streamlit as st
 from branding import apply_branding
 
+# Uncomment with the sidebar_filters(...) call below, once pages/_data.py has a cached
+# load_date_bounds(). Imports stay up here: ruff's E402 rejects one below the first call.
+# from pages._data import load_date_bounds
+# from pages._time_controls import sidebar_filters
+
 # Deployed in Snowflake, page_title/page_icon are ignored (Snowsight owns the
 # tab); they still apply under `streamlit run`. `layout` applies in both.
 # Importing branding makes no st.* call, so set_page_config is still the first
@@ -12,11 +17,18 @@ apply_branding()
 
 # Until st.navigation runs, Streamlit shows its fallback menu: every file under pages/,
 # underscore helpers included. Keep that window short. No data call or widget may run
-# before st.navigation. Put filters after `nav`, or inside the pages, so they do not stretch it.
+# before st.navigation. Put global filters after `nav` (below) and page-only filters inside the
+# pages, so they do not stretch it.
 nav = st.navigation(
     [
         st.Page("pages/overview.py", title="Overview", icon="📈", default=True),
         st.Page("pages/about.py", title="About", icon=":material/info:"),
     ]
 )
+
+# Global filters (the period, any filter every page applies) render here, after `nav` and
+# before nav.run(): a widget inside a page resets each time the reader switches pages, and one
+# here keeps its value on every page. Pages read the values with current_filters().
+# sidebar_filters(*load_date_bounds())
+
 nav.run()

@@ -46,9 +46,10 @@ changes (templates, governance, CI) do not belong in a `/ship-app` PR; commit th
 9. **Open the PR** (title/body: what changed, validation passed, then `Open critical: N` and the
    commits since review from step 2, per [these rules](../review-app/report-and-stamp.md#in-the-ship-app-pr-body)). Print the number and URL.
 10. **Note the deploy path:** merging to `main` triggers CI, which deploys — no local deploy step.
-11. **Watch checks to a terminal state** (`gh pr checks <num> --watch` in the background;
-    `gh pr view <num> --json state,mergeStateStatus`) and report once on exit. A host that forbids
-    polling CI: hand the user `gh pr checks <num> --watch` and end at "PR open, checks pending".
+11. **Watch to a terminal state** in the background, reporting once on exit. **PR checks:**
+    `gh pr checks <num> --watch` and `gh pr view <num> --json state,mergeStateStatus`. A host that
+    tracks PR checks and forbids polling CI (PR checks only): hand over that command and end at
+    "PR open, checks pending". **Merged:** always `gh run watch <id> --exit-status` the deploy run.
 
 ## Reporting the outcome
 
@@ -77,10 +78,9 @@ When the watch sees `MERGED` or step 4 finds a squash-merged branch, follow [aft
 
 ## Done when
 
-The PR is open, validation passed before staging, the branch is rebased on current `origin/main`,
-and checks reached a terminal state with the outcome reported: a named failed check, "awaiting
-approval," or merged + the deploy result. Polling not allowed: "PR open, checks pending". Merged:
-local checkout on updated `main`, spent branch removed.
+The PR is open, validated before staging, rebased on current `origin/main`, and checks reached a
+terminal state, reported: a named failed check, "awaiting approval," or merged + the deploy result.
+Polling PR checks not allowed: "PR open, checks pending". Merged: on `main`, spent branch removed.
 
 ## System-evolution retro (always, even on a clean ship)
 

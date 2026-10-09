@@ -81,18 +81,34 @@ def lint_query(
 
     Each ``{TOKEN}`` is replaced with its sample value on one line, so line
     numbers stay true to the file. A line-length finding on a line that held a
-    token is dropped: the length is the sample's, not the query's. CTEs come from
-    sqlfluff's parse tree (nested ones included), which is what the comment rule
-    needs and what no regex over SQL text gets right.
+    token is dropped: the length is the sample's, not the query's. Whitespace an
+    empty sample leaves behind is dropped too: the "All" state of
+    ``... :2 {REGION_FILTER}`` would otherwise end in a space (LT01), and a token
+    on the last line would leave a blank one (LT12), neither of which the query
+    has. Trailing whitespace the author wrote is kept, so LT01 still finds it.
+    CTEs come from sqlfluff's parse tree (nested ones included), which is what
+    the comment rule needs and what no regex over SQL text gets right.
     """
     token_lines: set[int] = set()
     out_lines = []
     for lineno, line in enumerate(sql.split("\n"), start=1):
         if _TOKEN_RE.search(line):
             token_lines.add(lineno)
+            authored = line
             for name, value in tokens.items():
                 line = line.replace("{" + name + "}", " ".join(value.split()))
+            if authored == authored.rstrip():
+                line = line.rstrip()
         out_lines.append(line)
+    # Blank token lines just before the final newline: dropping them shifts no
+    # other line's number.
+    while (
+        len(out_lines) > 1
+        and out_lines[-1] == ""
+        and out_lines[-2] == ""
+        and len(out_lines) - 1 in token_lines
+    ):
+        del out_lines[-2]
     linted = _linter(cfg_text, "query").lint_string("\n".join(out_lines))
     found = []
     for v in linted.get_violations():

@@ -10,9 +10,12 @@ scaffold carries them and that the pure helpers behave.
 from __future__ import annotations
 
 import ast
+import contextlib
 import importlib.util
+from datetime import date, timedelta
 from pathlib import Path
 
+import pytest
 import yaml
 
 from streamsnow.config import Config
@@ -32,9 +35,10 @@ def _app(tmp_path: Path) -> Path:
     return tmp_path / "apps" / SLUG
 
 
-def _pure_functions(path: Path, names: set[str]) -> dict:
+def _pure_functions(path: Path, names: set[str], **globals_: object) -> dict:
     """Load only the named top-level functions and constants, without the module's
-    imports (branding.py imports plotly and streamlit, which the test env lacks)."""
+    imports (branding.py imports plotly and streamlit, which the test env lacks).
+    ``globals_`` stands in for the imports the loaded functions use."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
 
     def wanted(node: ast.stmt) -> bool:
@@ -45,7 +49,7 @@ def _pure_functions(path: Path, names: set[str]) -> dict:
         )
 
     defs = [n for n in tree.body if wanted(n)]
-    namespace: dict = {}
+    namespace: dict = dict(globals_)
     exec(compile(ast.Module(body=defs, type_ignores=[]), str(path), "exec"), namespace)
     return namespace
 
@@ -200,3 +204,64 @@ def test_entrypoint_warns_against_data_calls_before_navigation(tmp_path):
     comment = entry[: entry.index("nav = st.navigation")]
     assert "before st.navigation" in comment
     assert "after `nav`" in comment
+
+
+class _FakeStreamlit:
+    """The few `st` calls the time controls make; the picker returns its default."""
+
+    def __init__(self) -> None:
+        self.session_state: dict = {}
+        self.sidebar = contextlib.nullcontext()
+
+    def date_input(self, label, value, min_value, max_value, key):
+        return value
+
+    def caption(self, text) -> None:
+        pass
+
+
+_TIME_CONTROLS = {
+    "FILTERS_KEY",
+    "default_period",
+    "date_range",
+    "sidebar_filters",
+    "current_filters",
+}
+
+
+def _time_controls(tmp_path, st=None) -> dict:
+    path = _app(tmp_path) / "pages/_time_controls.py"
+    return _pure_functions(path, _TIME_CONTROLS, timedelta=timedelta, st=st or _FakeStreamlit())
+
+
+def test_default_period_is_365_days_counting_both_ends(tmp_path):
+    """#100: queries filter with an inclusive BETWEEN, so `max - 365 days` was 366 days."""
+    default_period = _time_controls(tmp_path)["default_period"]
+    start, end = default_period(date(1992, 1, 1), date(1998, 8, 2))
+    assert (start, end) == (date(1997, 8, 3), date(1998, 8, 2))
+    assert (end - start).days + 1 == 365
+    # Short data: the default never starts before the data does.
+    assert default_period(date(1998, 6, 1), date(1998, 8, 2))[0] == date(1998, 6, 1)
+
+
+def test_sidebar_filters_are_what_every_page_reads(tmp_path):
+    """#101: a widget a page renders is dropped when the reader switches pages, so the
+    period lives in the entrypoint and pages read it back with current_filters()."""
+    st = _FakeStreamlit()
+    ns = _time_controls(tmp_path, st)
+    picked = ns["sidebar_filters"](date(1992, 1, 1), date(1998, 8, 2))
+    assert picked == {"start_date": date(1997, 8, 3), "end_date": date(1998, 8, 2)}
+    assert ns["current_filters"]() == picked
+
+
+def test_current_filters_without_the_entrypoint_call_names_the_fix(tmp_path):
+    current_filters = _time_controls(tmp_path)["current_filters"]
+    with pytest.raises(RuntimeError, match="sidebar_filters"):
+        current_filters()
+
+
+def test_entrypoint_shows_where_global_filters_go(tmp_path):
+    entry = (_app(tmp_path) / "streamlit_app.py").read_text(encoding="utf-8")
+    between = entry[entry.index("nav = st.navigation") : entry.rindex("nav.run()")]
+    assert "sidebar_filters(" in between
+    assert "current_filters()" in between

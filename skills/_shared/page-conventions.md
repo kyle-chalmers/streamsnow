@@ -14,7 +14,11 @@ Every page, in this order:
    number is, not three inches above it in a paragraph.
 3. **Time controls in one place.** One shared helper (e.g. `pages/_time_controls.py`, imported
    package-qualified) renders the period picker and a `Selected: … · Comparing to: …` line, so
-   two pages never disagree about what "last month" means.
+   two pages never disagree about what "last month" means. A filter every page applies (the
+   period, usually) renders once, in `streamlit_app.py` after `st.navigation(...)` and before
+   `nav.run()` (`sidebar_filters`), and pages read it with `current_filters()`: Streamlit drops a
+   widget's value when the page that rendered it stops running, so a picker inside each page
+   resets whenever the reader switches pages. A filter only one page uses stays in that page.
 4. **Footer: sources and freshness.** `st.divider()`, then `st.caption("Sources: <db>.<schema>.<object> · …")`
    and `st.caption(f"Data as of: {freshness}")`. A reviewer can go from the footer to Snowsight.
 
@@ -24,7 +28,8 @@ When editing a page that does not follow this, fix it in the same PR — atomic,
 
 A page's default period ends at the data's latest date, not at today. Load it once, cached, from
 the object the page reads (`SELECT MAX(<date_col>) FROM <db>.<schema>.<table>` in its own
-`queries/*.sql`), and derive the default start from it (for example one year before). Pass both
+`queries/*.sql`), and derive the default start from it (for example the 365 days ending there,
+counting both ends, as `BETWEEN` does: `default_period` in `pages/_time_controls.py`). Pass both
 ends to the date picker's `value=`, and bound its `min_value` / `max_value` by the data too.
 `date.today()` as a default makes every page over data that ends in the past (a historical
 extract, a sample dataset, a feed that stopped loading) open empty, which reads as a broken
@@ -114,5 +119,6 @@ departures; nothing blocks on them.
 
 The scaffold ships the shared pieces these guides call for, each imported package-qualified:
 `pages/_glossary.py` (the definitions table above), `pages/_layout.py` (`definitions_expander`,
-`empty_state`, `sources_footer`, `show_sql`), `pages/_time_controls.py` (`date_range`, bounded by
-the data), `pages/_data.py` (loaders several pages share) and `pages/about.py`.
+`empty_state`, `sources_footer`, `show_sql`), `pages/_time_controls.py` (`sidebar_filters` and
+`current_filters` for filters every page shares, `date_range` for a page-only period, all bounded
+by the data), `pages/_data.py` (loaders several pages share) and `pages/about.py`.
