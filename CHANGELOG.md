@@ -10,6 +10,10 @@ entry.
 
 ### Changed
 
+- **The skills diagram is simpler.** It names the two installs, lists what /onboard sets up
+  (including the CI key Claude never sees), shortens every step caption, marks /review-app and
+  /sql-review as subagent steps with a one-line legend, and drops the modes and subagent
+  lists. The README alt text matches.
 - **README diagrams use the StreamSnow brand.** The skills, repos and CI key diagrams are
   recolored to the logo's Snowflake blue, ice and coral on a deep navy canvas; layout and
   wording are unchanged apart from the repos diagram's color legend. Each diagram
