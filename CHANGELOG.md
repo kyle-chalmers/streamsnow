@@ -69,6 +69,9 @@ entry.
   but not `ruff format`, so the commit hook rewrote files and failed every build round. Builders
   now run `pre-commit run ruff-check` and `ruff-format` on their files from the repo root, and
   the orchestrator runs every hook on the round's files before committing it.
+- **`/ship-app` always watches the deploy run** (#103). Step 11's fallback for hosts that forbid
+  polling CI now names PR checks only, so an agent no longer hands the post-merge deploy run
+  back to the user instead of reporting its outcome.
 
 ## [0.11.0] - 2026-10-08
 

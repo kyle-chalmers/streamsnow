@@ -379,6 +379,17 @@ def test_ship_app_has_a_fallback_when_the_host_forbids_polling_ci():
     assert skill.count("PR open, checks pending") >= 2  # the step and "Done when"
 
 
+def test_ship_app_always_watches_the_deploy_run():
+    """#103: the host's no-polling rule covers PR checks it tracks itself. Stretched to the
+    post-merge deploy run, which no host tracks, it left the deploy outcome unreported."""
+    skill = _flat((SKILLS_DIR / "ship-app" / "SKILL.md").read_text(encoding="utf-8"))
+    step = skill[skill.index("11. **") : skill.index("## Reporting the outcome")]
+    assert "gh run watch" in step and "--exit-status" in step
+    assert "PR checks only" in step
+    done = skill[skill.index("## Done when") :]
+    assert "Polling PR checks not allowed" in done
+
+
 def test_skills_say_who_applies_app_data_ddl():
     """#79: the deploy job applies app-data DDL. "A human applies DDL" without that
     qualifier would send an agent to ask for a manual apply the deploy already does."""
