@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-08
+
 ### Added
 
 - **The deploy job builds app data** (#79). Views and dynamic tables an app declares in

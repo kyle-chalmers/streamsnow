@@ -358,7 +358,7 @@ streamsnow update                        # dry-run: governance files the new tem
 streamsnow update --apply                # re-render AGENTS.md, CLAUDE.md, hooks, CI, deploy.yml
 ```
 
-Generated CI and deploy workflows pin `streamsnow>=0.11.0,<0.12`; bump the pin with
+Generated CI and deploy workflows pin `streamsnow>=0.12.0,<0.13`; bump the pin with
 `update --apply` when you move to a new minor release (before 1.0, minors can break).
 
 `update` stops at the repo-level governance files. It never rewrites app files
