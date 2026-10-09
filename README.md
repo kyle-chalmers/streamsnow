@@ -92,7 +92,7 @@ from *one implementation, many consumers* to *design is a default, not a gate*.
 | You need | What it's for |
 |---|---|
 | A Snowflake account | Where the apps run, on the container runtime (default) or the warehouse runtime |
-| You or your Snowflake admin, once | Runs the admin script that creates the roles, CI user and grants, as `USERADMIN`, `SECURITYADMIN` and, for the container runtime or a git-repository deploy, `ACCOUNTADMIN` ([Deploy setup](docs/deploy-setup.md)) |
+| You or your Snowflake admin, once | Runs the admin script that creates the roles, CI user and grants, as `SYSADMIN`, `USERADMIN`, `SECURITYADMIN` and `ACCOUNTADMIN` ([Deploy setup](docs/deploy-setup.md)) |
 | A GitHub repository for your apps | GitHub Actions runs the checks on every pull request and deploys on merge |
 | Claude Code (recommended) or another coding agent | Runs the skills. Claude Code and Codex are the two tested |
 | Python 3.11+, `uv` and `git` | The `streamsnow` CLI and its checks |
@@ -285,7 +285,8 @@ Then, in a Claude Code session in that repo, start setup:
 /onboard
 ```
 
-If `/onboard` isn't listed, run `/reload-plugins` (no restart needed) and try again.
+The skills are normally available straight away, even in a session that was already open. If
+`/onboard` isn't listed, run `/reload-plugins` (no restart needed) and try again.
 StreamSnow's one-line session-start message first appears in your next session.
 
 `/onboard` gets your machine, repo and Snowflake account ready in four stages, and says
@@ -389,7 +390,6 @@ without `--apply`; `--force` as well when it reports `modified`).
 <summary><b>Two template fixes an existing repo makes by hand</b></summary>
 
 These reach new repos only.
-
 
 - In `apps/<slug>/pages/_glossary.py`, change the last line of `hover_definition` from
   `return metric_help(key).replace("%", "%%")` to `return metric_help(key)`.

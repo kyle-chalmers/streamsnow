@@ -1,6 +1,6 @@
 # README media
 
-Scripts that produce the images the top-level README and the GitHub social preview use.
+Scripts that produce the images the top-level README, the docs and the GitHub social preview use.
 They are maintainer tools, not part of the `streamsnow` package, and they are not run in
 CI. Every image is regenerated from real sources (the real CLI, a real end-to-end run, the
 hand-authored logo), so rerun them when the CLI output or a skill's output changes.
@@ -81,9 +81,11 @@ What each script does:
   blocked, `npm install @excalidraw/utils@0.1.5` somewhere and pass `--lib-dir` to its
   folder. A PNG over `--max-kb` (default 500) is re-saved as a palette image.
   The diagrams use the logo's palette on the deep navy `#07182A` canvas: Snowflake blue
-  `#29B5E8` for the main steps and arrows, its tints `#BFE6F6` and `#9CCFE6` for secondary
-  boxes and labels, ice `#E8F4FA` for titles and body text, and coral `#D97757` only for
-  what you do or own (your input, checkpoints, your files).
+  `#29B5E8` for the main steps and arrows; its tints `#BFE6F6`, `#9CCFE6` and `#5CC8EE` for
+  secondary boxes and labels; navy `#11567F` and the surface shades `#0B1E33`, `#0D2238`,
+  `#0E3350` and `#1E3A55` for panels and borders; ice `#E8F4FA` for titles and body text; and
+  coral `#D97757` (stroke `#A9512F`) only for what you do or own (your input, checkpoints,
+  your files).
   Each diagram embeds `logo-dark.svg` as an image element in its top-right corner; when the
   logo changes, re-embed it in the three files and re-export.
 

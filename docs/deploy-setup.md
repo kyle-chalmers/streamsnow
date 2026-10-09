@@ -21,7 +21,7 @@ that can:
 | `SYSADMIN` | app database + schema (and the stage schema if different), an `XSMALL` warehouse (`AUTO_SUSPEND = 60`, `INITIALLY_SUSPENDED`) |
 | `USERADMIN` | `ci_role`, `viewer_role`, and a `TYPE = SERVICE` CI user with key-pair auth, no password (`RSA_PUBLIC_KEY` from `--public-key-file`, else a placeholder to paste) |
 | `SECURITYADMIN` | both roles to `SYSADMIN`; the viewer role to **you** (whoever runs the script, via `CURRENT_USER()`) and to each `--viewer-user`; each existing `--viewer-role` gets it in a last section of its own; `USAGE` on the database, schema and warehouse to both roles; `CREATE STREAMLIT` + `CREATE STAGE` on the schema to `ci_role`; `USAGE` + `SELECT` on each governance source; `USAGE`, `CREATE VIEW` and `CREATE DYNAMIC TABLE` on the app-data schema to `ci_role` |
-| `ACCOUNTADMIN` | container runtime: the PyPI external access integration (Snowflake's managed `snowflake.external_access.pypi_rule`) and `USAGE` on it and on the compute pool to `ci_role`; `CREATE COMPUTE POOL` only when your pool is not `SYSTEM_COMPUTE_POOL_CPU`, which Snowflake pre-provisions in every account; git-repository: the API integration |
+| `ACCOUNTADMIN` | always run (the section says when there is nothing to do); shared source databases: `IMPORTED PRIVILEGES` to `ci_role`; container runtime: the PyPI external access integration (Snowflake's managed `snowflake.external_access.pypi_rule`) and `USAGE` on it and on the compute pool to `ci_role`; `CREATE COMPUTE POOL` only when your pool is not `SYSTEM_COMPUTE_POOL_CPU`, which Snowflake pre-provisions in every account; git-repository: the API integration |
 | `ci_role` | the deploy-source objects it will own: the stage, or the secret + git repository |
 
 ```bash
