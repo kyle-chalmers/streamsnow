@@ -65,6 +65,10 @@ entry.
   page reset to its default on every page switch. New apps scaffold `sidebar_filters()` (called
   once in `streamlit_app.py`, after `st.navigation`) and `current_filters()` (what pages read),
   and the build guidance puts filters every page applies in the entrypoint.
+- **Page-builders run the repo's ruff hooks** (#102). The brief listed five streamsnow checks
+  but not `ruff format`, so the commit hook rewrote files and failed every build round. Builders
+  now run `pre-commit run ruff-check` and `ruff-format` on their files from the repo root, and
+  the orchestrator runs every hook on the round's files before committing it.
 
 ## [0.11.0] - 2026-10-08
 

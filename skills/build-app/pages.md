@@ -22,7 +22,10 @@ The orchestrator builds every §4 page at once and owns every file pages share; 
    <slug>` and the page-builder brief's five `check` commands. Fix shared files yourself; send page
    findings back to that page's builder in `fix` mode.
 5. **Commit the round** (pages, their queries, `index.yaml`, the generated review files, the
-   shared files you changed) and log it in §11 (`Next: verify`).
+   shared files you changed) and log it in §11 (`Next: verify`). First, after step 4's
+   `generate`, run `pre-commit run --files <the round's files>` from the repo root until it exits
+   0: the hooks include `ruff format`, which rewrites files, and a rewrite during `git commit`
+   fails the commit.
 
 Without subagents, build the pages one at a time with the steps below; you then own every file.
 
@@ -118,10 +121,11 @@ returns their inputs instead of editing shared files.
    4. `streamsnow sql-review generate <slug>`: writes `sql_review/NN_<page>.sql` (one runnable
       section per metric) and refreshes the README tables. Then `streamsnow sql-review check <slug>`
       must be clean.
-   5. Commit the page module, its `queries/*.sql`, `index.yaml`, and the generated page file and
-      README **together**: a page and its review SQL land together. Splitting them leaves a window
-      where `check` reads drift or uncovered pages, and a reviewer can't re-run the numbers behind
-      the new visuals.
+   5. Run `pre-commit run --files <those files>` from the repo root until it exits 0 (it applies
+      `ruff format`, which would otherwise fail the commit), then commit the page module, its
+      `queries/*.sql`, `index.yaml`, and the generated page file and README **together**: a page
+      and its review SQL land together. Splitting them leaves a window where `check` reads drift
+      or uncovered pages, and a reviewer can't re-run the numbers behind the new visuals.
 9. **End of the build phase** (all §4 pages built): `streamsnow sql-review check <slug>` reports no
    `coverage` warning, so every page in the nav is in `index.yaml`. A warning for a helper query that
    shows no value on screen (a date-bounds or filter-options loader in `pages/_data.py`) is expected:
