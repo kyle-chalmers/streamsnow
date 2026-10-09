@@ -58,6 +58,13 @@ entry.
   the end of a line left a trailing space (LT01), and on the query's last line a blank line
   (LT12). Whitespace the sample leaves behind is dropped before linting; trailing whitespace
   the author wrote is still a finding.
+- **The scaffolded default period is 365 days** (#100). `date_range` started at
+  `max_date - 365 days`, which an inclusive `BETWEEN` turns into 366. The new
+  `default_period` helper counts both ends.
+- **Global filters keep their value across pages** (#101). A period picker rendered inside each
+  page reset to its default on every page switch. New apps scaffold `sidebar_filters()` (called
+  once in `streamlit_app.py`, after `st.navigation`) and `current_filters()` (what pages read),
+  and the build guidance puts filters every page applies in the entrypoint.
 
 ## [0.11.0] - 2026-10-08
 

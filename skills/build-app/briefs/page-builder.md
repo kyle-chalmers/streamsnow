@@ -27,8 +27,9 @@ another page, or a shared query. Need something there? Return it as a request.
 
 1. Write the queries with their header blocks; real SQL against the profiled objects.
 2. Write the page: the design's caption and sections, `help=` from the glossary keys,
-   `definitions_expander(<keys>)` and `sources_footer(...)` at the end, `date_range` for the
-   period, shared data from `pages/_data.py`, `show_sql` where the design says so. Mark each
+   `definitions_expander(<keys>)` and `sources_footer(...)` at the end, the period from
+   `current_filters()` (never a page-level picker for a filter other pages share; need a new
+   global filter? request it in `data_requests`), shared data from `pages/_data.py`, `show_sql` where the design says so. Mark each
    visual with `review_value("<key>", value)` in this file.
 3. Run `streamsnow check page-imports apps/<slug>`, `streamsnow check caching apps/<slug>`,
    `streamsnow check schema-refs apps/<slug>`, `streamsnow check bind-predicates apps/<slug>` and

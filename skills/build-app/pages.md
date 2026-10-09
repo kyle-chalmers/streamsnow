@@ -15,7 +15,9 @@ The orchestrator builds every §4 page at once and owns every file pages share; 
 3. **Merge** the returns: reject any write outside a builder's own files; add `nav_entry` to
    `st.navigation` in §4 order (About stays last); add `index_entry` under `pages:`; add
    `glossary_entries` to `pages/_glossary.py`; resolve `data_requests` by adding the loader to
-   `pages/_data.py` and re-dispatching the pages that asked.
+   `pages/_data.py` and re-dispatching the pages that asked. Turn on the global filters in
+   `streamlit_app.py` (step 5 below) before the first page that reads `current_filters()` runs,
+   and add any global filter a builder requested to `sidebar_filters`.
 4. **Generate once:** `streamsnow sql-review generate <slug>`, then `streamsnow sql-review check
    <slug>` and the page-builder brief's five `check` commands. Fix shared files yourself; send page
    findings back to that page's builder in `fix` mode.
@@ -71,13 +73,18 @@ returns their inputs instead of editing shared files.
    package-qualified (`from pages._header import ...`) — see Gotchas. Use the scaffold's shared
    modules rather than writing your own: each metric gets a `pages/_glossary.py` entry and its
    `help=`; the page ends with `definitions_expander(<its keys>)` and `sources_footer(...)` from
-   `pages/_layout.py`; the period picker is `date_range` from `pages/_time_controls.py`; data
-   another page also reads goes in `pages/_data.py`. Add `show_sql(...)` under a visual when §2
+   `pages/_layout.py`; the period comes from `current_filters()` in `pages/_time_controls.py`
+   (a filter every page applies renders once in `streamlit_app.py`, see step 5; a filter only this
+   page uses is rendered in the page, with `date_range` for a page-only period); data another page
+   also reads goes in `pages/_data.py`. Add `show_sql(...)` under a visual when §2
    says the readers check numbers themselves (analysts), passing the same SQL and binds the loader
    runs.
 5. **Register the page**: add an `st.Page(...)` entry to the existing `st.navigation` structure in
    `streamlit_app.py`. Show the diff before applying and use multi-line `Edit` context so the match
-   is unambiguous. One nav group → add to it; several → ask which.
+   is unambiguous. One nav group → add to it; several → ask which. The first page that reads
+   `current_filters()` also turns on the global filters there: add a cached `load_date_bounds()`
+   to `pages/_data.py` and uncomment the scaffold's two imports and its
+   `sidebar_filters(*load_date_bounds())` line (after `nav`, before `nav.run()`).
 6. **Run the checks on the new files** — `streamsnow check schema-refs apps/<slug>`, then
    `streamsnow check caching apps/<slug>`, then `streamsnow check bind-predicates apps/<slug>`,
    then `streamsnow check sql-tokens apps/<slug>` (four invocations, not a pipeline), and fix
@@ -185,6 +192,10 @@ return get_active_session().sql(sql, params=[start, end]).to_pandas()
   `streamlit_app.py`, say) leaves Streamlit's fallback menu of every `pages/*.py` helper on screen
   for the whole first run, because the real navigation does not exist until the loader returns.
   Build the `st.navigation(...)` call first, then load data.
+- **A filter every page applies lives in the entrypoint.** Rendered inside each page, the period
+  resets to its default whenever the reader switches pages, because Streamlit drops a widget's
+  value once its page stops running. `sidebar_filters` in `streamlit_app.py` keeps one value for
+  every page; pages read it with `current_filters()`.
 - **Cast COUNT-style metrics to int** before formatting (`f"{int(n):,}"`) so a card reads `23`, not `23.0`.
 - **Don't auto-set `default=True`** on the new page; if it should be the landing page, the user
   flips the existing default in a one-line manual edit.
