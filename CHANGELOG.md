@@ -54,6 +54,10 @@ entry.
   opener inside a string literal no longer starts a comment for the deny check. A
   `WITH ... AS (` inside a quoted column alias no longer reads as a CTE that hides the table of
   the same name.
+- **`sql-review check` no longer fails an "All" filter token** (#98). An empty token sample at
+  the end of a line left a trailing space (LT01), and on the query's last line a blank line
+  (LT12). Whitespace the sample leaves behind is dropped before linting; trailing whitespace
+  the author wrote is still a finding.
 
 ## [0.11.0] - 2026-10-08
 

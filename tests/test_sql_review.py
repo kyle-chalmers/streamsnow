@@ -740,6 +740,49 @@ def test_fragments_are_not_linted(repo: Path, capsys: pytest.CaptureFixture) -> 
     assert _check(repo) == 0
 
 
+def test_an_empty_token_sample_at_the_end_of_a_line_lints_clean(
+    repo: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """#98: an "All" filter samples as "", which left the line's separating space
+    behind as trailing whitespace, an LT01 the query itself does not have."""
+    data = _index()
+    data["pages"][0]["metrics"][0]["tokens"]["REGION_FILTER"] = ""
+    _write_index(repo, data)
+    _generate(repo)
+    assert not [f for f in _findings(repo, capsys) if f["kind"] == "lint"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT a\nFROM t\nWHERE a > 1 {REGION_FILTER}\n",
+        "SELECT a\nFROM t\nWHERE a > 1\n{REGION_FILTER}\n",  # own line, last line of the file
+        "SELECT a\nFROM t\nWHERE a > 1\n{REGION_FILTER}\nORDER BY a\n",
+    ],
+)
+def test_an_empty_token_sample_leaves_no_whitespace_finding(sql: str) -> None:
+    from streamsnow.tools.sql_review_lint import lint_query
+
+    found, _ = lint_query(sql, sr_lint_default(), {"REGION_FILTER": ""})
+    assert found == []
+
+
+def test_line_numbers_survive_an_empty_token_line_without_a_final_newline() -> None:
+    from streamsnow.tools.sql_review_lint import lint_query
+
+    sql = "SELECT a\nFROM t\n{REGION_FILTER}\nwhere a > 1"
+    found, _ = lint_query(sql, sr_lint_default(), {"REGION_FILTER": ""})
+    assert (4, "CP01") in [(line, rule) for line, rule, _ in found]
+
+
+def test_trailing_whitespace_the_author_wrote_on_a_token_line_is_still_found() -> None:
+    from streamsnow.tools.sql_review_lint import lint_query
+
+    sql = "SELECT a\nFROM t\nWHERE a > 1 {REGION_FILTER} \n"
+    found, _ = lint_query(sql, sr_lint_default(), {"REGION_FILTER": ""})
+    assert [(line, rule) for line, rule, _ in found] == [(3, "LT01")]
+
+
 @pytest.mark.parametrize(
     ("query", "detail"),
     [
