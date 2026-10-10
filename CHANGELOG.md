@@ -20,6 +20,8 @@ entry.
   local denylist), then publishes and creates the GitHub Release. `verify` finds the publish
   run by commit, so it reports "pending" while `publish.yml` is still tagging.
 
+## [0.13.0] - 2026-10-10
+
 ### Fixed
 
 - **The privacy scan skips untracked gitignored files** when it scans a git work tree's top
