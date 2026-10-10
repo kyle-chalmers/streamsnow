@@ -296,8 +296,8 @@ the repo's `.sqlfluff` (created when missing, never overwritten) and the
 `sql_review/` moved to the new format by hand
 ([Auditing a visual](auditing-a-visual.md#for-the-developer-on-the-other-side-of-this)).
 0.9 moves every generated pin to `streamsnow>=0.9,<0.10`, and 0.10 to
-`streamsnow>=0.10.1,<0.11`, 0.11 to `streamsnow>=0.11.0,<0.12`, and 0.12 to
-`streamsnow>=0.12.0,<0.13`.
+`streamsnow>=0.10.1,<0.11`, 0.11 to `streamsnow>=0.11.0,<0.12`, 0.12 to
+`streamsnow>=0.12.0,<0.13`, and 0.13 to `streamsnow>=0.13.0,<0.14`.
 
 ## See also
 
