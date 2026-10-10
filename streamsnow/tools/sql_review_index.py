@@ -35,6 +35,12 @@ Schema (``schema_version: 2``)::
             binds: {"1": params.start_date, "2": params.end_date}
             notes: "Excludes refunds; booked date, not ship date."
             reads: [ANALYTICS.REPORTING.APP_REVENUE_DAILY]
+            # Optional: the values the visual shows. A one-line -- description,
+            # then a SELECT over the query's result, which the section names `detail`.
+            summary: |
+              -- The Revenue tile, rounded to whole dollars as shown
+              SELECT ROUND(SUM(revenue), 0) AS revenue_shown
+              FROM detail
     objects:
       - name: ANALYTICS.REPORTING.APP_REVENUE_DAILY
         grants: [ROLE_APP_READER]
@@ -80,7 +86,7 @@ _FQN_RE = re.compile(rf"^{_IDENT}\.{_IDENT}\.{_IDENT}$")
 
 _TOP_KEYS = frozenset({"schema_version", "app", "review_window", "pages", "objects", "fragments"})
 _PAGE_KEYS = frozenset({"path", "metrics"})
-_METRIC_KEYS = frozenset({"key", "query", "tokens", "binds", "notes", "reads"})
+_METRIC_KEYS = frozenset({"key", "query", "tokens", "binds", "notes", "reads", "summary"})
 _OBJECT_KEYS = frozenset({"name", "grants", "reason"})
 _FRAGMENT_KEYS = frozenset({"file", "reason"})
 
@@ -93,6 +99,8 @@ class Metric:
     binds: dict[str, str] = field(default_factory=dict)
     notes: str = ""
     reads: list[str] = field(default_factory=list)
+    summary: str = ""  # SELECT over the CTE `detail` returning what the visual shows
+    summary_line: int = 0  # index.yaml line of the summary's first SQL line (derived)
     number: int = 0  # 1-based position on its page (derived)
 
 
@@ -409,7 +417,7 @@ def load_index(app: Path) -> Index:
             if not isinstance(raw, dict):
                 problem(f"{mwhere} must be a mapping with key and query", path)
                 continue
-            metric = _load_metric(app, raw, mwhere, problem, idx.review_window)
+            metric = _load_metric(app, raw, mwhere, problem, idx.review_window, text)
             if metric is None:
                 continue
             if metric.key in seen_keys:
@@ -439,7 +447,40 @@ def load_index(app: Path) -> Index:
     return idx
 
 
-def _load_metric(app: Path, raw: dict, where: str, problem, window: dict) -> Metric | None:
+def _summary_line(text: str, key: str) -> int:
+    """index.yaml line holding the summary's first SQL line (best effort, as ``_line_of``).
+
+    The first ``summary:`` after the metric's ``key:`` line; a block scalar
+    (``summary: |``) starts on the next line.
+    """
+    lines = text.splitlines()
+    k = next(
+        (i for i, ln in enumerate(lines) if re.search(rf"\bkey:\s*['\"]?{key}['\"]?\s*$", ln)),
+        None,
+    )
+    if k is None:
+        return 1
+    # The metric's list entry: from its `- ` line to the next entry at that indent.
+    start = next((i for i in range(k, -1, -1) if re.match(r"^\s*-\s", lines[i])), k)
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if lines[i].strip() and len(lines[i]) - len(lines[i].lstrip()) <= indent
+        ),
+        len(lines),
+    )
+    for i in range(start, end):
+        m = re.match(r"^\s*(?:-\s+)?summary:\s*(.*)$", lines[i])
+        if m:
+            return i + 2 if m.group(1).strip()[:1] in ("|", ">") else i + 1
+    return 1
+
+
+def _load_metric(
+    app: Path, raw: dict, where: str, problem, window: dict, text: str = ""
+) -> Metric | None:
     _unknown(raw, _METRIC_KEYS, where, problem)
     key = raw.get("key")
     if not isinstance(key, str) or not _KEY_RE.match(key):
@@ -471,6 +512,17 @@ def _load_metric(app: Path, raw: dict, where: str, problem, window: dict) -> Met
     for name in metric.reads:
         if not _FQN_RE.match(name):
             problem(f"metric {key!r}: reads entry {name!r} must be DATABASE.SCHEMA.OBJECT", key)
+    if "summary" in raw:
+        summary = raw.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            problem(f"metric {key!r}: summary must be a SQL SELECT over detail", key)
+        else:
+            from .sql_review import summary_problems  # noqa: PLC0415  (import cycle)
+
+            metric.summary = summary.strip()
+            metric.summary_line = _summary_line(text, key)
+            for detail in summary_problems(metric.summary):
+                problem(f"metric {key!r}: summary {detail}", key)
     qpath = _query_file(app, query)
     if qpath is None:
         problem(f"metric {key!r}: {query} does not exist (or resolves outside the app)", key)
@@ -518,6 +570,11 @@ def _load_metric(app: Path, raw: dict, where: str, problem, window: dict) -> Met
             )
         elif not value.strip():
             problem(f"metric {key!r}: bind {b!r} needs a value", key)
+    if metric.summary:
+        from .sql_review import summary_query_problems  # noqa: PLC0415  (import cycle)
+
+        for detail in summary_query_problems(sql):
+            problem(f"metric {key!r}: {query} {detail}", key)
     return metric
 
 
