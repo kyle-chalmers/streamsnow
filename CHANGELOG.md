@@ -8,6 +8,18 @@ entry.
 
 ## [Unreleased]
 
+### Added
+
+- **Summary sections in review SQL.** A metric in `sql_review/index.yaml` can carry a
+  `summary:`, a one-line `--` description and then a SELECT over `detail`. `generate` writes it
+  as a `--N_key_summary` section right after the metric's own, its description above the tag:
+  `WITH detail AS (<the section above, verbatim>)` and then the summary, so the page file
+  returns exactly what each visual shows (a KPI's total, its year-earlier value, the YoY % as
+  rounded). Indexes without summaries generate byte for byte as before. `check` refuses a summary
+  that is not one read-only SELECT reading `detail`, and lints it at its `index.yaml` line;
+  `probe` and `run` measure summary sections as `NN#ns`, and `compare` holds the visual to the
+  summary's first column when a metric has one.
+
 ### Changed
 
 - **The skills diagram is simpler.** It names the two installs, lists what /onboard sets up

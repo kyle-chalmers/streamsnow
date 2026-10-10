@@ -19,6 +19,9 @@ Data notes (grain, definitions, quirks, freshness) live in `../AGENTS.md`, not h
   `index.yaml`), directly above its SQL, and ends with one `;`. One blank line between sections.
 - Each section runs on its own: its `params` CTE holds the review window, `{TOKENS}` carry their
   sample values, and `:binds` read `params` (`params.start_date` in `index.yaml`).
+- A metric with a `summary:` in `index.yaml` gets a second section right after its own: its
+  one-line description, then the tag `--N_key_summary`, then `WITH detail AS (<the section
+  above, verbatim>)` and the summary's SELECT. It returns exactly what the visual shows.
 - Reordering metrics or pages renumbers files and tags; the key stays the stable name.
 
 ## Editing rules
@@ -29,6 +32,9 @@ Data notes (grain, definitions, quirks, freshness) live in `../AGENTS.md`, not h
 - Every metric needs exactly one `review_value("<key>", value)` call on its page, wrapping the
   value its visual shows (`from review import review_value`). `check` matches them to the index.
 - A query file that is only inlined into others is listed under `fragments:` with a reason.
+- A `summary:` is a `|` block: a one-line `--` description, then one read-only SELECT over
+  `detail` (no tokens, binds or `params`). The value the visual marks goes in its first column.
+  Never alias a result with a `detail` column's name: Snowflake reads the column, not the alias.
 
 ## Comments in queries
 
