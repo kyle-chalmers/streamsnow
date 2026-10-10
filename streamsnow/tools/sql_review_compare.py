@@ -36,6 +36,11 @@ Matching
   or numeric key cannot tell a grouping from a slice, so those stay a
   ``mismatch``. A run or a ``review.py`` from before key counts never gives
   ``aggregated``.
+- **Summaries first:** a metric with a ``summary:`` is held to its summary
+  section's ``run`` result (``against: summary``), which returns exactly what
+  the visual shows; a shown number matches the summary row's first numeric
+  column (rule ``first_column``). A run from before the summary falls back to
+  the detail result, with a warning.
 - **Scalars and displayed numbers:** against the single numeric total of a
   one-row result, or against the row count when the result has no numeric
   column. A multi-row result with exactly one numeric column whose non-zero
@@ -314,11 +319,14 @@ def _scalar_expected(run: dict) -> tuple[Decimal | None, bool, str, str | None]:
         return None, False, "", run.get("totals_detail") or "run has no totals"
     if not totals:
         return Decimal(int(run.get("rows") or 0)), True, "row_count", None
-    if len(totals) == 1 and run.get("rows") == 1:
+    if run.get("rows") == 1 and (len(totals) == 1 or run.get("summary")):
+        # A summary row carries every value its visual shows (a KPI and its
+        # delta); the number the visual marks is its first numeric column.
         name, value = next(iter(totals.items()))
         expected = _decimal(value)
         floats = set(run.get("float_columns") or [])
-        return expected, _integral(expected) and name not in floats, "total", None
+        rule = "total" if len(totals) == 1 else "first_column"
+        return expected, _integral(expected) and name not in floats, rule, None
     return (
         None,
         False,
@@ -746,7 +754,11 @@ def cmd_compare(args: argparse.Namespace, runner: object = None) -> int:
     for path in run_files:
         data = live.read_json(path)
         digests[str(data.get("page") or path.stem[4:])] = live.run_digest(path)
-        for run in data.get("results", []):
+        runs = [r for r in data.get("results", []) if isinstance(r, dict)]
+        summaries = {(str(r.get("page")), r.get("n")): r for r in runs if r.get("summary")}
+        for run in runs:
+            if run.get("summary"):
+                continue  # held to its metric's capture below, in place of the detail
             page = pages.get(str(run.get("page")))
             metric = (
                 next((m for m in page.metrics if m.number == run.get("n")), None) if page else None
@@ -754,6 +766,16 @@ def cmd_compare(args: argparse.Namespace, runner: object = None) -> int:
             if page is None or metric is None:
                 warnings.append(f"{run.get('id')} matches no metric in index.yaml; skipped")
                 continue
+            against = "detail"
+            if metric.summary:
+                summary_run = summaries.get((str(run.get("page")), metric.number))
+                if summary_run is not None:
+                    run, against = summary_run, "summary"
+                else:
+                    warnings.append(
+                        f"{run.get('id')}: {metric.key} has a summary, but this run has no "
+                        "result for it (it predates the summary); compared against the detail"
+                    )
             cap, why = _find_capture(page, metric.key, captures, index)
             if cap is not None:
                 used.add(cap.file)
@@ -768,6 +790,7 @@ def cmd_compare(args: argparse.Namespace, runner: object = None) -> int:
                     "stem": page.stem,
                     "n": metric.number,
                     "key": metric.key,
+                    "against": against,
                     **verdict,
                     "capture": cap.file if cap else None,
                     "screen": screen_check(run, cap.data if cap else None, seen) if seen else None,

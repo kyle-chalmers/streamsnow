@@ -36,6 +36,12 @@ tag is always line 9, and every section is self-contained::
     )
     SELECT ... WHERE order_date BETWEEN (SELECT start_date FROM params) AND ...;
 
+A metric with a ``summary:`` in the index also gets a summary section right
+after its own: the summary's one-line description, the tag ``--N_key_summary``,
+then ``WITH detail AS (<the section above, verbatim>)`` and the summary's
+SELECT, which returns exactly what the visual shows. An index without
+summaries renders exactly as it did before they existed.
+
 ``{TOKENS}`` are replaced with the index's sample values and ``:binds`` with
 their index values (``params.<name>`` becomes a scalar read of the section's own
 ``params`` CTE), so a section runs with the cursor in it and Cmd/Ctrl+Enter.
@@ -463,9 +469,23 @@ def _with_terminal_verb(stmt: str) -> str:
     balance is only sound when string-literal contents cannot contribute
     parens or verb-shaped words.
     """
+    i = _with_terminal_offset(stmt)
+    if i < 0:
+        return ""
+    m = re.match(r"[A-Za-z]+", stmt[i:])
+    return m.group(0).upper() if m else ""
+
+
+def _with_terminal_offset(stmt: str) -> int:
+    """Offset of the statement a ``WITH`` terminates in, or -1 when it cannot be parsed.
+
+    The walker behind ``_with_terminal_verb`` (same contract: masked text only),
+    also used to split a query's CTE list from its final ``SELECT`` when a
+    summary section wraps it.
+    """
     tokens = stmt.split()
     if not tokens or tokens[0].upper() != "WITH":
-        return ""
+        return -1
     # Re-scan character-wise for balanced parens; token-wise is not enough
     # because CTE bodies contain arbitrary whitespace/commas.
     i = len("WITH")
@@ -486,7 +506,7 @@ def _with_terminal_verb(stmt: str) -> str:
             re.IGNORECASE,
         )
         if not m:
-            return ""
+            return -1
         i += m.end()
         while i < n and stmt[i].isspace():
             i += 1
@@ -500,12 +520,12 @@ def _with_terminal_verb(stmt: str) -> str:
             while i < n and stmt[i].isspace():
                 i += 1
         if stmt[i : i + 2].upper() != "AS":
-            return ""
+            return -1
         i += 2
         while i < n and stmt[i].isspace():
             i += 1
         if i >= n or stmt[i] != "(":
-            return ""
+            return -1
         depth = 1
         i += 1
         while i < n and depth:
@@ -517,8 +537,7 @@ def _with_terminal_verb(stmt: str) -> str:
         if i < n and stmt[i] == ",":
             i += 1
             continue  # next CTE definition
-        m = re.match(r"[A-Za-z]+", stmt[i:])
-        return m.group(0).upper() if m else ""
+        return i
 
 
 # Second, independent layer under the statement-root allowlist. Four masking
@@ -896,12 +915,11 @@ def _with_params(body: str, lead: list[str], window: dict[str, str]) -> str:
     return "\n".join([*cte[:-1], cte[-1] + ",", *lead, rest])
 
 
-def render_section(app: Path, index: sri.Index, metric: sri.Metric, text: str | None = None) -> str:
-    """One metric's runnable SQL (no tag line), ending in exactly one ``;``.
-
-    ``text`` stands in for the metric's query file: ``bench --sql-file``
-    renders a candidate rewrite exactly as the app's own query would be.
-    """
+def _prepared_query(
+    app: Path, metric: sri.Metric, text: str | None = None
+) -> tuple[list[str], str, str]:
+    """``(lead_comments, body, masked_body)``: the metric's query with tokens and
+    binds substituted, one statement, no trailing ``;``. Raises ToolError."""
     if text is None:
         qpath = app / metric.query
         try:
@@ -933,6 +951,16 @@ def render_section(app: Path, index: sri.Index, metric: sri.Metric, text: str | 
             f"metric {metric.key!r}: {metric.query} already defines a CTE named params, "
             "which the review section adds; rename the query's CTE"
         )
+    return lead, body, masked
+
+
+def render_section(app: Path, index: sri.Index, metric: sri.Metric, text: str | None = None) -> str:
+    """One metric's runnable SQL (no tag line), ending in exactly one ``;``.
+
+    ``text`` stands in for the metric's query file: ``bench --sql-file``
+    renders a candidate rewrite exactly as the app's own query would be.
+    """
+    lead, body, masked = _prepared_query(app, metric, text)
     root = masked.split(None, 1)[0].upper()
     uses_params = any(_PARAMS_REF_RE.match(v.strip()) for v in metric.binds.values())
     if index.review_window and root in ("SELECT", "WITH"):
@@ -947,6 +975,173 @@ def render_section(app: Path, index: sri.Index, metric: sri.Metric, text: str | 
     return sql + ";"
 
 
+# --------------------------------------------------------------------------- #
+# Summary sections: what the visual shows, computed from the detail result
+# --------------------------------------------------------------------------- #
+#: The CTE a summary section names the app query's result.
+DETAIL_CTE = "detail"
+#: The tag suffix of a summary section: ``--N_key_summary`` follows ``--N_key``.
+SUMMARY_SUFFIX = "_summary"
+_DETAIL_REF_RE = re.compile(rf"\b{DETAIL_CTE}\b", re.IGNORECASE)
+_PARAMS_REF_ANY_RE = re.compile(r"\bparams\b", re.IGNORECASE)
+_CTE_DEF_RE = re.compile(
+    r"(?:\bWITH\s+(?:RECURSIVE\s+)?|,)\s*([A-Za-z_][A-Za-z0-9_$]*)\s*(?:\([^)]*\)\s*)?AS\s*\(",
+    re.IGNORECASE,
+)
+#: A line ``split_page`` would read as a section tag.
+_TAG_SHAPED_RE = re.compile(r"^--\d+_", re.MULTILINE)
+#: A summary may continue the CTE list after ``detail`` with a leading comma.
+_LEADING_COMMA_RE = re.compile(r"\A(\s*),")
+
+
+def summary_parts(summary: str) -> tuple[str, str]:
+    """``(description, sql)`` of an index ``summary:``.
+
+    The first line is the one-line ``--`` description the page file shows above
+    the section's tag; the rest is the SQL. A leading ``,`` (the reference
+    form ``, cells AS (...) SELECT ...``, continuing the list after ``detail``)
+    reads as ``WITH``, on the same line, so line numbers stay true.
+    """
+    text = summary.replace("\r\n", "\n").strip("\n")
+    first, _, rest = text.partition("\n")
+    if not first.lstrip().startswith("--"):
+        return "", text
+    rest = rest.rstrip("\n")
+    m = _LEADING_COMMA_RE.match(_mask_strings_and_comments(rest))
+    if m:
+        rest = rest[: m.end(1)] + "WITH " + rest[m.end() :].lstrip(" ")
+    return first.strip(), rest
+
+
+def summary_problems(summary: str) -> list[str]:
+    """Why an index ``summary:`` cannot render as a read-only section ([] when it can).
+
+    A summary sits in the page file under its own one-line description, beside
+    a ``detail`` CTE holding the app query's whole statement, so it must be one
+    read-only SELECT (or ``WITH`` ... ``SELECT``) that reads ``detail``, with no
+    template machinery of its own: tokens and binds belong to the app query,
+    and the detail statement already carries their sample values.
+    """
+    description, sql = summary_parts(summary)
+    problems: list[str] = []
+    if not description:
+        problems.append(
+            "needs a one-line description first: a -- comment saying what the visual shows "
+            "(the page file prints it above the section's tag)"
+        )
+    elif (
+        len(description) > MAX_LINE
+        or not description.startswith("-- ")
+        or not description[3:].strip()
+        or description.startswith("-- Provenance:")
+    ):
+        # `-- ` keeps it from ever reading as a `--N_key` tag; the provenance
+        # prefix is reserved for the file's last line.
+        problems.append(
+            f"description must be one '-- <text>' comment of {MAX_LINE} characters or fewer"
+        )
+    masked, unterminated = _mask_with_status(sql)
+    if unterminated:
+        return [*problems, f"has an unterminated {unterminated}"]
+    body = masked.strip()
+    while body.endswith(";"):
+        body = body[:-1].rstrip()
+    if not body:
+        return [*problems, "has no SQL after its description"]
+    if ";" in body:
+        problems.append("holds more than one statement; it must be a single SELECT")
+    root = body.split(None, 1)[0].upper()
+    if root not in ("SELECT", "WITH") or (root == "WITH" and _with_terminal_verb(body) != "SELECT"):
+        problems.append(f"must be a SELECT (or WITH ... SELECT) over {DETAIL_CTE}, not {root}")
+    problems += _verify_read_only(sql)
+    if _TAG_SHAPED_RE.search(sql):
+        problems.append("has a line shaped like a section tag (--N_...); reword that comment")
+    for name in dict.fromkeys(m.group(1) for m in _TOKEN_RE.finditer(body)):
+        problems.append(f"uses {{{name}}}; a summary takes no tokens (the query's are applied)")
+    for name in dict.fromkeys(m.group(1) for m in _BIND_RE.finditer(body)):
+        problems.append(f"uses :{name}; a summary takes no binds (the query's are applied)")
+    if not _DETAIL_REF_RE.search(body):
+        problems.append(
+            f"never reads {DETAIL_CTE}, the app query's result (e.g. SELECT ... FROM {DETAIL_CTE})"
+        )
+    ctes = {m.group(1).lower() for m in _CTE_DEF_RE.finditer(body)}
+    if DETAIL_CTE in ctes:
+        problems.append(f"defines a CTE named {DETAIL_CTE}, which the summary section adds")
+    if "params" not in ctes and _PARAMS_REF_ANY_RE.search(body):
+        problems.append(
+            "reads params, which lives inside detail; select what the summary needs from detail"
+        )
+    return problems
+
+
+def summary_query_problems(sql: str) -> list[str]:
+    """Why a query cannot be wrapped by its metric's summary ([] when it can)."""
+    masked = _mask_strings_and_comments(strip_header(sql)).strip()
+    root = masked.split(None, 1)[0].upper() if masked else ""
+    if root not in ("SELECT", "WITH"):
+        return [f"is not a SELECT or WITH statement, so a summary cannot read it as {DETAIL_CTE}"]
+    return []
+
+
+def _split_ctes(sql: str) -> tuple[str, str, str]:
+    """``(ctes, between, final)`` of one statement.
+
+    ``ctes`` is the text after ``WITH`` through the last CTE's ``)`` ("" with
+    no ``WITH``), ``between`` the comment lines before the final statement, and
+    ``final`` that statement. Positions come from the masked text, so nothing
+    inside a literal or comment can move a boundary.
+    """
+    masked = _mask_strings_and_comments(sql)
+    m = _LEADING_WITH_RE.match(masked)
+    if m is None:
+        return "", "", sql.strip()
+    lead = len(masked) - len(masked.lstrip())
+    off = _with_terminal_offset(masked[lead:])
+    if off < 0:
+        raise ToolError("cannot find where the summary's WITH clause ends")
+    off += lead
+    close = masked.rindex(")", 0, off) + 1
+    with_at = masked.upper().index("WITH", lead)
+    above = sql[:with_at].strip()  # comments before WITH belong to the first CTE
+    ctes = "\n".join(x for x in (above, sql[m.end() : close].strip()) if x)
+    return ctes, sql[close:off].strip(), sql[off:].strip()
+
+
+def _indent(sql: str, pad: str = "    ") -> str:
+    """Indent every line, except a line that starts inside a multi-line string
+    or ``$$`` constant: padding it would change the literal, and the detail CTE
+    must run exactly what the detail section runs."""
+    out: list[str] = []
+    offset = 0
+    for line in sql.split("\n"):
+        inside = _mask_with_status(sql[:offset])[1] is not None
+        out.append(line if inside or not line else pad + line)
+        offset += len(line) + 1
+    return "\n".join(out)
+
+
+def render_summary_section(detail: str, summary_sql: str) -> str:
+    """A summary section's SQL (no description or tag line), ending in one ``;``.
+
+    ``detail`` is the detail section exactly as the page file holds it (no
+    ``;``), so the CTE runs the very statement a reviewer just read above it.
+    ``summary_sql`` is the summary without its description. A ``WITH`` in the
+    summary continues the CTE list after ``detail``.
+    """
+    sql = summary_sql.strip()
+    while sql.endswith(";"):
+        sql = sql[:-1].rstrip()
+    s_ctes, s_between, s_final = _split_ctes(sql)
+    out = f"WITH {DETAIL_CTE} AS (\n{_indent(detail.strip())}\n)"
+    if s_ctes:
+        out += f",\n\n{s_ctes}"
+    out += "\n\n" + "\n".join([*([s_between] if s_between else []), s_final])
+    # A summary ending in a `-- comment` would comment out a `;` on its line.
+    last = out.rsplit("\n", 1)[-1]
+    ends_in_comment = _mask_strings_and_comments(last).rstrip() != last.rstrip()
+    return out + ("\n;" if ends_in_comment else ";")
+
+
 def _clip(line: str) -> str:
     line = " ".join(line.split())
     return line if len(line) <= MAX_LINE else line[: MAX_LINE - 1] + "…"
@@ -954,7 +1149,9 @@ def _clip(line: str) -> str:
 
 def _page_header(app: Path, index: sri.Index, page: sri.Page) -> list[str]:
     """Exactly HEADER_LINES lines, so the first tag is always line 9."""
-    listed = ", ".join(f"{m.number} {m.key}" for m in page.metrics)
+    listed = ", ".join(
+        f"{m.number} {m.key}" + (" (+summary)" if m.summary else "") for m in page.metrics
+    )
     metrics = f"-- Metrics: {listed}"
     if len(metrics) > MAX_LINE:
         metrics = f"-- Metrics: {len(page.metrics)}. Each section starts with its --N_key tag."
@@ -981,19 +1178,30 @@ def render_page(app: Path, index: sri.Index, page: sri.Page, cfg_text: str) -> s
     """The full page file (no provenance yet). Refuses anything not read-only."""
     from . import sql_review_lint as srl  # noqa: PLC0415  (lazy: sqlfluff import)
 
+    def fixed(sql: str) -> str:
+        # A fix failure leaves the SQL as rendered; check's parse pass reports it.
+        with contextlib.suppress(Exception):
+            sql = srl.fix_section(sql, cfg_text)
+        sql = sql.strip()
+        while sql.endswith(";"):
+            sql = sql[:-1].rstrip()
+        return sql
+
     lines = _page_header(app, index, page)
     for metric in page.metrics:
-        section = render_section(app, index, metric)
-        # A fix failure leaves the section as rendered; check's parse pass reports it.
-        with contextlib.suppress(Exception):
-            section = srl.fix_section(section, cfg_text)
-        section = section.strip()
-        while section.endswith(";"):
-            section = section[:-1].rstrip()
+        detail = fixed(render_section(app, index, metric))
         lines.append(f"--{metric.number}_{metric.key}")
-        lines.extend(section.split("\n"))
-        lines[-1] += ";"
+        lines.extend(f"{detail};".split("\n"))
         lines.append("")
+        if metric.summary:
+            description, summary_sql = summary_parts(metric.summary)
+            # The summary is fixed alone, so the detail inside it stays byte-identical
+            # to the section above (only indented).
+            section = render_summary_section(detail, fixed(summary_sql + ";"))
+            lines.append(description)
+            lines.append(f"--{metric.number}_{metric.key}{SUMMARY_SUFFIX}")
+            lines.extend(section.split("\n"))
+            lines.append("")
     text = "\n".join(line.rstrip() for line in lines).rstrip() + "\n"
     problems = (
         _verify_read_only(text) + _verify_binds_bound(text) + _verify_session_vars_defined(text)
@@ -1073,7 +1281,8 @@ def readme_block(index: sri.Index) -> str:
         for p in pages:
             for m in p.metrics:
                 reads = ", ".join(f"`{r}`" for r in m.reads) or "—"
-                out.append(f"| `{p.filename}` | {m.number} | `{m.key}` | `{m.query}` | {reads} |")
+                key = f"`{m.key}`" + (" + summary" if m.summary else "")
+                out.append(f"| `{p.filename}` | {m.number} | {key} | `{m.query}` | {reads} |")
     else:
         out.append("_None yet._")
     out += ["", "### App-specific reporting objects", ""]
@@ -1390,6 +1599,44 @@ def _lint_findings(
                         "detail": f"does not parse as Snowflake SQL: {desc}",
                     }
                 )
+        found += _summary_lint_findings(app, index, cfg_text)
+    return found
+
+
+def _summary_lint_findings(app: Path, index: sri.Index, cfg_text: str) -> list[dict]:
+    """sqlfluff and the comment rules over each index ``summary:``, at index.yaml lines.
+
+    A summary is SQL a reviewer reads in the page file, so it is held to the
+    query rules. It lints on its own (``detail`` reads as a table), and the
+    density advisory is skipped: one comment on a three-line summary is not
+    over-commenting.
+    """
+    from . import sql_review_lint as srl  # noqa: PLC0415  (lazy: sqlfluff import)
+
+    rel = _rel(app, "sql_review", sri.INDEX_NAME)
+    found: list[dict] = []
+    for page in index.pages:
+        for m in page.metrics:
+            if not m.summary:
+                continue
+            description, sql = summary_parts(m.summary)
+            text = (f"{description}\n{sql}" if description else sql) + "\n"
+            offset = max(m.summary_line, 1) - 1
+            violations, ctes = srl.lint_query(text, cfg_text, {})
+            found += [
+                {
+                    "kind": KIND_LINT,
+                    "file": rel,
+                    "line": offset + line,
+                    "detail": f"summary of {m.key!r}: {code}: {desc}",
+                }
+                for line, code, desc in violations
+            ]
+            found += [
+                {**f, "line": offset + f["line"], "detail": f"summary of {m.key!r}: {f['detail']}"}
+                for f in _comment_findings(rel, text, ctes)
+                if f["kind"] == KIND_COMMENTS
+            ]
     return found
 
 

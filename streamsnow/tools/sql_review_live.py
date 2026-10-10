@@ -15,7 +15,8 @@ evidence honest:
 
 - **Facts come from tools, not from an agent's reading of a result set.** Each
   verb emits compact JSON with a stable ``id`` (``probe:01#1``,
-  ``probe:DB.SCHEMA.OBJECT``, ``run:01#1``, ``bench:01#1:before``). Reviewer
+  ``probe:DB.SCHEMA.OBJECT``, ``run:01#1``, ``bench:01#1:before``; a metric's
+  summary section is ``01#1s``, as in ``run:01#1s``). Reviewer
   agents make judgement calls that must cite those IDs, and ``log`` refuses a
   finding whose evidence is not in the run directory.
 - **No data rows leave Snowflake.** ``run`` and ``bench`` wrap each section in
@@ -433,10 +434,11 @@ class Section:
     page: sri.Page
     metric: sri.Metric
     sql: str  # without the trailing ';'
+    summary: bool = False  # the --N_key_summary section, not the metric's detail
 
     @property
     def ref(self) -> str:
-        return f"{self.page.number:02d}#{self.metric.number}"
+        return f"{self.page.number:02d}#{self.metric.number}" + ("s" if self.summary else "")
 
     @property
     def root(self) -> str:
@@ -450,6 +452,7 @@ class Section:
             "stem": self.page.stem,
             "n": self.metric.number,
             "key": self.metric.key,
+            **({"summary": True} if self.summary else {}),
         }
 
 
@@ -512,6 +515,12 @@ def page_sections(
             if sql is None:
                 raise ToolError(f"{page.filename} has no section --{metric.number}_{metric.key}")
             out.append(Section(page, metric, sql))
+            if metric.summary:
+                tag = f"{metric.key}{sr.SUMMARY_SUFFIX}"
+                sql = chunks.get((metric.number, tag))
+                if sql is None:
+                    raise ToolError(f"{page.filename} has no section --{metric.number}_{tag}")
+                out.append(Section(page, metric, sql, summary=True))
     return out
 
 
@@ -1152,7 +1161,9 @@ def cmd_bench(args: argparse.Namespace, runner: sx.Runner | None = None) -> int:
         raise ToolError("--metric must look like 01#2 (page number # metric number)")
     page_no, metric_no = int(m.group(1)), int(m.group(2))
     sections = [
-        s for s in page_sections(repo, app, index, f"{page_no:02d}") if s.metric.number == metric_no
+        s
+        for s in page_sections(repo, app, index, f"{page_no:02d}")
+        if s.metric.number == metric_no and not s.summary
     ]
     if not sections:
         raise ToolError(f"no metric {args.metric} in {app.name}'s index.yaml")
@@ -1460,6 +1471,13 @@ def render_log(run_dir: Path, app: Path, index: sri.Index, findings: list[dict],
                 f"| {metric.number} `{metric.key}` | {status} | {rows} | {headline(r)} "
                 f"| {match} | {ids} |"
             )
+            rs = run_results.get(f"run:{nn}#{metric.number}s")
+            if metric.summary and rs is not None:
+                rows = rs.get("rows") if rs.get("rows") is not None else "—"
+                lines.append(
+                    f"| {metric.number} `{metric.key}` summary | {rs.get('status', 'not run')} "
+                    f"| {rows} | {headline(rs)} | — | — |"
+                )
         lines.append("")
     objs = [r for r in probe.get("results", []) if r.get("object")]
     if objs:

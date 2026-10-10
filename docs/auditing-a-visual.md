@@ -87,8 +87,38 @@ pages:
         tokens: {REGION_FILTER: "AND region = 'West'"}
         binds: {"1": params.start_date, "2": params.end_date}
         reads: [ANALYTICS.REPORTING.ORDERS]
+        summary: |                     # optional: exactly what the visual shows
+          -- The Revenue tile, rounded to whole dollars as shown
+          SELECT ROUND(SUM(revenue), 0) AS revenue_shown
+          FROM detail
 objects: []                            # views/tables built for this app, with DDL files
 ```
+
+`summary:` is for a visual that derives its number from the query's result (a
+card that sums a wide query, a chart that regroups it). `generate` writes it
+as a second section right after the metric's own, so a reader runs the
+section the app's query feeds and then the one that returns the numbers on
+screen:
+
+```sql
+-- The Revenue tile, rounded to whole dollars as shown
+--1_total_revenue_summary
+WITH detail AS (
+    WITH params AS (
+        ...the --1_total_revenue section above, verbatim...
+    )
+    SELECT ...
+)
+
+SELECT ROUND(SUM(revenue), 0) AS revenue_shown
+FROM detail;
+```
+
+Its first line is a one-line description, printed above the tag. `detail` is
+the section above, verbatim, so the summary cannot drift from what the app
+runs. `compare` holds a shown number to the summary's first column. Name its
+outputs apart from `detail`'s columns: Snowflake reads a bare `revenue` as the
+column, never as a same-named alias.
 
 `streamsnow sql-review check` keeps it honest: every finding carries a
 `kind` (`index`, `provenance`, `marker`, `objects`, `lint`, `comments`,

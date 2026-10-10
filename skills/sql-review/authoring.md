@@ -39,6 +39,33 @@ regenerated. The folder's own rules are in `apps/<slug>/sql_review/AGENTS.md`.
      bind is an `index` finding.
    - `reads`: every object the query reads, `DATABASE.SCHEMA.OBJECT`.
    - `notes`: a definition a reviewer needs ("booked date, not ship date"), when there is one.
+   - `summary` (optional, recommended when the page derives what it shows): the exact values
+     the visual displays, computed from the query's result. When pandas sums, ratios, rounds or
+     regroups a wide query, the detail section alone cannot show the number on screen. Write a
+     `|` block whose first line is a one-line `--` description (100 characters or fewer, printed
+     above the section's tag), then a SELECT over `detail`, the query's result:
+
+     ```yaml
+     summary: |
+       -- The Revenue card: selected revenue, a year earlier, YoY % (2 dp)
+       SELECT
+           SUM(IFF(period = 'selected', revenue, 0)) AS revenue_selected,
+           SUM(IFF(period = 'prior', revenue, 0)) AS revenue_year_earlier,
+           ROUND((revenue_selected - revenue_year_earlier)
+               / NULLIF(revenue_year_earlier, 0) * 100, 2) AS yoy_pct
+       FROM detail
+     ```
+
+     `generate` writes it as a `--N_key_summary` section right after the metric's detail
+     section: `WITH detail AS (<the detail section, verbatim>)` then the SELECT. Put the value
+     the visual marks with `review_value` in the **first** column; `compare` holds a shown number
+     to it. More CTEs continue the list (`WITH name AS (...) SELECT ...`, or `, name AS (...)
+     SELECT ...`), each with its one-line comment. A summary takes no tokens or binds and cannot
+     read `params` (it lives inside `detail`); `check` refuses anything but one read-only SELECT
+     that reads `detail`, and lints it at its `index.yaml` line. **Never reuse a `detail` column
+     name as an alias** (`SUM(...) AS revenue` then `revenue - prior`): Snowflake resolves the
+     bare name to the column, not the alias. Name the outputs `revenue_selected`,
+     `revenue_shown_billions` and so on.
    - **Omit `review_window` when no metric binds `params.*`.** It only feeds the `params` CTE;
      without a bind that reads it, the window is dead weight in every generated section.
    - **Anchor `review_window` to the data, always** (when you keep one): end it at the source's
@@ -93,6 +120,8 @@ regenerated. The folder's own rules are in `apps/<slug>/sql_review/AGENTS.md`.
 - **One section per visual, whatever its join width**: a three-table join is one section; its
   `reads:` lists all three objects.
 - **No `{TOKEN}`s and no binds in a query** → no `tokens:` or `binds:` needed. That's fine.
+- **A summary per derived visual**: a KPI card that sums a wide query, a chart that regroups it,
+  a table that ranks it. A visual that shows the query's rows as they are needs none.
 - **Zero rows in the review window** is a finding to report (the UI may render empty), not an
   error to fix here: the page reviewer judges it from the `run` result.
 
