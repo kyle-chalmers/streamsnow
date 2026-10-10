@@ -120,3 +120,45 @@ def test_load_denylist_skips_malformed_regex_instead_of_crashing(tmp_path, capsy
     assert terms == ["good term"]
     assert [p.pattern for p in patterns] == ["ok\\d+"]
     assert "unclosed" in capsys.readouterr().err
+
+
+def _git_repo(root):
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    return lambda *a: subprocess.run(["git", "-C", str(root), *a], check=True)
+
+
+def test_untracked_gitignored_files_are_skipped_at_a_work_tree_root(tmp_path):
+    git = _git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(".claude/*.local.*\nlocal-out/\n", encoding="utf-8")
+    (tmp_path / ".claude").mkdir()
+    leak = "/Users/" + "somebody/project"
+    (tmp_path / ".claude" / "settings.local.json").write_text(
+        f'{{"p": "{leak}"}}', encoding="utf-8"
+    )
+    (tmp_path / "local-out").mkdir()
+    (tmp_path / "local-out" / "notes.md").write_text(leak, encoding="utf-8")
+    git("add", ".gitignore")
+    assert scan_tree(tmp_path)["ok"]
+
+
+def test_tracked_and_untracked_unignored_files_are_still_scanned(tmp_path):
+    git = _git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text("*.local.json\n", encoding="utf-8")
+    leak = "/Users/" + "somebody/project"
+    (tmp_path / "forced.local.json").write_text(f'{{"p": "{leak}"}}', encoding="utf-8")
+    git("add", "-f", "forced.local.json")  # tracked despite the rule: it ships
+    (tmp_path / "new.md").write_text(leak, encoding="utf-8")  # untracked, not ignored
+    files = {f["file"] for f in scan_tree(tmp_path)["findings"]}
+    assert files == {"forced.local.json", "new.md"}
+
+
+def test_a_directory_ignored_by_an_enclosing_repo_is_scanned_in_full(tmp_path):
+    _git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text("extracted/\n", encoding="utf-8")
+    inner = tmp_path / "extracted"
+    inner.mkdir()
+    (inner / "README.md").write_text("/Users/" + "somebody/project", encoding="utf-8")
+    # Not the work tree's top level, so the enclosing repo's rules never apply.
+    assert not scan_tree(inner)["ok"]
