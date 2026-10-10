@@ -8,6 +8,13 @@ entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The privacy scan skips untracked gitignored files** when it scans a git work tree's top
+  level, so a local `.claude/settings.local.json` no longer fails the release gate on a clean
+  checkout. Tracked files are always scanned, even ones that match an ignore rule, and any
+  other directory is scanned in full.
+
 ### Added
 
 - **Summary sections in review SQL.** A metric in `sql_review/index.yaml` can carry a
