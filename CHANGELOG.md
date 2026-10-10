@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-10
+
 ### Fixed
 
 - **The privacy scan skips untracked gitignored files** when it scans a git work tree's top
