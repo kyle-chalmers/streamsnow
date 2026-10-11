@@ -33,9 +33,9 @@
 </p>
 
 <p align="center">
-  <img alt="StreamSnow demo in Claude: /build-app turns a one-line idea into a sales dashboard with a checkpoint for your OK at each step, /review-app runs the validate-app gate and five reviewers, /preview-app opens the app locally, /ship-app opens the pull request, the checks pass, the merge triggers the deploy workflow, and the app runs live in Snowsight." src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/demo.gif" width="900">
+  <img alt="Screen recording of a real StreamSnow run, sped up. In Claude, /build-app asks the spec questions and stops at Checkpoint 1 for approval, subagents build and review a sales dashboard, the dashboard runs in a local preview, the deploy job for the merged pull request passes in GitHub Actions, and the app opens live in Snowsight." src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/demo.gif" width="900">
   <br>
-  <sub>One real run, condensed: <code>/build-app</code>, <code>/review-app</code>, <code>/preview-app</code> and <code>/ship-app</code> in Claude, then CI checks, the merge and the deploy to Snowflake.</sub>
+  <sub>One real run from a screen recording, sped up: the <code>/build-app</code> spec questions and first checkpoint, subagents building and reviewing, the local preview, the CI deploy after the merge, and the live app in Snowsight. Also available as an <a href="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/demo.mp4">MP4</a>.</sub>
 </p>
 
 > **Quick start.** Check the [prerequisites](#prerequisites), then open your coding agent
