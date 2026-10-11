@@ -10,6 +10,11 @@ entry.
 
 ### Changed
 
+- **The README demo is a real screen recording.** `docs/images/demo.gif` (and a new
+  `docs/images/demo.mp4`) is now cut from the screen recording of an actual StreamSnow run:
+  the spec questions, the first checkpoint, subagents building, the local preview, the CI
+  deploy and the live app in Snowsight. It replaces the GIF drawn by
+  `scripts/readme_media/render_gif.py`.
 - **A release is one prompt.** "cut the release" (or `/release`) now runs to PyPI with no
   further step from the maintainer: `release.py prepare` raises the generated workflows'
   `streamsnow>=` pin by itself whenever the old pin cannot install the new version (a minor

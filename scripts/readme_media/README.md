@@ -10,7 +10,7 @@ hand-authored logo), so rerun them when the CLI output or a skill's output chang
 | `logo-light.svg`, `logo-dark.svg` | hand-authored, no script | the SVGs themselves |
 | `social-preview.png` (1280x640) | `render_social.py` | `social_preview.html` |
 | `demo-terminal.svg` | `render_terminal.py` | the real offline CLI flow |
-| `demo.gif` | `render_gif.py` + `claude_flow.py` | a real Claude run, with its app screenshots in `assets/sales-performance/` |
+| `demo.gif`, `demo.mp4` | cut by hand from a screen recording (see [Record the full Claude Code to Snowflake demo](#record-the-full-claude-code-to-snowflake-demo)) | a real run, recorded end to end |
 | `skills-flow.png`, `repos-flow.png`, `secrets-flow.png` | `export_excalidraw.py` | the `.excalidraw` file next to each PNG |
 
 ## The logo
@@ -62,7 +62,8 @@ What each script does:
   write an SVG that still contains a home or temp path.
 - `render_social.py` screenshots `social_preview.html` at 1280x640. Upload the PNG under
   the repository's Settings, General, Social preview.
-- `render_gif.py` plays the StreamSnow journey in a Claude desktop chat: `/build-app` (with
+- `render_gif.py` (no longer the README demo; it writes `docs/images/demo.gif` by default, so
+  pass `--out` to keep the recording) plays the StreamSnow journey in a Claude desktop chat: `/build-app` (with
   its checkpoints and subagents), `/review-app`, `/preview-app` (the app in a local browser
   window) and `/ship-app`, then the pull request's checks, the merge, the deploy run's steps,
   and the app live in a Snowsight frame. It stitches title card, scenes and end card into a
@@ -91,8 +92,7 @@ What each script does:
 
 ## Record the full Claude Code to Snowflake demo
 
-`demo.gif` draws the whole path from a real run's words and screenshots. A screen recording
-of the same path (an idea typed into Claude Code, the governed app it builds, the pull
+`demo.gif` is this recording. A screen recording of the path (an idea typed into Claude Code, the governed app it builds, the pull
 request, and the live app in Snowsight) shows the real interface instead, and it needs a real
 account, so it is recorded by hand.
 Use a scratch Snowflake account or a sandbox database with sample data only, and nothing
