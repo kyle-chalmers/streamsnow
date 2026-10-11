@@ -1,66 +1,71 @@
 ---
 name: release
-description: Maintainer-only release of StreamSnow, driven by scripts/release.py. Subcommands are prepare <X.Y.Z> (bump, close the changelog, commit, run the gates, open the release PR), tag <X.Y.Z> (after the PR merges, tag the release commit so PyPI publishes, then create the GitHub Release) and verify <X.Y.Z> (check the publish landed). suggest recommends a version.
-argument-hint: "prepare|tag|verify|suggest <X.Y.Z>"
+description: Maintainer-only release of StreamSnow, driven by scripts/release.py. One prompt ("cut the release", /release, /release X.Y.Z) runs it end to end, and publish.yml tags and publishes when the release PR merges. Also suggest, prepare <X.Y.Z>, verify <X.Y.Z>, and the by-hand fallback tag <X.Y.Z>.
+argument-hint: "[X.Y.Z] | suggest | prepare|verify|tag <X.Y.Z>"
 model: haiku
 disable-model-invocation: true
-allowed-tools: ["Bash(uv run python scripts/release.py suggest)", "Bash(uv run python scripts/release.py prepare *)", "Bash(uv run python scripts/release.py open-pr *)", "Bash(uv run python scripts/release.py gates *)", "Bash(uv run python scripts/release.py verify *)", "Bash(git status *)", "Bash(git fetch origin)", "Bash(git switch -c claude/release-* origin/main)"]
+allowed-tools: ["Bash(uv run python scripts/release.py suggest)", "Bash(uv run python scripts/release.py prepare *)", "Bash(uv run python scripts/release.py open-pr *)", "Bash(uv run python scripts/release.py gates *)", "Bash(uv run python scripts/release.py verify *)", "Bash(git status *)", "Bash(git fetch origin)", "Bash(git switch -c claude/release-* origin/main)", "Bash(git log *)", "Bash(git diff *)"]
 ---
 
 # /release
 
 You run exact commands and report their output. The script makes every decision.
 RELEASING.md is the source of truth for the procedure; this skill only drives the script.
-This skill is the maintainer-sanctioned exception to the rule in `.claude/CLAUDE.md` that
-puts tags and releases off-limits for agents, and only through scripts/release.py.
-The one step that cannot be undone (the tag push that publishes to PyPI) needs two
-confirmations: the maintainer typing `/release tag X.Y.Z`, and approving the permission
-prompt for the `tag` command, which this skill deliberately does not pre-approve.
+It is the maintainer-sanctioned exception to the rule in `.claude/CLAUDE.md` that puts
+tags and releases off-limits for agents.
+
+**The protocol: one prompt.** When the maintainer asks for a release, run cut below to the
+end and hand nothing back. open-pr turns on the release PR's auto-merge, and when it merges
+`publish.yml` tags the commit (`release.py tag --from-ci`), publishes to PyPI and creates the
+GitHub Release. Merging is the publish decision; the maintainer made it by asking.
 
 ## Rules
 
 1. Run the commands below exactly, in order, from the repo root.
-2. If any command exits non-zero, stop. Show its output verbatim and do nothing else.
-3. Never edit files by hand. Never skip, retry around or work around a failing gate.
-4. Never run `git push`, `git commit`, `git tag`, `gh pr`, `gh release` or `uv publish` except through the script.
-5. Never pick the version. If the user gave none, run `suggest`, show its output, and ask.
-6. Never wait for or poll CI. Report and stop.
-7. Never pass `--allow-no-denylist` (it exists only on `tag`) unless the maintainer explicitly asks for it.
+2. If a command exits non-zero, stop. Show its output verbatim, say what failed and why, and
+   propose the fix. Never work around, skip or retry around a failing gate.
+3. Never edit files by hand during a release.
+4. Never run git push, git commit, git tag, gh pr, gh release or uv publish yourself; the
+   script and publish.yml do those.
+5. Never wait for or poll CI. Report and stop.
+6. Never run the by-hand `tag` unless the maintainer says "tag X.Y.Z" in the chat session.
+
+## cut ("cut the release", `/release`, `/release X.Y.Z`)
+
+1. `git status --porcelain`. If it prints anything, stop and ask the user to commit or stash.
+2. Version: the one the maintainer named, else run `uv run python scripts/release.py suggest`
+   and take its recommendation.
+3. `git fetch origin`, then `git switch -c claude/release-X.Y.Z origin/main`
+4. `uv run python scripts/release.py prepare X.Y.Z`. It raises the generated workflows' pin
+   by itself when the old pin cannot install X.Y.Z. Add `--pin-floor` only for a patch whose
+   generated workflows call a command added since the last release.
+5. Do its checklist yourself and report what you checked: read `git log` and `git diff`
+   from the last tag to HEAD for real company, people or customer names, internal URLs,
+   email addresses, ticket IDs and account locators; look at every changed image; note
+   changes to LICENSE, README and CONTRIBUTING. If the Playwright CLI pin moved, or you find
+   anything, stop and show it.
+6. `uv run python scripts/release.py open-pr X.Y.Z --trailer "<line>"`, where `<line>` is the
+   Co-Authored-By line from your own commit attribution instructions, copied verbatim (leave
+   it out if you have none). With a pin floor from step 4, add `--pin-floor-note "<why>"`.
+7. Show the output and stop: the PR merges itself when CI is green, and publish.yml takes it
+   from there. Say `/release verify X.Y.Z` can confirm it later.
 
 ## suggest
 
-1. `uv run python scripts/release.py suggest`
-2. Show the output verbatim and ask the user which version to release.
+`uv run python scripts/release.py suggest`, and show the output verbatim.
 
 ## prepare X.Y.Z
 
-1. `git status --porcelain`. If it prints anything, stop and ask the user to commit or stash.
-2. `git fetch origin`
-3. `git switch -c claude/release-X.Y.Z origin/main`
-4. Ask the user: "Do the generated workflows now call a command added since the last
-   release? If yes I will pass --pin-floor." Use their answer.
-5. `uv run python scripts/release.py prepare X.Y.Z` (add `--pin-floor` if they said yes).
-   Show the output verbatim, including its checklist, and ask the user to confirm they
-   have done each checklist item. Wait for their yes.
-6. `uv run python scripts/release.py open-pr X.Y.Z --trailer "<line>"`, where `<line>` is
-   the Co-Authored-By line from your own commit attribution instructions, copied verbatim.
-   Leave out `--trailer` if you have none. If they said yes in step 4, also pass
-   `--pin-floor-note "<the command they named>"`.
-7. Show the output verbatim. On exit 0, tell the user: "Once this PR has merged, type
-   `/release tag X.Y.Z`." Then stop.
-
-## tag X.Y.Z
-
-1. Tell the user: "Next you will see a permission prompt for the tag command. Approving it
-   pushes the tag, which publishes to PyPI and cannot be undone."
-2. `uv run python scripts/release.py tag X.Y.Z`. If the user denies the permission prompt,
-   stop and say nothing was tagged.
-3. Show the output verbatim. On exit 0, tell the user to run `/release verify X.Y.Z` in a
-   few minutes. If it says to rerun with `--release-only`, tell the user that and stop; run
-   `uv run python scripts/release.py tag X.Y.Z --release-only` only when they ask.
+Steps 1, 3, 4 and 5 of cut, then stop and report.
 
 ## verify X.Y.Z
 
-1. `uv run python scripts/release.py verify X.Y.Z`
-2. Show the output verbatim. Exit 3 means still publishing: tell the user to run
-   `/release verify X.Y.Z` again later. Do not loop.
+`uv run python scripts/release.py verify X.Y.Z`; show the output verbatim. Exit 3 means
+still publishing (or still tagging): say so. Do not loop.
+
+## tag X.Y.Z (fallback, only after the maintainer says "tag X.Y.Z")
+
+For when publish.yml refused to tag (verify names its run). Say: "Next you will see a
+permission prompt for the tag command. Approving it pushes the tag, which publishes to
+PyPI and cannot be undone." Then run `uv run python scripts/release.py tag X.Y.Z` and show
+the output verbatim. If it says to rerun with `--release-only`, say so and stop.

@@ -8,6 +8,18 @@ entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **A release is one prompt.** "cut the release" (or `/release`) now runs to PyPI with no
+  further step from the maintainer: `release.py prepare` raises the generated workflows'
+  `streamsnow>=` pin by itself whenever the old pin cannot install the new version (a minor
+  release no longer ships workflows that exclude it) and appends the new pin to
+  `docs/deploying.md`'s history; `open-pr` turns on the release PR's auto-merge; and once it
+  merges and `ci` is green, `publish.yml` runs the new `release.py tag X.Y.Z --from-ci`, which
+  tags only when the merged commit's files are exactly the release PR's (gated with the
+  local denylist), then publishes and creates the GitHub Release. `verify` finds the publish
+  run by commit, so it reports "pending" while `publish.yml` is still tagging.
+
 ## [0.13.0] - 2026-10-10
 
 ### Fixed

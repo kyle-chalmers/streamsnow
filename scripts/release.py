@@ -22,7 +22,8 @@ Subcommands (all accept ``--root DIR`` and ``--format md|json``):
     gates X.Y.Z          read-only: the release gates, each PASS, FAIL or WARN
     tag X.Y.Z            tag the release commit on origin/main and create the GitHub
                          Release, only when every precondition holds (--release-only
-                         retries just the Release)
+                         retries just the Release; --from-ci is publish.yml's mode, see
+                         _release_pr_tree)
     verify X.Y.Z         read-only: the publish run, PyPI, and a smoke test, checked once
 
 Exit codes: 0 pass, 1 a gate failed or a precondition refused, 2 tool error (bad
@@ -61,8 +62,9 @@ DENYLIST = ".streamsnow/export-denylist.txt"
 WALKTHROUGH = "skills/_shared/playwright-walkthrough.md"
 DOCS_LINKS = "scripts/check_docs_links.py"
 PIN_SOURCE = "streamsnow/_templates/repo/ci.yml.j2"
-# docs/deploying.md also names the pin, inside a paragraph of upgrade history; rewriting it
-# would change what earlier releases said, so prepare asks for a hand edit instead.
+# docs/deploying.md also names the pin, inside a paragraph of upgrade history. prepare only
+# appends the new release to it (`, and 0.13 to <pin>.`), never rewrites what an earlier
+# release said; when the paragraph's last entry is not where it expects, it asks for a hand edit.
 PIN_FILES = (
     PIN_SOURCE,
     "streamsnow/_templates/repo/deploy.yml.j2",
@@ -97,6 +99,8 @@ _VERSION_PATTERNS = {
 }
 _LOCK_VERSION = re.compile(r'^name = "streamsnow"\nversion = "([^"]+)"$', re.M)
 _PIN = re.compile(r"streamsnow>=(\d+\.\d+(?:\.\d+)?),<(\d+)\.(\d+)(?![\d.])")
+# The last entry of docs/deploying.md's pin history: `and 0.12 to\n`streamsnow>=...`.`
+_PIN_HISTORY_LAST = re.compile(r"and (\d+\.\d+) to(\s+)(`streamsnow>=[^`]+`)\.")
 _DATED = r"^## \[{v}\] - \d{{4}}-\d{{2}}-\d{{2}}$"
 _HOME_PATH = re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+")
 _PLAYWRIGHT_PIN = re.compile(r"@playwright/cli@(\d+\.\d+\.\d+)")
@@ -488,7 +492,41 @@ def plan_pin_floor(root: Path, version: str) -> dict[str, str]:
         if not exact.search(text):
             raise ToolError(f"{rel}: the current pin `{current}` is not there; fix it by hand")
         planned[rel] = exact.sub(new, text)
+    history = append_pin_history(_read(root, PIN_HISTORY), version, new)
+    if history is not None:
+        planned[PIN_HISTORY] = history
     return planned
+
+
+def append_pin_history(text: str, version: str, new_pin: str) -> str | None:
+    """docs/deploying.md with ``, and A.B to `<new_pin>`.`` appended to its pin history.
+
+    Earlier entries keep their words; only the last one loses its ``and``. None when the
+    history's last entry is not ``and A.B to `streamsnow>=...`.`` (prepare then asks for
+    a hand edit) or already names this minor version.
+    """
+    entries = list(_PIN_HISTORY_LAST.finditer(text))
+    if not entries:
+        return None
+    last = entries[-1]
+    major, minor, _ = parse_semver(version)
+    label = f"{major}.{minor}"
+    if last.group(1) == label:
+        return None
+    tail = f"{last.group(1)} to{last.group(2)}{last.group(3)}, and {label} to `{new_pin}`."
+    return text[: last.start()] + tail + text[last.end() :]
+
+
+def pin_excludes(root: Path, version: str) -> bool:
+    """True when the generated workflows' current pin cannot install ``version``.
+
+    Every 0.x minor release crosses the pin's cap (`<0.13` excludes 0.13.0), and a
+    release whose workflows cannot install it ships red CI to every repo that updates.
+    """
+    m = _PIN.search(_read(root, PIN_SOURCE))
+    if not m:
+        return False
+    return parse_semver(version)[:2] >= (int(m.group(2)), int(m.group(3)))
 
 
 def _checklist(run: Run, root: Path, version: str, new_pin: str | None) -> list[str]:
@@ -538,6 +576,9 @@ def prepare(version: str, root: Path, run: Run, today: date, pin_floor: bool) ->
         raise Refused(f"{version} is not greater than the current version {current}")
     rep.add("version", "PASS", f"{current} -> {version}")
     new_log = close_changelog(_read(root, CHANGELOG), version, today)
+    if not pin_floor and pin_excludes(root, version):
+        pin_floor = True
+        rep.add("pin floor", "PASS", "raised: the current pin's cap excludes this version")
     pins = plan_pin_floor(root, version) if pin_floor else {}
 
     for rel, text in texts.items():
@@ -548,8 +589,12 @@ def prepare(version: str, root: Path, run: Run, today: date, pin_floor: bool) ->
     new_pin = None
     for rel, text in pins.items():
         _write(root, rel, text)
+        if rel == PIN_HISTORY:
+            continue
         new_pin = _PIN.search(text).group(0)
         rep.add(f"pin floor {rel}", "PASS", new_pin)
+    if PIN_HISTORY in pins:
+        rep.add(f"pin history {PIN_HISTORY}", "PASS", f"appended {new_pin}")
 
     for args in (["uv", "lock"], ["uv", "lock", "--check"]):
         proc = _exec(run, args, root)
@@ -565,7 +610,9 @@ def prepare(version: str, root: Path, run: Run, today: date, pin_floor: bool) ->
         rep.exit = 1
         return rep
     rep.add("uv.lock version", "PASS", version)
-    rep.extra["checklist"] = _checklist(run, root, version, new_pin)
+    rep.extra["checklist"] = _checklist(
+        run, root, version, None if PIN_HISTORY in pins else new_pin
+    )
     rep.message = "prepared; nothing was committed or pushed"
     rep.next = (
         f'uv run python scripts/release.py open-pr {version} --trailer "<Co-Authored-By line>"'
@@ -821,7 +868,12 @@ def open_pr(
     body += [f"- {r.status} {r.name}" + (f": {r.detail}" if r.detail else "") for r in g.results]
     if pin_note:
         body += ["", "Pin floor raised: " + pin_note]
-    body += ["", f"After this merges, the maintainer types `/release tag {version}`."]
+    body += [
+        "",
+        "This PR merges itself when CI is green. On merge, `publish.yml` runs "
+        f"`scripts/release.py tag {version} --from-ci`, which tags the release commit only "
+        "when its files are exactly this PR's, publishes to PyPI and creates the GitHub Release.",
+    ]
     body_text = "\n".join(body) + "\n"
     hits = denylist_hits(body_text, deny)
     if hits:
@@ -857,9 +909,21 @@ def open_pr(
         rep.exit = 1
         rep.message = f"{branch} is pushed but the PR was not created; open it by hand"
         return rep
-    rep.add("pull request", "PASS", _out(proc))
-    rep.message = f"release PR opened: {_out(proc)}"
-    rep.next = f"once the PR has merged, type /release tag {version}"
+    url = _out(proc)
+    rep.add("pull request", "PASS", url)
+    # Merging is the publish decision: publish.yml tags and publishes the merged release
+    # commit. The maintainer delegated it when they asked for the release.
+    proc = _exec(run, ["gh", "pr", "merge", url, "--auto", "--squash"], root)
+    if proc.returncode != 0:
+        rep.add("auto-merge", "WARN", f"not enabled ({_err(proc)}); merge the PR by hand")
+        rep.message = f"release PR opened: {url}; auto-merge is off, so merge it by hand"
+    else:
+        rep.add("auto-merge", "PASS", "squash, once CI is green")
+        rep.message = (
+            f"release PR opened: {url}. It merges itself when CI is green, and publish.yml "
+            "then tags, publishes and creates the GitHub Release"
+        )
+    rep.next = f"nothing; check later with /release verify {version}"
     return rep
 
 
@@ -958,6 +1022,68 @@ def _ci_green(run: Run, root: Path, sha: str) -> str:
     return f"`{CI_WORKFLOW}` push run succeeded"
 
 
+def _release_pr_tree(run: Run, root: Path, sha: str, version: str) -> str:
+    """The merged release PR whose files are exactly ``sha``'s, or Refused.
+
+    CI has no local denylist, so ``tag --from-ci`` stands on open-pr's gates instead:
+    open-pr ran every gate, the denylist included, on the release PR's single commit. The
+    tag is safe only when the commit on main carries exactly those files, so the PR must be
+    the one open-pr opens (branch ``claude/release-X.Y.Z``, one commit, merged as ``sha``)
+    and its head tree must equal ``sha``'s. Anything else (main moved before the merge, a
+    second commit pushed to the PR) refuses, and nothing is published.
+    """
+    branch = f"claude/release-{version}"
+    proc = _exec(
+        run,
+        [
+            "gh",
+            "api",
+            f"repos/{{owner}}/{{repo}}/commits/{sha}/pulls",
+            "--jq",
+            "[.[] | {number, ref: .head.ref, head: .head.sha, merged: .merged_at, "
+            "merge: .merge_commit_sha}]",
+        ],
+        root,
+    )
+    if proc.returncode != 0:
+        raise ToolError(f"gh api commits/{sha[:12]}/pulls failed: {_err(proc)}")
+    try:
+        pulls = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise ToolError(f"gh api returned invalid JSON: {exc}") from exc
+    pr = next(
+        (p for p in pulls if p.get("ref") == branch and p.get("merged") and p.get("merge") == sha),
+        None,
+    )
+    if pr is None:
+        raise Refused(f"{sha[:12]} is not the merge of a {branch} pull request")
+    number = pr["number"]
+    proc = _exec(
+        run,
+        ["gh", "pr", "view", str(number), "--json", "commits", "--jq", ".commits | length"],
+        root,
+    )
+    if proc.returncode != 0:
+        raise ToolError(f"gh pr view {number} failed: {_err(proc)}")
+    if _out(proc) != "1":
+        raise Refused(f"release PR #{number} has {_out(proc)} commits; open-pr opens exactly one")
+    proc = _exec(run, ["git", "fetch", "origin", f"refs/pull/{number}/head"], root)
+    if proc.returncode != 0:
+        raise ToolError(f"git fetch refs/pull/{number}/head failed: {_err(proc)}")
+    trees = []
+    for ref in ("FETCH_HEAD^{tree}", f"{sha}^{{tree}}"):
+        proc = _exec(run, ["git", "rev-parse", ref], root)
+        if proc.returncode != 0:
+            raise ToolError(f"git rev-parse {ref} failed: {_err(proc)}")
+        trees.append(_out(proc))
+    if trees[0] != trees[1]:
+        raise Refused(
+            f"the files at {sha[:12]} differ from release PR #{number}'s, which open-pr gated "
+            "(main moved before the merge?); re-cut the release"
+        )
+    return f"files identical to release PR #{number}, gated by open-pr with the denylist"
+
+
 def _create_release(run: Run, root: Path, tag_name: str, notes: str) -> subprocess.CompletedProcess:
     path = _tmp_text(notes + "\n", "streamsnow-release-")
     try:
@@ -1018,6 +1144,7 @@ def tag(
     run: Run,
     release_only: bool = False,
     allow_no_denylist: bool = False,
+    from_ci: bool = False,
 ) -> Report:
     rep = Report("tag", version)
     parse_semver(version)
@@ -1059,7 +1186,9 @@ def tag(
     rep.add("changelog section", "PASS", f"## [{version}] on {sha[:12]}")
 
     deny = find_denylist(root, run)
-    if not deny and not allow_no_denylist:
+    if from_ci:
+        rep.add("release pr", "PASS", _release_pr_tree(run, root, sha, version))
+    elif not deny and not allow_no_denylist:
         raise Refused(_NO_DENYLIST.format(d=DENYLIST))
     scan = scan_commits(run, root, sha, deny)
     problems = _scan_problems(scan)
@@ -1068,7 +1197,8 @@ def tag(
     if deny:
         rep.add("commit messages", "PASS", f"{scan['count']} commit(s) clean")
     else:
-        rep.add("commit messages", "WARN", "NO DENYLIST (--allow-no-denylist): paths only")
+        why = "denylist ran at open-pr" if from_ci else "--allow-no-denylist"
+        rep.add("commit messages", "WARN", f"NO DENYLIST ({why}): paths only")
 
     # RELEASING.md's privacy gate scans files; nothing forces `gates` to have run on this
     # exact commit, so scan the files of the commit being tagged.
@@ -1078,7 +1208,8 @@ def tag(
             f"the files at {sha[:12]} fail the privacy scan with {findings} finding(s); run "
             "check_export_clean on that commit locally to see them"
         )
-    scope = "with the local denylist" if deny else "NO DENYLIST (--allow-no-denylist): generic"
+    why = "denylist ran at open-pr" if from_ci else "--allow-no-denylist"
+    scope = "with the local denylist" if deny else f"NO DENYLIST ({why}): generic"
     rep.add("privacy scan", "PASS" if deny else "WARN", f"files at {sha[:12]} clean, {scope}")
 
     proc = _exec(run, ["git", "tag", t, sha], root)
@@ -1138,17 +1269,9 @@ def _pending(rep: Report, name: str, detail: str) -> Report:
     return rep
 
 
-def verify(version: str, root: Path, run: Run, fetch_json: Callable[[str], dict]) -> Report:
-    rep = Report("verify", version)
-    parse_semver(version)
-    t = f"v{version}"
-    if f"refs/tags/{t}" not in _remote_refs(run, root, f"refs/tags/{t}"):
-        rep.add("tag on origin", "FAIL", f"{t} is not on origin")
-        rep.exit = 1
-        rep.message = f"{t} is not on origin; run /release tag {version} first"
-        return rep
-    rep.add("tag on origin", "PASS", t)
-    args = ["gh", "run", "list", "--workflow", "publish.yml", "--branch", t]
+def _publish_run(run: Run, root: Path, sha: str) -> dict | None:
+    """The newest publish.yml run for ``sha``: a tag push, or the run that tags it on main."""
+    args = ["gh", "run", "list", "--workflow", "publish.yml", "--commit", sha]
     proc = _exec(run, [*args, "--json", "status,conclusion,url", "--limit", "1"], root)
     if proc.returncode != 0:
         raise ToolError(f"gh run list failed: {_err(proc)}")
@@ -1156,9 +1279,32 @@ def verify(version: str, root: Path, run: Run, fetch_json: Callable[[str], dict]
         runs = json.loads(proc.stdout or "[]")
     except json.JSONDecodeError as exc:
         raise ToolError(f"gh run list returned invalid JSON: {exc}") from exc
-    if not runs:
+    return runs[0] if runs else None
+
+
+def verify(version: str, root: Path, run: Run, fetch_json: Callable[[str], dict]) -> Report:
+    rep = Report("verify", version)
+    parse_semver(version)
+    t = f"v{version}"
+    tag_ref = f"refs/tags/{t}"
+    remote = _remote_refs(run, root, tag_ref, "refs/heads/main")
+    if tag_ref not in remote:
+        # publish.yml tags the release commit itself once CI is green on main, so a
+        # missing tag may only mean that run has not got there yet.
+        main = remote.get("refs/heads/main")
+        r = _publish_run(run, root, main) if main else None
+        if r is not None and r.get("status") != "completed":
+            return _pending(rep, "publish run", f"tagging {t}: {r.get('url', '')}")
+        rep.add("tag on origin", "FAIL", f"{t} is not on origin")
+        rep.exit = 1
+        rep.message = f"{t} is not on origin" + (
+            f"; the publish run did not tag it: {r.get('url', '')}" if r else ""
+        )
+        return rep
+    rep.add("tag on origin", "PASS", t)
+    r = _publish_run(run, root, remote[tag_ref])
+    if r is None:
         return _pending(rep, "publish run", f"no publish run for {t} yet")
-    r = runs[0]
     if r.get("status") != "completed":
         return _pending(rep, "publish run", f"{r.get('status')}: {r.get('url', '')}")
     if r.get("conclusion") != "success":
@@ -1260,6 +1406,11 @@ def main(
         action="store_true",
         help="Accept a generic-only commit-message check when no denylist is found (loud WARN).",
     )
+    t.add_argument(
+        "--from-ci",
+        action="store_true",
+        help="publish.yml only: tag when the commit's files are exactly its merged release PR's.",
+    )
     v = sub.add_parser("verify", parents=[common], help="Check the publish landed (read-only).")
     v.add_argument("version")
     try:
@@ -1280,7 +1431,7 @@ def main(
         elif args.cmd == "gates":
             rep = gates(version, root, run, args.online)
         elif args.cmd == "tag":
-            rep = tag(version, root, run, args.release_only, args.allow_no_denylist)
+            rep = tag(version, root, run, args.release_only, args.allow_no_denylist, args.from_ci)
         else:
             rep = verify(version, root, run, fetch_json)
     except Refused as exc:

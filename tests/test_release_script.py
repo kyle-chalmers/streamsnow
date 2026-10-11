@@ -48,6 +48,7 @@ MUTATING = (
     ["git", "push"],
     ["git", "commit"],
     ["gh", "release", "create"],
+    ["gh", "pr", "merge"],
     ["gh", "pr", "create"],
 )
 TRAILER = "Co-Authored-By: Acme Bot <bot@example.com>"
@@ -286,12 +287,31 @@ def test_prepare_bumps_every_spot_and_closes_the_changelog(tmp_path, capsys):
     log = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     expected = PREFACE + "## [Unreleased]\n\n## [0.5.0] - 2031-04-09\n\n" + ADDED.strip() + "\n\n"
     assert log == expected + OLD_SECTION
-    # no pin change without --pin-floor
-    assert "streamsnow>=0.4.1,<0.5" in (root / "README.md").read_text(encoding="utf-8")
+    # a minor release crosses the pin's cap, so the pin moves without --pin-floor
+    assert "streamsnow>=0.5.0,<0.6" in (root / "README.md").read_text(encoding="utf-8")
+    assert statuses(payload)["pin floor"] == "PASS"
     assert fake.mutations() == []
     # the next step is open-pr (which commits, then gates on a clean tree), not gates
     assert "open-pr 0.5.0" in payload["next"]
     assert "gates" not in payload["next"]
+
+
+def test_a_patch_inside_the_pin_leaves_it_alone(tmp_path, capsys):
+    root = make_repo(tmp_path)
+    code, payload, _ = _prepare(capsys, root, "0.4.3")
+    assert code == 0, payload
+    assert "streamsnow>=0.4.1,<0.5" in (root / "README.md").read_text(encoding="utf-8")
+    assert (root / "docs/deploying.md").read_text(encoding="utf-8") == DEPLOYING
+    assert "pin floor" not in statuses(payload)
+
+
+@pytest.mark.parametrize(
+    ("version", "excluded"),
+    [("0.4.3", False), ("0.4.99", False), ("0.5.0", True), ("0.6.0", True), ("1.0.0", True)],
+)
+def test_pin_excludes_reads_the_cap(tmp_path, version, excluded):
+    root = make_repo(tmp_path, git=False)
+    assert release.pin_excludes(root, version) is excluded
 
 
 def test_prepare_prints_the_human_review_checklist(tmp_path, capsys):
@@ -377,18 +397,39 @@ def test_pin_floor_patch_rewrites_exactly_the_listed_files(tmp_path, capsys):
         "streamsnow/__init__.py",
         "uv.lock",
         "CHANGELOG.md",
+        "docs/deploying.md",
     }
     assert set(changed) == expected
 
 
-def test_pin_floor_leaves_the_deploying_history_alone_and_says_so(tmp_path, capsys):
+def test_pin_floor_appends_to_the_deploying_history_and_keeps_its_words(tmp_path, capsys):
     root = make_repo(tmp_path)
     code, payload, out = _prepare(capsys, root, "0.4.3", "--pin-floor")
     assert code == 0
     assert "docs/deploying.md" not in release.PIN_FILES
     text = (root / "docs/deploying.md").read_text(encoding="utf-8")
-    assert text == DEPLOYING
-    assert "and 0.10 to" in text
+    assert text == (
+        "0.9 moves every generated pin to `streamsnow>=0.9,<0.10`, and 0.10 to\n"
+        "`streamsnow>=0.4.1,<0.5`, and 0.4 to `streamsnow>=0.4.3,<0.5`.\n"
+    ).replace(", and 0.10 to", ", 0.10 to", 1)
+    assert statuses(payload)["pin history docs/deploying.md"] == "PASS"
+    assert not any("docs/deploying.md" in item for item in payload["checklist"])
+
+
+@pytest.mark.parametrize(
+    "history",
+    [
+        "Upgrades: see the release notes.\n",  # no entry to extend
+        "0.3 moves the pin to `streamsnow>=0.3,<0.4`, and 0.4 to\n`streamsnow>=0.4.1,<0.5`.\n",
+    ],
+)
+def test_pin_history_it_cannot_extend_is_left_for_a_hand_edit(tmp_path, capsys, history):
+    root = make_repo(tmp_path)
+    (root / "docs/deploying.md").write_text(history, encoding="utf-8")
+    _git(root, "commit", "-qam", "docs: acme history")
+    code, payload, _ = _prepare(capsys, root, "0.4.3", "--pin-floor")
+    assert code == 0, payload
+    assert (root / "docs/deploying.md").read_text(encoding="utf-8") == history
     assert any("docs/deploying.md" in item for item in payload["checklist"])
 
 
@@ -614,6 +655,7 @@ def pr_run(root: Path, captured: dict, **gate_kw) -> FakeRun:
         return (0, "https://example.com/acme/pull/7\n", "")
 
     fake.handlers.insert(0, (["gh", "pr", "create"], create))
+    fake.on(["gh", "pr", "merge"], rc=captured.get("merge_rc", 0), err="auto-merge disabled")
     return fake
 
 
@@ -640,8 +682,23 @@ def test_open_pr_commits_then_gates_then_pushes_and_opens_the_pr(tmp_path, capsy
     pr = next(c for c in fake.calls if c[:3] == ["gh", "pr", "create"])
     assert "--body-file" in pr and pr[pr.index("--title") + 1] == "chore(0.4.3): release 0.4.3"
     assert "git tree clean" in captured["body"] and "PASS" in captured["body"]
-    assert "/release tag 0.4.3" in out
+    assert "tag 0.4.3 --from-ci" in captured["body"]
+    # the PR merges itself once CI is green; publish.yml tags and publishes from there
+    merge = next(c for c in fake.calls if c[:3] == ["gh", "pr", "merge"])
+    assert merge == ["gh", "pr", "merge", "https://example.com/acme/pull/7", "--auto", "--squash"]
+    assert fake.calls.index(pr) < fake.calls.index(merge)
+    assert statuses(payload)["auto-merge"] == "PASS"
+    assert "publish.yml" in payload["message"] and "verify 0.4.3" in payload["next"]
     assert _git(root, "status", "--porcelain") == ""
+
+
+def test_open_pr_without_auto_merge_still_succeeds_and_says_merge_by_hand(tmp_path, capsys):
+    root = _pr_repo(tmp_path, capsys)
+    fake = pr_run(root, {"merge_rc": 1})
+    code, payload, _ = run_main(capsys, ["open-pr", "0.4.3", "--root", str(root)], run=fake)
+    assert code == 0, payload
+    assert statuses(payload)["auto-merge"] == "WARN"
+    assert "merge it by hand" in payload["message"]
 
 
 def test_open_pr_adds_the_pin_floor_note_to_the_body(tmp_path, capsys):
@@ -1026,6 +1083,67 @@ def test_tag_without_a_denylist_scans_the_tree_generically_when_allowed(tmp_path
     assert code == 1 and fake.mutations() == []
 
 
+# --------------------------------------------------------------------------- tag --from-ci
+
+
+def ci_tag_run(tmp_path, ref="claude/release-0.5.0", merge=SHA, commits="1", pr_tree="t1"):
+    """publish.yml's run: no denylist on the runner, the merged release PR on GitHub."""
+    fake = tag_run(tmp_path, denylist=None)
+    pulls = [{"number": 42, "ref": ref, "head": "c" * 40, "merged": "2031-04-09", "merge": merge}]
+    fake.on(["gh", "api", f"repos/{{owner}}/{{repo}}/commits/{SHA}/pulls"], out=json.dumps(pulls))
+    fake.on(["gh", "pr", "view", "42", "--json", "commits"], out=commits + "\n")
+    fake.on(["git", "fetch", "origin", "refs/pull/42/head"])
+    fake.on(["git", "rev-parse", "FETCH_HEAD^{tree}"], out=pr_tree + "\n")
+    fake.on(["git", "rev-parse", f"{SHA}^{{tree}}"], out="t1\n")
+    return fake
+
+
+def test_tag_from_ci_tags_when_the_files_are_the_release_prs(tmp_path, capsys):
+    fake = ci_tag_run(tmp_path)
+    code, payload, _ = _tag(capsys, tmp_path, fake, "--from-ci")
+    assert code == 0, payload
+    assert statuses(payload)["release pr"] == "PASS"
+    assert "--denylist" not in fake.calls[_scan_index(fake)]  # the runner has none
+    assert [m[:3] for m in fake.mutations()] == [
+        ["git", "tag", "v0.5.0"],
+        ["git", "push", "origin"],
+        ["gh", "release", "create"],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("kw", "reason"),
+    [
+        ({"pr_tree": "t2"}, "differ from release PR #42"),
+        ({"ref": "claude/acme-hotfix"}, "is not the merge of a claude/release-0.5.0"),
+        ({"merge": "d" * 40}, "is not the merge of a claude/release-0.5.0"),
+        ({"commits": "2"}, "has 2 commits"),
+    ],
+)
+def test_tag_from_ci_refuses_anything_open_pr_did_not_gate(tmp_path, capsys, kw, reason):
+    fake = ci_tag_run(tmp_path, **kw)
+    code, _, out = _tag(capsys, tmp_path, fake, "--from-ci")
+    assert code == 1 and reason in out
+    assert fake.mutations() == []
+
+
+def test_tag_without_from_ci_still_needs_the_denylist(tmp_path, capsys):
+    fake = ci_tag_run(tmp_path)
+    code, _, out = _tag(capsys, tmp_path, fake)
+    assert code == 1 and "export-denylist.txt" in out and fake.mutations() == []
+
+
+def test_tag_from_ci_still_scans_the_files_generically(tmp_path, capsys):
+    user = "acmedev"
+    fake = ci_tag_run(tmp_path)
+    fake.handlers = [h for h in fake.handlers if h[0][:2] != ["git", "archive"]]
+    fake.handlers.append(
+        (["git", "archive", "--format=tar", "-o"], _archive({"README.md": f"/home/{user}/x\n"}))
+    )
+    code, _, _ = _tag(capsys, tmp_path, fake, "--from-ci")
+    assert code == 1 and fake.mutations() == []
+
+
 @pytest.mark.parametrize("name", ["../escape.txt", "/abs/escape.txt"])
 def test_tag_refuses_an_archive_member_that_escapes(tmp_path, capsys, name):
     fake = tag_run(tmp_path)
@@ -1218,15 +1336,25 @@ def test_tag_release_only_refusals(tmp_path, capsys, kw, code, reason):
 
 # --------------------------------------------------------------------------- verify
 
+MAIN = "b" * 40
 SMOKE = ["uvx", "--refresh-package", "streamsnow", "--from", "streamsnow==0.5.0"]
 
 
 def verify_run(runs, uvx_out="streamsnow 0.5.0\n", tag_on_origin=True) -> FakeRun:
     fake = FakeRun(git_passthrough=False)
-    refs = f"{SHA}\trefs/tags/v0.5.0\n" if tag_on_origin else ""
+    refs = (f"{SHA}\trefs/tags/v0.5.0\n" if tag_on_origin else "") + f"{MAIN}\trefs/heads/main\n"
     fake.on(["git", "ls-remote", "origin", "refs/tags/v0.5.0"], out=refs)
+    # A run is looked up by commit: the tag's, or main's while publish.yml has yet to tag it.
     fake.on(
-        ["gh", "run", "list", "--workflow", "publish.yml", "--branch", "v0.5.0"],
+        [
+            "gh",
+            "run",
+            "list",
+            "--workflow",
+            "publish.yml",
+            "--commit",
+            SHA if tag_on_origin else MAIN,
+        ],
         out=json.dumps(runs),
     )
     fake.on([*SMOKE, "streamsnow", "--version"], out=uvx_out)
@@ -1247,9 +1375,23 @@ def _pypi(version="0.5.0"):
 
 
 def test_verify_tag_missing_on_origin_exits_1(tmp_path, capsys):
-    fake = verify_run(OK_RUN, tag_on_origin=False)
+    fake = verify_run([], tag_on_origin=False)
     code, _, out = run_main(capsys, ["verify", "0.5.0", "--root", str(tmp_path)], run=fake)
     assert code == 1 and "not on origin" in out
+
+
+def test_verify_while_publish_yml_is_still_tagging_is_pending(tmp_path, capsys):
+    running = [{"status": "in_progress", "conclusion": "", "url": "https://example.com/r/9"}]
+    fake = verify_run(running, tag_on_origin=False)
+    code, _, out = run_main(capsys, ["verify", "0.5.0", "--root", str(tmp_path)], run=fake)
+    assert code == 3 and "https://example.com/r/9" in out
+
+
+def test_verify_when_publish_yml_did_not_tag_names_its_run(tmp_path, capsys):
+    failed = [{"status": "completed", "conclusion": "failure", "url": "https://example.com/r/8"}]
+    fake = verify_run(failed, tag_on_origin=False)
+    code, _, out = run_main(capsys, ["verify", "0.5.0", "--root", str(tmp_path)], run=fake)
+    assert code == 1 and "did not tag it" in out and "https://example.com/r/8" in out
 
 
 def test_verify_pending_exits_3(tmp_path, capsys):
@@ -1328,6 +1470,9 @@ ALLOWED = [
     "Bash(git status *)",
     "Bash(git fetch origin)",
     "Bash(git switch -c claude/release-* origin/main)",
+    # read-only, for the checklist review the agent now does itself
+    "Bash(git log *)",
+    "Bash(git diff *)",
 ]
 
 
@@ -1436,7 +1581,7 @@ def test_gate_list_tracks_releasing_md():
 
 
 # Update only after reading the new "Cut a release" text against scripts/release.py.
-CUT_A_RELEASE_SHA256 = "51efcd751ec6754f80c61fd5dd00571d937b612fee491259874383a0e9ae0f26"
+CUT_A_RELEASE_SHA256 = "3f14bc1e6027776bdc6ceafa0768b10b4a8790fc927f3c0b2e43840d1e42ebec"
 
 
 def _normalized_section(doc: str, heading: str) -> str:
