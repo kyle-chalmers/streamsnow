@@ -1,25 +1,100 @@
 name: publish
 
-# Tag a release (e.g. `git tag v0.1.0 && git push --tags`) to build and publish
-# to PyPI via Trusted Publishing (OIDC — no stored token). One-time setup: add a
-# PyPI trusted publisher for project `streamsnow`, repo kyle-chalmers/streamsnow,
+# Builds and publishes to PyPI via Trusted Publishing (OIDC, no stored token). One-time
+# setup: a PyPI trusted publisher for project `streamsnow`, repo kyle-chalmers/streamsnow,
 # workflow `publish.yml`, environment `pypi`. See RELEASING.md.
+#
+# Two ways in:
+# - A release PR merges (opened by `scripts/release.py open-pr`, which also turns on its
+#   auto-merge). Once `ci` is green on that `chore(X.Y.Z): release X.Y.Z` commit, the
+#   `release` job runs `scripts/release.py tag X.Y.Z --from-ci`: it tags the commit only
+#   when every precondition holds and its files are exactly the release PR's, which
+#   open-pr gated with the maintainer's local denylist. It also creates the GitHub Release.
+#   A tag pushed with GITHUB_TOKEN starts no other workflow, so `publish` runs here.
+# - A tag pushed by hand (`release.py tag X.Y.Z` on the maintainer's machine).
 
 on:
   push:
     tags: ["v*"]
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
 
+concurrency:
+  group: publish-${{ github.event.workflow_run.head_sha || github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  release:
+    # Only a green `ci` push run on this repo's main, for a release commit.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.head_commit.message, 'chore(')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the tag, create the GitHub Release
+      pull-requests: read # find the merged release PR
+      actions: read # check `ci` on the commit
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tagged: ${{ steps.tag.outputs.tagged }}
+    steps:
+      - name: Read the release version from the commit subject
+        id: version
+        env:
+          MESSAGE: ${{ github.event.workflow_run.head_commit.message }}
+        run: |
+          subject="$(printf '%s\n' "$MESSAGE" | head -n 1)"
+          if [[ "$subject" =~ ^chore\(([0-9]+\.[0-9]+\.[0-9]+)\):\ release\ ([0-9]+\.[0-9]+\.[0-9]+)(\ \(#[0-9]+\))?$ ]] \
+            && [[ "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
+            echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "not a release commit: $subject"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.version.outputs.version != ''
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+        if: steps.version.outputs.version != ''
+
+      - name: Tag the release commit and create the GitHub Release
+        id: tag
+        if: steps.version.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          uv run python scripts/release.py tag "$VERSION" --from-ci
+          echo "tagged=true" >> "$GITHUB_OUTPUT"
+
   build-and-publish:
+    needs: release
+    # A hand-pushed tag, or a release the job above just tagged. `!cancelled()` lets the
+    # tag-push path run although `release` is skipped there.
+    if: >-
+      !cancelled() &&
+      (github.event_name == 'push' || needs.release.outputs.tagged == 'true')
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write # required for PyPI Trusted Publishing
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || format('v{0}', needs.release.outputs.version) }}
 
       - uses: astral-sh/setup-uv@v7
 
@@ -27,11 +102,11 @@ jobs:
         run: uv build
 
       - name: Verify the tag matches the package version
+        env:
+          TAG: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', needs.release.outputs.version) }}
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG="$(uv run --python 3.11 python -c 'import importlib.metadata as m; print(m.version("streamsnow"))' 2>/dev/null || true)"
-          echo "tag=$TAG pkg=$PKG"
-          # soft check — the wheel filename carries the authoritative version
+          echo "tag=${TAG#v}"
+          # soft check: the wheel filename carries the authoritative version
           ls dist/
 
       - name: Publish to PyPI (Trusted Publishing)

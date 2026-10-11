@@ -32,6 +32,21 @@ since 0.7, and every release still passes this gate before it is tagged:
 
 ## Cut a release
 
+**With Claude Code (the normal path): one prompt.** Say "cut the release" (or type
+`/release`). Claude runs `scripts/release.py` end to end: the recommended version unless you
+name one, `prepare` (it raises the generated workflows' `streamsnow>=` pin whenever the old
+pin cannot install the new version, and appends the new pin to `docs/deploying.md`'s
+history), the privacy gate's human review below (Claude does it and reports what it
+checked), and `open-pr`, which runs every gate with your local denylist, opens the release
+PR and turns on its auto-merge. When CI is green the PR merges, and `publish.yml` runs
+`release.py tag X.Y.Z --from-ci`: it tags the merged commit only when its files are exactly
+the gated PR's (and main's CI is green, the versions and changelog agree, and the tag is
+new), then publishes to PyPI and creates the GitHub Release. You do nothing after the prompt;
+`/release verify X.Y.Z` confirms it landed. If `publish.yml` refuses to tag (main moved
+before the merge, say), nothing is published: verify names the run, and saying "tag X.Y.Z"
+has Claude run the tag by hand (approve its permission prompt). The steps below are what
+the script does, and the reference for releasing entirely by hand.
+
 1. Bump the version in **lockstep across four files**:
    - `pyproject.toml`
    - `.claude-plugin/plugin.json`
