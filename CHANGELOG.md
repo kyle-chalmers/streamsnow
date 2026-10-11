@@ -14,7 +14,9 @@ entry.
   `docs/images/demo.mp4`) is now cut from the screen recording of an actual StreamSnow run:
   the spec questions, the first checkpoint, subagents building, the local preview, the CI
   deploy and the live app in Snowsight. It replaces the GIF drawn by
-  `scripts/readme_media/render_gif.py`.
+  `scripts/readme_media/render_gif.py`, opens with the same StreamSnow title card, and
+  plays at an easy pace, with a short pause on each step and soft fades between them. A
+  bar across the top names each stage (Spec, Checkpoint, Build, Preview, Ship, Live).
 - **A release is one prompt.** "cut the release" (or `/release`) now runs to PyPI with no
   further step from the maintainer: `release.py prepare` raises the generated workflows'
   `streamsnow>=` pin by itself whenever the old pin cannot install the new version (a minor
