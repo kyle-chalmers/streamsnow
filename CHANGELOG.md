@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-19
+
 ### Added
 
 - **`streamsnow review-gate branch`** (#112) reports whether commits would land on the deploy
