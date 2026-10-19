@@ -52,8 +52,8 @@ page:
   rise in cost is bad (`st.metric(delta_color="inverse")`). Partial periods say so ("Oct, to date").
 - **Format for reading** in the house currency and locale: `1.2M`, `34.5%`, and integer counts
   (`23`, not `23.0`). Percentage-point changes say "pts".
-- **Put the definition on the card** with `st.metric(help=…)`. The scaffold's `branded_metric`
-  has no `help=`, so with it the definition goes in the caption or glossary.
+- **Put the definition on the card** with `st.metric(help=…)`, or the scaffold's
+  `branded_metric(help=…)`, which renders through `st.metric` so the tooltip shows.
 
 ## Color
 

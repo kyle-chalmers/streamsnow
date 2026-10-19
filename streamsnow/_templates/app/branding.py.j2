@@ -4,13 +4,11 @@ Each app ships its own local copy (deploy runtimes can't import a shared module)
 Import locally: ``from branding import apply_branding, branded_metric``.
 """
 
-import html
-
 import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
 
-_BRANDING_VERSION = "1.1.0"
+_BRANDING_VERSION = "1.2.0"
 
 BRAND_COLORS = {
     "primary": "{{ brand.primary }}",
@@ -73,22 +71,28 @@ def fmt_pct(ratio: float, decimals: int = 1) -> str:
     return f"{ratio * 100:.{decimals}f}%"
 
 
-_DELTA_COLORS = {"up": BRAND_STATUS_COLORS["good"], "down": BRAND_STATUS_COLORS["bad"]}
-_NEUTRAL_INK = "#6b7280"
 # A falling delta starts with: hyphen, minus sign, down arrow, down triangle, or "(".
 _DOWN_MARKS = ("-", "\u2212", "\u2193", "\u25bc", "(")
 
 
-def _delta_ink(delta: str, delta_color: str = "normal") -> str:
-    """The delta's color by meaning: up is good ("normal"), up is bad ("inverse"), or
-    grey ("off"). A delta with no non-zero digit ("0%", "+0.0 pts") is no change: grey.
-    Down is a leading minus, a down arrow, or accounting parentheses ("(5%)")."""
-    if delta_color == "off" or not any(c in "123456789" for c in delta):
-        return _NEUTRAL_INK
+def _metric_delta(delta: str, delta_color: str = "normal") -> tuple[str, str]:
+    """The ``(delta_color, delta_arrow)`` that make ``st.metric`` show a delta by meaning.
+
+    ``st.metric`` reads direction only from a leading hyphen, so "(5%)", "\u2193 5%" and a
+    minus sign would show as a green rise. Read the direction here instead, set the arrow
+    from it, and flip "normal"/"inverse" where Streamlit would misread the sign. A delta
+    with no non-zero digit ("0%", "+0.0 pts") is no change: grey, with no arrow.
+    """
+    if not any(c in "123456789" for c in delta):
+        return "off", "off"
     down = delta.lstrip().startswith(_DOWN_MARKS)
-    if delta_color == "inverse":
-        down = not down
-    return _DELTA_COLORS["down" if down else "up"]
+    arrow = "down" if down else "up"
+    if delta_color == "off":
+        return "off", arrow
+    streamlit_sees_down = delta.lstrip().startswith("-")
+    if down != streamlit_sees_down:
+        delta_color = "inverse" if delta_color == "normal" else "normal"
+    return delta_color, arrow
 
 
 def branded_metric(
@@ -99,34 +103,27 @@ def branded_metric(
     help: str | None = None,
     delta_color: str = "normal",
 ) -> None:
-    """A metric card with a brand-colored left border.
+    """A bordered metric card: ``st.metric`` with the house delta rules.
 
-    ``help`` is the metric's definition (from ``pages/_glossary.py``), shown as a
-    hover tooltip like ``st.metric(help=...)``. ``delta_color`` colors the delta by
-    meaning, as ``st.metric`` does: "normal" (up is good), "inverse" (up is bad,
-    e.g. cost) or "off". The direction is read from the delta's leading sign or arrow.
+    ``help`` is the metric's definition (from ``pages/_glossary.py``), shown as the card's
+    hover tooltip. ``delta_color`` colors the delta by meaning: "normal" (up is good),
+    "inverse" (up is bad, e.g. cost) or "off"; the direction is read from the delta's
+    leading sign, arrow or parentheses (``_metric_delta``). Needs Streamlit 1.52 or later
+    (``delta_arrow``).
 
-    label/value/delta/help/border_color are HTML-escaped before interpolation —
-    the card uses unsafe_allow_html=True, so escaping stops a database-derived
-    value (including a per-tenant brand color) from breaking out of the
-    attribute and injecting markup into the viewer's page.
+    ``border_color`` is accepted so older calls keep working but has no effect: the border
+    is ``st.metric``'s own. Until 1.2.0 this card was raw HTML with a brand-colored left
+    border, and an HTML hover attribute shows no tooltip in Streamlit, so every KPI
+    definition was invisible.
     """
-    color = html.escape(border_color or BRAND_COLORS["primary"])
-    label, value = html.escape(label), html.escape(value)
-    help_html = (
-        f' <span title="{html.escape(help)}" aria-label="{html.escape(help)}"'
-        ' style="cursor:help;">&#9432;</span>'
-        if help
-        else ""
-    )
-    delta_html = ""
-    if delta:
-        delta_ink = _delta_ink(delta, delta_color)
-        delta_html = f'<div style="font-size:0.8rem;color:{delta_ink};">{html.escape(delta)}</div>'
-    st.markdown(
-        f'<div style="border-left:4px solid {color};padding:0.25rem 0.75rem;margin:0.25rem 0;">'
-        f'<div style="font-size:0.8rem;color:#6b7280;">{label}{help_html}</div>'
-        f'<div style="font-size:1.6rem;font-weight:600;">{value}</div>'
-        f"{delta_html}</div>",
-        unsafe_allow_html=True,
+    del border_color  # kept for positional compatibility, see docstring
+    color, arrow = _metric_delta(delta, delta_color) if delta else (delta_color, "auto")
+    st.metric(
+        label,
+        value,
+        delta=delta,
+        delta_color=color,
+        delta_arrow=arrow,
+        help=help,
+        border=True,
     )

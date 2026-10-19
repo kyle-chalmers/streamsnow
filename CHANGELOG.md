@@ -17,6 +17,16 @@ entry.
 
 ### Fixed
 
+- **KPI definitions show on hover again** (#114). The scaffold's `branded_metric` drew its card
+  as HTML in `st.markdown`, where the `help=` tooltip (an HTML `title`) never appears, so every
+  definition `pages/_glossary.py` passed it was invisible. It now renders through
+  `st.metric(help=..., border=True)` with the same signature, and still colors the delta by
+  meaning: arrows, a minus sign and accounting parentheses read as down, and a delta with no
+  non-zero digit is grey with no arrow. Visible changes: the card has `st.metric`'s full border
+  instead of a brand-colored left edge (`border_color` is accepted but has no effect), and it
+  needs Streamlit 1.52 or later. `branding.py` is now `_BRANDING_VERSION = "1.2.0"`; existing
+  apps get the fix by copying the new `branding.py` in, and `streamsnow check branding-parity`
+  lists the ones still on an older copy.
 - **`/build-app` no longer commits to `main`** (#112). It runs `review-gate branch --ensure`
   before the foundation commit, and `/build-app --feedback` and `/review-app --fix` before
   theirs, so a build leaves `main` matching `origin/main` and `/ship-app` no longer has to move

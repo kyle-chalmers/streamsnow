@@ -142,7 +142,7 @@ def test_branding_formatters(tmp_path):
 
 def test_branding_stamp_and_metric_card_api(tmp_path):
     branding = (_app(tmp_path) / "branding.py").read_text(encoding="utf-8")
-    assert '_BRANDING_VERSION = "1.1.0"' in branding
+    assert '_BRANDING_VERSION = "1.2.0"' in branding
     assert "BRAND_STATUS_COLORS" in branding
     card = next(
         n
@@ -162,22 +162,65 @@ def test_default_palette_keeps_status_hues_out():
     ]
 
 
+def _streamlit_ink(delta: str, delta_color: str) -> str:
+    """How st.metric colors a delta (streamlit/elements/metric.py, 1.52 to 1.59): only a
+    leading "-" reads as negative; "normal" makes negative red, "inverse" green."""
+    negative = delta.lstrip().startswith("-")
+    if delta_color == "off":
+        return "grey"
+    return "bad" if negative == (delta_color == "normal") else "good"
+
+
+_METRIC_NAMES = {"_DOWN_MARKS", "_metric_delta"}
+
+
 def test_metric_delta_is_colored_by_meaning(tmp_path):
-    names = {"BRAND_STATUS_COLORS", "_DELTA_COLORS", "_NEUTRAL_INK", "_DOWN_MARKS", "_delta_ink"}
-    ns = _pure_functions(_app(tmp_path) / "branding.py", names)
-    ink, good, bad = (
-        ns["_delta_ink"],
-        ns["BRAND_STATUS_COLORS"]["good"],
-        ns["BRAND_STATUS_COLORS"]["bad"],
-    )
-    grey = ns["_NEUTRAL_INK"]
-    assert ink("+5.3%") == good and ink("-5.3%") == bad and ink("\u22121.2k") == bad
-    assert ink("+5.3%", "inverse") == bad and ink("-5.3%", "inverse") == good  # e.g. cost
-    assert ink("+5.3%", "off") == grey
+    """#114 moved the card onto st.metric, which reads direction only from a leading "-".
+    `_metric_delta` keeps the old meaning: arrows, a minus sign and accounting parentheses
+    are down, a delta with no non-zero digit is no change, and "inverse" still flips."""
+    ns = _pure_functions(_app(tmp_path) / "branding.py", _METRIC_NAMES)
+
+    def shown(delta: str, delta_color: str = "normal") -> tuple[str, str]:
+        color, arrow = ns["_metric_delta"](delta, delta_color)
+        return _streamlit_ink(delta, color), arrow
+
+    assert shown("+5.3%") == ("good", "up") and shown("-5.3%") == ("bad", "down")
+    assert shown("\u22121.2k") == ("bad", "down")  # a minus sign, not a hyphen
+    assert shown("+5.3%", "inverse") == ("bad", "up")  # e.g. cost
+    assert shown("-5.3%", "inverse") == ("good", "down")
+    assert shown("+5.3%", "off") == ("grey", "up")
     for down in ("\u2193 5%", "\u25bc 5%", "(5%)"):  # arrows and accounting negatives
-        assert ink(down) == bad and ink(down, "inverse") == good
+        assert shown(down) == ("bad", "down") and shown(down, "inverse") == ("good", "down")
     for unchanged in ("0%", "+0.0 pts", "0"):  # no change is neither good nor bad
-        assert ink(unchanged) == grey and ink(unchanged, "inverse") == grey
+        assert shown(unchanged) == shown(unchanged, "inverse") == ("grey", "off")
+
+
+class _MetricRecorder:
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple, dict]] = []
+
+    def metric(self, *args, **kwargs) -> None:
+        self.calls.append((args, kwargs))
+
+
+def test_branded_metric_is_st_metric_so_the_help_tooltip_shows(tmp_path):
+    """#114: the card was HTML in st.markdown, and a `title=` tooltip never shows there, so
+    every KPI definition from pages/_glossary.py was invisible. It now renders through
+    st.metric, whose help= is a real tooltip."""
+    path = _app(tmp_path) / "branding.py"
+    st = _MetricRecorder()
+    ns = _pure_functions(path, _METRIC_NAMES | {"branded_metric"}, st=st)
+    ns["branded_metric"]("Revenue", "$48.6k", "(5%)", None, "Booked revenue. Formula: sum(x)")
+    (args, kwargs) = st.calls[0]
+    assert args == ("Revenue", "$48.6k")
+    assert kwargs["help"] == "Booked revenue. Formula: sum(x)"
+    assert kwargs["border"] is True
+    assert kwargs["delta"] == "(5%)" and kwargs["delta_arrow"] == "down"
+    assert kwargs["delta_color"] == "inverse"  # "(5%)" is down; st.metric alone would say up
+    ns["branded_metric"]("Rows", "1,234")
+    assert st.calls[1][1]["delta"] is None and st.calls[1][1]["help"] is None
+    source = path.read_text(encoding="utf-8")
+    assert "unsafe_allow_html" not in source and "title=" not in source
 
 
 def test_hover_definition_keeps_a_lone_percent_sign(tmp_path):
