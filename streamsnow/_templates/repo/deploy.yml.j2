@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
       SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
@@ -35,7 +35,7 @@ jobs:
     # configured") instead of connecting from the SNOWFLAKE_* variables above
     # (https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-a-temporary-connection).
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Gate on configured secrets
         id: gate
@@ -48,8 +48,11 @@ jobs:
             echo "go=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         if: steps.gate.outputs.go == 'true'
+        with:
+          # No uv.lock in an apps repo: a cache keyed on it never invalidates.
+          enable-cache: false
 
       - name: Install tooling
         if: steps.gate.outputs.go == 'true'
