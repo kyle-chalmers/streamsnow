@@ -72,6 +72,7 @@ streamlit not installed). ``status`` 0 = running, 1 = not running.
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import json
 import os
@@ -322,18 +323,30 @@ def build_command(entrypoint: Path, port: int) -> list[str]:
 #: Suffixes whose edits a running server does not pick up (see ``changed_since_start``).
 _STALE_SUFFIXES = (".py", ".sql")
 
-#: ``st.Page("pages/x.py", ...)`` or ``st.Page(page="pages/x.py")`` in the entrypoint: the
-#: scripts Streamlit re-executes.
-_ST_PAGE = re.compile(r"""st\.Page\(\s*(?:page\s*=\s*)?["']([^"']+\.py)["']""")
-
 
 def _page_scripts(app_dir: Path) -> set[str] | None:
-    """Page scripts the entrypoint registers with ``st.Page``; None when it registers none."""
+    """Page scripts the entrypoint registers with ``st.Page``; None when it registers none.
+
+    Parsed, not pattern-matched: ``st.Page("pages/x.py")``, ``st.Page(page="pages/x.py")``
+    and calls split across lines or interleaved with comments all count. A page given as a
+    callable has no file and adds nothing.
+    """
     try:
-        text = (app_dir / "streamlit_app.py").read_text(encoding="utf-8")
-    except OSError:
+        tree = ast.parse((app_dir / "streamlit_app.py").read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
         return None
-    pages = {Path(m).as_posix().removeprefix("./") for m in _ST_PAGE.findall(text)}
+    pages: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name != "Page":
+            continue
+        args = [*node.args[:1], *(k.value for k in node.keywords if k.arg == "page")]
+        for arg in args:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                pages.add(Path(arg.value).as_posix().removeprefix("./"))
     return pages or None
 
 
@@ -341,15 +354,16 @@ def _is_rerun_script(rel: Path, pages: set[str] | None) -> bool:
     """The entrypoint and page scripts, which Streamlit re-executes on every rerun.
 
     With ``st.navigation`` the pages are exactly what ``st.Page`` names, so a helper such as
-    ``pages/admin/helpers.py`` still counts as shared. Without it, fall back to the scaffold's
-    convention: a shared module under ``pages/`` starts with ``_``.
+    ``pages/admin/helpers.py`` still counts as shared. Without it, Streamlit's legacy
+    multipage mode runs only the files directly in ``pages/``, and the scaffold names a
+    shared module there with a leading ``_``.
     """
     posix = rel.as_posix()
     if posix == "streamlit_app.py":
         return True
     if pages is not None:
         return posix in pages
-    return len(rel.parts) > 1 and rel.parts[0] == "pages" and not rel.name.startswith("_")
+    return len(rel.parts) == 2 and rel.parts[0] == "pages" and not rel.name.startswith("_")
 
 
 def shared_sources(app_dir: Path) -> dict[str, float]:

@@ -919,3 +919,20 @@ def test_keyword_page_registration_and_added_files_are_understood(tmp_path):
     (app_dir / "queries" / "new.sql").write_text("select 1\n", encoding="utf-8")
     _touch(app_dir / "queries" / "new.sql", started - 60)
     assert preview_app.changed_since_start(app_dir, started, inventory) == ["queries/new.sql"]
+
+
+def test_page_registration_is_parsed_not_pattern_matched(tmp_path):
+    app_dir = _repo(tmp_path) / "apps" / SLUG
+    (app_dir / "pages" / "deep").mkdir(parents=True)
+    (app_dir / "streamlit_app.py").write_text(
+        "import streamlit as st\nst.navigation([\n    st.Page(  # the main page\n"
+        '        "pages/report.py",\n    ),\n]).run()\n',
+        encoding="utf-8",
+    )
+    for rel in ("pages/report.py", "pages/helpers.py", "pages/deep/util.py"):
+        (app_dir / rel).write_text("X = 1\n", encoding="utf-8")
+    assert sorted(preview_app.shared_sources(app_dir)) == ["pages/deep/util.py", "pages/helpers.py"]
+
+    # Without st.Page (legacy multipage), only files directly in pages/ are scripts.
+    (app_dir / "streamlit_app.py").write_text("import streamlit as st\n", encoding="utf-8")
+    assert sorted(preview_app.shared_sources(app_dir)) == ["pages/deep/util.py"]
