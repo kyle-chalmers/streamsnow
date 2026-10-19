@@ -72,6 +72,7 @@ streamlit not installed). ``status`` 0 = running, 1 = not running.
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import json
 import os
@@ -319,6 +320,109 @@ def build_command(entrypoint: Path, port: int) -> list[str]:
     ]
 
 
+#: Suffixes whose edits a running server does not pick up (see ``changed_since_start``).
+_STALE_SUFFIXES = (".py", ".sql")
+
+
+def _page_scripts(app_dir: Path) -> set[str]:
+    """Page files the entrypoint names with ``st.Page``: the scripts Streamlit re-executes.
+
+    Parsed, not pattern-matched: ``st.Page("pages/x.py")``, ``st.Page(page="pages/x.py")``
+    and calls split across lines or interleaved with comments all count. Anything this
+    cannot resolve (a callable page, navigation built in another module, legacy multipage
+    mode) stays tracked as shared: a wrong guess then costs one extra restart, never a
+    walkthrough against old code.
+    """
+    try:
+        tree = ast.parse((app_dir / "streamlit_app.py").read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return set()
+    pages: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name != "Page":
+            continue
+        for arg in [*node.args[:1], *(k.value for k in node.keywords if k.arg == "page")]:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                pages.add(Path(arg.value).as_posix().removeprefix("./"))
+    return pages
+
+
+def _is_rerun_script(rel: Path, pages: set[str]) -> bool:
+    """The entrypoint and the page files ``st.Page`` names (SQL is never re-executed)."""
+    posix = rel.as_posix()
+    return rel.suffix == ".py" and (posix == "streamlit_app.py" or posix in pages)
+
+
+def shared_sources(app_dir: Path) -> dict[str, float]:
+    """App files a running server keeps the start-time version of, mapped to their mtime.
+
+    Streamlit re-executes ``streamlit_app.py`` and the page scripts on every rerun, but the
+    modules they import (``pages/_layout.py``, ``branding.py``, ``sql_loader.py``) stay in
+    ``sys.modules`` for the server's life, and cached query results keep the old SQL text. A
+    page that imports a name newly added to a shared module then fails with ImportError in a
+    long-running preview, or a walkthrough passes on old code (#113). Hidden directories
+    (the app's ``.venv``, ``.review``) and ``__pycache__`` are not app code and are skipped.
+    """
+    pages = _page_scripts(app_dir)
+    found: dict[str, float] = {}
+    for root, dirs, files in os.walk(app_dir):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+        for name in files:
+            if not name.endswith(_STALE_SUFFIXES):
+                continue
+            path = Path(root) / name
+            rel = path.relative_to(app_dir)
+            if _is_rerun_script(rel, pages):
+                continue
+            try:
+                found[rel.as_posix()] = path.stat().st_mtime
+            except OSError:
+                continue
+    return found
+
+
+def changed_since_start(
+    app_dir: Path, started: float, started_files: list[str] | None = None
+) -> list[str]:
+    """Shared files edited after ``started``, and any added or deleted since ``started_files``.
+
+    A deleted module that was already imported keeps running from memory, so its removal
+    is as stale as an edit; a file added with a preserved older mtime (an archive or a
+    ``cp -p``) is caught by the inventory rather than the clock.
+    """
+    now = shared_sources(app_dir)
+    changed = {rel for rel, mtime in now.items() if mtime > started}
+    if started_files is not None:
+        before = set(started_files)
+        changed.update(before.symmetric_difference(now))
+    return sorted(changed)
+
+
+def _staleness(repo: Path, slug: str, state: dict[str, Any]) -> tuple[bool | None, list[str]]:
+    """(stale, changed files). ``None`` when the state predates ``started_epoch``."""
+    started = state.get("started_epoch")
+    if not isinstance(started, (int, float)):
+        return None, []
+    files = state.get("started_files")
+    changed = changed_since_start(
+        repo / "apps" / slug, float(started), files if isinstance(files, list) else None
+    )
+    return bool(changed), changed
+
+
+def _stale_note(slug: str, changed: list[str]) -> str:
+    shown = ", ".join(changed[:3]) + (f" and {len(changed) - 3} more" if len(changed) > 3 else "")
+    return (
+        f"; stale: {shown} changed or removed since it started and the server still runs the "
+        f"old version. Restart before trusting a walkthrough: "
+        f"`streamsnow preview start {slug} --restart-if-stale`"
+    )
+
+
 def _state_dir(repo: Path) -> Path:
     return repo / ".streamsnow" / "preview"
 
@@ -434,6 +538,16 @@ def _port_in_use(port: int) -> bool:
         return False
     finally:
         sock.close()
+
+
+def _wait_port_free(port: int, timeout: float = 3.0) -> bool:
+    """True once nothing accepts on ``port`` (a just-killed server can linger briefly)."""
+    deadline = time.monotonic() + timeout
+    while _port_in_use(port):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
+    return True
 
 
 #: Never route the localhost probe through a proxy. ``urlopen`` honors
@@ -623,23 +737,47 @@ def cmd_start(args: argparse.Namespace) -> int:
                 args.json,
             )
             return 1
-        healthy = probe_health(port)
-        _emit(
-            {
-                "status": "already_running",
-                "pid": state["pid"],
-                "port": port,
-                "url": f"http://127.0.0.1:{port}",
-                "healthy": healthy,
-                "review_capture": running,
-                "message": f"{slug} already running (pid {state['pid']}, port {port}, "
-                f"{'healthy' if healthy else 'not yet healthy'})",
-            },
-            args.json,
-        )
-        return 0
+        stale, changed = _staleness(repo, slug, state)
+        if stale and args.restart_if_stale:
+            pid = int(state["pid"])
+            if not _kill(pid):
+                _emit(
+                    {
+                        "status": "error",
+                        "message": f"error: stale preview pid {pid} survived SIGTERM and "
+                        "SIGKILL — kill it manually",
+                    },
+                    args.json,
+                )
+                return 1
+            _state_path(repo, slug).unlink(missing_ok=True)
+            restarted_for = changed
+            # Same port, so the URL a walkthrough already holds keeps working.
+            requested_port = port if _wait_port_free(port) else 0
+        else:
+            healthy = probe_health(port)
+            _emit(
+                {
+                    "status": "already_running",
+                    "pid": state["pid"],
+                    "port": port,
+                    "url": f"http://127.0.0.1:{port}",
+                    "healthy": healthy,
+                    "review_capture": running,
+                    "stale": stale,
+                    "changed_since_start": changed,
+                    "message": f"{slug} already running (pid {state['pid']}, port {port}, "
+                    f"{'healthy' if healthy else 'not yet healthy'})"
+                    + (_stale_note(slug, changed) if stale else ""),
+                },
+                args.json,
+            )
+            return 0
+    else:
+        restarted_for = None
+        requested_port = args.port
 
-    port = _free_port() if args.port == 0 else args.port
+    port = _free_port() if requested_port == 0 else requested_port
     if _port_in_use(port):
         _emit(
             {
@@ -657,10 +795,12 @@ def cmd_start(args: argparse.Namespace) -> int:
     log_path = _log_path(repo, slug)
     # --port 0 can lose the free port to another process before Streamlit binds
     # it; one retry on a fresh port covers that race.
-    attempts = 2 if args.port == 0 else 1
+    attempts = 2 if requested_port == 0 else 1
     for attempt in range(attempts):
         retry_port = attempt < attempts - 1
-        outcome = _launch_and_wait(args, repo, entrypoint, port, log_path, capture, retry_port)
+        outcome = _launch_and_wait(
+            args, repo, entrypoint, port, log_path, capture, retry_port, restarted_for
+        )
         if outcome is None:
             return 0
         if outcome == "tool_error":
@@ -679,12 +819,16 @@ def _launch_and_wait(
     log_path: Path,
     capture: Path | None,
     retry_port: bool,
+    restarted_for: list[str] | None = None,
 ) -> str | None:
     """Launch on ``port`` and wait for health. None when serving; otherwise the
     failure's classification (reported, except a ``port_in_use`` the caller
     will retry) or ``tool_error``."""
     slug = args.slug
     cmd = build_command(entrypoint, port)
+    # Taken before launch: a file edited while the server imports is counted as stale.
+    launched_at = time.time()
+    started_files = sorted(shared_sources(entrypoint.parent))
     try:
         with log_path.open("wb") as log_fh:
             proc = _launch_detached(cmd, log_fh, repo, _child_env(capture))
@@ -714,6 +858,9 @@ def _launch_and_wait(
                 "cmd": cmd,
                 "review_capture": str(capture) if capture else None,
                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                # What `changed_since_start` compares app files against.
+                "started_epoch": launched_at,
+                "started_files": started_files,
             },
             indent=2,
         ),
@@ -735,7 +882,11 @@ def _launch_and_wait(
                     "url": f"http://127.0.0.1:{port}",
                     "log": str(log_path),
                     "review_capture": str(capture) if capture else None,
-                    "message": f"{slug} serving at http://127.0.0.1:{port} "
+                    **({"restarted_for": restarted_for} if restarted_for else {}),
+                    "message": (
+                        f"restarted (stale: {', '.join(restarted_for)}); " if restarted_for else ""
+                    )
+                    + f"{slug} serving at http://127.0.0.1:{port} "
                     f"(pid {proc.pid}, log {log_path})"
                     + (f", capturing review values to {capture}" if capture else ""),
                 },
@@ -796,6 +947,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         )
         return 1
     healthy = probe_health(port)
+    stale, changed = _staleness(repo, slug, state)
     _emit(
         {
             "status": "running",
@@ -805,8 +957,11 @@ def cmd_status(args: argparse.Namespace) -> int:
             "healthy": healthy,
             "log": state.get("log", ""),
             "review_capture": state.get("review_capture"),
+            "stale": stale,
+            "changed_since_start": changed,
             "message": f"{slug}: running (pid {pid}, port {port}, "
-            f"{'healthy' if healthy else 'health probe failed'})",
+            f"{'healthy' if healthy else 'health probe failed'})"
+            + (_stale_note(slug, changed) if stale else ""),
         },
         args.json,
     )
@@ -903,6 +1058,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=_DEFAULT_TIMEOUT,
         help=f"Seconds to wait for the health endpoint (default {_DEFAULT_TIMEOUT:g}).",
+    )
+    p.add_argument(
+        "--restart-if-stale",
+        action="store_true",
+        help="If this app is already running but a shared module or SQL file changed since "
+        "it started, stop it and start again on the same port.",
     )
     p.add_argument("--poll-interval", type=float, default=0.5, help=argparse.SUPPRESS)
 
