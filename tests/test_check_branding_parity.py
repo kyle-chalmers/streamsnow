@@ -1,4 +1,9 @@
-"""Tests for the branding.py _BRANDING_VERSION parity check."""
+"""Tests for the branding.py _BRANDING_VERSION parity check.
+
+The synthetic stamps (1.6.0, 1.7.0, ...) are deliberately not the installed template's
+version: when the newest app matches the template, a minor lag is an upgrade and only a
+note (see the ``_template_version`` tests below), which is a different case.
+"""
 
 from __future__ import annotations
 
@@ -29,22 +34,22 @@ def _app(tmp_path: Path, slug: str, version: str | None) -> Path:
 
 
 def test_matching_versions_clean(tmp_path):
-    _app(tmp_path, "acme-sales-dashboard", "1.2.0")
-    _app(tmp_path, "marketing-campaign-dashboard", "1.2.0")
+    _app(tmp_path, "acme-sales-dashboard", "1.7.0")
+    _app(tmp_path, "marketing-campaign-dashboard", "1.7.0")
     res = check_branding_parity.scan_paths([tmp_path / "apps"])
     assert res["ok"]
     assert res["findings"] == []
 
 
 def test_lagging_app_flagged(tmp_path):
-    _app(tmp_path, "acme-sales-dashboard", "1.2.0")
-    behind = _app(tmp_path, "marketing-campaign-dashboard", "1.1.0")
+    _app(tmp_path, "acme-sales-dashboard", "1.7.0")
+    behind = _app(tmp_path, "marketing-campaign-dashboard", "1.6.0")
     res = check_branding_parity.scan_paths([tmp_path / "apps"])
     assert not res["ok"]
     assert len(res["findings"]) == 1
     f = res["findings"][0]
     assert str(behind / "branding.py") == f["file"]
-    assert "'1.1.0'" in f["detail"] and "'1.2.0'" in f["detail"]
+    assert "'1.6.0'" in f["detail"] and "'1.7.0'" in f["detail"]
 
 
 def test_semantic_version_ordering(tmp_path):
@@ -57,7 +62,7 @@ def test_semantic_version_ordering(tmp_path):
 
 
 def test_missing_stamp_is_note_not_failure(tmp_path):
-    _app(tmp_path, "acme-sales-dashboard", "1.2.0")
+    _app(tmp_path, "acme-sales-dashboard", "1.7.0")
     _app(tmp_path, "marketing-campaign-dashboard", None)
     res = check_branding_parity.scan_paths([tmp_path / "apps"])
     assert res["ok"]
@@ -80,7 +85,7 @@ def test_app_without_branding_file_skipped(tmp_path):
 
 def test_unparseable_version_never_becomes_reference(tmp_path):
     # A typo'd stamp must not outrank real versions; it is itself the skew.
-    _app(tmp_path, "acme-sales-dashboard", "1.2.0")
+    _app(tmp_path, "acme-sales-dashboard", "1.7.0")
     _app(tmp_path, "marketing-campaign-dashboard", "one-point-three")
     res = check_branding_parity.scan_paths([tmp_path / "apps"])
     assert not res["ok"]
@@ -98,13 +103,13 @@ def test_template_lag_is_note_not_failure(tmp_path):
 
 
 def test_main_exit_codes_and_json(tmp_path, capsys):
-    _app(tmp_path, "acme-sales-dashboard", "1.2.0")
+    _app(tmp_path, "acme-sales-dashboard", "1.7.0")
     _app(tmp_path, "marketing-campaign-dashboard", "1.0.0")
     assert check_branding_parity.main([str(tmp_path / "apps"), "--format", "json"]) == 1
     assert '"ok": false' in capsys.readouterr().out
     # Bring the straggler up to date -> clean.
     (tmp_path / "apps/marketing-campaign-dashboard/branding.py").write_text(
-        _BRANDING.format(version="1.2.0"), encoding="utf-8"
+        _BRANDING.format(version="1.7.0"), encoding="utf-8"
     )
     assert check_branding_parity.main([str(tmp_path / "apps")]) == 0
 
