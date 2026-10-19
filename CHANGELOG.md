@@ -8,6 +8,17 @@ entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Generated CI and deploy workflows run on current actions** (#116). `checks.yml` and
+  `deploy.yml` now use `actions/checkout@v7` and `astral-sh/setup-uv@v7` (Node 24, where
+  `@v4`/`@v5` targeted the deprecated Node 20), run on `ubuntu-24.04` instead of the floating
+  `ubuntu-latest`, so the runner OS changes only with a StreamSnow upgrade, and turn off
+  setup-uv's cache, which keyed on a `uv.lock` an apps repo never has and so never
+  invalidated. Existing repos pick this up with `streamsnow update --apply`, which re-renders
+  both workflows (and overwrites local edits to them). Self-hosted runners need a version
+  that supports Node 24 actions.
+
 ### Changed
 
 - **The README demo is a real screen recording.** `docs/images/demo.gif` (and a new
