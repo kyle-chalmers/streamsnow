@@ -18,6 +18,13 @@ entry.
   invalidated. Existing repos pick this up with `streamsnow update --apply`, which re-renders
   both workflows (and overwrites local edits to them). Self-hosted runners need a version
   that supports Node 24 actions.
+- **Recording a resolution no longer changes which review report counts** (#115).
+  `streamsnow review-loop write-resolutions` keeps the report's modification time. Before,
+  recording a fix on an older report made it the newest, so `review-loop open-findings`
+  counted that unstamped report and `/ship-app` wrote "not reviewed for this change" even
+  though a newer stamped report covered the tree. `/review-app --fix` now says where a
+  deferred fix approved after an `--auto` stamp is recorded, and to re-run `/review-app` to
+  stamp the new state.
 
 ### Changed
 
