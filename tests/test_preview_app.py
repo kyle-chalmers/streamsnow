@@ -949,3 +949,19 @@ def test_callable_pages_leave_their_modules_tracked(tmp_path):
     )
     (app_dir / "pages" / "report.py").write_text("def render(): ...\n", encoding="utf-8")
     assert sorted(preview_app.shared_sources(app_dir)) == ["pages/report.py"]
+
+
+def test_imported_navigation_tracks_pages_and_sql_is_never_a_script(tmp_path):
+    app_dir = _repo(tmp_path) / "apps" / SLUG
+    (app_dir / "pages").mkdir()
+    (app_dir / "streamlit_app.py").write_text(
+        "import streamlit as st\nfrom nav import PAGES\nst.navigation(PAGES).run()\n",
+        encoding="utf-8",
+    )
+    (app_dir / "pages" / "report.py").write_text("def render(): ...\n", encoding="utf-8")
+    (app_dir / "pages" / "report.sql").write_text("select 1\n", encoding="utf-8")
+    assert sorted(preview_app.shared_sources(app_dir)) == ["pages/report.py", "pages/report.sql"]
+
+    # Legacy multipage: the page script reruns, the SQL beside it does not.
+    (app_dir / "streamlit_app.py").write_text("import streamlit as st\n", encoding="utf-8")
+    assert sorted(preview_app.shared_sources(app_dir)) == ["pages/report.sql"]
