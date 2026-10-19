@@ -20,6 +20,21 @@ entry.
   --restart-if-stale` stops a stale server and relaunches it on the same port. `/build-app`'s
   build and verify loops and `/review-app --auto`'s walk start the preview with it. Previews
   started by an older StreamSnow report `stale: null` until restarted.
+- **Generated CI and deploy workflows run on current actions** (#116). `checks.yml` and
+  `deploy.yml` now use `actions/checkout@v7` and `astral-sh/setup-uv@v7` (Node 24, where
+  `@v4`/`@v5` targeted the deprecated Node 20), run on `ubuntu-24.04` instead of the floating
+  `ubuntu-latest`, so the runner OS changes only with a StreamSnow upgrade, and turn off
+  setup-uv's cache, which keyed on a `uv.lock` an apps repo never has and so never
+  invalidated. Existing repos pick this up with `streamsnow update --apply`, which re-renders
+  both workflows (and overwrites local edits to them). Self-hosted runners need a version
+  that supports Node 24 actions.
+- **Recording a resolution no longer changes which review report counts** (#115).
+  `streamsnow review-loop write-resolutions` keeps the report's modification time. Before,
+  recording a fix on an older report made it the newest, so `review-loop open-findings`
+  counted that unstamped report and `/ship-app` wrote "not reviewed for this change" even
+  though a newer stamped report covered the tree. `/review-app --fix` now says where a
+  deferred fix approved after an `--auto` stamp is recorded, and to re-run `/review-app` to
+  stamp the new state.
 
 ### Changed
 
