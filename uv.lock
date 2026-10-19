@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 
 [[package]]
@@ -618,7 +618,7 @@ wheels = [
 
 [[package]]
 name = "streamsnow"
-version = "0.13.0"
+version = "0.14.0"
 source = { editable = "." }
 dependencies = [
     { name = "jinja2" },
