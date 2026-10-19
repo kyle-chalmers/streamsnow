@@ -710,3 +710,20 @@ def test_branch_ensure_works_before_the_first_commit(
     code, out = _branch(root, monkeypatch, capsys, "--slug", SLUG, "--ensure")
     assert code == 0 and out["created"] is True
     assert _checked_out(root) == f"build/{SLUG}"
+
+
+def test_branch_acts_on_the_repo_it_runs_in_not_claude_project_dir(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """From a worktree, CLAUDE_PROJECT_DIR can name another checkout; --ensure must never
+    switch that one's branch."""
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init", "-q", "-b", "main")
+    (other / "streamsnow.config.yaml").write_text("project:\n  name: Acme\n", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(other))
+    _git(repo, "checkout", "-q", "main")
+    code, out = _branch(repo, monkeypatch, capsys, "--slug", SLUG, "--ensure")
+    assert code == 0 and out["created"] is True
+    assert _checked_out(repo) == f"build/{SLUG}"
+    assert _checked_out(other) == "main"

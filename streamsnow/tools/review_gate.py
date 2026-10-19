@@ -1116,7 +1116,9 @@ def cmd_branch(args: argparse.Namespace) -> int:
     if args.ensure and not (args.slug and _SLUG_RE.match(args.slug)):
         print("error: --ensure needs --slug <kebab-case app slug>", file=sys.stderr)
         return 2
-    root = repo_root()
+    # The repo this runs in, never CLAUDE_PROJECT_DIR: --ensure switches branches, and from a
+    # worktree that variable can name a different checkout (another session's main).
+    root = repo_root(Path.cwd())
     state = branch_state(root)
     state.update(created=False)
     default = state["default_branch"]
