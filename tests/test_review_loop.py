@@ -417,6 +417,60 @@ def test_open_findings_picks_newest_report(tmp_path: Path, capsys: pytest.Captur
     assert out["counts"] == {"BLOCK": 0, "FLAG": 0, "NICE-TO-HAVE": 0}
 
 
+def test_write_resolutions_keeps_the_reports_mtime(tmp_path: Path) -> None:
+    import os
+
+    report = tmp_path / "review-1.md"
+    report.write_text(REPORT, encoding="utf-8")
+    os.utime(report, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
+    applied = tmp_path / "applied.json"
+    applied.write_text("[]", encoding="utf-8")
+    assert rl.main(["write-resolutions", str(report), "--applied", str(applied)]) == 0
+    assert "## Resolutions" in report.read_text(encoding="utf-8")
+    assert report.stat().st_mtime_ns == 1_700_000_000_000_000_000
+
+
+def test_resolving_an_older_report_keeps_the_newer_stamp_counted(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """#115: recording a deferred fix on review-A (older) made it the newest file, so
+    open-findings counted the unstamped A instead of the stamped review-B, and /ship-app's
+    PR body read "not reviewed for this change"."""
+    import os
+    import time
+
+    session = tmp_path / ".review"
+    session.mkdir()
+    older = session / "review-A.md"
+    older.write_text(REPORT, encoding="utf-8")
+    past = time.time() - 3600
+    os.utime(older, (past, past))
+    newer = session / "review-B.md"
+    newer.write_text(
+        "# Review\nReviewed-baseline: 0123456789abcdef\n\n"
+        "## SQL\n\n### BLOCK\n- _none_\n\n### FLAG\n- _none_\n",
+        encoding="utf-8",
+    )
+    applied = tmp_path / "B.json"
+    applied.write_text(
+        json.dumps(
+            [
+                {
+                    "citation": "apps/acme-sales-dashboard/queries/revenue_daily.sql:12",
+                    "summary": "SELECT * over a wide view",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert rl.main(["write-resolutions", str(older), "--applied", str(applied)]) == 0
+    capsys.readouterr()
+    code, out = _open(capsys, str(session))
+    assert code == 0
+    assert out["report"].endswith("review-B.md")
+    assert out["stamped"] is True
+
+
 def test_open_findings_unparsed_report_is_not_zero(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:

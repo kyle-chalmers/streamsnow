@@ -79,6 +79,7 @@ from __future__ import annotations
 import argparse
 import enum
 import json
+import os
 import re
 import sys
 import time
@@ -555,8 +556,8 @@ def cmd_open_findings(args: argparse.Namespace) -> int:
         result["reason"] = "; ".join(problems[:5]) + "; open findings unknown"
         print(json.dumps(result, indent=2))
         return 0
-    # Only the counted report's own Applied block closes a finding. Writing
-    # Resolutions makes the report that recorded a fix the newest one, so the
+    # Only the counted report's own Applied block closes a finding. A fix belongs
+    # in the Resolutions of the report it answers (the newest one in a loop), so the
     # session union adds nothing legitimate, and it would close a critical a
     # newer report re-flags after an older fix (the no-convergence case).
     applied = parse_applied_tuples(text)
@@ -608,7 +609,13 @@ def _format_finding_line(f: dict[str, Any]) -> str:
 
 
 def cmd_write_resolutions(args: argparse.Namespace) -> int:
-    """Append a ``## Resolutions`` block to a report."""
+    """Append a ``## Resolutions`` block to a report, keeping its modification time.
+
+    Reports are ordered by mtime (``newest_review_report``, ``review-gate``'s stored head,
+    the skills' ``ls -t``). Recording a resolution is bookkeeping: if it bumped the mtime,
+    resolving an older report would make it the newest, and ``open-findings`` would count
+    that unstamped report instead of the stamped one after it (#115).
+    """
     report_path = Path(args.report)
     if not report_path.is_file():
         print(json.dumps({"error": f"not a file: {report_path}"}), file=sys.stderr)
@@ -635,10 +642,12 @@ def cmd_write_resolutions(args: argparse.Namespace) -> int:
                 lines.append(_format_finding_line(f))
         lines.append("")
 
+    before = report_path.stat()
     with report_path.open("a", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
         if not lines[-1]:
             fh.write("\n")
+    os.utime(report_path, ns=(before.st_atime_ns, before.st_mtime_ns))
 
     counts = {
         "applied": len(applied),

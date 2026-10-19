@@ -56,7 +56,8 @@ re-derives its dedup each cycle re-reports findings it already resolved:
    `streamsnow review-gate stamp apps/<slug>/.review/review-<ts>.md --slug <slug>` (stamping
    earlier records a tree state the commits immediately invalidate, and the gate would nag after
    every successful run). Skip the stamp on a no-convergence stop — an unresolved repeat is not a
-   reviewed state.
+   reviewed state. A Bucket B item deferred here and approved after the stamp goes through
+   `--fix`, recorded on this stamped report ([fixes.md](fixes.md) step 7).
 9. **Report:** cycles run, commits (with SHAs), the punch list, the smoke outcome, the exit reason,
    and the hand-off — /validate-app then /ship-app.
 
