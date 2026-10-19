@@ -20,11 +20,11 @@ confirmation, safe secrets provisioning, URL surfacing, triage.
 - `streamsnow preview start <slug>` (bare `streamsnow preview <slug>` is shorthand for `start`) —
   verifies the entrypoint and port, launches `streamlit run` detached with output to a log, then
   polls the health endpoint until it answers or the timeout expires. `--port N` (`0`: any free),
-  `--json`, `--review-capture DIR` (/sql-review). Exit 0 = serving; on exit 1 the log tail was
-  **classified** (missing `secrets.toml`, bad account locator, missing package, port collision,
-  session-outside-Snowflake) into an actionable hint — read it before improvising.
-- `streamsnow preview status <slug>` — running/not-running + live health probe; stale state from a
-  crashed preview is cleaned up silently, so a dead run never wedges the next `start`.
+  `--json`, `--review-capture DIR` (/sql-review), `--restart-if-stale` (Gotchas). Exit 0 = serving;
+  exit 1 = log tail **classified** (missing `secrets.toml`, bad account locator, missing package,
+  port collision, session-outside-Snowflake) into an actionable hint — read it before improvising.
+- `streamsnow preview status <slug>` — running/not-running, live health probe, `stale` if serving
+  old code; a crashed preview's state is cleaned up silently, so it never wedges the next `start`.
 - `streamsnow preview logs <slug> [--lines N]`: tail the log (kept after `stop`); a `cause:` line names a known failure.
 - `streamsnow preview stop <slug>` — graceful kill, state removed; idempotent.
 
@@ -59,8 +59,8 @@ first script run finishes; data errors surface in the browser and in `logs`, not
 - **Warehouse-runtime apps:** a `get_active_session` traceback locally is the runtime's signature,
   not a code bug — see [_shared/runtime-decision.md](../_shared/runtime-decision.md); point at the
   app's commented local-parity fallback (revert before the PR) or verify in Snowsight.
-- **A SQL edit that "has no effect":** hot-reload picks up `.py` changes but can serve cached
-  results of the old SQL text; `streamsnow preview stop <slug>` then `start` before concluding it failed.
+- **A SQL or shared-module (`pages/_*.py`) edit not showing, or an `ImportError`?** Imported
+  modules and cached SQL outlive reruns: `streamsnow preview start <slug> --restart-if-stale`.
 - **Don't run deploys locally** — `deploy-setup` / `deploy-sql` feed the CI workflow; preview is the
   only local-run path. `.streamsnow/` (preview state + logs) belongs in `.gitignore`.
 

@@ -12,7 +12,8 @@ checkpoint 3. Outside /build-app, run `/review-app` only.
 
 ## Round
 
-1. Start the preview (`streamsnow preview start <slug>`) and run the UI walkthrough
+1. Start the preview (`streamsnow preview start <slug> --restart-if-stale`, so a server still
+   running pre-fix shared modules is restarted) and run the UI walkthrough
    ([_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md)) for one screenshot
    per page under default filters.
 2. Dispatch in one message: **perf-reviewer** ([briefs/perf-reviewer.md](briefs/perf-reviewer.md)),

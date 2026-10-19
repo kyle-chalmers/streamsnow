@@ -222,7 +222,8 @@ return get_active_session().sql(sql, params=[start, end]).to_pandas()
 
 `/build-app` runs these itself between CP1 and CP3; the user only types at the checkpoints.
 
-1. **Preview:** `streamsnow preview start <slug>` (`--json` for the URL and status). It prefers the
+1. **Preview:** `streamsnow preview start <slug> --restart-if-stale` (`--json` for the URL and
+   status; the flag restarts a server still running old shared modules). It prefers the
    repo's `.venv/bin/streamlit`; on exit 1 read the classified hint (no default `snow` connection,
    bad account locator, missing package) before improvising, then `streamsnow preview logs <slug>`.
    Hand over the root URL and ask for the click-through — that is CP2, not something to skip.

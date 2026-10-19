@@ -362,6 +362,7 @@
         "--lines",
         "--poll-interval",
         "--port",
+        "--restart-if-stale",
         "--review-capture",
         "--timeout",
         "slug"
