@@ -21,6 +21,31 @@ entry.
   before the foundation commit, and `/build-app --feedback` and `/review-app --fix` before
   theirs, so a build leaves `main` matching `origin/main` and `/ship-app` no longer has to move
   the commits onto a branch and reset `main` by hand.
+- **A preview serving old shared modules says so, and restarts on request** (#113). Page
+  scripts re-run on every rerun, but modules they import (`pages/_*.py`, `branding.py`,
+  `sql_loader.py`) and cached SQL stay as they were when the server started, so a walkthrough
+  could hit `ImportError` or pass on old code. `streamsnow preview status` and an
+  already-running `preview start` now report `stale` with the files changed or removed since
+  start (page scripts named by `st.Page` excluded; in `--json` as `stale` and
+  `changed_since_start`, and in the plain message), and the new `preview start
+  --restart-if-stale` stops a stale server and relaunches it on the same port. `/build-app`'s
+  build and verify loops and `/review-app --auto`'s walk start the preview with it. Previews
+  started by an older StreamSnow report `stale: null` until restarted.
+- **Generated CI and deploy workflows run on current actions** (#116). `checks.yml` and
+  `deploy.yml` now use `actions/checkout@v7` and `astral-sh/setup-uv@v7` (Node 24, where
+  `@v4`/`@v5` targeted the deprecated Node 20), run on `ubuntu-24.04` instead of the floating
+  `ubuntu-latest`, so the runner OS changes only with a StreamSnow upgrade, and turn off
+  setup-uv's cache, which keyed on a `uv.lock` an apps repo never has and so never
+  invalidated. Existing repos pick this up with `streamsnow update --apply`, which re-renders
+  both workflows (and overwrites local edits to them). Self-hosted runners need a version
+  that supports Node 24 actions.
+- **Recording a resolution no longer changes which review report counts** (#115).
+  `streamsnow review-loop write-resolutions` keeps the report's modification time. Before,
+  recording a fix on an older report made it the newest, so `review-loop open-findings`
+  counted that unstamped report and `/ship-app` wrote "not reviewed for this change" even
+  though a newer stamped report covered the tree. `/review-app --fix` now says where a
+  deferred fix approved after an `--auto` stamp is recorded, and to re-run `/review-app` to
+  stamp the new state.
 
 ### Changed
 

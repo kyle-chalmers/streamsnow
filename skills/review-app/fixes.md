@@ -51,7 +51,12 @@ extra question.
    `streamsnow review-loop parse-findings` emits) or `-` for stdin; an empty group can be omitted.
    This is what the `--auto` loop's dedup and no-convergence detector read: an unrecorded applied
    fix gets re-reported next cycle, and a finding that returns *after* its recorded fix is the
-   no-convergence signal instead of silently deduped noise.
+   no-convergence signal instead of silently deduped noise. Recording keeps the report's
+   modification time, so it never changes which report `open-findings` counts. A Bucket B
+   finding deferred by an earlier `--auto` run and approved later goes on the newest report
+   (the stamped one that `open-findings` counts), not on the older report that first raised it.
+   The fix commit moves the tree past that stamp, and `--fix` never stamps, so tell the user to
+   re-run `/review-app` to stamp the new state before `/ship-app`.
 8. **Re-gate:** `streamsnow validate-app <slug>` until PASS or the only failures are documented
    deferrals.
 9. **Report:** commits applied, decisions made, the punch list, the gate result, and next step

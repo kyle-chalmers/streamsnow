@@ -736,3 +736,248 @@ def test_launch_passes_an_all_str_environment(monkeypatch, tmp_path):
         preview_app._launch_detached([sys.executable, "-c", "pass"], log_fh, tmp_path, env)
     assert seen["env"]["STREAMSNOW_REVIEW_CAPTURE"] == str(tmp_path / "capture")
     assert all(isinstance(k, str) and isinstance(v, str) for k, v in seen["env"].items())
+
+
+# --------------------------------------------------------------------------- #
+# Stale preview after shared-module edits (#113)
+# --------------------------------------------------------------------------- #
+def _app_with_shared_modules(repo: Path) -> Path:
+    app_dir = repo / "apps" / SLUG
+    (app_dir / "streamlit_app.py").write_text(
+        'import streamlit as st\nst.navigation([st.Page("pages/overview.py")]).run()\n',
+        encoding="utf-8",
+    )
+    (app_dir / "pages").mkdir()
+    (app_dir / "pages" / "overview.py").write_text("import pages._layout\n", encoding="utf-8")
+    (app_dir / "pages" / "_layout.py").write_text("PRIOR_LABEL = 'x'\n", encoding="utf-8")
+    (app_dir / "queries").mkdir()
+    (app_dir / "queries" / "revenue.sql").write_text("select 1\n", encoding="utf-8")
+    (app_dir / "branding.py").write_text("BRAND = 'acme'\n", encoding="utf-8")
+    return app_dir
+
+
+def _touch(path: Path, when: float) -> None:
+    os.utime(path, (when, when))
+
+
+def test_changed_since_start_lists_shared_modules_and_sql_not_page_scripts(tmp_path):
+    """Streamlit re-runs the entrypoint and page scripts on every rerun, but the modules
+    they import stay in sys.modules and cached results keep the old SQL text, so only
+    those make a running preview stale."""
+    app_dir = _app_with_shared_modules(_repo(tmp_path))
+    started = time.time() - 60
+    for path in app_dir.rglob("*"):
+        if path.is_file():
+            _touch(path, started - 60)
+    _touch(app_dir / "streamlit_app.py", started + 10)
+    _touch(app_dir / "pages" / "overview.py", started + 10)
+    assert preview_app.changed_since_start(app_dir, started) == []
+
+    _touch(app_dir / "pages" / "_layout.py", started + 10)
+    _touch(app_dir / "queries" / "revenue.sql", started + 10)
+    _touch(app_dir / "branding.py", started + 10)
+    venv_file = app_dir / ".venv" / "lib" / "site.py"
+    venv_file.parent.mkdir(parents=True)
+    venv_file.write_text("", encoding="utf-8")  # an install after start is not app code
+    assert preview_app.changed_since_start(app_dir, started) == [
+        "branding.py",
+        "pages/_layout.py",
+        "queries/revenue.sql",
+    ]
+
+
+def test_status_reports_a_stale_preview_in_json_and_plain_text(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    app_dir = _app_with_shared_modules(repo)
+    _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
+    port = _free_port()
+    try:
+        assert preview_app.main(_start_args(repo, port)) == 0
+        capsys.readouterr()
+        status_args = ["status", SLUG, "--dir", str(repo)]
+        assert preview_app.main([*status_args, "--json"]) == 0
+        fresh = json.loads(capsys.readouterr().out)
+        assert fresh["stale"] is False and fresh["changed_since_start"] == []
+
+        _touch(app_dir / "pages" / "_layout.py", time.time() + 5)
+        assert preview_app.main([*status_args, "--json"]) == 0
+        stale = json.loads(capsys.readouterr().out)
+        assert stale["stale"] is True
+        assert stale["changed_since_start"] == ["pages/_layout.py"]
+        # Without --json only the message prints: the warning must be in it.
+        assert preview_app.main(status_args) == 0
+        plain = capsys.readouterr().out
+        assert "stale" in plain and "pages/_layout.py" in plain and "--restart-if-stale" in plain
+
+        # The already-running start path says the same thing.
+        assert preview_app.main(_start_args(repo, port) + ["--json"]) == 0
+        again = json.loads(capsys.readouterr().out)
+        assert again["status"] == "already_running" and again["stale"] is True
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_state_from_an_older_streamsnow_reads_as_unknown_staleness(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
+    port = _free_port()
+    try:
+        assert preview_app.main(_start_args(repo, port)) == 0
+        capsys.readouterr()
+        state_path = repo / ".streamsnow" / "preview" / f"{SLUG}.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        del state["started_epoch"]
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        assert preview_app.main(["status", SLUG, "--dir", str(repo), "--json"]) == 0
+        assert json.loads(capsys.readouterr().out)["stale"] is None
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_restart_if_stale_relaunches_only_a_stale_preview(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    app_dir = _app_with_shared_modules(repo)
+    _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
+    port = _free_port()
+    state_path = repo / ".streamsnow" / "preview" / f"{SLUG}.json"
+    restart = _start_args(repo, port) + ["--restart-if-stale", "--json"]
+    try:
+        assert preview_app.main(_start_args(repo, port)) == 0
+        capsys.readouterr()
+        first_pid = json.loads(state_path.read_text(encoding="utf-8"))["pid"]
+
+        # Fresh: the flag reuses the running server.
+        assert preview_app.main(restart) == 0
+        assert json.loads(capsys.readouterr().out)["status"] == "already_running"
+        assert json.loads(state_path.read_text(encoding="utf-8"))["pid"] == first_pid
+
+        # Stale: the old server goes and a new one serves on the same port.
+        _touch(app_dir / "pages" / "_layout.py", time.time() + 5)
+        assert preview_app.main(restart) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["status"] == "ready" and payload["port"] == port
+        assert payload["restarted_for"] == ["pages/_layout.py"]
+        assert not preview_app._pid_alive(first_pid)
+        assert json.loads(state_path.read_text(encoding="utf-8"))["pid"] != first_pid
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_registered_pages_decide_what_reruns_so_unprefixed_helpers_still_count(tmp_path):
+    """With st.navigation the page scripts are what st.Page names; a helper under pages/
+    without the scaffold's `_` prefix is still an imported module."""
+    app_dir = _repo(tmp_path) / "apps" / SLUG
+    (app_dir / "pages" / "admin").mkdir(parents=True)
+    (app_dir / "streamlit_app.py").write_text(
+        'import streamlit as st\nnav = st.navigation([\n    st.Page(\n        "pages/admin/report.py",'
+        ' title="Report")\n])\nnav.run()\n',
+        encoding="utf-8",
+    )
+    (app_dir / "pages" / "admin" / "report.py").write_text("import x\n", encoding="utf-8")
+    (app_dir / "pages" / "admin" / "helpers.py").write_text("X = 1\n", encoding="utf-8")
+    started = time.time() - 60
+    _touch(app_dir / "pages" / "admin" / "report.py", started + 10)
+    _touch(app_dir / "pages" / "admin" / "helpers.py", started + 10)
+    _touch(app_dir / "streamlit_app.py", started + 10)
+    assert preview_app.changed_since_start(app_dir, started) == ["pages/admin/helpers.py"]
+
+
+def test_a_deleted_shared_module_makes_the_preview_stale(tmp_path, monkeypatch, capsys):
+    """An imported module keeps running from memory after its file is removed."""
+    repo = _repo(tmp_path)
+    app_dir = _app_with_shared_modules(repo)
+    _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
+    port = _free_port()
+    try:
+        assert preview_app.main(_start_args(repo, port)) == 0
+        capsys.readouterr()
+        (app_dir / "pages" / "_layout.py").unlink()
+        assert preview_app.main(["status", SLUG, "--dir", str(repo), "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["stale"] is True
+        assert payload["changed_since_start"] == ["pages/_layout.py"]
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_keyword_page_registration_and_added_files_are_understood(tmp_path):
+    app_dir = _repo(tmp_path) / "apps" / SLUG
+    (app_dir / "pages").mkdir()
+    (app_dir / "streamlit_app.py").write_text(
+        'import streamlit as st\nst.navigation([st.Page(page="pages/report.py")]).run()\n',
+        encoding="utf-8",
+    )
+    (app_dir / "pages" / "report.py").write_text("import pages.helpers\n", encoding="utf-8")
+    (app_dir / "pages" / "helpers.py").write_text("X = 1\n", encoding="utf-8")
+    started = time.time() - 60
+    for path in (app_dir / "pages").iterdir():
+        _touch(path, started - 60)
+    inventory = sorted(preview_app.shared_sources(app_dir))
+    assert inventory == ["pages/helpers.py"]
+    _touch(app_dir / "pages" / "helpers.py", started + 10)
+    assert preview_app.changed_since_start(app_dir, started, inventory) == ["pages/helpers.py"]
+
+    # A file added with a preserved older mtime is caught by the start-time inventory.
+    _touch(app_dir / "pages" / "helpers.py", started - 60)
+    (app_dir / "queries").mkdir()
+    (app_dir / "queries" / "new.sql").write_text("select 1\n", encoding="utf-8")
+    _touch(app_dir / "queries" / "new.sql", started - 60)
+    assert preview_app.changed_since_start(app_dir, started, inventory) == ["queries/new.sql"]
+
+
+def test_page_registration_is_parsed_not_pattern_matched(tmp_path):
+    app_dir = _repo(tmp_path) / "apps" / SLUG
+    (app_dir / "pages" / "deep").mkdir(parents=True)
+    (app_dir / "streamlit_app.py").write_text(
+        "import streamlit as st\nst.navigation([\n    st.Page(  # the main page\n"
+        '        "pages/report.py",\n    ),\n]).run()\n',
+        encoding="utf-8",
+    )
+    for rel in ("pages/report.py", "pages/helpers.py", "pages/deep/util.py"):
+        (app_dir / rel).write_text("X = 1\n", encoding="utf-8")
+    assert sorted(preview_app.shared_sources(app_dir)) == ["pages/deep/util.py", "pages/helpers.py"]
+
+    # Without st.Page nothing is known to rerun, so every page file is tracked (an extra
+    # restart in a legacy multipage app beats a walkthrough on old code).
+    (app_dir / "streamlit_app.py").write_text("import streamlit as st\n", encoding="utf-8")
+    assert sorted(preview_app.shared_sources(app_dir)) == [
+        "pages/deep/util.py",
+        "pages/helpers.py",
+        "pages/report.py",
+    ]
+
+
+def test_callable_pages_leave_their_modules_tracked(tmp_path):
+    """st.Page(render) has no file; the module render came from is imported, so shared."""
+    app_dir = _repo(tmp_path) / "apps" / SLUG
+    (app_dir / "pages").mkdir()
+    (app_dir / "streamlit_app.py").write_text(
+        "import streamlit as st\nfrom pages.report import render\n"
+        "st.navigation([st.Page(render)]).run()\n",
+        encoding="utf-8",
+    )
+    (app_dir / "pages" / "report.py").write_text("def render(): ...\n", encoding="utf-8")
+    assert sorted(preview_app.shared_sources(app_dir)) == ["pages/report.py"]
+
+
+def test_imported_navigation_tracks_pages_and_sql_is_never_a_script(tmp_path):
+    app_dir = _repo(tmp_path) / "apps" / SLUG
+    (app_dir / "pages").mkdir()
+    (app_dir / "streamlit_app.py").write_text(
+        "import streamlit as st\nfrom nav import PAGES\nst.navigation(PAGES).run()\n",
+        encoding="utf-8",
+    )
+    (app_dir / "pages" / "report.py").write_text("def render(): ...\n", encoding="utf-8")
+    (app_dir / "pages" / "report.sql").write_text("select 1\n", encoding="utf-8")
+    assert sorted(preview_app.shared_sources(app_dir)) == ["pages/report.py", "pages/report.sql"]
+
+    # Delegated to a function in another module: still unresolved, still tracked.
+    (app_dir / "streamlit_app.py").write_text(
+        "from navigation import run\nrun()\n", encoding="utf-8"
+    )
+    (app_dir / "pages" / "helpers.py").write_text("X = 1\n", encoding="utf-8")
+    assert sorted(preview_app.shared_sources(app_dir)) == [
+        "pages/helpers.py",
+        "pages/report.py",
+        "pages/report.sql",
+    ]
