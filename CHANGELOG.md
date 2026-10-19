@@ -8,6 +8,18 @@ entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A preview serving old shared modules says so, and restarts on request** (#113). Page
+  scripts re-run on every rerun, but modules they import (`pages/_*.py`, `branding.py`,
+  `sql_loader.py`) and cached SQL stay as they were when the server started, so a walkthrough
+  could hit `ImportError` or pass on old code. `streamsnow preview status` and an
+  already-running `preview start` now report `stale` with the changed files (in `--json` as
+  `stale` and `changed_since_start`, and in the plain message), and the new
+  `preview start --restart-if-stale` stops a stale server and relaunches it on the same port.
+  `/build-app`'s build and verify loops and `/review-app --auto`'s walk start the preview
+  with it. Previews started by an older StreamSnow report `stale: null` until restarted.
+
 ### Changed
 
 - **The README demo is a real screen recording.** `docs/images/demo.gif` (and a new

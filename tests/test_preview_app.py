@@ -736,3 +736,124 @@ def test_launch_passes_an_all_str_environment(monkeypatch, tmp_path):
         preview_app._launch_detached([sys.executable, "-c", "pass"], log_fh, tmp_path, env)
     assert seen["env"]["STREAMSNOW_REVIEW_CAPTURE"] == str(tmp_path / "capture")
     assert all(isinstance(k, str) and isinstance(v, str) for k, v in seen["env"].items())
+
+
+# --------------------------------------------------------------------------- #
+# Stale preview after shared-module edits (#113)
+# --------------------------------------------------------------------------- #
+def _app_with_shared_modules(repo: Path) -> Path:
+    app_dir = repo / "apps" / SLUG
+    (app_dir / "pages").mkdir()
+    (app_dir / "pages" / "overview.py").write_text("import pages._layout\n", encoding="utf-8")
+    (app_dir / "pages" / "_layout.py").write_text("PRIOR_LABEL = 'x'\n", encoding="utf-8")
+    (app_dir / "queries").mkdir()
+    (app_dir / "queries" / "revenue.sql").write_text("select 1\n", encoding="utf-8")
+    (app_dir / "branding.py").write_text("BRAND = 'acme'\n", encoding="utf-8")
+    return app_dir
+
+
+def _touch(path: Path, when: float) -> None:
+    os.utime(path, (when, when))
+
+
+def test_changed_since_start_lists_shared_modules_and_sql_not_page_scripts(tmp_path):
+    """Streamlit re-runs the entrypoint and page scripts on every rerun, but the modules
+    they import stay in sys.modules and cached results keep the old SQL text, so only
+    those make a running preview stale."""
+    app_dir = _app_with_shared_modules(_repo(tmp_path))
+    started = time.time() - 60
+    for path in app_dir.rglob("*"):
+        if path.is_file():
+            _touch(path, started - 60)
+    _touch(app_dir / "streamlit_app.py", started + 10)
+    _touch(app_dir / "pages" / "overview.py", started + 10)
+    assert preview_app.changed_since_start(app_dir, started) == []
+
+    _touch(app_dir / "pages" / "_layout.py", started + 10)
+    _touch(app_dir / "queries" / "revenue.sql", started + 10)
+    _touch(app_dir / "branding.py", started + 10)
+    venv_file = app_dir / ".venv" / "lib" / "site.py"
+    venv_file.parent.mkdir(parents=True)
+    venv_file.write_text("", encoding="utf-8")  # an install after start is not app code
+    assert preview_app.changed_since_start(app_dir, started) == [
+        "branding.py",
+        "pages/_layout.py",
+        "queries/revenue.sql",
+    ]
+
+
+def test_status_reports_a_stale_preview_in_json_and_plain_text(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    app_dir = _app_with_shared_modules(repo)
+    _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
+    port = _free_port()
+    try:
+        assert preview_app.main(_start_args(repo, port)) == 0
+        capsys.readouterr()
+        status_args = ["status", SLUG, "--dir", str(repo)]
+        assert preview_app.main([*status_args, "--json"]) == 0
+        fresh = json.loads(capsys.readouterr().out)
+        assert fresh["stale"] is False and fresh["changed_since_start"] == []
+
+        _touch(app_dir / "pages" / "_layout.py", time.time() + 5)
+        assert preview_app.main([*status_args, "--json"]) == 0
+        stale = json.loads(capsys.readouterr().out)
+        assert stale["stale"] is True
+        assert stale["changed_since_start"] == ["pages/_layout.py"]
+        # Without --json only the message prints: the warning must be in it.
+        assert preview_app.main(status_args) == 0
+        plain = capsys.readouterr().out
+        assert "stale" in plain and "pages/_layout.py" in plain and "--restart-if-stale" in plain
+
+        # The already-running start path says the same thing.
+        assert preview_app.main(_start_args(repo, port) + ["--json"]) == 0
+        again = json.loads(capsys.readouterr().out)
+        assert again["status"] == "already_running" and again["stale"] is True
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_state_from_an_older_streamsnow_reads_as_unknown_staleness(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
+    port = _free_port()
+    try:
+        assert preview_app.main(_start_args(repo, port)) == 0
+        capsys.readouterr()
+        state_path = repo / ".streamsnow" / "preview" / f"{SLUG}.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        del state["started_epoch"]
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        assert preview_app.main(["status", SLUG, "--dir", str(repo), "--json"]) == 0
+        assert json.loads(capsys.readouterr().out)["stale"] is None
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_restart_if_stale_relaunches_only_a_stale_preview(tmp_path, monkeypatch, capsys):
+    repo = _repo(tmp_path)
+    app_dir = _app_with_shared_modules(repo)
+    _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
+    port = _free_port()
+    state_path = repo / ".streamsnow" / "preview" / f"{SLUG}.json"
+    restart = _start_args(repo, port) + ["--restart-if-stale", "--json"]
+    try:
+        assert preview_app.main(_start_args(repo, port)) == 0
+        capsys.readouterr()
+        first_pid = json.loads(state_path.read_text(encoding="utf-8"))["pid"]
+
+        # Fresh: the flag reuses the running server.
+        assert preview_app.main(restart) == 0
+        assert json.loads(capsys.readouterr().out)["status"] == "already_running"
+        assert json.loads(state_path.read_text(encoding="utf-8"))["pid"] == first_pid
+
+        # Stale: the old server goes and a new one serves on the same port.
+        _touch(app_dir / "pages" / "_layout.py", time.time() + 5)
+        assert preview_app.main(restart) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["status"] == "ready" and payload["port"] == port
+        assert payload["restarted_for"] == ["pages/_layout.py"]
+        assert not preview_app._pid_alive(first_pid)
+        assert json.loads(state_path.read_text(encoding="utf-8"))["pid"] != first_pid
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
