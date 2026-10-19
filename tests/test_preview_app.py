@@ -894,3 +894,28 @@ def test_a_deleted_shared_module_makes_the_preview_stale(tmp_path, monkeypatch, 
         assert payload["changed_since_start"] == ["pages/_layout.py"]
     finally:
         preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_keyword_page_registration_and_added_files_are_understood(tmp_path):
+    app_dir = _repo(tmp_path) / "apps" / SLUG
+    (app_dir / "pages").mkdir()
+    (app_dir / "streamlit_app.py").write_text(
+        'import streamlit as st\nst.navigation([st.Page(page="pages/report.py")]).run()\n',
+        encoding="utf-8",
+    )
+    (app_dir / "pages" / "report.py").write_text("import pages.helpers\n", encoding="utf-8")
+    (app_dir / "pages" / "helpers.py").write_text("X = 1\n", encoding="utf-8")
+    started = time.time() - 60
+    for path in (app_dir / "pages").iterdir():
+        _touch(path, started - 60)
+    inventory = sorted(preview_app.shared_sources(app_dir))
+    assert inventory == ["pages/helpers.py"]
+    _touch(app_dir / "pages" / "helpers.py", started + 10)
+    assert preview_app.changed_since_start(app_dir, started, inventory) == ["pages/helpers.py"]
+
+    # A file added with a preserved older mtime is caught by the start-time inventory.
+    _touch(app_dir / "pages" / "helpers.py", started - 60)
+    (app_dir / "queries").mkdir()
+    (app_dir / "queries" / "new.sql").write_text("select 1\n", encoding="utf-8")
+    _touch(app_dir / "queries" / "new.sql", started - 60)
+    assert preview_app.changed_since_start(app_dir, started, inventory) == ["queries/new.sql"]

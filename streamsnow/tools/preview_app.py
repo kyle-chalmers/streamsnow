@@ -322,8 +322,9 @@ def build_command(entrypoint: Path, port: int) -> list[str]:
 #: Suffixes whose edits a running server does not pick up (see ``changed_since_start``).
 _STALE_SUFFIXES = (".py", ".sql")
 
-#: ``st.Page("pages/x.py", ...)`` in the entrypoint: the scripts Streamlit re-executes.
-_ST_PAGE = re.compile(r"""st\.Page\(\s*["']([^"']+\.py)["']""")
+#: ``st.Page("pages/x.py", ...)`` or ``st.Page(page="pages/x.py")`` in the entrypoint: the
+#: scripts Streamlit re-executes.
+_ST_PAGE = re.compile(r"""st\.Page\(\s*(?:page\s*=\s*)?["']([^"']+\.py)["']""")
 
 
 def _page_scripts(app_dir: Path) -> set[str] | None:
@@ -382,14 +383,17 @@ def shared_sources(app_dir: Path) -> dict[str, float]:
 def changed_since_start(
     app_dir: Path, started: float, started_files: list[str] | None = None
 ) -> list[str]:
-    """Shared files edited after ``started``, plus those in ``started_files`` now deleted.
+    """Shared files edited after ``started``, and any added or deleted since ``started_files``.
 
     A deleted module that was already imported keeps running from memory, so its removal
-    is as stale as an edit.
+    is as stale as an edit; a file added with a preserved older mtime (an archive or a
+    ``cp -p``) is caught by the inventory rather than the clock.
     """
     now = shared_sources(app_dir)
     changed = {rel for rel, mtime in now.items() if mtime > started}
-    changed.update(rel for rel in started_files or () if rel not in now)
+    if started_files is not None:
+        before = set(started_files)
+        changed.update(before.symmetric_difference(now))
     return sorted(changed)
 
 
