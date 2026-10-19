@@ -324,55 +324,37 @@ def build_command(entrypoint: Path, port: int) -> list[str]:
 _STALE_SUFFIXES = (".py", ".sql")
 
 
-def _page_scripts(app_dir: Path) -> set[str] | None:
-    """Page scripts the entrypoint registers with ``st.Page``; None in legacy multipage mode.
+def _page_scripts(app_dir: Path) -> set[str]:
+    """Page files the entrypoint names with ``st.Page``: the scripts Streamlit re-executes.
 
     Parsed, not pattern-matched: ``st.Page("pages/x.py")``, ``st.Page(page="pages/x.py")``
-    and calls split across lines or interleaved with comments all count. A page given as a
-    callable has no file and adds nothing, but still means ``st.navigation`` is in use: the
-    legacy ``pages/`` rule does not apply, so the module it was imported from counts as shared.
-    So does an ``st.navigation`` call whose pages are built elsewhere: every file under
-    ``pages/`` is then tracked, which can over-report a stale preview but never miss one.
+    and calls split across lines or interleaved with comments all count. Anything this
+    cannot resolve (a callable page, navigation built in another module, legacy multipage
+    mode) stays tracked as shared: a wrong guess then costs one extra restart, never a
+    walkthrough against old code.
     """
     try:
         tree = ast.parse((app_dir / "streamlit_app.py").read_text(encoding="utf-8"))
     except (OSError, SyntaxError, ValueError):
-        return None
+        return set()
     pages: set[str] = set()
-    uses_navigation = False
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-        if name not in ("Page", "navigation"):
-            continue
-        uses_navigation = True
         if name != "Page":
             continue
-        args = [*node.args[:1], *(k.value for k in node.keywords if k.arg == "page")]
-        for arg in args:
+        for arg in [*node.args[:1], *(k.value for k in node.keywords if k.arg == "page")]:
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 pages.add(Path(arg.value).as_posix().removeprefix("./"))
-    return pages if uses_navigation else None
+    return pages
 
 
-def _is_rerun_script(rel: Path, pages: set[str] | None) -> bool:
-    """The entrypoint and page scripts, which Streamlit re-executes on every rerun.
-
-    With ``st.navigation`` the pages are exactly what ``st.Page`` names, so a helper such as
-    ``pages/admin/helpers.py`` still counts as shared. Without it, Streamlit's legacy
-    multipage mode runs only the files directly in ``pages/``, and the scaffold names a
-    shared module there with a leading ``_``.
-    """
+def _is_rerun_script(rel: Path, pages: set[str]) -> bool:
+    """The entrypoint and the page files ``st.Page`` names (SQL is never re-executed)."""
     posix = rel.as_posix()
-    if rel.suffix != ".py":
-        return False  # SQL is never re-executed; its cached results outlive reruns
-    if posix == "streamlit_app.py":
-        return True
-    if pages is not None:
-        return posix in pages
-    return len(rel.parts) == 2 and rel.parts[0] == "pages" and not rel.name.startswith("_")
+    return rel.suffix == ".py" and (posix == "streamlit_app.py" or posix in pages)
 
 
 def shared_sources(app_dir: Path) -> dict[str, float]:

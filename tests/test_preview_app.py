@@ -743,6 +743,10 @@ def test_launch_passes_an_all_str_environment(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------- #
 def _app_with_shared_modules(repo: Path) -> Path:
     app_dir = repo / "apps" / SLUG
+    (app_dir / "streamlit_app.py").write_text(
+        'import streamlit as st\nst.navigation([st.Page("pages/overview.py")]).run()\n',
+        encoding="utf-8",
+    )
     (app_dir / "pages").mkdir()
     (app_dir / "pages" / "overview.py").write_text("import pages._layout\n", encoding="utf-8")
     (app_dir / "pages" / "_layout.py").write_text("PRIOR_LABEL = 'x'\n", encoding="utf-8")
@@ -933,9 +937,14 @@ def test_page_registration_is_parsed_not_pattern_matched(tmp_path):
         (app_dir / rel).write_text("X = 1\n", encoding="utf-8")
     assert sorted(preview_app.shared_sources(app_dir)) == ["pages/deep/util.py", "pages/helpers.py"]
 
-    # Without st.Page (legacy multipage), only files directly in pages/ are scripts.
+    # Without st.Page nothing is known to rerun, so every page file is tracked (an extra
+    # restart in a legacy multipage app beats a walkthrough on old code).
     (app_dir / "streamlit_app.py").write_text("import streamlit as st\n", encoding="utf-8")
-    assert sorted(preview_app.shared_sources(app_dir)) == ["pages/deep/util.py"]
+    assert sorted(preview_app.shared_sources(app_dir)) == [
+        "pages/deep/util.py",
+        "pages/helpers.py",
+        "pages/report.py",
+    ]
 
 
 def test_callable_pages_leave_their_modules_tracked(tmp_path):
@@ -962,6 +971,13 @@ def test_imported_navigation_tracks_pages_and_sql_is_never_a_script(tmp_path):
     (app_dir / "pages" / "report.sql").write_text("select 1\n", encoding="utf-8")
     assert sorted(preview_app.shared_sources(app_dir)) == ["pages/report.py", "pages/report.sql"]
 
-    # Legacy multipage: the page script reruns, the SQL beside it does not.
-    (app_dir / "streamlit_app.py").write_text("import streamlit as st\n", encoding="utf-8")
-    assert sorted(preview_app.shared_sources(app_dir)) == ["pages/report.sql"]
+    # Delegated to a function in another module: still unresolved, still tracked.
+    (app_dir / "streamlit_app.py").write_text(
+        "from navigation import run\nrun()\n", encoding="utf-8"
+    )
+    (app_dir / "pages" / "helpers.py").write_text("X = 1\n", encoding="utf-8")
+    assert sorted(preview_app.shared_sources(app_dir)) == [
+        "pages/helpers.py",
+        "pages/report.py",
+        "pages/report.sql",
+    ]
