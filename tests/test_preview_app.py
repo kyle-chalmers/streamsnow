@@ -936,3 +936,16 @@ def test_page_registration_is_parsed_not_pattern_matched(tmp_path):
     # Without st.Page (legacy multipage), only files directly in pages/ are scripts.
     (app_dir / "streamlit_app.py").write_text("import streamlit as st\n", encoding="utf-8")
     assert sorted(preview_app.shared_sources(app_dir)) == ["pages/deep/util.py"]
+
+
+def test_callable_pages_leave_their_modules_tracked(tmp_path):
+    """st.Page(render) has no file; the module render came from is imported, so shared."""
+    app_dir = _repo(tmp_path) / "apps" / SLUG
+    (app_dir / "pages").mkdir()
+    (app_dir / "streamlit_app.py").write_text(
+        "import streamlit as st\nfrom pages.report import render\n"
+        "st.navigation([st.Page(render)]).run()\n",
+        encoding="utf-8",
+    )
+    (app_dir / "pages" / "report.py").write_text("def render(): ...\n", encoding="utf-8")
+    assert sorted(preview_app.shared_sources(app_dir)) == ["pages/report.py"]

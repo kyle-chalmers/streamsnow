@@ -325,17 +325,19 @@ _STALE_SUFFIXES = (".py", ".sql")
 
 
 def _page_scripts(app_dir: Path) -> set[str] | None:
-    """Page scripts the entrypoint registers with ``st.Page``; None when it registers none.
+    """Page scripts the entrypoint registers with ``st.Page``; None when it calls none.
 
     Parsed, not pattern-matched: ``st.Page("pages/x.py")``, ``st.Page(page="pages/x.py")``
     and calls split across lines or interleaved with comments all count. A page given as a
-    callable has no file and adds nothing.
+    callable has no file and adds nothing, but still means ``st.navigation`` is in use: the
+    legacy ``pages/`` rule does not apply, so the module it was imported from counts as shared.
     """
     try:
         tree = ast.parse((app_dir / "streamlit_app.py").read_text(encoding="utf-8"))
     except (OSError, SyntaxError, ValueError):
         return None
     pages: set[str] = set()
+    uses_st_page = False
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -343,11 +345,12 @@ def _page_scripts(app_dir: Path) -> set[str] | None:
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
         if name != "Page":
             continue
+        uses_st_page = True
         args = [*node.args[:1], *(k.value for k in node.keywords if k.arg == "page")]
         for arg in args:
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 pages.add(Path(arg.value).as_posix().removeprefix("./"))
-    return pages or None
+    return pages if uses_st_page else None
 
 
 def _is_rerun_script(rel: Path, pages: set[str] | None) -> bool:
