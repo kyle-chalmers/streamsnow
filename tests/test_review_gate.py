@@ -727,3 +727,14 @@ def test_branch_acts_on_the_repo_it_runs_in_not_claude_project_dir(
     assert code == 0 and out["created"] is True
     assert _checked_out(repo) == f"build/{SLUG}"
     assert _checked_out(other) == "main"
+
+
+def test_branch_reads_an_unquoted_numeric_deploy_branch_as_config_does(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    (repo / "streamsnow.config.yaml").write_text(
+        "project:\n  name: Acme\ndeploy:\n  git_branch: 2026\n", encoding="utf-8"
+    )
+    _git(repo, "checkout", "-q", "-b", "2026")
+    code, out = _branch(repo, monkeypatch, capsys)
+    assert code == 1 and out["default_branch"] == "2026"
