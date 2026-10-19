@@ -12,10 +12,13 @@ on:
 
 jobs:
   claude-review:
-    # Skip PRs opened by the maintainer accounts; review everyone else.
+    # Skip PRs opened by the maintainer accounts and by bots; review everyone else.
+    # claude-code-action refuses bot actors, and Dependabot runs get no repo secrets,
+    # so a bot PR (dependency bumps) only ever showed this check as failed.
     if: |
       github.event.pull_request.user.login != 'kyle-chalmers' &&
-      github.event.pull_request.user.login != 'kylechalmers-labs'
+      github.event.pull_request.user.login != 'kylechalmers-labs' &&
+      github.event.pull_request.user.type != 'Bot'
 
     runs-on: ubuntu-latest
     permissions:
