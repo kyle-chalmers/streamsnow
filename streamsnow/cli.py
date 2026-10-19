@@ -1920,7 +1920,8 @@ def preview(ctx: typer.Context) -> None:
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def review_gate_cmd(ctx: typer.Context) -> None:
-    """Decide whether an app change needs review (classify | baseline | stamp | stop-hook)."""
+    """Decide whether an app change needs review (classify | branch | baseline | stamp |
+    stop-hook)."""
     raise typer.Exit(code=_review_gate_main(list(ctx.args)))
 
 

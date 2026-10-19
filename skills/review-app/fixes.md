@@ -32,7 +32,9 @@ extra question.
 
 1. Resolve the slug; confirm `apps/<slug>/streamlit_app.py` exists.
 2. **Start clean:** `git status --short apps/<slug>` — atomic commits need a clean tree. Unrelated
-   edits → ask the user to stash/commit first; never entangle their work-in-progress.
+   edits → ask the user to stash/commit first; never entangle their work-in-progress. Then
+   `streamsnow review-gate branch --slug <slug> --ensure`, so fix commits never land on the deploy
+   branch (exit 1 names an existing `build/<slug>`: ask the user).
 3. **Load the latest report:** `ls -t apps/<slug>/.review/review-*.md | head -1`. None → run a
    review pass first and stop.
 4. **Bucket every finding** and print the plan ("N automatic, N to walk, N heads-up") before any
@@ -90,4 +92,6 @@ Runtime undeterminable → reclassify as Bucket B and ask.
   reclassify as B or re-run the review.
 - **Never introduce a denied-schema reference.** If a proposed fix would, refuse and downgrade to C
   with the policy reason.
-- **No branch switching, no pushing** — the atomic commits become the `/ship-app` PR body.
+- **Never commit on the deploy branch, never switch between existing branches, no pushing**:
+  step 2 branches off `main` only when needed, and the atomic commits become the `/ship-app` PR
+  body.

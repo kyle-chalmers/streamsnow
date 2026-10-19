@@ -370,6 +370,7 @@
     "review-gate": {
       "verbs": [
         "baseline",
+        "branch",
         "classify",
         "stamp",
         "stop-hook"
@@ -377,6 +378,7 @@
       "arguments": [
         "--apps-dir",
         "--base-ref",
+        "--ensure",
         "--expect-baseline",
         "--format",
         "--payload",

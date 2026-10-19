@@ -8,6 +8,20 @@ entry.
 
 ## [Unreleased]
 
+### Added
+
+- **`streamsnow review-gate branch`** (#112) reports whether commits would land on the deploy
+  branch (`deploy.git_branch`, default `main`) and how far it is ahead of `origin`. With
+  `--ensure --slug <slug>` it creates and switches to `build/<slug>` instead, carrying
+  uncommitted work along, and refuses (exit 1) to reuse an existing `build/<slug>`.
+
+### Fixed
+
+- **`/build-app` no longer commits to `main`** (#112). It runs `review-gate branch --ensure`
+  before the foundation commit, and `/build-app --feedback` and `/review-app --fix` before
+  theirs, so a build leaves `main` matching `origin/main` and `/ship-app` no longer has to move
+  the commits onto a branch and reset `main` by hand.
+
 ### Changed
 
 - **The README demo is a real screen recording.** `docs/images/demo.gif` (and a new
