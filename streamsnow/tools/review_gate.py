@@ -1079,7 +1079,7 @@ def deploy_branch(root: Path) -> str:
     deploy = data.get("deploy") if isinstance(data, dict) else None
     branch = deploy.get("git_branch") if isinstance(deploy, dict) else None
     # str() as the config loader does, so an unquoted `git_branch: 2026` is branch "2026".
-    if branch is None or isinstance(branch, (dict, list, bool)):
+    if branch is None or isinstance(branch, (dict, list)):
         return "main"
     return str(branch).strip() or "main"
 
