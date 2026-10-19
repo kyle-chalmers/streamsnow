@@ -46,7 +46,7 @@ It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume and never skips a checkpoi
 
 5. Follow [scaffold.md](scaffold.md): `streamsnow new <domain> <function>` (runtime from §9,
    [_shared/runtime-decision.md](../_shared/runtime-decision.md)), then the shared layer from the
-   design: glossary, `pages/_data.py` loaders and their queries, About page. Commit it.
+   design: glossary, `pages/_data.py` loaders, their queries, About page; commit on `build/<slug>`.
 
 ## Phase 4 — Build pages in parallel
 

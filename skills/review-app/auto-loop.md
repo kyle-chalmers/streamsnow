@@ -46,7 +46,9 @@ re-derives its dedup each cycle re-reports findings it already resolved:
    step 4. Any terminal verdict except `clean` → skip to step 8's stamp decision and report.
 7. **A pre-walk `clean` earns the smoke, and the walk gets the LAST word:** run the browser
    walkthrough across all pages if the Playwright CLI is available (Node 20+)
-   ([_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md)), otherwise
+   ([_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md)) on a preview
+   started with `streamsnow preview start <slug> --restart-if-stale` (this cycle's fixes to
+   shared modules take effect only after a restart), otherwise
    `/preview-app` and a manual click-through. The walk is a **finding source, not confirmation** —
    re-run `exit-condition` WITH the `--walk-*` flags from its report: `walk-reentry` loops back to
    step 4 (bounded by `--max-walk-reentries` plus the already-attempted set — a flapping page
@@ -56,7 +58,8 @@ re-derives its dedup each cycle re-reports findings it already resolved:
    `streamsnow review-gate stamp apps/<slug>/.review/review-<ts>.md --slug <slug>` (stamping
    earlier records a tree state the commits immediately invalidate, and the gate would nag after
    every successful run). Skip the stamp on a no-convergence stop — an unresolved repeat is not a
-   reviewed state.
+   reviewed state. A Bucket B item deferred here and approved after the stamp goes through
+   `--fix`, recorded on this stamped report ([fixes.md](fixes.md) step 7).
 9. **Report:** cycles run, commits (with SHAs), the punch list, the smoke outcome, the exit reason,
    and the hand-off — /validate-app then /ship-app.
 

@@ -54,8 +54,13 @@ parallel page-builders don't diverge:
    and one cached loader in `pages/_data.py` (`@st.cache_data(ttl=...)`, filters as arguments).
    The data's date bounds are usually the first.
 3. **About page:** fill `ABOUT` in `pages/about.py` from §1, §2 and §4.
-4. Run `streamsnow check caching apps/<slug>` and `streamsnow check page-imports apps/<slug>`,
-   then commit the foundation and log §11 (`Next: build`).
+4. Run `streamsnow check caching apps/<slug>` and `streamsnow check page-imports apps/<slug>`.
+   Before the first commit, `streamsnow review-gate branch --slug <slug> --ensure` moves the build
+   off the deploy branch onto `build/<slug>`, carrying the uncommitted scaffold along, so `main`
+   never diverges from `origin/main` with unreviewed work. Exit 1 names an existing
+   `build/<slug>` that may hold an earlier build: ask the user whether to switch to it or name a
+   new branch, and never commit on `main` instead. Then commit the foundation and log §11
+   (`Next: build`, plus the branch).
 
 ## First-build conventions (apply to every page you fill in)
 

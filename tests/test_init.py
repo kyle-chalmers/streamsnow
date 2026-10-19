@@ -574,6 +574,46 @@ def test_generated_workflows_pin_a_compatible_streamsnow(tmp_path):
         )
 
 
+def _action_majors(workflow: dict) -> dict[str, set[str]]:
+    """Map each `uses:` action (owner/name) to the set of `@vN` refs it is pinned at."""
+    majors: dict[str, set[str]] = {}
+    for job in workflow["jobs"].values():
+        for step in job["steps"]:
+            if "uses" in step:
+                action, _, ref = step["uses"].partition("@")
+                majors.setdefault(action, set()).add(ref)
+    return majors
+
+
+def test_generated_workflows_track_this_repos_action_versions_and_runner(tmp_path):
+    """#116: the generated workflows pinned Node 20 actions (`checkout@v4`, `setup-uv@v5`),
+    floated on `ubuntu-latest` and let setup-uv cache on a `uv.lock` an apps repo never
+    has. Each now matches the majors this repository's own CI runs on, pins the runner
+    image so the OS moves only on a StreamSnow upgrade, and turns the dead cache off."""
+    own = _action_majors(
+        yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    )
+    data = yaml.safe_load(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+    scaffold(Config.from_dict(data), tmp_path / "checks", "acme-sales-dashboard")
+    workflows = {
+        "checks": yaml.safe_load(
+            (tmp_path / "checks/.github/workflows/checks.yml").read_text(encoding="utf-8")
+        ),
+        **_render_deploy_workflows(tmp_path),
+    }
+    for name, workflow in workflows.items():
+        for action, refs in _action_majors(workflow).items():
+            if action in ("actions/checkout", "astral-sh/setup-uv"):
+                assert refs == own[action], f"{name}: {action}@{refs} != this repo's {own[action]}"
+        for job_name, job in workflow["jobs"].items():
+            assert job["runs-on"] != "ubuntu-latest", f"{name}/{job_name} floats on ubuntu-latest"
+            for step in job["steps"]:
+                if step.get("uses", "").startswith("astral-sh/setup-uv@"):
+                    assert step.get("with", {}).get("enable-cache") is False, (
+                        f"{name}/{job_name}: setup-uv caches on a uv.lock the repo lacks"
+                    )
+
+
 def _repoint_starter(app_dir: Path) -> None:
     """Replace YOUR_TABLE in all three starter files. Not enough on its own: the page's
     hard-coded sample metric and chart are still on screen."""

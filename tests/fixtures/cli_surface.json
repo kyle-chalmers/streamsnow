@@ -362,6 +362,7 @@
         "--lines",
         "--poll-interval",
         "--port",
+        "--restart-if-stale",
         "--review-capture",
         "--timeout",
         "slug"
@@ -370,6 +371,7 @@
     "review-gate": {
       "verbs": [
         "baseline",
+        "branch",
         "classify",
         "stamp",
         "stop-hook"
@@ -377,6 +379,7 @@
       "arguments": [
         "--apps-dir",
         "--base-ref",
+        "--ensure",
         "--expect-baseline",
         "--format",
         "--payload",
