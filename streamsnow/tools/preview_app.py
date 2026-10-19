@@ -322,16 +322,37 @@ def build_command(entrypoint: Path, port: int) -> list[str]:
 #: Suffixes whose edits a running server does not pick up (see ``changed_since_start``).
 _STALE_SUFFIXES = (".py", ".sql")
 
+#: ``st.Page("pages/x.py", ...)`` in the entrypoint: the scripts Streamlit re-executes.
+_ST_PAGE = re.compile(r"""st\.Page\(\s*["']([^"']+\.py)["']""")
 
-def _is_rerun_script(rel: Path) -> bool:
-    """The entrypoint and page scripts, which Streamlit re-executes on every rerun."""
-    if rel.as_posix() == "streamlit_app.py":
+
+def _page_scripts(app_dir: Path) -> set[str] | None:
+    """Page scripts the entrypoint registers with ``st.Page``; None when it registers none."""
+    try:
+        text = (app_dir / "streamlit_app.py").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    pages = {Path(m).as_posix().removeprefix("./") for m in _ST_PAGE.findall(text)}
+    return pages or None
+
+
+def _is_rerun_script(rel: Path, pages: set[str] | None) -> bool:
+    """The entrypoint and page scripts, which Streamlit re-executes on every rerun.
+
+    With ``st.navigation`` the pages are exactly what ``st.Page`` names, so a helper such as
+    ``pages/admin/helpers.py`` still counts as shared. Without it, fall back to the scaffold's
+    convention: a shared module under ``pages/`` starts with ``_``.
+    """
+    posix = rel.as_posix()
+    if posix == "streamlit_app.py":
         return True
+    if pages is not None:
+        return posix in pages
     return len(rel.parts) > 1 and rel.parts[0] == "pages" and not rel.name.startswith("_")
 
 
-def changed_since_start(app_dir: Path, started: float) -> list[str]:
-    """App files edited after the server started that it is still serving the old version of.
+def shared_sources(app_dir: Path) -> dict[str, float]:
+    """App files a running server keeps the start-time version of, mapped to their mtime.
 
     Streamlit re-executes ``streamlit_app.py`` and the page scripts on every rerun, but the
     modules they import (``pages/_layout.py``, ``branding.py``, ``sql_loader.py``) stay in
@@ -340,7 +361,8 @@ def changed_since_start(app_dir: Path, started: float) -> list[str]:
     long-running preview, or a walkthrough passes on old code (#113). Hidden directories
     (the app's ``.venv``, ``.review``) and ``__pycache__`` are not app code and are skipped.
     """
-    changed: list[str] = []
+    pages = _page_scripts(app_dir)
+    found: dict[str, float] = {}
     for root, dirs, files in os.walk(app_dir):
         dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
         for name in files:
@@ -348,13 +370,26 @@ def changed_since_start(app_dir: Path, started: float) -> list[str]:
                 continue
             path = Path(root) / name
             rel = path.relative_to(app_dir)
-            if _is_rerun_script(rel):
+            if _is_rerun_script(rel, pages):
                 continue
             try:
-                if path.stat().st_mtime > started:
-                    changed.append(rel.as_posix())
+                found[rel.as_posix()] = path.stat().st_mtime
             except OSError:
                 continue
+    return found
+
+
+def changed_since_start(
+    app_dir: Path, started: float, started_files: list[str] | None = None
+) -> list[str]:
+    """Shared files edited after ``started``, plus those in ``started_files`` now deleted.
+
+    A deleted module that was already imported keeps running from memory, so its removal
+    is as stale as an edit.
+    """
+    now = shared_sources(app_dir)
+    changed = {rel for rel, mtime in now.items() if mtime > started}
+    changed.update(rel for rel in started_files or () if rel not in now)
     return sorted(changed)
 
 
@@ -363,15 +398,18 @@ def _staleness(repo: Path, slug: str, state: dict[str, Any]) -> tuple[bool | Non
     started = state.get("started_epoch")
     if not isinstance(started, (int, float)):
         return None, []
-    changed = changed_since_start(repo / "apps" / slug, float(started))
+    files = state.get("started_files")
+    changed = changed_since_start(
+        repo / "apps" / slug, float(started), files if isinstance(files, list) else None
+    )
     return bool(changed), changed
 
 
 def _stale_note(slug: str, changed: list[str]) -> str:
     shown = ", ".join(changed[:3]) + (f" and {len(changed) - 3} more" if len(changed) > 3 else "")
     return (
-        f"; stale: {shown} changed since it started and the server still runs the old "
-        f"version. Restart before trusting a walkthrough: "
+        f"; stale: {shown} changed or removed since it started and the server still runs the "
+        f"old version. Restart before trusting a walkthrough: "
         f"`streamsnow preview start {slug} --restart-if-stale`"
     )
 
@@ -781,6 +819,7 @@ def _launch_and_wait(
     cmd = build_command(entrypoint, port)
     # Taken before launch: a file edited while the server imports is counted as stale.
     launched_at = time.time()
+    started_files = sorted(shared_sources(entrypoint.parent))
     try:
         with log_path.open("wb") as log_fh:
             proc = _launch_detached(cmd, log_fh, repo, _child_env(capture))
@@ -812,6 +851,7 @@ def _launch_and_wait(
                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 # What `changed_since_start` compares app files against.
                 "started_epoch": launched_at,
+                "started_files": started_files,
             },
             indent=2,
         ),

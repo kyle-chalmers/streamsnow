@@ -857,3 +857,40 @@ def test_restart_if_stale_relaunches_only_a_stale_preview(tmp_path, monkeypatch,
         assert json.loads(state_path.read_text(encoding="utf-8"))["pid"] != first_pid
     finally:
         preview_app.main(["stop", SLUG, "--dir", str(repo)])
+
+
+def test_registered_pages_decide_what_reruns_so_unprefixed_helpers_still_count(tmp_path):
+    """With st.navigation the page scripts are what st.Page names; a helper under pages/
+    without the scaffold's `_` prefix is still an imported module."""
+    app_dir = _repo(tmp_path) / "apps" / SLUG
+    (app_dir / "pages" / "admin").mkdir(parents=True)
+    (app_dir / "streamlit_app.py").write_text(
+        'import streamlit as st\nnav = st.navigation([\n    st.Page(\n        "pages/admin/report.py",'
+        ' title="Report")\n])\nnav.run()\n',
+        encoding="utf-8",
+    )
+    (app_dir / "pages" / "admin" / "report.py").write_text("import x\n", encoding="utf-8")
+    (app_dir / "pages" / "admin" / "helpers.py").write_text("X = 1\n", encoding="utf-8")
+    started = time.time() - 60
+    _touch(app_dir / "pages" / "admin" / "report.py", started + 10)
+    _touch(app_dir / "pages" / "admin" / "helpers.py", started + 10)
+    _touch(app_dir / "streamlit_app.py", started + 10)
+    assert preview_app.changed_since_start(app_dir, started) == ["pages/admin/helpers.py"]
+
+
+def test_a_deleted_shared_module_makes_the_preview_stale(tmp_path, monkeypatch, capsys):
+    """An imported module keeps running from memory after its file is removed."""
+    repo = _repo(tmp_path)
+    app_dir = _app_with_shared_modules(repo)
+    _fake_launcher(tmp_path, FAKE_SERVER, monkeypatch)
+    port = _free_port()
+    try:
+        assert preview_app.main(_start_args(repo, port)) == 0
+        capsys.readouterr()
+        (app_dir / "pages" / "_layout.py").unlink()
+        assert preview_app.main(["status", SLUG, "--dir", str(repo), "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["stale"] is True
+        assert payload["changed_since_start"] == ["pages/_layout.py"]
+    finally:
+        preview_app.main(["stop", SLUG, "--dir", str(repo)])
