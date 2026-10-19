@@ -599,3 +599,142 @@ def test_classify_json_carries_review_head_fields(
     assert app["reviewed_head"] == ""
     assert app["reviewed_head_status"] == "none"
     assert app["commits_since_review"] == []
+
+
+# ---------------------------------------------------------------------------
+# branch: build on a feature branch, never the deploy branch (#112)
+# ---------------------------------------------------------------------------
+
+
+def _branch(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, *argv: str
+) -> tuple[int, dict]:
+    monkeypatch.chdir(repo)
+    code = rg.main(["branch", *argv, "--format", "json"])
+    return code, json.loads(capsys.readouterr().out)
+
+
+def _checked_out(repo: Path) -> str:
+    return _git(repo, "symbolic-ref", "--short", "HEAD").strip()
+
+
+def test_branch_leaves_a_feature_branch_alone(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    code, out = _branch(repo, monkeypatch, capsys, "--slug", SLUG, "--ensure")
+    assert code == 0
+    assert out["branch"] == "feature" and out["on_default"] is False
+    assert out["created"] is False
+    assert _checked_out(repo) == "feature"
+
+
+def test_branch_on_the_default_branch_is_a_finding_without_ensure(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _git(repo, "checkout", "-q", "main")
+    code, out = _branch(repo, monkeypatch, capsys)
+    assert code == 1
+    assert out["on_default"] is True and out["default_branch"] == "main"
+    assert _checked_out(repo) == "main"
+
+
+def test_branch_ensure_creates_build_slug_from_the_default_branch(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _git(repo, "checkout", "-q", "main")
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")  # uncommitted work travels along
+    code, out = _branch(repo, monkeypatch, capsys, "--slug", SLUG, "--ensure")
+    assert code == 0
+    assert out["created"] is True and out["branch"] == f"build/{SLUG}"
+    assert _checked_out(repo) == f"build/{SLUG}"
+    assert _overview(repo).read_text(encoding="utf-8") == PAGE_V2
+
+
+def test_branch_ensure_refuses_to_reuse_an_existing_build_branch(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """An existing build/<slug> may hold an earlier build: the user decides, not the tool."""
+    _git(repo, "branch", f"build/{SLUG}")
+    _git(repo, "checkout", "-q", "main")
+    code, out = _branch(repo, monkeypatch, capsys, "--slug", SLUG, "--ensure")
+    assert code == 1
+    assert out["created"] is False and out["exists"] == f"build/{SLUG}"
+    assert f"build/{SLUG}" in out["message"]
+    assert _checked_out(repo) == "main"
+
+
+def test_branch_reads_the_deploy_branch_from_config(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    (repo / "streamsnow.config.yaml").write_text(
+        "project:\n  name: Acme\ndeploy:\n  git_branch: release\n", encoding="utf-8"
+    )
+    _git(repo, "checkout", "-q", "-b", "release")
+    code, out = _branch(repo, monkeypatch, capsys)
+    assert code == 1 and out["default_branch"] == "release" and out["on_default"] is True
+    _git(repo, "checkout", "-q", "main")
+    code, out = _branch(repo, monkeypatch, capsys)
+    assert code == 0 and out["on_default"] is False
+
+
+def test_branch_counts_default_branch_commits_ahead_of_origin(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    origin = tmp_path / "origin.git"
+    _git(tmp_path, "init", "-q", "--bare", str(origin))
+    _git(repo, "remote", "add", "origin", str(origin))
+    _git(repo, "push", "-q", "origin", "main")
+    _git(repo, "checkout", "-q", "main")
+    _overview(repo).write_text(PAGE_V2, encoding="utf-8")
+    _git(repo, "commit", "-q", "-am", "unreviewed work on main")
+    code, out = _branch(repo, monkeypatch, capsys)
+    assert code == 1 and out["ahead_of_origin"] == 1
+    assert "ahead of origin/main" in out["message"]
+
+
+def test_branch_ensure_needs_a_slug(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.chdir(repo)
+    assert rg.main(["branch", "--ensure", "--format", "json"]) == 2
+    assert rg.main(["branch", "--ensure", "--slug", "Not A Slug", "--format", "json"]) == 2
+
+
+def test_branch_ensure_works_before_the_first_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    root = tmp_path / "fresh"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    (root / "streamsnow.config.yaml").write_text("project:\n  name: Acme\n", encoding="utf-8")
+    code, out = _branch(root, monkeypatch, capsys, "--slug", SLUG, "--ensure")
+    assert code == 0 and out["created"] is True
+    assert _checked_out(root) == f"build/{SLUG}"
+
+
+def test_branch_acts_on_the_repo_it_runs_in_not_claude_project_dir(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """From a worktree, CLAUDE_PROJECT_DIR can name another checkout; --ensure must never
+    switch that one's branch."""
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init", "-q", "-b", "main")
+    (other / "streamsnow.config.yaml").write_text("project:\n  name: Acme\n", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(other))
+    _git(repo, "checkout", "-q", "main")
+    code, out = _branch(repo, monkeypatch, capsys, "--slug", SLUG, "--ensure")
+    assert code == 0 and out["created"] is True
+    assert _checked_out(repo) == f"build/{SLUG}"
+    assert _checked_out(other) == "main"
+
+
+def test_branch_reads_an_unquoted_numeric_deploy_branch_as_config_does(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    (repo / "streamsnow.config.yaml").write_text(
+        "project:\n  name: Acme\ndeploy:\n  git_branch: 2026\n", encoding="utf-8"
+    )
+    _git(repo, "checkout", "-q", "-b", "2026")
+    code, out = _branch(repo, monkeypatch, capsys)
+    assert code == 1 and out["default_branch"] == "2026"

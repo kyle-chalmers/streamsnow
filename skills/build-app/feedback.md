@@ -11,7 +11,9 @@ confirmation, because the user is checking your reading of *their* words.
    ([spec.md](spec.md), automatic backfill mode) so scope changes have a spec to land in: one
    confirmation, then proceed.
 2. Confirm a clean working tree (`git status --porcelain apps/<slug>`); otherwise ask to commit or
-   stash first. One commit per item only works on a clean tree.
+   stash first. One commit per item only works on a clean tree. Then
+   `streamsnow review-gate branch --slug <slug> --ensure`: feedback commits land on a feature
+   branch, never the deploy branch (exit 1 names an existing `build/<slug>`: ask the user).
 
 ## Collect and classify
 

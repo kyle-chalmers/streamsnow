@@ -39,6 +39,18 @@ Subcommands:
         and writes nothing. The stamp also records ``Reviewed-head:``, the
         commit it saw, so ``classify`` can list the commits made since.
 
+    branch [--slug=<slug>] [--ensure] [--format=md|json]
+        Report whether work would land on the deploy branch (``deploy.git_branch``,
+        default ``main``), and how far that branch is ahead of its origin. Without
+        ``--ensure``: exit 0 on another branch, 1 on the deploy branch (or a
+        detached HEAD). With ``--ensure --slug``: on the deploy branch, create and
+        switch to ``build/<slug>`` (exit 0), carrying any uncommitted work along; an
+        existing ``build/<slug>`` is never reused (exit 1, named in the output) because
+        it may hold an earlier build, so the caller asks the user. `/build-app` calls
+        it before its first commit, and `/build-app --feedback` and `/review-app --fix`
+        before theirs: a build that commits to ``main`` leaves ``main`` diverged from
+        ``origin/main`` with unreviewed work one ``git push`` from the deploy branch.
+
     stop-hook [--payload=system-only|both]
         Read Claude Code `Stop` hook JSON on stdin and emit the warn-only
         payload when a substantive app change is ending unreviewed. Always
@@ -1052,6 +1064,102 @@ def _config_base_ref(root: Path) -> str:
     return ref if isinstance(ref, str) and ref else "origin/main"
 
 
+_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+
+
+def deploy_branch(root: Path) -> str:
+    """``deploy.git_branch`` from streamsnow.config.yaml (best-effort), else ``main``."""
+    cfg_path = root / CONFIG_FILENAME
+    try:
+        import yaml  # noqa: PLC0415 — optional dependency, see gate_config
+
+        data = yaml.safe_load(cfg_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:  # noqa: BLE001 — best-effort by design
+        return "main"
+    deploy = data.get("deploy") if isinstance(data, dict) else None
+    branch = deploy.get("git_branch") if isinstance(deploy, dict) else None
+    # str() as the config loader does, so an unquoted `git_branch: 2026` is branch "2026".
+    if branch is None or isinstance(branch, (dict, list)):
+        return "main"
+    return str(branch).strip() or "main"
+
+
+def branch_state(root: Path) -> dict:
+    """The current branch (None when detached), the deploy branch, and its lead on origin.
+
+    ``symbolic-ref`` rather than ``rev-parse --abbrev-ref``: it also answers in a repo
+    with no commits yet, which is exactly where a fresh build starts.
+    """
+    current = _git(root, "symbolic-ref", "--short", "-q", "HEAD", check=False).strip() or None
+    default = deploy_branch(root)
+    ahead: int | None = None
+    if _git(
+        root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{default}", check=False
+    ):
+        count = _git(root, "rev-list", "--count", f"origin/{default}..{default}", check=False)
+        ahead = int(count.strip()) if count.strip().isdigit() else None
+    return {
+        "branch": current,
+        "default_branch": default,
+        "on_default": current is None or current == default,
+        "ahead_of_origin": ahead,
+    }
+
+
+def _branch_exists(root: Path, name: str) -> bool:
+    proc = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{name}"],
+        cwd=root,
+        capture_output=True,
+    )
+    return proc.returncode == 0
+
+
+def cmd_branch(args: argparse.Namespace) -> int:
+    if args.ensure and not (args.slug and _SLUG_RE.match(args.slug)):
+        print("error: --ensure needs --slug <kebab-case app slug>", file=sys.stderr)
+        return 2
+    # The repo this runs in, never CLAUDE_PROJECT_DIR: --ensure switches branches, and from a
+    # worktree that variable can name a different checkout (another session's main).
+    root = repo_root(Path.cwd())
+    state = branch_state(root)
+    state.update(created=False)
+    default = state["default_branch"]
+    where = state["branch"] or "a detached HEAD"
+    lead = (
+        f"; {default} is {state['ahead_of_origin']} commit(s) ahead of origin/{default}"
+        if state["ahead_of_origin"]
+        else ""
+    )
+    code = 0
+    if not state["on_default"]:
+        state["message"] = f"on {where}, not the deploy branch {default}: commit here{lead}"
+    elif not args.ensure:
+        state["message"] = (
+            f"on {where}: commits here skip the PR to {default}. Create a feature branch "
+            f"first (`streamsnow review-gate branch --slug <slug> --ensure`){lead}"
+        )
+        code = 1
+    else:
+        target = f"build/{args.slug}"
+        if _branch_exists(root, target):
+            state["exists"] = target
+            state["message"] = (
+                f"on {where} and {target} already exists, so it may hold an earlier build: "
+                f"ask the user whether to `git switch {target}` or name a new branch{lead}"
+            )
+            code = 1
+        else:
+            _git(root, "switch", "-q", "-c", target)
+            state.update(branch=target, on_default=False, created=True)
+            state["message"] = f"created and switched to {target} (was on {where}){lead}"
+    if args.format == "json":
+        print(json.dumps(state, indent=2))
+    else:
+        print(state["message"])
+    return code
+
+
 def cmd_baseline(args: argparse.Namespace) -> int:
     root = repo_root()
     apps_dir = apps_dir_name(root, args.apps_dir)
@@ -1208,6 +1316,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--base-ref", default=None)
     p.add_argument("--format", choices=("md", "json"), default="md")
 
+    p = sub.add_parser(
+        "branch", help="Is work about to land on the deploy branch? --ensure branches off it."
+    )
+    p.add_argument("--slug", default=None, help="App slug; --ensure creates build/<slug>.")
+    p.add_argument(
+        "--ensure",
+        action="store_true",
+        help="On the deploy branch, create and switch to build/<slug> (never reuses one).",
+    )
+    p.add_argument("--format", choices=("md", "json"), default="md")
+
     p = sub.add_parser("baseline", help="Print an app's current baseline digest.")
     p.add_argument("slug")
 
@@ -1235,6 +1354,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     handlers = {
         "classify": cmd_classify,
+        "branch": cmd_branch,
         "baseline": cmd_baseline,
         "stamp": cmd_stamp,
         "stop-hook": cmd_stop_hook,

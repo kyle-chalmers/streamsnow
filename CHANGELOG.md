@@ -8,8 +8,19 @@ entry.
 
 ## [Unreleased]
 
+### Added
+
+- **`streamsnow review-gate branch`** (#112) reports whether commits would land on the deploy
+  branch (`deploy.git_branch`, default `main`) and how far it is ahead of `origin`. With
+  `--ensure --slug <slug>` it creates and switches to `build/<slug>` instead, carrying
+  uncommitted work along, and refuses (exit 1) to reuse an existing `build/<slug>`.
+
 ### Fixed
 
+- **`/build-app` no longer commits to `main`** (#112). It runs `review-gate branch --ensure`
+  before the foundation commit, and `/build-app --feedback` and `/review-app --fix` before
+  theirs, so a build leaves `main` matching `origin/main` and `/ship-app` no longer has to move
+  the commits onto a branch and reset `main` by hand.
 - **A preview serving old shared modules says so, and restarts on request** (#113). Page
   scripts re-run on every rerun, but modules they import (`pages/_*.py`, `branding.py`,
   `sql_loader.py`) and cached SQL stay as they were when the server started, so a walkthrough

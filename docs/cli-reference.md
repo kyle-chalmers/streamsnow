@@ -158,6 +158,7 @@ See [Auditing a visual](auditing-a-visual.md) for the file format and the live r
 | Command | What it does |
 |---|---|
 | `streamsnow review-gate classify [<slug>]` | Does this change need a review before shipping? Classifies each changed app's diff as trivial or needing the review loop (no slug: every changed app). `--base-ref`, `--format md\|json`. `/ship-app` runs it. See "Reading `classify`" below. |
+| `streamsnow review-gate branch` | Would commits land on the deploy branch (`deploy.git_branch`, default `main`)? Exit 0 on another branch, 1 on the deploy branch or a detached HEAD; reports `ahead_of_origin`. `--ensure --slug <slug>` creates and switches to `build/<slug>` instead (exit 0), and exits 1 without switching when `build/<slug>` already exists. `--format md\|json`. `/build-app`, `--feedback` and `/review-app --fix` run it before committing. |
 | `streamsnow review-gate baseline <slug>` | Prints the app's current baseline digest. |
 | `streamsnow review-gate stamp <artifact> --slug <slug>` | Writes or refreshes the `Reviewed-baseline`, `Reviewed-files` and `Reviewed-head` lines in a review artifact (`--base-ref`). `--expect-baseline <digest>`: the `baseline` captured when the review was dispatched; if the app has changed since, it exits 2 ("app changed since dispatch") and writes nothing. |
 | `streamsnow review-gate stop-hook` | The plugin's warn-only Stop-hook nudge (`--payload both\|system-only`). |
