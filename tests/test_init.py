@@ -971,10 +971,11 @@ def test_build_app_replacing_the_starter_trio_passes_validate(tmp_path, monkeypa
         encoding="utf-8",
     )
     entry = a / "streamlit_app.py"
+    starter = '"pages/overview.py",\n            title="Overview"'
+    assert starter in entry.read_text(encoding="utf-8")
     entry.write_text(
         entry.read_text(encoding="utf-8").replace(
-            'st.Page("pages/overview.py", title="Overview"',
-            'st.Page("pages/sales_trend.py", title="Sales trend"',
+            starter, '"pages/sales_trend.py",\n            title="Sales trend"'
         ),
         encoding="utf-8",
     )

@@ -117,12 +117,11 @@ def _conform(a: Path, scaffold_entry: str) -> None:
         'st.line_chart(review_value("net_paid_by_day", orders), x="ORDER_DATE", y="NET_PAID")\n',
     )
     # The scaffold's entrypoint (st.navigation) replaces the legacy one.
+    starter = '"pages/overview.py",\n            title="Overview"'
+    assert starter in scaffold_entry
     _write(
         a / "streamlit_app.py",
-        scaffold_entry.replace(
-            'st.Page("pages/overview.py", title="Overview"',
-            'st.Page("pages/revenue.py", title="Revenue"',
-        ),
+        scaffold_entry.replace(starter, '"pages/revenue.py",\n            title="Revenue"'),
     )
     _write(
         a / "sql_review/index.yaml",

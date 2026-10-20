@@ -12,7 +12,11 @@ from branding import apply_branding
 # tab); they still apply under `streamlit run`. `layout` applies in both.
 # Importing branding makes no st.* call, so set_page_config is still the first
 # Streamlit command; apply_branding() must run after it.
-st.set_page_config(page_title="{{ app_title }}", page_icon="📊", layout="wide")
+st.set_page_config(
+    page_title="{{ app_title }}",
+    page_icon=":material/bar_chart:",
+    layout="wide",
+)
 apply_branding()
 
 # Until st.navigation runs, Streamlit shows its fallback menu: every file under pages/,
@@ -21,7 +25,12 @@ apply_branding()
 # pages, so they do not stretch it.
 nav = st.navigation(
     [
-        st.Page("pages/overview.py", title="Overview", icon="📈", default=True),
+        st.Page(
+            "pages/overview.py",
+            title="Overview",
+            icon=":material/dashboard:",
+            default=True,
+        ),
         st.Page("pages/about.py", title="About", icon=":material/info:"),
     ]
 )

@@ -176,12 +176,16 @@ page (the end-of-build step below finishes them for every page).
 ```python
 # container
 conn = st.connection("snowflake")
-return conn.query(sql, params=[start, end], ttl=0)  # ttl=0: outer cache is the source of truth
+return conn.query(sql, params=[start, end], ttl=0)  # ttl=0: the outer cache is the only one
 
 # warehouse
-from snowflake.snowpark.context import get_active_session
+try:
+    from snowflake.snowpark.context import get_active_session
 
-return get_active_session().sql(sql, params=[start, end]).to_pandas()
+    session = get_active_session()
+except Exception:  # noqa: BLE001  broad on purpose: see `check session-fallback`
+    session = st.connection("snowflake").session()
+return session.sql(sql, params=[start, end]).to_pandas()
 ```
 
 ## Gotchas

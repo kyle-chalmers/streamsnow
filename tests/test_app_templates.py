@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import importlib.util
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -20,6 +21,7 @@ import yaml
 
 from streamsnow.config import Config
 from streamsnow.scaffolder import _DEFAULT_CHART_SEQUENCE, scaffold
+from streamsnow.tools.check_session_fallback import find_unwrapped_calls
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_CONFIG = REPO_ROOT / "streamsnow.config.example.yaml"
@@ -142,7 +144,7 @@ def test_branding_formatters(tmp_path):
 
 def test_branding_stamp_and_metric_card_api(tmp_path):
     branding = (_app(tmp_path) / "branding.py").read_text(encoding="utf-8")
-    assert '_BRANDING_VERSION = "1.2.0"' in branding
+    assert '_BRANDING_VERSION = "1.3.0"' in branding
     assert "BRAND_STATUS_COLORS" in branding
     card = next(
         n
@@ -152,6 +154,7 @@ def test_branding_stamp_and_metric_card_api(tmp_path):
     params = [a.arg for a in card.args.args]
     # Existing callers pass (label, value, delta, border_color) positionally; new ones are last.
     assert params == ["label", "value", "delta", "border_color", "help", "delta_color"]
+    assert [a.arg for a in card.args.kwonlyargs] == ["chart_data", "chart_type"]
 
 
 def test_default_palette_keeps_status_hues_out():
@@ -221,6 +224,40 @@ def test_branded_metric_is_st_metric_so_the_help_tooltip_shows(tmp_path):
     assert st.calls[1][1]["delta"] is None and st.calls[1][1]["help"] is None
     source = path.read_text(encoding="utf-8")
     assert "unsafe_allow_html" not in source and "title=" not in source
+
+
+# st.metric's parameters at the warehouse pin (1.52.2), all also present at the container pin
+# (1.59.2); from `inspect.signature(st.metric)` in clean installs of each. 1.59.2 adds `format`
+# and `delta_description`, which a warehouse app would reject.
+_ST_METRIC_BOTH_PINS = {
+    "label",
+    "value",
+    "delta",
+    "delta_color",
+    "help",
+    "label_visibility",
+    "border",
+    "width",
+    "height",
+    "chart_data",
+    "chart_type",
+    "delta_arrow",
+}
+
+
+def test_branded_metric_draws_the_sparkline_the_guide_recommends(tmp_path):
+    """visualization-guide.md starts a current number at "a KPI card: value, delta, optional
+    sparkline", and branded_metric had no way to pass st.metric's chart_data, so the card
+    the scaffold ships could not draw one."""
+    st = _MetricRecorder()
+    ns = _pure_functions(_app(tmp_path) / "branding.py", _METRIC_NAMES | {"branded_metric"}, st=st)
+    ns["branded_metric"]("Orders", "1,204", "+4%", chart_data=[3, 5, 4, 7], chart_type="bar")
+    ns["branded_metric"]("Rows", "1,234")
+    (_, sparkline), (_, plain) = st.calls
+    assert sparkline["chart_data"] == [3, 5, 4, 7] and sparkline["chart_type"] == "bar"
+    assert plain["chart_data"] is None and plain["chart_type"] == "line"  # st.metric defaults
+    # Every argument the card passes exists in both pinned runtimes' st.metric.
+    assert set(sparkline) | {"label", "value"} <= _ST_METRIC_BOTH_PINS
 
 
 def test_hover_definition_keeps_a_lone_percent_sign(tmp_path):
@@ -308,3 +345,59 @@ def test_entrypoint_shows_where_global_filters_go(tmp_path):
     between = entry[entry.index("nav = st.navigation") : entry.rindex("nav.run()")]
     assert "sidebar_filters(" in between
     assert "current_filters()" in between
+
+
+def test_entrypoint_icons_are_material_symbols(tmp_path):
+    """The About page used `:material/info:` while Overview and the tab used emoji, so the
+    sidebar mixed two icon styles. Every icon the entrypoint sets is a Material Symbol."""
+    entry = (_app(tmp_path) / "streamlit_app.py").read_text(encoding="utf-8")
+    icons = re.findall(r"\b(?:page_icon|icon)=\"([^\"]*)\"", entry)
+    assert len(icons) == 3  # page_icon, Overview, About
+    assert all(re.fullmatch(r":material/[a-z_]+:", icon) for icon in icons), icons
+
+
+def test_theme_font_uses_the_documented_keyword(tmp_path):
+    """Streamlit documents "sans-serif"; "sans serif" only worked because the frontend turns
+    spaces into hyphens before matching the keyword."""
+    toml = (_app(tmp_path) / ".streamlit/config.toml").read_text(encoding="utf-8")
+    assert 'font = "sans-serif"' in toml
+    assert "sans serif" not in toml
+
+
+def test_secrets_example_names_the_account_identifier(tmp_path):
+    """Snowflake prefers the org-account identifier and calls the locator legacy, so the
+    comment must not tell developers `account` is the locator."""
+    example = (_app(tmp_path) / ".streamlit/secrets.toml.example").read_text(encoding="utf-8")
+    assert "LOCATOR" not in example
+    assert "org-account" in example and "snowflakecomputing.com" in example
+
+
+def _python_blocks(markdown: str) -> list[str]:
+    return re.findall(r"```python\n(.*?)```", markdown, re.DOTALL)
+
+
+def test_build_guide_connection_snippets_pass_session_fallback(tmp_path):
+    """pages.md showed a bare get_active_session() that `check session-fallback` blocks, and
+    runtime-decision.md described a commented fallback reverted before the PR, while the
+    scaffold ships a live broad try/except. The guides now match the scaffold and the check."""
+    pages = (REPO_ROOT / "skills/build-app/pages.md").read_text(encoding="utf-8")
+    section = pages[pages.index("## Connection pattern by runtime") : pages.index("## Gotchas")]
+    (snippet,) = _python_blocks(section)
+    # The snippet is loader bodies; wrap it in a function so `return` parses.
+    body = "\n".join("    " + line for line in snippet.splitlines())
+    assert "get_active_session" in snippet
+    assert find_unwrapped_calls(f"import streamlit as st\n\ndef load():\n{body}\n") == []
+    assert "ttl=0" in snippet
+    decision = (REPO_ROOT / "skills/_shared/runtime-decision.md").read_text(encoding="utf-8")
+    assert "13644" not in decision  # fixed in Streamlit 1.54.0; the container pin is 1.59.2
+    assert "revert it before the PR" not in decision
+    assert "session-fallback" in decision
+
+
+def test_visualization_guide_says_only_the_colorway_reaches_the_screen():
+    """Observed in a local preview at both pins (1.52.2, 1.59.2): st.plotly_chart replaces
+    a Plotly template's font and backgrounds with the app theme, under theme="streamlit"
+    and theme=None alike, and keeps its colorway."""
+    guide = (REPO_ROOT / "skills/_shared/visualization-guide.md").read_text(encoding="utf-8")
+    chrome = guide[guide.index("## Chrome") : guide.index("## Further reading")]
+    assert "colorway" in chrome and ".streamlit/config.toml" in chrome

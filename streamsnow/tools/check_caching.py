@@ -3,9 +3,11 @@
 A public function that runs a *named* Snowflake query — one whose SQL comes from
 a string literal or a ``load_sql(...)`` / ``render_sql(...)`` helper — and returns
 the result must carry ``@st.cache_data`` with an explicit ``ttl`` keyword to
-control warehouse spend (the cache is per-session). ``# noqa: cache-required`` on
-the ``def`` line or on a fetch-call line opts out (real-time monitors, smoke
-tests, Cortex-style ad-hoc executors).
+control warehouse spend: without it every rerun queries again. The cache lives
+per viewer session on the warehouse runtime and is shared across viewers on the
+container runtime. ``# noqa: cache-required`` on the ``def`` line or on a
+fetch-call line opts out (real-time monitors, smoke tests, Cortex-style ad-hoc
+executors).
 
 A *named* query is a string literal, a ``load_sql(...)`` / ``render_sql(...)``
 result, or a local variable assigned from one of those (the canonical
