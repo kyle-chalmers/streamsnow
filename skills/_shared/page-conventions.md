@@ -103,6 +103,30 @@ at the rendered grain, never the average of a per-row percentage; the `Sources:`
 object each metric reads. `tests/fixtures/fleet/apps/acme-collections-overview/pages/_glossary.py`
 in the StreamSnow repo is a complete, validate-clean example.
 
+## Optional filters: tokens pick SQL, binds carry values
+
+An optional filter ("All regions" or one region) cannot bind Python `None` (see
+[production-gotchas.md](production-gotchas.md)), so the page swaps a `{TOKEN}` fragment into the
+query with `render_sql`. The fragment is SQL text the page wrote, chosen by branching on the
+reader's choice. The reader's value itself goes in `params` as a `:N` bind, never into the
+fragment:
+
+```python
+# queries/attempts.sql: ... WHERE attempt_date BETWEEN :1 AND :2 {REGION_FILTER}
+region_filter = "" if region == "All" else "AND region = :3"
+params = [start, end] if region == "All" else [start, end, region]
+sql = render_sql("attempts", REGION_FILTER=region_filter)
+```
+
+Never `REGION_FILTER=f"AND region = '{region}'"`: `render_sql` pastes the text in unescaped, so
+a value carrying a quote rewrites the query, and the app runs it with the owning role's grants
+(docs/snowflake-docs.md D13), reading anything that role can. A widget's options are not a
+security boundary: query params, a stale session or a crafted request reach the same code. A
+multi-select becomes an `IN` list of placeholders (`:3, :4, :5`), one bound value each.
+`streamsnow check security` warns on a token built by f-string, `%`, `+` or `.format()` from a
+value it cannot prove constant (`token-sql`); a fragment built only from placeholders carries a
+`# noqa: token-sql` and a comment saying so.
+
 ## Related defaults
 
 Design for the use case and the people who read the page. The three guides below are starting

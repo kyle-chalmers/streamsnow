@@ -27,6 +27,19 @@ Detection
   inline string-building at the call site is the risk, not a pre-built query
   variable or a token-builder helper that returns a fragment. An f-string passed
   to ``st.caption()`` / ``help=`` / ``st.markdown(...)`` is never flagged.
+- **token-sql** (warning, not yet a finding): a ``render_sql(...)`` keyword
+  argument built by f-string, ``%``, ``+`` or ``.format()`` from a value the
+  check cannot prove constant, either inline or in the local variable passed
+  (``REGION_FILTER=f"AND region = '{region}'"``). ``render_sql`` pastes tokens
+  in with ``str.replace``, so that is the injection dynamic-sql blocks, one
+  variable removed, and the deployed app runs it with the owning role's grants
+  (docs/snowflake-docs.md D13). A widget's options do not bound the value. The
+  safe shape branches on the value to pick a constant fragment and binds the
+  value itself (``"" if region == "All" else "AND region = :3"``). A name counts
+  as constant when every assignment to it in scope is; a parameter or a helper's
+  return value is not traced, so the check stays quiet rather than guess.
+  Reported under ``warnings`` (exit 0) so repos that passed before keep passing;
+  it moves to ``findings`` in a later release.
 - **write-sql** — a constant SQL string passed to ``.sql()`` / ``.query()``
   whose first statement keyword is a write/DDL/DML verb.
 
@@ -46,9 +59,11 @@ Waivers
 =======
 
 - ``# noqa: dynamic-sql`` on (or spanning) the offending line suppresses that
-  one kind (a provably server-controlled metadata command). It is the only
-  ``noqa`` this check honors: egress, code-exec and write-sql are never waivable,
-  since a self-service waiver there would be a security bypass.
+  one kind (a provably server-controlled metadata command). ``# noqa: token-sql``
+  on the call or on the line that builds the fragment does the same for a token
+  built only from bind placeholders (an ``IN (:3, :4)`` list). Egress, code-exec
+  and write-sql are never waivable, since a self-service waiver there would be a
+  security bypass.
 - The narrow Snowflake Cortex Analyst REST exception: a bare ``import requests``
   carrying a trailing ``# snowflake-cortex-rest`` comment is **not** flagged as
   egress (the container-runtime Cortex Analyst client). General ``requests``
@@ -171,6 +186,13 @@ WRITE_KEYWORDS: frozenset[str] = frozenset(
 
 # Method names whose first argument is raw SQL text.
 SQL_METHODS: frozenset[str] = frozenset({"sql", "query"})
+
+# Functions that paste their keyword arguments into SQL text unescaped.
+TOKEN_SQL_FUNCS: frozenset[str] = frozenset({"render_sql"})
+
+# Kinds reported under ``warnings`` instead of ``findings``: a new rule ships
+# warn-only first so a repo that passed before keeps passing (docs/versioning.md).
+WARN_ONLY_KINDS: frozenset[str] = frozenset({"token-sql"})
 
 # Narrow waiver for the Snowflake-internal Cortex Analyst REST endpoint used by
 # container-runtime Streamlit apps. General ``requests`` imports remain banned.
@@ -453,6 +475,169 @@ def _scan_sql_calls(tree: ast.AST, lines: list[str]) -> list[dict]:
     return findings
 
 
+class _Scope:
+    """One function (or the module): what each local name is assigned, and its parameters."""
+
+    def __init__(self, parent: _Scope | None = None, params: frozenset[str] = frozenset()):
+        self.parent = parent
+        self.params = params
+        self.assigns: dict[str, list[ast.expr]] = {}
+
+    def lookup(self, name: str) -> tuple[_Scope, list[ast.expr]] | None:
+        """The scope binding ``name`` and its assigned values, or ``None`` when untraceable.
+
+        A parameter is untraceable: its value comes from the caller.
+        """
+        scope: _Scope | None = self
+        while scope is not None:
+            if name in scope.params:
+                return None
+            if name in scope.assigns:
+                return scope, scope.assigns[name]
+            scope = scope.parent
+        return None
+
+
+def _params(args: ast.arguments) -> frozenset[str]:
+    names = [a.arg for a in args.posonlyargs + args.args + args.kwonlyargs]
+    names += [a.arg for a in (args.vararg, args.kwarg) if a is not None]
+    return frozenset(names)
+
+
+def _is_token_sql_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+    return name in TOKEN_SQL_FUNCS
+
+
+def _collect_scopes(node: ast.AST, scope: _Scope, calls: list[tuple[ast.Call, _Scope]]) -> None:
+    """Record assignments per scope and every ``render_sql(...)`` call with its scope."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            _collect_scopes(child, _Scope(scope, _params(child.args)), calls)
+            continue
+        if isinstance(child, ast.Assign):
+            for target in child.targets:
+                if isinstance(target, ast.Name):
+                    scope.assigns.setdefault(target.id, []).append(child.value)
+        elif isinstance(child, (ast.AnnAssign, ast.NamedExpr)) and child.value is not None:
+            if isinstance(child.target, ast.Name):
+                scope.assigns.setdefault(child.target.id, []).append(child.value)
+        elif isinstance(child, ast.AugAssign) and isinstance(child.target, ast.Name):
+            # ``x += piece`` is ``x = <earlier x> + piece``; the earlier values are
+            # already recorded, so the piece is checked as one more ``+`` operand.
+            built = ast.BinOp(left=ast.Constant(""), op=ast.Add(), right=child.value)
+            scope.assigns.setdefault(child.target.id, []).append(ast.copy_location(built, child))
+        elif _is_token_sql_call(child):
+            calls.append((child, scope))
+        _collect_scopes(child, scope, calls)
+
+
+def _is_constant(expr: ast.expr, scope: _Scope, seen: frozenset[tuple[int, str]]) -> bool:
+    """True when ``expr`` can only ever evaluate to text written in the code."""
+    if isinstance(expr, ast.Constant):
+        return True
+    if isinstance(expr, ast.Name):
+        key = (id(scope), expr.id)
+        if key in seen:
+            return True  # a self-reference adds nothing the other assignments don't
+        found = scope.lookup(expr.id)
+        if found is None:
+            return False
+        owner, values = found
+        return all(_is_constant(v, owner, seen | {key}) for v in values)
+    if isinstance(expr, ast.JoinedStr):
+        return all(
+            _is_constant(v.value, scope, seen)
+            for v in expr.values
+            if isinstance(v, ast.FormattedValue)
+        )
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Add, ast.Mod)):
+        return _is_constant(expr.left, scope, seen) and _is_constant(expr.right, scope, seen)
+    if isinstance(expr, (ast.Tuple, ast.List)):
+        return all(_is_constant(e, scope, seen) for e in expr.elts)
+    if isinstance(expr, ast.IfExp):
+        return _is_constant(expr.body, scope, seen) and _is_constant(expr.orelse, scope, seen)
+    if isinstance(expr, ast.BoolOp):
+        return all(_is_constant(v, scope, seen) for v in expr.values)
+    func = expr.func if isinstance(expr, ast.Call) else None
+    if isinstance(expr, ast.Call) and isinstance(func, ast.Attribute) and func.attr == "format":
+        parts = [func.value, *expr.args, *(k.value for k in expr.keywords)]
+        return all(_is_constant(p, scope, seen) for p in parts)
+    return False
+
+
+def _nonconstant_build(
+    expr: ast.expr, scope: _Scope, seen: frozenset[tuple[int, str]] = frozenset()
+) -> ast.expr | None:
+    """The string-building expression behind ``expr`` that uses a non-constant, if any.
+
+    Follows a name through its assignments in scope and both arms of a
+    conditional, since ``REGION_FILTER=region_filter`` with ``region_filter``
+    built two lines up is the same token. Anything else it cannot see through
+    (a parameter, a helper's return, a dict lookup of constant fragments) is
+    not reported.
+    """
+    if _is_dynamic_sql_expr(expr):
+        return None if _is_constant(expr, scope, seen) else expr
+    if isinstance(expr, ast.Name):
+        key = (id(scope), expr.id)
+        found = None if key in seen else scope.lookup(expr.id)
+        if found is None:
+            return None
+        owner, values = found
+        for value in values:
+            hit = _nonconstant_build(value, owner, seen | {key})
+            if hit is not None:
+                return hit
+        return None
+    if isinstance(expr, ast.IfExp):
+        return _nonconstant_build(expr.body, scope, seen) or _nonconstant_build(
+            expr.orelse, scope, seen
+        )
+    if isinstance(expr, ast.BoolOp):
+        for value in expr.values:
+            hit = _nonconstant_build(value, scope, seen)
+            if hit is not None:
+                return hit
+    return None
+
+
+def _scan_token_sql(tree: ast.AST, lines: list[str]) -> list[dict]:
+    """Flag ``render_sql`` tokens built from a value the check cannot prove constant."""
+    calls: list[tuple[ast.Call, _Scope]] = []
+    _collect_scopes(tree, _Scope(), calls)
+    findings: list[dict] = []
+    for call, scope in calls:
+        for kw in call.keywords:
+            if kw.arg is None:  # **tokens: the dict's contents are not visible here
+                continue
+            hit = _nonconstant_build(kw.value, scope)
+            if hit is None:
+                continue
+            call_end = getattr(call, "end_lineno", None) or call.lineno
+            hit_end = getattr(hit, "end_lineno", None) or hit.lineno
+            if _is_waived(lines, call.lineno, call_end, "token-sql") or _is_waived(
+                lines, hit.lineno, hit_end, "token-sql"
+            ):
+                continue
+            where = "" if hit.lineno == kw.value.lineno else f" (built on line {hit.lineno})"
+            findings.append(
+                {
+                    "file": "",
+                    "line": kw.value.lineno,
+                    "kind": "token-sql",
+                    "detail": (
+                        f"render_sql({kw.arg}=...) token is built from a non-constant value"
+                        f"{where}: pick a constant fragment and bind the value in params"
+                    ),
+                }
+            )
+    return findings
+
+
 def _literal_strings(tree: ast.AST) -> list[tuple[int, str]]:
     return [
         (getattr(n, "lineno", 1), n.value)
@@ -562,6 +747,7 @@ def _scan_python(path: Path) -> list[dict]:
     findings.extend(_scan_imports(tree, lines))
     findings.extend(_scan_exec_calls(tree))
     findings.extend(_scan_sql_calls(tree, lines))
+    findings.extend(_scan_token_sql(tree, lines))
     findings.extend(_scan_cortex_rest(tree, lines))
     for f in findings:
         f["file"] = str(path)
@@ -741,7 +927,9 @@ def scan_paths(paths: list[Path], root: Path | None = None) -> dict:
                         "only CREATE and GRANT"
                     )
             findings.extend(found)
-    return {"ok": not findings, "findings": findings}
+    warnings = [f for f in findings if f["kind"] in WARN_ONLY_KINDS]
+    findings = [f for f in findings if f["kind"] not in WARN_ONLY_KINDS]
+    return {"ok": not findings, "findings": findings, "warnings": warnings}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -758,20 +946,22 @@ def main(argv: list[str] | None = None) -> int:
     # explicitly-named files keep the name-based filter, which is what stops a
     # `.review/` artifact handed over by path from being scanned.
     findings: list[dict] = []
+    warnings: list[dict] = []
     for raw in args.paths or ["apps"]:
         target = Path(raw)
-        if target.is_dir():
-            findings.extend(scan_paths(_iter_files(target), target)["findings"])
-        else:
-            findings.extend(scan_paths([target])["findings"])
-    result = {"ok": not findings, "findings": findings}
+        part = scan_paths(_iter_files(target), target) if target.is_dir() else scan_paths([target])
+        findings.extend(part["findings"])
+        warnings.extend(part["warnings"])
+    result = {"ok": not findings, "findings": findings, "warnings": warnings}
     if args.format == "json":
         print(json.dumps(result, indent=2))
-    elif result["ok"]:
-        print("app-security: clean")
     else:
+        for f in result["warnings"]:
+            print(f"WARN {f['file']}:{f['line']} [{f['kind']}] {f['detail']}")
         for f in result["findings"]:
             print(f"BLOCK {f['file']}:{f['line']} [{f['kind']}] {f['detail']}")
+        if result["ok"]:
+            print("app-security: clean" + (f" ({len(warnings)} warning(s))" if warnings else ""))
     return 0 if result["ok"] else 1
 
 

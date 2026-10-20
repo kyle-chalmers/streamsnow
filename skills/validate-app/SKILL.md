@@ -22,6 +22,7 @@ Names as the gate prints them. How to fix each: [fixing-checks.md](fixing-checks
 - **schema-refs:** no reference into a `governance.schema_deny` schema (exact `read_exceptions` aside). Names outside `governance.sources` and app data, and two-part `SCHEMA.OBJECT` names, are warnings under `governance.boundary: warn` and failures under `enforce`.
 - **app-security:** no network egress, code execution, write SQL or string-built SQL. Apps are
   read-only by contract; maintained DDL in `sql_review/app_specific_reporting_objects/` is exempt.
+  A `render_sql` token built from a non-constant value is a `token-sql` warning (not yet a failure).
 - **bind-predicates:** none of the `:N IS NULL OR` deployed-driver trap.
 - **sql-tokens:** no `{TOKEN}` placeholders inside SQL comments.
 - **session-fallback:** `get_active_session()` sits in a broad `try/except`.
