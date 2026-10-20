@@ -317,7 +317,7 @@ These are SHOW and SELECT-over-SHOW (or `INFORMATION_SCHEMA`) only. **Never run 
 never switch roles to get more visibility. A probe that errors (no privilege, no source can see
 it) or returns nothing to choose from is not a failure: that question falls back to asking the
 user plainly, with no proposal, and you say why. With no usable source at all, ask each question and
-pass `--account` with the locator the user gives.
+pass `--account` with the account identifier the user gives.
 
 ### 2c · Propose, confirm, run
 
@@ -378,10 +378,10 @@ reuses that config and renders `AGENTS.md`, CI and the rest from the final value
 defaults after `init` leaves those files naming the old values until
 `streamsnow update --apply` re-renders them.) `streamsnow init` takes the same flags, for a user
 who wants no review of the defaults. `--connection` reads the account from that
-connection and makes it `snowflake.connection_name`; use `--account <locator>` only when there is
+connection and makes it `snowflake.connection_name`; use `--account <account-identifier>` only when there is
 no `snow` connection (MCP-only or nothing at all). Local preview still needs a `snow` connection
 later, which step 3 covers. If `--connection` exits 2 (the connection names no account, or `snow`
-cannot list connections), ask for the locator and pass `--account` instead. To change answers
+cannot list connections), ask for the account identifier and pass `--account` instead. To change answers
 later, run `streamsnow configure` (interactive, prefilled from the current file) or
 `streamsnow init --no-starter-app --reconfigure` with the changed flags; answer flags on an
 existing config without `--reconfigure` exit 2 rather than being ignored. When the deploy source
@@ -587,8 +587,9 @@ connector read that name. Never open or edit the connection file yourself. The p
 (gitignored) is an optional override for an app that needs a different role or warehouse — offer
 it only when asked. Two classic traps either way:
 
-- `account` is a locator (`ab12345.us-west-2`), **not** the full `*.snowflakecomputing.com`
-  hostname — the connector appends the suffix, and a doubled one fails auth.
+- `account` is the account identifier (`myorg-myaccount`, or a legacy locator such as
+  `ab12345.us-west-2`), **not** the full `*.snowflakecomputing.com` hostname: the connector
+  appends the suffix, and a doubled one fails auth.
 - Preview with a role whose data reads match the CI role's (deployed apps run with owner's rights):
   the viewer role with the opt-in data grants from `deploy-setup --admin` uncommented, or a developer
   role with the same reads. Not a broad personal role, which hides missing grants locally that then

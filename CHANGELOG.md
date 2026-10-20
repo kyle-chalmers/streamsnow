@@ -46,6 +46,14 @@ entry.
   hyphens), and `secrets.toml.example` calls `account` the account identifier, preferably the
   org-account form, rather than the locator.
 
+### Changed
+
+- **StreamSnow now calls the Snowflake `account` value an account identifier** in CLI
+  help, wizard prompts, error messages, preview hints, docs and skills, following Snowflake's
+  preference for the `myorg-myaccount` form; a legacy locator such as `ab12345.us-east-1` is still
+  accepted, and no flag or config key changed
+  ([account identifiers](https://docs.snowflake.com/en/user-guide/admin-account-identifier)).
+
 ## [0.14.0] - 2026-10-19
 
 ### Added

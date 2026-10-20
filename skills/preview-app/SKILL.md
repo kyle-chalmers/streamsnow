@@ -21,7 +21,7 @@ confirmation, safe secrets provisioning, URL surfacing, triage.
   verifies the entrypoint and port, launches `streamlit run` detached with output to a log, then
   polls the health endpoint until it answers or the timeout expires. `--port N` (`0`: any free),
   `--json`, `--review-capture DIR` (/sql-review), `--restart-if-stale` (Gotchas). Exit 0 = serving;
-  exit 1 = log tail **classified** (missing `secrets.toml`, bad account locator, missing package,
+  exit 1 = log tail **classified** (missing `secrets.toml`, bad account identifier, missing package,
   port collision, session-outside-Snowflake) into an actionable hint — read it before improvising.
 - `streamsnow preview status <slug>` — running/not-running, live health probe, `stale` if serving
   old code; a crashed preview's state is cleaned up silently, so it never wedges the next `start`.
@@ -66,8 +66,8 @@ first script run finishes; data errors surface in the browser and in `logs`, not
 
 ## Troubleshooting
 
-- **Auth failures** → recheck the `snow` connection (or `secrets.toml`) against config: locator not
-  hostname, `externalbrowser` for SSO, never a password; `streamsnow configure` if config is stale.
+- **Auth failures** → recheck the `snow` connection (or `secrets.toml`) against config: account identifier
+  (`myorg-myaccount`), not hostname, `externalbrowser` for SSO, never a password; `streamsnow configure` if config is stale.
 - **Import errors in the log** → stale `<repo>/.venv` (the launcher prefers it); `uv pip install -e apps/<slug>`, relaunch.
 - **A cryptic Snowflake error** → [_shared/deploy-error-translator.md](../_shared/deploy-error-translator.md)
   maps common signatures to causes; its role/warehouse/grant diagnoses apply locally too.

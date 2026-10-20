@@ -23,7 +23,7 @@ def _run_wizard(monkeypatch, prefill=None, directory=Path("acme-analytics")):
 
     def fake_prompt(text, default=None, **kwargs):
         asked.append((str(text), default))
-        # The account locator is the one question with no default on a first run.
+        # The account identifier is the one question with no default on a first run.
         return default if default is not None else "ab12345.us-east-1"
 
     monkeypatch.setattr(typer, "prompt", fake_prompt)
@@ -32,7 +32,7 @@ def _run_wizard(monkeypatch, prefill=None, directory=Path("acme-analytics")):
 
 def test_every_question_has_a_detected_or_default_answer(monkeypatch):
     """D8: no fixed question count. Every question arrives prefilled, so Enter through
-    the wizard writes a complete, valid config. The account locator is the one value
+    the wizard writes a complete, valid config. The account identifier is the one value
     nothing can default on a first run; a re-run prefills it too."""
     cfg_dict, asked = _run_wizard(monkeypatch)
     no_default = [q for q, default in asked if default in (None, "")]
