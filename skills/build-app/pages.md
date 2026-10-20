@@ -187,7 +187,11 @@ return get_active_session().sql(sql, params=[start, end]).to_pandas()
 
 - **Optional "All" filters:** never bind Python `None` — compose a `{TOKEN}` fragment via
   `render_sql` instead. Deployed, the driver NULL-binds every param when one is `None`; the page
-  shows 0/0 KPIs deployed while working locally.
+  shows 0/0 KPIs deployed while working locally. The token holds only SQL the page wrote, picked
+  by branching on the filter (`"" if region == "All" else "AND region = :3"`); the reader's value
+  goes in `params`. An f-string token (`f"AND region = '{region}'"`) is SQL injection that runs
+  with the owning role's grants, and widget options don't prevent it.
+  See [page-conventions.md](../_shared/page-conventions.md#optional-filters-tokens-pick-sql-binds-carry-values).
 - **Shared helper in `pages/`:** import it package-qualified (`from pages._header import ...`).
   Bare (`from _header import ...`) resolves under `streamlit run`, which also puts the executing
   page's own directory on `sys.path`, then `ModuleNotFoundError`s on every page deployed, where only

@@ -58,8 +58,16 @@ or not three-part. Write `DATABASE.SCHEMA.OBJECT`. Adding a schema the apps genu
   directly in an app's `sql_review/app_specific_reporting_objects/` may use `CREATE`, `ALTER` and
   `GRANT` (that folder holds the maintained object definitions); any other write there still fails.
 - *dynamic-sql*: SQL assembled by f-string / `.format` / `%` / `+` at a `.sql()` / `.query()` call.
-  Fix with bind parameters, or a `{TOKEN}` fragment validated against an allowlist. Never paper
+  Fix with bind parameters, or a `{TOKEN}` fragment chosen from constants. Never paper
   over it by string-escaping.
+- *token-sql* (a warning for now, not a failure): a `render_sql(...)` token built by f-string,
+  `%`, `+` or `.format()` from a value the check cannot prove constant, either inline or in the
+  variable passed. `render_sql` pastes tokens in unescaped, so this is the same injection as
+  dynamic-sql one step removed. Fix by branching on the value to pick a constant fragment and
+  binding the value itself (`"AND region = :3"` plus `region` in `params`), per
+  [page-conventions.md](../_shared/page-conventions.md#optional-filters-tokens-pick-sql-binds-carry-values).
+  A fragment built only from bind placeholders (an `IN (:3, :4)` list) is safe: put
+  `# noqa: token-sql` on the line that builds it, with a comment saying why.
 - *snowflake-cortex-rest*: a `requests` import waived for Cortex Analyst whose code departs from
   the one allowed shape (the Cortex Analyst endpoint, a URL built from `SNOWFLAKE_HOST`, the
   session token file, one `requests.post`). Match that shape exactly or remove the waiver.

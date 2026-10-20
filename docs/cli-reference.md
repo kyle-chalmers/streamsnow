@@ -108,7 +108,7 @@ extra keys listed below.
 | Check | Blocks | Extra flags | Extra JSON keys |
 |---|---|---|---|
 | `schema-refs` | References to denied schemas (`governance.schema_deny`: `RAW` in every database or `FINANCE.RAW`, minus exact `read_exceptions`); under `governance.boundary: enforce` also names outside `governance.sources` and app data, and two-part names (warnings under `warn`) | `--config` | `warnings`, `boundary`; findings carry `database`, `reason`, and `ref`/`detail` for boundary entries |
-| `security` | Egress, code execution, write SQL, dynamic SQL in app code. A DDL file directly in an app's `sql_review/app_specific_reporting_objects/` may use `CREATE`, `ALTER` and `GRANT` | | |
+| `security` | Egress, code execution, write SQL, dynamic SQL in app code. A DDL file directly in an app's `sql_review/app_specific_reporting_objects/` may use `CREATE`, `ALTER` and `GRANT`. A `render_sql` token built by f-string, `%`, `+` or `.format()` from a non-constant is a `token-sql` warning (exit 0) | | `warnings` |
 | `caching` | Data-fetching functions without `@st.cache_data(ttl=...)` | | |
 | `bind-predicates` | The `:N IS NULL OR` Go-driver bind trap | | |
 | `sql-tokens` | `{TOKEN}` placeholders inside SQL comments (`render_sql` would substitute them) | | |

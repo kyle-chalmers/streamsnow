@@ -418,6 +418,135 @@ def test_noqa_only_waives_dynamic_sql(tmp_path):
         assert kind in kinds, f"{kind} must NOT be waivable via # noqa"
 
 
+# --------------------------------------------------------------------------- #
+# app-security: render_sql tokens built from the reader's value (token-sql)   #
+# --------------------------------------------------------------------------- #
+_TOKEN_PAGE_HEAD = "from sql_loader import render_sql\nimport sql_loader\n\n"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # inline f-string, the shape the audit found passing every check
+        "def load(region):\n"
+        "    return render_sql('attempts', REGION_FILTER=f\"AND region = '{region}'\")\n",
+        # the same fragment built in a variable first
+        "def load(region):\n"
+        "    region_filter = ''\n"
+        "    if region != 'All':\n"
+        "        region_filter = f\"AND region = '{region}'\"\n"
+        "    return render_sql('attempts', REGION_FILTER=region_filter)\n",
+        "def load(region):\n"
+        "    return render_sql('attempts', REGION_FILTER=\"AND region = '\" + region + \"'\")\n",
+        "def load(region):\n"
+        "    return render_sql('attempts', REGION_FILTER=\"AND region = '%s'\" % region)\n",
+        "def load(region):\n"
+        "    return sql_loader.render_sql(\n"
+        "        'attempts', REGION_FILTER=\"AND region = '{}'\".format(region)\n"
+        "    )\n",
+        "def load(region):\n"
+        "    frag = 'AND 1 = 1'\n"
+        "    frag += f\" AND region = '{region}'\"\n"
+        "    return render_sql('attempts', REGION_FILTER=frag)\n",
+        "def load(region):\n"
+        "    return render_sql(\n"
+        "        'attempts', REGION_FILTER=f\"AND region = '{region}'\" if region else ''\n"
+        "    )\n",
+    ],
+    ids=["fstring", "variable", "plus", "percent", "format", "augassign", "ifexp"],
+)
+def test_token_sql_warns_on_a_token_built_from_the_value(tmp_path, body):
+    p = _write(tmp_path / "pages" / "attempts.py", _TOKEN_PAGE_HEAD + body)
+    res = check_app_security.scan_paths([p])
+    assert [w["kind"] for w in res["warnings"]] == ["token-sql"], res
+    assert "REGION_FILTER" in res["warnings"][0]["detail"]
+    # Warn-only in this release: a repo that passed before still passes.
+    assert res["ok"] and res["findings"] == []
+
+
+def test_token_sql_passes_constant_fragments(tmp_path):
+    p = _write(
+        tmp_path / "pages" / "attempts.py",
+        _TOKEN_PAGE_HEAD + "LIMIT_CLAUSE = 'LIMIT 500'\n"
+        "SEGMENTS = {'All': '', 'Retail': \"AND segment = 'RETAIL'\"}\n\n"
+        "def load(region, segment, segment_expr, start, end):\n"
+        "    region_filter = '' if region == 'All' else 'AND region = :3'\n"
+        "    params = [start, end] if region == 'All' else [start, end, region]\n"
+        "    col = 'REGION'\n"
+        "    sql = render_sql(\n"
+        "        'attempts',\n"
+        "        REGION_FILTER=region_filter,\n"
+        "        COL_FILTER=f'AND {col} IS NOT NULL',\n"
+        "        LIMIT=LIMIT_CLAUSE + '',\n"
+        "        SEGMENT_FILTER=SEGMENTS[segment],\n"
+        "        SEGMENT_EXPR=segment_expr,\n"
+        "    )\n"
+        "    return sql, params\n",
+    )
+    res = check_app_security.scan_paths([p])
+    assert res["ok"] and res["warnings"] == [], res
+
+
+def test_token_sql_waiver_covers_a_placeholder_list_only(tmp_path):
+    waived = _write(
+        tmp_path / "pages" / "regions.py",
+        _TOKEN_PAGE_HEAD + "def load(regions):\n"
+        "    marks = ', '.join(f':{i + 3}' for i in range(len(regions)))\n"
+        "    frag = f'AND region IN ({marks})'  # noqa: token-sql (bind placeholders only)\n"
+        "    return render_sql('attempts', REGION_FILTER=frag)\n",
+    )
+    assert check_app_security.scan_paths([waived])["warnings"] == []
+    # The token-sql waiver is not a dynamic-sql waiver.
+    dyn = _write(
+        tmp_path / "pages" / "dyn.py",
+        "def load(c, region):\n"
+        "    return c.sql(f\"SELECT 1 WHERE region = '{region}'\")  # noqa: token-sql\n",
+    )
+    assert [f["kind"] for f in check_app_security.scan_paths([dyn])["findings"]] == ["dynamic-sql"]
+
+
+@pytest.mark.parametrize("fmt", ["md", "json"])
+def test_token_sql_cli_reports_a_warning_and_exits_zero(tmp_path, capsys, fmt):
+    from streamsnow.tools.check_app_security import main
+
+    _write(
+        tmp_path / "apps" / "acme-ops" / "pages" / "attempts.py",
+        _TOKEN_PAGE_HEAD + "def load(region):\n"
+        "    return render_sql('attempts', REGION_FILTER=f\"AND region = '{region}'\")\n",
+    )
+    rc = main([str(tmp_path / "apps"), "--format", fmt])
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    if fmt == "json":
+        payload = json.loads(out)
+        assert payload["ok"] is True and payload["findings"] == []
+        assert [w["kind"] for w in payload["warnings"]] == ["token-sql"]
+    else:
+        assert "WARN" in out and "[token-sql]" in out and "1 warning(s)" in out
+
+
+def test_validate_app_shows_token_sql_as_a_warning_not_a_failure(tmp_path):
+    import shutil
+
+    repo = tmp_path / "fleet"
+    shutil.copytree(FLEET, repo)
+    page = repo / "apps" / "acme-outreach-ops" / "pages" / "overview.py"
+    text = page.read_text(encoding="utf-8")
+    old = 'render_sql("attempts", SEGMENT_EXPR=segment_expr)'
+    assert old in text
+    page.write_text(
+        text.replace(old, 'render_sql("attempts", SEGMENT_EXPR=f"\'{segment_expr}\'")'),
+        encoding="utf-8",
+    )
+    cfg = _fleet_cfg()
+    res = validate_app(
+        repo / "apps" / "acme-outreach-ops", SchemaPolicy.from_governance(cfg.governance), cfg
+    )
+    sec = next(c for c in res["checks"] if c["name"] == "app-security")
+    assert sec["ok"] and [w["kind"] for w in sec["warnings"]] == ["token-sql"]
+    assert res["ok"], [c for c in res["checks"] if not c["ok"]]
+
+
 def test_cortex_rest_waiver_is_validated_not_blanket(tmp_path):
     # A valid Cortex Analyst shape passes; the same waiver abused to exfiltrate
     # (requests.post to an external URL) is flagged.
@@ -1681,6 +1810,8 @@ def test_fleet_fixture_app_passes_validate(slug):
     assert res["ok"], [c for c in res["checks"] if not c["ok"]]
     refs = next(c for c in res["checks"] if c["name"] == "schema-refs")
     assert refs["warnings"] == [], refs["warnings"]  # the fleet already uses three-part names
+    sec = next(c for c in res["checks"] if c["name"] == "app-security")
+    assert sec["warnings"] == [], sec["warnings"]  # tokens are constant fragments or params
 
 
 def test_fleet_fixture_still_covers_the_migration_shapes():

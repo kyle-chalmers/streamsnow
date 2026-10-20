@@ -8,6 +8,18 @@ entry.
 
 ## [Unreleased]
 
+### Added
+
+- **`streamsnow check security` warns on a `render_sql` token built from the reader's value**
+  (`token-sql`). A token such as `REGION_FILTER=f"AND region = '{region}'"`, built by f-string,
+  `%`, `+` or `.format()` inline or in the variable passed, is pasted into the SQL unescaped and
+  runs with the owning role's grants, and no check looked at it. It is reported under a new
+  `warnings` key (also in `validate-app`) and exits 0 in this release; it becomes a blocking
+  finding in a later one. The safe shape is a constant fragment picked by branching on the value
+  (`"" if region == "All" else "AND region = :3"`) with the value bound in `params`, now stated in
+  `skills/_shared/page-conventions.md`, `/build-app`'s page gotchas and the `sql_loader.py`
+  template. `# noqa: token-sql` waives a fragment built only from bind placeholders.
+
 ## [0.14.0] - 2026-10-19
 
 ### Added

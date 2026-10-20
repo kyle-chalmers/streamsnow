@@ -542,7 +542,14 @@ def validate_app(app_dir: Path, policy: SchemaPolicy, cfg: Config) -> dict:
         }
     )
     sec = check_app_security.scan_paths(files)
-    checks.append({"name": "app-security", "ok": sec["ok"], "findings": sec["findings"]})
+    checks.append(
+        {
+            "name": "app-security",
+            "ok": sec["ok"],
+            "findings": sec["findings"],
+            "warnings": sec["warnings"],
+        }
+    )
     bind = check_bind_predicates.scan_paths(files)
     checks.append({"name": "bind-predicates", "ok": bind["ok"], "findings": bind["findings"]})
     tokens = check_sql_tokens.scan_paths(files)
