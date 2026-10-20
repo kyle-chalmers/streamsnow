@@ -15,6 +15,36 @@ entry.
   written. Page-builders use it for widget, layout and state choices; a new advisory
   **streamlit-reviewer** joins the verify round; StreamSnow's conventions win every conflict
   ([skills/_shared/streamlit-upstream-skill.md](skills/_shared/streamlit-upstream-skill.md)).
+- **`branded_metric` draws a sparkline.** It takes `chart_data=` and `chart_type=` (keyword
+  only) and passes them to `st.metric`, so the KPI card the visualization guide recommends
+  ("value, delta, optional sparkline") can be built from the scaffold. Only arguments both
+  pinned runtimes accept pass through (warehouse 1.52.2, container 1.59.2). `branding.py` is
+  now `_BRANDING_VERSION = "1.3.0"`; `streamsnow check branding-parity` lists apps on an older
+  copy.
+
+### Changed
+
+- **Scaffold navigation icons are Material Symbols.** A new app's tab icon and Overview page
+  use `:material/bar_chart:` and `:material/dashboard:` instead of emoji, matching the About
+  page's `:material/info:`. Existing apps are untouched (`streamsnow update` never rewrites
+  `apps/`).
+
+### Fixed
+
+- **Connection guidance matches the scaffold and `check session-fallback`.** `/build-app`'s
+  warehouse snippet called `get_active_session()` without the `try`/`except` the check
+  requires, and the runtime decision guide described a commented fallback reverted before the
+  PR; both now show the scaffold's live broad fallback. The guide's reason for `ttl=0` on
+  `conn.query` cited Streamlit issue #13644, fixed in Streamlit 1.54.0; it now gives the
+  reason that still holds: without a `ttl`, `conn.query` caches with no expiry and the
+  loader's own `ttl` refreshes nothing.
+- **The visualization guide no longer says `apply_branding()` themes Plotly fonts and
+  backgrounds.** `st.plotly_chart` replaces those with the app theme (observed at both pins,
+  with `theme="streamlit"` and `theme=None`); only the template's `colorway` shows.
+- **Scaffold config uses documented values.** `.streamlit/config.toml` sets `font =
+  "sans-serif"` (the old `"sans serif"` worked only because Streamlit turns spaces into
+  hyphens), and `secrets.toml.example` calls `account` the account identifier, preferably the
+  org-account form, rather than the locator.
 
 ## [0.14.0] - 2026-10-19
 

@@ -74,8 +74,11 @@ page:
 - **Axis titles name the measure and unit** ("Revenue, $k"). Gridlines are faint or absent.
   Tooltips repeat the name, unit and format.
 - **Use one chart library per app,** themed once in the entrypoint. The scaffold's
-  `apply_branding()` registers a Plotly template; Altair and the native `st.*_chart` functions
-  theme their own way.
+  `apply_branding()` registers a Plotly template, but only its `colorway` (the brand chart
+  sequence) reaches the screen. `st.plotly_chart` replaces the template's font, text color and
+  backgrounds with the app theme in `.streamlit/config.toml`, under `theme="streamlit"` (the
+  default) and `theme=None` alike, so change those in `config.toml`, not in the template.
+  Altair and the native `st.*_chart` functions theme their own way.
 
 ## Further reading
 
