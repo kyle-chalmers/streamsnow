@@ -10,6 +10,11 @@ entry.
 
 ### Added
 
+- **/build-app consults the Streamlit team's own `developing-with-streamlit` skill**, read at the
+  latest Streamlit release tag and checked against the app's pinned Streamlit before any call is
+  written. Page-builders use it for widget, layout and state choices; a new advisory
+  **streamlit-reviewer** joins the verify round; StreamSnow's conventions win every conflict
+  ([skills/_shared/streamlit-upstream-skill.md](skills/_shared/streamlit-upstream-skill.md)).
 - **`branded_metric` draws a sparkline.** It takes `chart_data=` and `chart_type=` (keyword
   only) and passes them to `st.metric`, so the KPI card the visualization guide recommends
   ("value, delta, optional sparkline") can be built from the scaffold. Only arguments both

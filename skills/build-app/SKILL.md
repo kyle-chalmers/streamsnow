@@ -57,8 +57,8 @@ It reads `apps/<slug>/REQUIREMENTS.md` §11 to resume and never skips a checkpoi
 
 ## Phase 5 — Preview, verify, then CHECKPOINT 2
 
-7. Follow [verify.md](verify.md): preview and walkthrough, then **perf-reviewer**, **viz-critic**
-   and **cold-reader** in parallel; fixes go to each file's owner, at most two rounds.
+7. Follow [verify.md](verify.md): preview, walkthrough, then **perf-reviewer**, **viz-critic**,
+   **streamlit-reviewer**, **cold-reader** in parallel; fixes go to file owners, two rounds max.
    **CP2:** the user clicks through every page. Block until they answer.
 
 ## Phase 6 — Check and ship, then CHECKPOINT 3

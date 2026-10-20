@@ -17,9 +17,24 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BRIEFS = REPO_ROOT / "skills" / "build-app" / "briefs"
-ROLES = ("data-scout", "app-designer", "page-builder", "perf-reviewer", "viz-critic", "cold-reader")
+ROLES = (
+    "data-scout",
+    "app-designer",
+    "page-builder",
+    "perf-reviewer",
+    "viz-critic",
+    "streamlit-reviewer",
+    "cold-reader",
+)
 SECTIONS = ("Role", "Inputs", "Owns", "Steps", "Returns", "Verify", "Degrade")
-READ_ONLY = ("data-scout", "app-designer", "perf-reviewer", "viz-critic", "cold-reader")
+READ_ONLY = (
+    "data-scout",
+    "app-designer",
+    "perf-reviewer",
+    "viz-critic",
+    "streamlit-reviewer",
+    "cold-reader",
+)
 # Files only the orchestrator writes: every page shares them.
 SHARED = ("streamlit_app.py", "sql_review/", "pages/_", "pages/about.py", "REQUIREMENTS.md")
 
@@ -30,7 +45,7 @@ def _sections(role: str) -> dict[str, str]:
     return {parts[i]: parts[i + 1] for i in range(1, len(parts) - 1, 2)}
 
 
-def test_briefs_dir_holds_exactly_the_six_roles():
+def test_briefs_dir_holds_exactly_the_roles():
     assert sorted(p.stem for p in BRIEFS.glob("*.md")) == sorted(ROLES)
 
 
@@ -96,6 +111,23 @@ def test_query_header_template_names_tokens_without_braces():
     assert header, "pages.md has no query header template"
     for line in header:
         assert "{" not in line and "TOKEN_NAME" in line, line
+
+
+def test_upstream_streamlit_skill_is_read_at_a_release_and_checked_against_the_pin():
+    """The Streamlit team's skill tracks `develop`, ahead of every pinned app: read unguarded,
+    it has agents write calls the app's Streamlit lacks, which fail only at runtime."""
+    recipe_path = BRIEFS.parents[1] / "_shared" / "streamlit-upstream-skill.md"
+    recipe = " ".join(recipe_path.read_text(encoding="utf-8").split())
+    assert "releases/latest" in recipe
+    assert "Never the `develop` branch" in recipe
+    assert "inspect.signature" in recipe  # works on every pin; `streamlit docs <cmd>` needs 1.59
+    assert "StreamSnow wins these conflicts" in recipe
+    for role in ("page-builder", "perf-reviewer", "viz-critic", "streamlit-reviewer"):
+        assert "streamlit-upstream-skill.md" in _sections(role)["Inputs"], role
+    # The orchestrator writes shared Streamlit code too.
+    for doc in ("scaffold.md", "pages.md"):
+        text = (BRIEFS.parent / doc).read_text(encoding="utf-8")
+        assert "streamlit-upstream-skill.md" in text, doc
 
 
 def test_form_rule_is_conditional_everywhere_it_is_stated():
