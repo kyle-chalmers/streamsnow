@@ -9,10 +9,10 @@ You need Python 3.11+, `uv`, and `git` (`uvx streamsnow doctor` tells you what i
 uv tool install streamsnow           # persistent `streamsnow` on your PATH
 mkdir my-snowflake-apps && cd my-snowflake-apps
 streamsnow init                      # setup wizard (every answer prefilled), then a governed scaffold
-# or skip the prompts: streamsnow init --runtime warehouse --account <locator> \
+# or skip the prompts: streamsnow init --runtime warehouse --account <account-identifier> \
 #   --sources ANALYTICS.MARTS,ANALYTICS.REPORTING \
 #   --app-data STREAMSNOW_APPS.STREAMSNOW_REPORTING --deploy-source stage-copy
-snow connection add --connection-name <name> --account <locator> \
+snow connection add --connection-name <name> --account <account-identifier> \
   --user <you> --authenticator externalbrowser --default   # init prints the exact command
 uv tool install pre-commit && pre-commit install
 streamsnow validate-app example-dashboard   # FAILS on the starter placeholders until you replace them

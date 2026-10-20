@@ -31,7 +31,7 @@ Command and flag names are part of the stable surface
 | `streamsnow update` | Re-renders the repo-level governance files from your config and the installed templates. Dry run unless `--apply`. It never rewrites app files (`review.py`, the glossary) or an existing `.sqlfluff`; see [Upgrading](getting-started.md#upgrading). |
 
 **Wizard answer flags** (shared by `configure` and `init`; giving all of them skips the
-prompts): `--runtime container|warehouse`, `--account <locator>` or
+prompts): `--runtime container|warehouse`, `--account <account-identifier>` or
 `--connection <snow connection>`, `--sources` (comma-separated `DATABASE.SCHEMA`, any
 databases), `--app-data` (`DATABASE.SCHEMA`, default `<app_database>.STREAMSNOW_REPORTING`),
 `--deploy-source stage-copy|git-repository`, plus optional `--deny-schemas` (`RAW` or

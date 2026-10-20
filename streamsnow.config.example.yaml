@@ -16,7 +16,7 @@ project:
   slug: "acme-dashboards"
 
 snowflake:
-  account: "ab12345.us-east-1"        # LOCATOR only — NOT the full hostname
+  account: "ab12345.us-east-1"        # account identifier (myorg-myaccount, or a legacy locator like this); NOT the full hostname
   connection_name: "acme"             # name of your `snow` CLI connection
 
   objects:

@@ -475,8 +475,8 @@ def _mask_variants(payloads: dict[str, bytes]) -> list[str]:
     """Every form of the key, account and user an error message might echo.
 
     ``_redact`` matches exact text, and Snowflake errors print the account in
-    lower case inside a hostname, with ``_`` as ``-``, and sometimes as the
-    locator without its region.
+    lower case inside a hostname, with ``_`` as ``-``, and, for a legacy locator,
+    sometimes as the locator without its region.
     """
     values: list[str] = []
     account = payloads["SNOWFLAKE_ACCOUNT"].decode("utf-8", errors="replace")
@@ -507,8 +507,9 @@ def _safe_detail(detail: str, payloads: dict[str, bytes]) -> str:
 
 
 def _names_a_secret(text: str, payloads: dict[str, bytes]) -> bool:
-    """True when any key line, the account, its locator or the user is in ``text``,
-    compared squashed (see :func:`_squash`), so line wraps and re-casing still match."""
+    """True when any key line, the account, its first dotted segment (a legacy locator
+    without its region) or the user is in ``text``, compared squashed (see
+    :func:`_squash`), so line wraps and re-casing still match."""
     squashed = _squash(text)
     needles: list[str] = []
     for name in (PRIVATE_KEY_SECRET, "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER"):

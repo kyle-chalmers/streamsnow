@@ -386,7 +386,7 @@ def test_classify_log_patterns():
         "acme123.snowflakecomputing.com.snowflakecomputing.com:443."
     )
     assert double_suffix["status"] == "bad_account"
-    assert "account locator" in double_suffix["hint"]
+    assert "account identifier" in double_suffix["hint"]
 
     session = preview_app.classify_log(
         "SnowparkSessionException: (1403): get_active_session() is not supported "

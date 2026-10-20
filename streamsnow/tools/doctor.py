@@ -372,7 +372,7 @@ def check_snow_connection(
     names = [n for n in (_connection_name(row) for row in rows) if n]
     ok = name in names
     add = (
-        f"snow connection add --connection-name {name} --account <locator> --user <you> "
+        f"snow connection add --connection-name {name} --account <account-identifier> --user <you> "
         "--authenticator externalbrowser --default"
     )
     existing_default = default_connection_name(rows)

@@ -11,7 +11,7 @@ owns the whole lifecycle so callers never hand-roll ``nohup``/PID bookkeeping:
         poll ``http://127.0.0.1:<port>/_stcore/health`` until it answers 200
         or the timeout expires. On timeout (or early process death) the
         process is killed and the log tail is *classified* — the known launch
-        failures (missing secrets.toml, bad account locator, missing package,
+        failures (missing secrets.toml, bad account identifier, missing package,
         port collision, session-outside-Snowflake) each map to an actionable
         hint instead of a raw traceback. A key-pair connection whose key the
         Python connector cannot load is classified too, but it only fails on
@@ -138,8 +138,9 @@ _LOG_PATTERNS: list[tuple[str, str, str]] = [
         r"\.snowflakecomputing\.com\.snowflakecomputing\.com|250001|"
         r"Failed to connect to DB.*Verify the connection|"
         r"could not be reached.*snowflakecomputing",
-        "Snowflake account unreachable — use the bare account locator in secrets.toml "
-        "(no https://, no .snowflakecomputing.com suffix) and check VPN/network",
+        "Snowflake account unreachable: use the bare account identifier in secrets.toml "
+        "(e.g. myorg-myaccount; no https://, no .snowflakecomputing.com suffix) "
+        "and check VPN/network",
     ),
     (
         "missing_package",
