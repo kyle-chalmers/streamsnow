@@ -8,6 +8,14 @@ entry.
 
 ## [Unreleased]
 
+### Added
+
+- **/build-app consults the Streamlit team's own `developing-with-streamlit` skill**, read at the
+  latest Streamlit release tag and checked against the app's pinned Streamlit before any call is
+  written. Page-builders use it for widget, layout and state choices; a new advisory
+  **streamlit-reviewer** joins the verify round; StreamSnow's conventions win every conflict
+  ([skills/_shared/streamlit-upstream-skill.md](skills/_shared/streamlit-upstream-skill.md)).
+
 ## [0.14.0] - 2026-10-19
 
 ### Added

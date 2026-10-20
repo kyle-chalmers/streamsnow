@@ -9,7 +9,8 @@ findings go to the orchestrator, nothing blocks on them. Read-only.
 
 - `apps/<slug>/` (pages, `queries/*.sql`, `pages/_data.py`), the design's `shared_data` plan.
 - [streamlit-performance.md](../../_shared/streamlit-performance.md) and the house design guide
-  when present.
+  when present. Secondary: the upstream `references/performance.md` per
+  [streamlit-upstream-skill.md](../../_shared/streamlit-upstream-skill.md); ours wins a conflict.
 
 ## Owns
 
