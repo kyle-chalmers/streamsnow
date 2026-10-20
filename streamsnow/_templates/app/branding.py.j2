@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
 
-_BRANDING_VERSION = "1.2.0"
+_BRANDING_VERSION = "1.3.0"
 
 BRAND_COLORS = {
     "primary": "{{ brand.primary }}",
@@ -23,6 +23,8 @@ BRAND_STATUS_COLORS = {"good": "#008300", "warning": "#C98500", "bad": "#E34948"
 # Register the Plotly template once. Guard against re-registration AND the
 # default-set side effect: the container runtime shares one Python process
 # across all viewers, so module-import mutations must be idempotent.
+# Inside st.plotly_chart only "colorway" shows: Streamlit replaces the font and
+# backgrounds with the .streamlit/config.toml theme. The rest serves exports.
 if "streamsnow_brand" not in pio.templates:
     pio.templates["streamsnow_brand"] = go.layout.Template(
         layout={
@@ -102,6 +104,9 @@ def branded_metric(
     border_color: str | None = None,
     help: str | None = None,
     delta_color: str = "normal",
+    *,
+    chart_data=None,
+    chart_type: str = "line",
 ) -> None:
     """A bordered metric card: ``st.metric`` with the house delta rules.
 
@@ -110,6 +115,11 @@ def branded_metric(
     "inverse" (up is bad, e.g. cost) or "off"; the direction is read from the delta's
     leading sign, arrow or parentheses (``_metric_delta``). Needs Streamlit 1.52 or later
     (``delta_arrow``).
+
+    ``chart_data`` (a list or Series of recent values) draws the card's sparkline, as a
+    "line", "bar" or "area" ``chart_type``. Only arguments ``st.metric`` takes on both
+    pinned runtimes (warehouse 1.52.2, container 1.59.2) pass through; ``format`` and
+    ``delta_description`` are 1.59-only and would fail a warehouse app.
 
     ``border_color`` is accepted so older calls keep working but has no effect: the border
     is ``st.metric``'s own. Until 1.2.0 this card was raw HTML with a brand-colored left
@@ -126,4 +136,6 @@ def branded_metric(
         delta_arrow=arrow,
         help=help,
         border=True,
+        chart_data=chart_data,
+        chart_type=chart_type,
     )
