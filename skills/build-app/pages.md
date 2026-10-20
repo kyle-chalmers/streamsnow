@@ -233,7 +233,7 @@ return session.sql(sql, params=[start, end]).to_pandas()
 1. **Preview:** `streamsnow preview start <slug> --restart-if-stale` (`--json` for the URL and
    status; the flag restarts a server still running old shared modules). It prefers the
    repo's `.venv/bin/streamlit`; on exit 1 read the classified hint (no default `snow` connection,
-   bad account locator, missing package) before improvising, then `streamsnow preview logs <slug>`.
+   bad account identifier, missing package) before improvising, then `streamsnow preview logs <slug>`.
    Hand over the root URL and ask for the click-through — that is CP2, not something to skip.
 2. **Validate:** `streamsnow validate-app <slug>`; on FAIL, follow `/validate-app`'s fixing guide
    and re-run until PASS. Never weaken a rule to get there.

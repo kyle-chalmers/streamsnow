@@ -187,7 +187,7 @@ generated workflow). Never a password.
 
 | Secret | Value |
 |---|---|
-| `SNOWFLAKE_ACCOUNT` | account locator (e.g. `ab12345.us-east-1`) |
+| `SNOWFLAKE_ACCOUNT` | account identifier (e.g. `myorg-myaccount`; a legacy locator such as `ab12345.us-east-1` also works) |
 | `SNOWFLAKE_USER` | CI service user |
 | `SNOWFLAKE_PRIVATE_KEY_RAW` | the PEM private key |
 | `SNOWFLAKE_PRIVATE_KEY_PASSPHRASE` | (optional) key passphrase |

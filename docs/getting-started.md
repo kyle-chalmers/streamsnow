@@ -263,7 +263,7 @@ along with `secrets.toml`.
 like:
 
 ```bash
-snow connection add --connection-name <name> --account <locator> \
+snow connection add --connection-name <name> --account <account-identifier> \
   --user <you> --authenticator externalbrowser --default
 ```
 
@@ -275,9 +275,10 @@ account details ([configure connections](https://docs.snowflake.com/en/developer
 
 Two things to get right:
 
-- Use the account **locator** (e.g. `ab12345.us-east-1`), not the full
-  `*.snowflakecomputing.com` hostname — the connector appends the suffix itself,
-  and the full hostname double-suffixes and 404s on auth.
+- Use the [account **identifier**](https://docs.snowflake.com/en/user-guide/admin-account-identifier),
+  preferably the `myorg-myaccount` form (a legacy locator such as `ab12345.us-east-1`
+  also works), not the full `*.snowflakecomputing.com` hostname. The connector appends the
+  suffix itself, and the full hostname double-suffixes and 404s on auth.
 - Authenticate with SSO (`externalbrowser`) or a [programmatic access token](https://docs.snowflake.com/en/user-guide/programmatic-access-tokens),
   never a password: Snowflake's [MFA rollout](https://docs.snowflake.com/en/user-guide/security-mfa-rollout)
   retires password-only sign-in (final phase Aug–Oct 2026; dates are
@@ -321,7 +322,7 @@ streamsnow preview example-dashboard               # run locally vs live Snowfla
 `preview` launches the `streamlit` from your repo's `.venv` when one exists
 (the `uv venv` line above creates it without activating it), then falls back
 to PATH. It polls the health endpoint and translates the common launch failures
-(no Snowflake connection, a bad account locator, a missing package) into
+(no Snowflake connection, a bad account identifier, a missing package) into
 actionable hints; `preview status`, `preview logs`, and `preview stop` manage it
 from there.
 
@@ -448,7 +449,7 @@ secrets / `secrets.toml`). The load-bearing sections:
 |---------|------------------|
 | `runtime` | `container` (default) or `warehouse` |
 | `project` | `name` and `slug` for the generated README and AGENTS.md |
-| `snowflake.account`, `snowflake.connection_name` | the account locator (not the full hostname) and the `snow` CLI connection the CLI and preview use |
+| `snowflake.account`, `snowflake.connection_name` | the account identifier, e.g. `myorg-myaccount` (not the full hostname), and the `snow` CLI connection the CLI and preview use |
 | `snowflake.objects` | where apps deploy (app database/schema), the stage for stage-copy deploys, the warehouse, and container `compute_pool` (default `SYSTEM_COMPUTE_POOL_CPU`, which Snowflake pre-provisions) + `external_access_integration`; optional `runtime_name` (default `SYSTEM$ST_CONTAINER_RUNTIME_PY3_11`) and `container_python` (default `3.11`) |
 | `snowflake.roles` | `ci_role` (deploys and owns the apps, reads the data) and `viewer_role` (opens deployed apps; data reads are opt-in) |
 | `governance` | `sources` (the `DATABASE.SCHEMA` locations apps read, in any databases), `app_data` (the schema for views and dynamic tables built for the apps), `schema_deny` (`RAW` or `FINANCE.RAW`), `read_exceptions`, `imported_databases`, and `boundary` (`warn` default, or `enforce`). `schema-refs` always enforces the deny list; names outside sources and app data, and two-part names, warn or fail per `boundary`. See [Data discovery](data-discovery.md) |

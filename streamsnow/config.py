@@ -232,7 +232,7 @@ def quote_sql_literal(value: str) -> str:
 
 
 def normalize_account(account: str) -> str:
-    """Return the Snowflake account *locator*, never the hostname.
+    """Return the Snowflake account *identifier*, never the hostname.
 
     The connector appends ``.snowflakecomputing.com`` itself; passing the full
     hostname double-suffixes and 404s on auth. Strip scheme + that suffix.
@@ -242,13 +242,15 @@ def normalize_account(account: str) -> str:
     a = re.sub(r"\.snowflakecomputing\.com.*$", "", a, flags=re.IGNORECASE)
     if not a:
         raise ConfigError("snowflake.account is empty after normalization.")
-    # Account locators are letters/digits/dot/dash/underscore (org-account or
-    # legacy region forms). Reject anything else — this value flows into the
-    # `snow connection add --account` shell hint and secrets.toml.
+    # Account identifiers are letters/digits/dot/dash/underscore (the preferred
+    # org-account form, or a legacy locator with its region segments). Reject
+    # anything else: this value flows into the `snow connection add --account`
+    # shell hint and secrets.toml.
     if not re.fullmatch(r"[A-Za-z0-9._-]+", a):
         raise ConfigError(
             f"snowflake.account {account!r} normalizes to {a!r}, which is not a "
-            "valid account locator (expected [A-Za-z0-9._-]+, e.g. ab12345.us-east-1)."
+            "valid account identifier (expected [A-Za-z0-9._-]+, e.g. myorg-myaccount or "
+            "the legacy locator form ab12345.us-east-1)."
         )
     return a
 

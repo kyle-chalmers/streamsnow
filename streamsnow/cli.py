@@ -358,7 +358,7 @@ def _prompt_config(
     The questions (``_QUESTIONS``): runtime, account, the sources the apps read
     (``DATABASE.SCHEMA`` entries in any databases), the app-data schema, and the
     deploy source. Every prompt carries a default: the current config's value,
-    a detected one, or StreamSnow's own (the account locator is the one value
+    a detected one, or StreamSnow's own (the account identifier is the one value
     with nothing to default to on a first run). Everything else is written as
     a commented default in the config file (the file is the editing surface).
     When ``prefill`` is supplied (an existing config being updated), its values
@@ -398,7 +398,7 @@ def _prompt_config(
         "Runtime", RUNTIMES, _pf(prefill, "runtime", "container")
     )
     account = given.get("account") or p(
-        "Snowflake account locator (no .snowflakecomputing.com)",
+        "Snowflake account identifier, e.g. myorg-myaccount (no .snowflakecomputing.com)",
         default=_pf(prefill, "snowflake.account", None),
     )
     # The snow connection: the one named by --connection, else the default one when
@@ -576,7 +576,8 @@ def _resolve_config(
 # Help text for the answer flags, shared by `init` and `configure`.
 _ANSWER_HELP = {
     "runtime": f"Wizard answer: runtime ({' | '.join(RUNTIMES)}).",
-    "account": "Wizard answer: Snowflake account locator (no .snowflakecomputing.com).",
+    "account": "Wizard answer: Snowflake account identifier, e.g. myorg-myaccount "
+    "(no .snowflakecomputing.com).",
     "connection": "Read the account from this snow connection (never printed) and use it "
     "as snowflake.connection_name. Instead of --account.",
     "sources": "Wizard answer: DATABASE.SCHEMA locations apps read, comma-separated, any "
@@ -590,10 +591,10 @@ _ANSWER_HELP = {
 
 
 def _account_from_connection(name: str) -> str:
-    """The account locator a ``snow`` connection opens. Raises ConfigError.
+    """The account identifier a ``snow`` connection opens. Raises ConfigError.
 
     Errors name connections, never an account value: the point of
-    ``--connection`` is that the locator never reaches the screen.
+    ``--connection`` is that the account never reaches the screen.
     """
     rows = _snow_connections()
     if rows is None:
@@ -617,7 +618,8 @@ def _account_from_connection(name: str) -> str:
         return normalize_account(account)
     except ConfigError:
         raise ConfigError(
-            f"--connection {name}: its account is not a valid locator; pass --account instead."
+            f"--connection {name}: its account is not a valid account identifier; "
+            "pass --account instead."
         ) from None
 
 
@@ -672,8 +674,8 @@ def _flag_answers(
             normalize_account(account)
         except ConfigError:
             raise ConfigError(
-                "--account must be an account locator such as ab12345.us-east-1 "
-                "(no .snowflakecomputing.com)."
+                "--account must be an account identifier such as myorg-myaccount (a legacy "
+                "locator such as ab12345.us-east-1 also works), without .snowflakecomputing.com."
             ) from None
     if sources is not None and deny_schemas is not None:
         both = governance_overlaps(_split_schemas(sources), _split_schemas(deny_schemas))
@@ -1154,7 +1156,10 @@ def ci_key_create(
         help="Where to write the key pair and secrets/ (keep it OUTSIDE the repo).",
     ),
     account: str = typer.Option(
-        None, "--account", help="Account locator for SNOWFLAKE_ACCOUNT (default: the config's)."
+        None,
+        "--account",
+        help="Account identifier for SNOWFLAKE_ACCOUNT, e.g. myorg-myaccount "
+        "(default: the config's).",
     ),
 ) -> None:
     """Create (or reuse) the CI user's key pair and the five deploy secret files.
@@ -1225,7 +1230,7 @@ def ci_key_push(
     account: str = typer.Option(
         None,
         "--account",
-        help="With --config: the account locator you gave `ci-key create` (default: the config's).",
+        help="With --config: the account identifier you gave `ci-key create` (default: the config's).",
     ),
 ) -> None:
     """Set the five deploy secrets on GitHub from the files `ci-key create` wrote.

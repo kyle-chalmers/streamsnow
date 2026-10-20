@@ -31,7 +31,7 @@ caught it. Runtime-specific facts link to the official page in
   `st.connection("snowflake")` reads `[connections.snowflake]` from
   `secrets.toml` first, then the `snow` CLI's default connection in
   `connections.toml` ([configure connections](https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections)).
-- **Fix:** `snow connection add --connection-name <name> --account <locator>
+- **Fix:** `snow connection add --connection-name <name> --account <account-identifier>
   --user <you> --authenticator externalbrowser --default` (the exact command is
   in `streamsnow configure`'s output). `streamsnow doctor` shows whether the
   configured connection name exists.
@@ -41,8 +41,10 @@ caught it. Runtime-specific facts link to the official page in
 - **Symptom:** the log shows `<acct>.snowflakecomputing.com.snowflakecomputing.com`
   or error 250001.
 - **Cause:** the full hostname was used where the connector expects the account
-  **locator**.
-- **Fix:** `account = "ab12345.us-east-1"`, no `https://`, no suffix.
+  **identifier**.
+- **Fix:** `account = "myorg-myaccount"` (or a legacy locator such as
+  `ab12345.us-east-1`), no `https://`, no suffix
+  ([account identifiers](https://docs.snowflake.com/en/user-guide/admin-account-identifier)).
 
 ### 5. Preview runs the wrong Python / `ModuleNotFoundError: streamlit`
 
