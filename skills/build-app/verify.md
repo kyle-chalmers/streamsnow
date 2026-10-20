@@ -1,11 +1,11 @@
-# Verify — three reviewers, bounded fixes, then CHECKPOINT 2
+# Verify — four reviewers, bounded fixes, then CHECKPOINT 2
 
-After the build, three advisory reviewers look at the running app in parallel. Their findings go
+After the build, four advisory reviewers look at the running app in parallel. Their findings go
 back to whoever owns the file; nothing here is a gate (`streamsnow validate-app` is). Dispatch each
 with its brief ([briefs/](briefs/)); without subagents, run them yourself one after another
 ([_shared/other-agents.md](../_shared/other-agents.md)).
 
-These three reviewers are the build loop: /build-app dispatches them and routes their findings to
+These four reviewers are the build loop: /build-app dispatches them and routes their findings to
 the page-builders before checkpoint 2. `/review-app` is the separate pre-ship pass, with its own
 five reviewers (SQL, data, UI, runtime, docs), run after `validate-app` passes and before
 checkpoint 3. Outside /build-app, run `/review-app` only.
@@ -17,9 +17,11 @@ checkpoint 3. Outside /build-app, run `/review-app` only.
    ([_shared/playwright-walkthrough.md](../_shared/playwright-walkthrough.md)) for one screenshot
    per page under default filters.
 2. Dispatch in one message: **perf-reviewer** ([briefs/perf-reviewer.md](briefs/perf-reviewer.md)),
-   **viz-critic** ([briefs/viz-critic.md](briefs/viz-critic.md)) and **cold-reader**
+   **viz-critic** ([briefs/viz-critic.md](briefs/viz-critic.md)), **streamlit-reviewer**
+   ([briefs/streamlit-reviewer.md](briefs/streamlit-reviewer.md)) and **cold-reader**
    ([briefs/cold-reader.md](briefs/cold-reader.md)). Give cold-reader only the screenshots and the
-   page text.
+   page text. Before routing a streamlit-reviewer pin-guard finding, confirm it with the signature
+   lookup in [_shared/streamlit-upstream-skill.md](../_shared/streamlit-upstream-skill.md#pin-guard-every-call-must-exist-in-the-apps-streamlit).
 3. Turn cold-reader's answers into findings: an answer that misses the page's §4 `Question:`, or
    misreads a number against its glossary entry, is a should-fix on that page's copy or layout.
 4. Merge all findings (same file and line → one finding, sources listed) and route them by
