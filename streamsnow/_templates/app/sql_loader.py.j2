@@ -3,6 +3,10 @@
 - ``load_sql(name)`` returns the raw file contents.
 - ``render_sql(name, **tokens)`` substitutes ``{UPPERCASE_TOKEN}`` placeholders
   via str.replace (NOT str.format — SQL patterns like ``{2}`` would collide).
+  The text goes in unescaped, so a token is only ever SQL the page wrote, chosen
+  by branching on the user's choice (``"" if region == "All" else "AND region = :3"``).
+  The user's value goes in ``params`` as a bind, never into a token: an f-string
+  token is SQL injection that runs with the app owner's grants.
 - ``query_headers()`` reads every query's header block (``Query / Feeds / Schemas``)
   so the About page lists data sources from the files themselves, never by hand.
 """
