@@ -14,6 +14,9 @@ another agent or the orchestrator owns.
 - This page's entry from the design plan, its `page_queries`, and the shared loaders already in
   `pages/_data.py`.
 - [pages.md](../pages.md) steps 2–4, 6 and 8 (marks, comments, lint), and the gotchas there.
+- [streamlit-upstream-skill.md](../../_shared/streamlit-upstream-skill.md) for widget, layout
+  and state choices: the Streamlit team's skill at the latest release, checked against the app's
+  pin, with StreamSnow's conventions winning every conflict.
 
 ## Owns
 

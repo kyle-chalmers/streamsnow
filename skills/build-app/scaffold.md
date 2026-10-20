@@ -47,7 +47,9 @@ real pages, queries, and branding without breaking the governance contract.
 ## Foundation (after the scaffold, before any page)
 
 The shared layer every page imports, built once by the orchestrator from the CP1b design so the
-parallel page-builders don't diverge:
+parallel page-builders don't diverge. Shared code is Streamlit code too: apply the pin guard in
+[_shared/streamlit-upstream-skill.md](../_shared/streamlit-upstream-skill.md) to every `st.*`
+call you write here, and read only the references that match the file you are changing.
 
 1. **Glossary:** one `Metric` per design `glossary` entry in `pages/_glossary.py`.
 2. **Shared data:** for each `shared_data` entry, its `queries/<name>.sql` (with header block)

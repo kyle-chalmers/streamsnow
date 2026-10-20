@@ -10,7 +10,9 @@ layers. Advisory: a choice that fits this audience and question beats the defaul
 - The walkthrough screenshots (`apps/<slug>/.review/walkthrough-<ts>/<page>.png`, from
   [playwright-walkthrough.md](../../_shared/playwright-walkthrough.md)) and each page's source.
 - The design plan, §2 `Style:`, the house design guide when present, and
-  [visualization-guide.md](../../_shared/visualization-guide.md).
+  [visualization-guide.md](../../_shared/visualization-guide.md). Secondary: the upstream
+  `references/dashboards.md` and `references/data-display.md` per
+  [streamlit-upstream-skill.md](../../_shared/streamlit-upstream-skill.md); ours wins a conflict.
 
 ## Owns
 

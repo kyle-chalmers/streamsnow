@@ -32,7 +32,9 @@ widgets are fine, and a missing form is at most nice-to-have);
 consistent chart library; number/`column_config` formatting. Judge chart form, layout, color and
 copy against [visualization-guide.md](../_shared/visualization-guide.md) and
 [explainability.md](../_shared/explainability.md), and load paths against
-[streamlit-performance.md](../_shared/streamlit-performance.md). They are defaults, so ask whether
+[streamlit-performance.md](../_shared/streamlit-performance.md). Widget, layout and state idioms,
+and any call missing from the app's pinned Streamlit, go against
+[streamlit-upstream-skill.md](../_shared/streamlit-upstream-skill.md). They are defaults, so ask whether
 a choice fits this audience and question, not whether it matches the guide. A departure is
 nice-to-have, should-fix when it misleads because it isn't disclosed (visualization-guide's
 "Departures to tell the reader about"), or when it breaks a house rule from the overlay. If the Playwright CLI is available (Node 20+), drive a
