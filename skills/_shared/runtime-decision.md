@@ -56,14 +56,17 @@ removes working features while fixing nothing.
   with conda pins, and **never pin `python`** there — the warehouse supplies the interpreter, and a
   pinned one breaks the manifest. The validate gate checks the manifest matches the declared runtime.
 - **Connection code.** Container → `conn = st.connection("snowflake")`, and pass `ttl=0` to
-  `conn.query(...)` so the outer `@st.cache_data(ttl=...)` is the single source of truth — Streamlit
-  issue #13644: `conn.query`'s internal cache ignores `params`, so two filters can share one stale
-  result without `ttl=0`. Warehouse →
-  `get_active_session()` when deployed, with the commented `st.connection` fallback for local runs —
-  the fallback is a conscious local-dev toggle the developer owns; revert it before the PR.
-- **Local preview.** Container apps run locally as-is. A warehouse app raises
-  `get_active_session` errors outside Snowflake — that's the runtime's signature, not a code bug;
-  use the fallback swap or verify in Snowsight.
+  `conn.query(...)` so the outer `@st.cache_data(ttl=...)` is the only cache layer. Without a
+  `ttl`, `conn.query` keeps its own copy of every result with no expiry, so the loader's `ttl`
+  would refresh nothing: when the outer entry expires, the inner cache hands back the old rows.
+  Warehouse → `get_active_session()` inside a `try` whose `except Exception` falls back to
+  `st.connection("snowflake").session()`, exactly as the scaffold's `pages/overview.py` does.
+  The fallback is live code, not a toggle: deployed, `get_active_session()` succeeds and the
+  fallback never runs; locally it raises and the fallback connects. `streamsnow check
+  session-fallback` blocks an unwrapped call or a narrow `except`.
+- **Local preview.** Container apps run locally as-is, and so do warehouse apps through that
+  fallback. A warehouse app whose `get_active_session()` has no fallback raises outside
+  Snowflake; add the `try`/`except` rather than verifying only in Snowsight.
 - **Don't mix patterns within one app.** Match whatever the app's existing pages already do.
 - **Governance is runtime-independent.** The data boundary (sources, app data and the deny list), security, caching, and bind-predicate
   checks apply identically to both runtimes.
