@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-20
+
 ### Added
 
 - **/build-app consults the Streamlit team's own `developing-with-streamlit` skill**, read at the
