@@ -10,6 +10,11 @@ entry.
 
 ### Added
 
+- **/build-app consults the Streamlit team's own `developing-with-streamlit` skill**, read at the
+  latest Streamlit release tag and checked against the app's pinned Streamlit before any call is
+  written. Page-builders use it for widget, layout and state choices; a new advisory
+  **streamlit-reviewer** joins the verify round; StreamSnow's conventions win every conflict
+  ([skills/_shared/streamlit-upstream-skill.md](skills/_shared/streamlit-upstream-skill.md)).
 - **`streamsnow check security` warns on a `render_sql` token built from the reader's value**
   (`token-sql`). A token such as `REGION_FILTER=f"AND region = '{region}'"`, built by f-string,
   `%`, `+` or `.format()` inline or in the variable passed, is pasted into the SQL unescaped and

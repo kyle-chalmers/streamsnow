@@ -18,7 +18,8 @@ The orchestrator builds every §4 page at once and owns every file pages share; 
    `pages/_data.py` and re-dispatching the pages that asked. Turn on the global filters in
    `streamlit_app.py` before the first page that reads `current_filters()` runs, as the one-page
    build's step 5 (**Register the page**) says, and add any global filter a builder requested to
-   `sidebar_filters`.
+   `sidebar_filters`. These shared edits get the same pin guard as a page
+   ([_shared/streamlit-upstream-skill.md](../_shared/streamlit-upstream-skill.md)).
 4. **Generate once:** `streamsnow sql-review generate <slug>`, then `streamsnow sql-review check
    <slug>` and the page-builder brief's five `check` commands. Fix shared files yourself; send page
    findings back to that page's builder in `fix` mode.
@@ -185,6 +186,9 @@ return get_active_session().sql(sql, params=[start, end]).to_pandas()
 
 ## Gotchas
 
+- **Choosing a widget or layout:** consult the Streamlit team's skill per
+  [_shared/streamlit-upstream-skill.md](../_shared/streamlit-upstream-skill.md), and confirm every
+  call exists in the app's pinned Streamlit before writing it. The rules on this page win a conflict.
 - **Optional "All" filters:** never bind Python `None` — compose a `{TOKEN}` fragment via
   `render_sql` instead. Deployed, the driver NULL-binds every param when one is `None`; the page
   shows 0/0 KPIs deployed while working locally. The token holds only SQL the page wrote, picked
