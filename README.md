@@ -35,7 +35,7 @@
 <p align="center">
   <img alt="The StreamSnow title card (idea, governed app, Snowflake), then a screen recording of a real StreamSnow run, sped up, with a bar naming each stage. In Claude, /build-app asks the spec questions and stops at Checkpoint 1 for approval, subagents build and review a sales dashboard, the dashboard runs in a local preview, the deploy job for the merged pull request passes in GitHub Actions, and the app opens live in Snowsight." src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/demo.gif" width="900">
   <br>
-  <sub>One real run from a screen recording, sped up: the <code>/build-app</code> spec questions and first checkpoint, subagents building and reviewing, the local preview, the CI deploy after the merge, and the live app in Snowsight. Also available as an <a href="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/demo.mp4">MP4</a>.</sub>
+  <sub>One real run from a screen recording, sped up: the <code>/build-app</code> spec questions and first checkpoint, subagents building and reviewing, the local preview, the CI deploy after the merge, and the live app in Snowsight. Also available as an <a href="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/v0.15.0/docs/images/demo.mp4">MP4</a>.</sub>
 </p>
 
 > **Quick start.** Check the [prerequisites](#prerequisites), then open your coding agent

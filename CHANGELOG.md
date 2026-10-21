@@ -8,6 +8,14 @@ entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **Ready for the Claude plugin directory.** The plugin has a listing icon
+  (`.claude-plugin/icon.png`), the Python hooks launch with `uv run --frozen` (a no-op beside
+  `--no-project` that the directory requires), and the demo MP4 moved out of the repo (the
+  README links the copy in the `v0.15.0` tag). Releases now fast-forward a `directory` branch,
+  which the directory listing follows.
+
 ## [0.15.0] - 2026-10-20
 
 ### Added

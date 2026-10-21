@@ -10,8 +10,9 @@ hand-authored logo), so rerun them when the CLI output or a skill's output chang
 | `logo-light.svg`, `logo-dark.svg` | hand-authored, no script | the SVGs themselves |
 | `social-preview.png` (1280x640) | `render_social.py` | `social_preview.html` |
 | `demo-terminal.svg` | `render_terminal.py` | the real offline CLI flow |
-| `demo.gif`, `demo.mp4` | cut by hand from a screen recording (see [Record the full Claude Code to Snowflake demo](#record-the-full-claude-code-to-snowflake-demo)) | a real run, recorded end to end |
+| `demo.gif` | cut by hand from a screen recording (see [Record the full Claude Code to Snowflake demo](#record-the-full-claude-code-to-snowflake-demo)) | a real run, recorded end to end; the README's MP4 link points at the copy in the `v0.15.0` tag, because the Claude plugin directory holds any video file in the plugin folder for review |
 | `skills-flow.png`, `repos-flow.png`, `secrets-flow.png` | `export_excalidraw.py` | the `.excalidraw` file next to each PNG |
+| `.claude-plugin/icon.png` (1024x1024, not in `docs/images/`) | `rsvg-convert -w 1024 -h 1024 scripts/readme_media/icon.svg -o .claude-plugin/icon.png` | `icon.svg`, the logo's mark on a square canvas. The Claude plugin directory took it as the listing icon on first save, so a new render changes only the repo copy |
 
 ## The logo
 
