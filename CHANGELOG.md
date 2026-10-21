@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-20
+
 ### Changed
 
 - **Ready for the Claude plugin directory.** The plugin has a listing icon
