@@ -127,7 +127,9 @@ def test_every_python_hook_uses_the_cross_shell_launcher() -> None:
     for event, index in PYTHON_HOOKS:
         command = _command(event, index)
         assert command.startswith("uv run --no-project "), command
-        for flag in ("--no-config", "--offline", "--no-python-downloads", "--quiet"):
+        # --frozen is a no-op beside --no-project, but the Claude plugin directory blocks
+        # any `uv run` without --locked or --frozen, and --quiet hides uv's warning about it.
+        for flag in ("--no-config", "--frozen", "--offline", "--no-python-downloads", "--quiet"):
             assert flag in command, (flag, command)
         assert command.rstrip().endswith("; exit 0"), command
         assert "||" not in command and "&&" not in command, "PowerShell 5.1 parses neither"

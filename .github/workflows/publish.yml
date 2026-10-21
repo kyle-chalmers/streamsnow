@@ -111,3 +111,23 @@ jobs:
 
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  directory-branch:
+    # The Claude plugin directory follows the `directory` branch, so a plugin update reaches
+    # directory users only once its release is on PyPI, never from an unreleased main.
+    # A plain push only fast-forwards: an older hand-pushed tag can't move the branch back.
+    needs: [release, build-and-publish]
+    if: >-
+      !cancelled() && needs.build-and-publish.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the `directory` branch
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Fast-forward `directory` to the release tag
+        env:
+          TAG: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', needs.release.outputs.version) }}
+        run: git push origin "refs/tags/${TAG}^{commit}:refs/heads/directory"

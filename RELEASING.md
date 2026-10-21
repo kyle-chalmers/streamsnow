@@ -100,6 +100,19 @@ claude plugin install --scope project streamsnow@streamsnow
 ```
 No publish step is required for the plugin — it's served from the public repo.
 
+### Claude plugin directory
+
+The listing in Anthropic's directory (claude.ai/directory/manage) follows the `directory`
+branch, not `main`. After `publish.yml` puts a release on PyPI, its `directory-branch` job
+fast-forwards `directory` to the release tag, so directory users get a plugin update only
+together with the CLI it expects. The directory then scans that commit and publishes it under
+the listing's publish setting. Nothing to do by hand; if the job fails, the listing keeps
+serving the previous version. The directory's checks shape a few repo rules: the icon lives at
+`.claude-plugin/icon.png` and became the listing icon on first save (changing it later does not
+change the listing), video files stay out of the repo, and every `uv run` in `hooks/hooks.json`
+carries `--frozen`. Before a structural change to the plugin, re-read the directory's
+[pre-submission checklist](https://claude.com/docs/plugins/pre-submission-checklist).
+
 ## Pre-release: official docs link sweep
 
 The link registry test is offline. Before tagging, run the online sweep once so
