@@ -1,0 +1,6 @@
+# Branches the git-sweep skill must never delete, even though they are merged into main.
+# One branch name or glob per line; applies to the local branch and origin/<name>.
+
+# The Claude plugin directory listing tracks this branch. publish.yml fast-forwards it to
+# each release tag, so it always points at a commit already in main.
+directory
