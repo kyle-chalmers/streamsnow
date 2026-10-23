@@ -138,7 +138,8 @@ behalf. Here is exactly what that means for your credentials.
 
 The limits, stated plainly: Claude runs as your user account, so the key guard
 is a backstop, not a sandbox, and it runs only inside Claude Code. The full
-detail is in [SECURITY.md](SECURITY.md#how-streamsnow-handles-secrets).
+detail is in [SECURITY.md](SECURITY.md#how-streamsnow-handles-secrets). For the data the
+skills read and every service they contact, see [Data and network](#data-and-network).
 
 ## Install with your coding agent
 
@@ -508,8 +509,9 @@ run outside skill prose entirely. See
 ## Hooks, in full
 
 Trust demands transparency: this plugin runs hooks, so here is every one of them. All are
-stdlib-only, make **no network calls**, never write outside the repo (plus one best-effort
-dedupe state file in `$TMPDIR`, so the review nudge fires once per state, not every turn),
+stdlib-only, make **no network calls**, write nothing outside the repo themselves except one
+best-effort dedupe state file in `$TMPDIR`, so the review nudge fires once per state, not every
+turn (uv, which launches the Python hooks offline, may use its own cache),
 and fail open, so a hook error never blocks your session. The one exception is the key guard,
 which denies rather than asks, and denies even if it hits an error on a call that names the key directory.
 
@@ -535,6 +537,54 @@ There is no MCP server to start. Unlike the hooks it does use the network: `npx`
 pinned package from npm the first time, and the CLI downloads its own browser once. It needs
 Node.js 20+; without Node the walkthroughs are skipped and everything else works.
 `streamsnow doctor` checks Node, and `/onboard` downloads the CLI and its browser ahead of time.
+
+## Data and network
+
+Everything StreamSnow sends, fetches or keeps, in one place. It has **no telemetry**: nothing
+reports back to the project, and the only services it talks to are the ones listed here.
+
+**Your Snowflake data and Claude.** The skills run inside your coding agent, so what they read
+goes to your agent's model provider (Anthropic, for Claude Code) under your own account's terms.
+That includes:
+
+- Schema metadata from setup and `/build-app` (`SHOW`, `INFORMATION_SCHEMA`, read-only).
+- Data profiling in `/build-app`: per source object, the date range, a row count, and up to 20
+  of the most frequent values for each filter the spec names. Those values are written into the
+  app's `REQUIREMENTS.md`, which you commit. If a filter column holds personal data, so will that
+  file: point filters at non-personal columns or edit the values out before committing.
+- Screenshots of every page of your running app during walkthroughs, which Claude reads, so it
+  sees whatever your app shows. They stay in `apps/<slug>/.review/` (gitignored) until you
+  delete them.
+- `/sql-review` aggregates (counts, totals, a hash), never rows.
+
+**Services the plugin and CLI contact, and what each gets:**
+
+| Destination | When | What is sent or fetched |
+|---|---|---|
+| Your Snowflake account | setup, `/build-app`, `/sql-review`, previews, deploys, `streamsnow ci-key verify` (signs in once as the CI user) | Queries you can read in the session; app code on deploy |
+| GitHub | `/onboard`, `/ship-app` | Your app code (push, pull request), CI secrets through `gh secret set` on standard input, and, only after you say yes, the repo's "delete merged branches" setting |
+| `github.com/streamlit/streamlit` | `/build-app` page builders and the Streamlit reviewer | Fetches the Streamlit team's own agent skill at Streamlit's latest release tag, as guidance Claude weighs against StreamSnow's rules. Nothing of yours is sent |
+| `api.osv.dev` | `streamsnow check dependency-vulns`: the pre-commit hook (best-effort) and CI | Package names and exact versions from each app's manifest, to look up known vulnerabilities |
+| `repo.anaconda.com` | `streamsnow migrate translate-deps` without `--offline` | Fetches Snowflake's Anaconda package index; nothing of yours is sent |
+| npm and Playwright's browser download | the first walkthrough or `/onboard` | Downloads the pinned `@playwright/cli` and its browser (see [The browser tool](#the-browser-tool)) |
+| Homebrew, PyPI, astral.sh, nvm | `/onboard`, after one approval, for tools you are missing | Downloads uv, Python, Node, gh, `streamsnow`, `snowflake-cli` and `pre-commit`. On Linux without Homebrew, uv's own installer runs as `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Google Antigravity (`agy`) and OpenAI Codex (`codex`) CLIs | `/review-app` and `/sql-review`, **only** with `review.cross_agent: true` in `streamsnow.config.yaml` (off by default) | The review prompt and read access to the repo, through those CLIs under your own accounts with those providers |
+
+**Files kept outside the repo, and for how long:**
+
+| Path | Kept |
+|---|---|
+| `~/.streamsnow-ci/` (CI private key) | Until you delete it |
+| `~/.snowflake/connections.toml` (when you let setup add a connection) | Until you edit it |
+| `$TMPDIR/streamsnow-review-gate/` (review nudge state) | Swept after 7 days |
+| `$TMPDIR/streamsnow-<user>/anaconda-repodata.json` | Refreshed after 24 hours; cleared with your temp folder |
+| npm, Playwright, uv and Homebrew caches | Managed by those tools |
+
+**Things only you trigger.** The ship retro never files an issue on its own: when it finds a gap
+in StreamSnow it drafts the issue and asks before posting it anywhere.
+
+StreamSnow is a developer tool for adults working with their organization's data. It is not
+intended for use by anyone under 18.
 
 ## Documentation
 

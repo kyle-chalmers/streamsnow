@@ -6,7 +6,7 @@ Purpose: fan one qualitative review prompt to external AI CLIs (`agy`, `codex`) 
 
 Always OFF by default in OSS. A calling skill opts in only when **both** hold:
 
-1. Config enables it — `streamsnow.config.yaml` has `review.cross_agent: true` (absent or `false` → skip entirely, host-only).
+1. Config enables it — `streamsnow.config.yaml` has `review.cross_agent: true` (absent or `false` → skip entirely, host-only). The key is documented in `streamsnow.config.example.yaml`, and README's "Data and network" discloses what this sends.
 2. At least one external CLI passes the smoke test below.
 
 If either fails, degrade silently to host-only review and emit one line: `cross-agent review off (config disabled | no external CLI found); using host reviewers only`. Never error out, never prompt to install anything.
