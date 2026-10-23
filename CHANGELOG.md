@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-23
+
 ### Changed
 
 - **README discloses every network call and the data the skills read**, in a new
