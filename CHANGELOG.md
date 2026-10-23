@@ -8,6 +8,18 @@ entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **README discloses every network call and the data the skills read**, in a new
+  [Data and network](README.md#data-and-network) section: Snowflake data that reaches the model
+  (profiling values written to `REQUIREMENTS.md`, walkthrough screenshots), every service the
+  plugin and CLI contact (GitHub, the upstream Streamlit skill, OSV.dev, Anaconda, installers,
+  and the opt-in cross-agent review), files kept outside the repo and for how long, no
+  telemetry, and not for under-18s.
+- **The ship retro asks before filing an issue.** It drafts the issue for the plugin repo and
+  posts it only after you approve that draft.
+- **`review.cross_agent` is documented** in `streamsnow.config.example.yaml` (off by default).
+
 ## [0.16.0] - 2026-10-20
 
 ### Changed

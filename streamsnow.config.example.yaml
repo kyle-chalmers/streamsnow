@@ -93,6 +93,12 @@ sql_review:                            # optional — the runnable review SQL ga
                                        # validate-app, pre-commit and CI. Drift, hand edits,
                                        # marker mismatches and lint always fail.
 
+# review:                              # optional; read by /review-app and /sql-review
+#   cross_agent: false                 # true also asks the agy (Google Antigravity) and codex
+#                                      # (OpenAI) CLIs, when installed, for a second-opinion
+#                                      # review with read access to this repo, under your own
+#                                      # accounts with those providers. Off by default.
+
 review_gate:                           # optional — the warn-only Stop-hook nudge
   enabled: true                        # false disables the nudge repo-wide
   # apps_dir: "apps"                   # only if your apps live elsewhere
