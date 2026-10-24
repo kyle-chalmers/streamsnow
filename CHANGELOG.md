@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-10-24
+
 ### Fixed
 
 - **The SessionStart hook passes the Claude plugin directory's validator.** `session_start.sh`
