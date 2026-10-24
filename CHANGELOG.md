@@ -8,6 +8,14 @@ entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The SessionStart hook passes the Claude plugin directory's validator.** `session_start.sh`
+  is rewritten one plain command per line with the same output; the directory refused it as
+  unreadable, and with it every `uv run` hook that runs after it. The notes from the `"//"` key
+  in `hooks/hooks.json`, which the directory flags as an unknown key, moved to
+  [hooks/README.md](hooks/README.md).
+
 ## [0.16.1] - 2026-10-23
 
 ### Changed
