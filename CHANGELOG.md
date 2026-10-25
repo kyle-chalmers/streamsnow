@@ -13,7 +13,7 @@ entry.
 - **The Streamlit team's skill ships with the plugin instead of being fetched.** `/build-app`'s
   page-builders and reviewers read a pinned, verbatim copy of `developing-with-streamlit` (its
   `SKILL.md` and `references/` at Streamlit 1.66.1, Apache-2.0) from
-  [skills/_shared/upstream-streamlit-skill/](skills/_shared/upstream-streamlit-skill/VENDORED.md)
+  [vendor/upstream-streamlit-skill/](vendor/upstream-streamlit-skill/VENDORED.md)
   rather than from GitHub at the latest release tag. The Claude plugin directory forbids a plugin
   that pulls behavioral instructions from outside it at run time, and a pinned copy means every
   user runs guidance that was reviewed and shipped. Maintainers refresh it with

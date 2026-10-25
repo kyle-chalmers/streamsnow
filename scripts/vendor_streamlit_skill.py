@@ -9,7 +9,8 @@ maintainer runs it, reviews the diff, and ships it in a release like any other c
 
     uv run python scripts/vendor_streamlit_skill.py 1.66.1
 
-Copies `SKILL.md` and `references/` verbatim at that release tag, plus Streamlit's Apache-2.0
+Copies `SKILL.md` and `references/` verbatim into `vendor/upstream-streamlit-skill/`, outside
+`skills/` so Claude Code never loads it as a skill of its own, at that release tag, plus Streamlit's Apache-2.0
 `LICENSE`, and rewrites `VENDORED.md`. It skips `assets/templates/`, which StreamSnow's recipe
 never uses (`skills/_shared/streamlit-upstream-skill.md`). Online by design; not part of the
 offline test suite.
@@ -26,7 +27,7 @@ from pathlib import Path
 
 REPO = "streamlit/streamlit"
 SKILL_PATH = "lib/streamlit/.agents/skills/developing-with-streamlit"
-DEST = Path(__file__).resolve().parent.parent / "skills" / "_shared" / "upstream-streamlit-skill"
+DEST = Path(__file__).resolve().parent.parent / "vendor" / "upstream-streamlit-skill"
 
 
 def _get(url: str) -> bytes:
@@ -71,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
 
 A pinned, unmodified copy of part of the Streamlit team's agent skill, read by StreamSnow's
 page-builders and reviewers through
-[streamlit-upstream-skill.md](../streamlit-upstream-skill.md). StreamSnow's conventions and
+[streamlit-upstream-skill.md](../../skills/_shared/streamlit-upstream-skill.md). StreamSnow's conventions and
 checks win every conflict with it.
 
 - Source: [{REPO}](https://github.com/{REPO}), `{SKILL_PATH}`

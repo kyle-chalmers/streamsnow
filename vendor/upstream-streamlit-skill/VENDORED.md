@@ -2,7 +2,7 @@
 
 A pinned, unmodified copy of part of the Streamlit team's agent skill, read by StreamSnow's
 page-builders and reviewers through
-[streamlit-upstream-skill.md](../streamlit-upstream-skill.md). StreamSnow's conventions and
+[streamlit-upstream-skill.md](../../skills/_shared/streamlit-upstream-skill.md). StreamSnow's conventions and
 checks win every conflict with it.
 
 - Source: [streamlit/streamlit](https://github.com/streamlit/streamlit), `lib/streamlit/.agents/skills/developing-with-streamlit`

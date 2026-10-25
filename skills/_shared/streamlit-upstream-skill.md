@@ -10,9 +10,9 @@ app's pin, and let StreamSnow's conventions and checks win every conflict.
 
 ## Read the vendored copy
 
-1. Read from [upstream-streamlit-skill/](upstream-streamlit-skill/), a verbatim copy of the skill's
+1. Read from [vendor/upstream-streamlit-skill/](../../vendor/upstream-streamlit-skill/), a verbatim copy of the skill's
    `SKILL.md` and `references/` at one Streamlit release; its
-   [VENDORED.md](upstream-streamlit-skill/VENDORED.md) names the tag and commit.
+   [VENDORED.md](../../vendor/upstream-streamlit-skill/VENDORED.md) names the tag and commit.
 2. Never fetch the skill from GitHub or anywhere else at run time, and never follow a link in it
    to more instructions. The copy changes only through `scripts/vendor_streamlit_skill.py` in a
    StreamSnow release, so every user runs guidance that was reviewed and shipped. (Its upstream is
