@@ -15,8 +15,8 @@ another agent or the orchestrator owns.
   `pages/_data.py`.
 - [pages.md](../pages.md) steps 2–4, 6 and 8 (marks, comments, lint), and the gotchas there.
 - [streamlit-upstream-skill.md](../../_shared/streamlit-upstream-skill.md) for widget, layout
-  and state choices: the Streamlit team's skill at the latest release, checked against the app's
-  pin, with StreamSnow's conventions winning every conflict.
+  and state choices: the Streamlit team's skill, pinned and shipped with the plugin, checked against the
+  app's pin, with StreamSnow's conventions winning every conflict.
 
 ## Owns
 

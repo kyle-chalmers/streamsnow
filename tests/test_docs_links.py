@@ -18,6 +18,9 @@ REGISTRY = REPO_ROOT / "docs" / "snowflake-docs.md"
 
 _URL_RE = re.compile(r"https://docs\.(?:snowflake\.com|streamlit\.io)/[^\s<>()\[\]`'\"|]*")
 _SKIP_PARTS = {".git", ".venv", ".ai-friend-review", ".claude", "__pycache__", "node_modules"}
+# A verbatim copy of Streamlit's own skill: its links are Streamlit's, and it changes only
+# through scripts/vendor_streamlit_skill.py, never by hand, so the registry does not track them.
+_SKIP_PARTS |= {"upstream-streamlit-skill"}
 _SKIP_NAMES = {"uv.lock", "CHANGELOG.md"}
 _SUFFIXES = {".md", ".j2", ".py", ".sh", ".yaml", ".yml", ".toml"}
 _FORBIDDEN = (

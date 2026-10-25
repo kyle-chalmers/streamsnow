@@ -8,6 +8,8 @@
   },
   "homepage": "https://github.com/kyle-chalmers/streamsnow",
   "repository": "https://github.com/kyle-chalmers/streamsnow",
+  "documentationUrl": "https://github.com/kyle-chalmers/streamsnow#readme",
+  "privacyPolicyUrl": "https://github.com/kyle-chalmers/streamsnow/blob/main/PRIVACY.md",
   "license": "MIT",
   "keywords": [
     "snowflake",

@@ -13,7 +13,7 @@ blocks on them. Read-only.
 - `apps/<slug>/pages/*.py` and `streamlit_app.py`, and the app's Streamlit pin
   (`pyproject.toml` for container, `environment.yml` for warehouse).
 - [streamlit-upstream-skill.md](../../_shared/streamlit-upstream-skill.md): how to read the
-  Streamlit team's skill at the latest release tag, the pin guard, and the StreamSnow rules that
+  Streamlit team's skill from the plugin's pinned copy, the pin guard, and the StreamSnow rules that
   win over it.
 - [page-conventions.md](../../_shared/page-conventions.md) and the house design guide when present.
 
@@ -23,7 +23,8 @@ Nothing (read-only).
 
 ## Steps
 
-1. Resolve the latest release tag and the app's pin as the recipe says; record both.
+1. Note the vendored copy's tag (from its `VENDORED.md`) and the app's pin as the recipe says;
+   record both.
 2. Per page, against the upstream references the recipe names for this reviewer: widget choice
    (selection widgets, buttons and menus, alerts), layout (columns versus containers, alignment
    of side-by-side elements, labels), state (where `st.session_state` is initialized, widget
