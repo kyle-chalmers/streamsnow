@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.16.3] - 2026-10-24
+
 ### Changed
 
 - **The Streamlit team's skill ships with the plugin instead of being fetched.** `/build-app`'s
