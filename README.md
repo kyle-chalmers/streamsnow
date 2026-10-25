@@ -313,6 +313,42 @@ browser, and run the admin script in Snowsight if you are the admin. In a repo t
 already has Streamlit apps it maps onto them and writes a `MIGRATION.md` instead of
 scaffolding over them. Re-run `/onboard` any time to check.
 
+### Example prompts
+
+Three prompts that show the core loop, after `/onboard`. They use Snowflake's shared sample
+database, `SNOWFLAKE_SAMPLE_DATA`, which most Snowflake accounts can read, so you can try them
+before pointing StreamSnow at your own data. `<slug>` is the app name `/build-app` chose (it says
+so at the first checkpoint).
+
+1. **Build an app from an idea.**
+
+   ```
+   /build-app A sales dashboard on SNOWFLAKE_SAMPLE_DATA.TPCH_SF1: revenue by month and by region, with a market-segment filter
+   ```
+
+   It asks the spec questions and stops for your approval of `REQUIREMENTS.md`, profiles the
+   tables, shows a text wireframe for approval, builds each page with its own subagent, runs the
+   app in a local preview for you to click through, and ends with `/validate-app` passing.
+
+2. **Review it until it is clean.**
+
+   ```
+   /review-app <slug> --auto
+   ```
+
+   A senior-style review of the app's SQL, pages, performance, visuals and governance, which
+   applies the fixes one commit each and repeats until nothing is left to fix.
+
+3. **Turn feedback into fixes.**
+
+   ```
+   /build-app <slug> --feedback "Add a top 10 customers by revenue table to the overview page, and make the region filter multi-select"
+   ```
+
+   It classifies each piece of feedback, builds the changes the same governed way, and brings you
+   back to the preview. When you are happy, type `/ship-app <slug>` to open the pull request; CI
+   deploys it to Snowflake on merge.
+
 ## The skills
 
 One front door plus focused verbs. Each skill's `SKILL.md` stays under 80 lines, with
@@ -563,7 +599,7 @@ That includes:
 |---|---|---|
 | Your Snowflake account | setup, `/build-app`, `/sql-review`, previews, deploys, `streamsnow ci-key verify` (signs in once as the CI user) | Queries you can read in the session; app code on deploy |
 | GitHub | `/onboard`, `/ship-app` | Your app code (push, pull request), CI secrets through `gh secret set` on standard input, and, only after you say yes, the repo's "delete merged branches" setting |
-| `github.com/streamlit/streamlit` | `/build-app` page builders and the Streamlit reviewer | Fetches the Streamlit team's own agent skill at Streamlit's latest release tag, as guidance Claude weighs against StreamSnow's rules. Nothing of yours is sent |
+| `github.com/streamlit/streamlit` | `/build-app` and `/review-app`, only to confirm an `st.*` call exists in an app's pinned Streamlit when that version is not installed locally | Reads Streamlit's source at the pinned release tag. Nothing of yours is sent. The Streamlit team's agent skill itself ships inside the plugin as a pinned copy ([vendor/upstream-streamlit-skill/](vendor/upstream-streamlit-skill/VENDORED.md)) and is never fetched at run time |
 | `api.osv.dev` | `streamsnow check dependency-vulns`: the pre-commit hook (best-effort) and CI | Package names and exact versions from each app's manifest, to look up known vulnerabilities |
 | `repo.anaconda.com` | `streamsnow migrate translate-deps` without `--offline` | Fetches Snowflake's Anaconda package index; nothing of yours is sent |
 | npm and Playwright's browser download | the first walkthrough or `/onboard` | Downloads the pinned `@playwright/cli` and its browser (see [The browser tool](#the-browser-tool)) |

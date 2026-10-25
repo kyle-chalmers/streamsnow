@@ -8,6 +8,25 @@ entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **The Streamlit team's skill ships with the plugin instead of being fetched.** `/build-app`'s
+  page-builders and reviewers read a pinned, verbatim copy of `developing-with-streamlit` (its
+  `SKILL.md` and `references/` at Streamlit 1.66.1, Apache-2.0) from
+  [vendor/upstream-streamlit-skill/](vendor/upstream-streamlit-skill/VENDORED.md)
+  rather than from GitHub at the latest release tag. The Claude plugin directory forbids a plugin
+  that pulls behavioral instructions from outside it at run time, and a pinned copy means every
+  user runs guidance that was reviewed and shipped. Maintainers refresh it with
+  `scripts/vendor_streamlit_skill.py <tag>`. The pin guard is unchanged.
+
+### Added
+
+- **[PRIVACY.md](PRIVACY.md)**: what StreamSnow reads, what it stores and where, every service it
+  contacts with a link to that service's privacy policy, no telemetry, and not for under-18s.
+  `plugin.json` now sets `privacyPolicyUrl` and `documentationUrl`.
+- **Example prompts** in the README: build an app from an idea, review it until clean, and turn
+  feedback into fixes, all runnable against Snowflake's shared sample data.
+
 ## [0.16.2] - 2026-10-24
 
 ### Fixed
