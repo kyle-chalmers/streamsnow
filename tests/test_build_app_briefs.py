@@ -115,11 +115,19 @@ def test_query_header_template_names_tokens_without_braces():
 
 def test_upstream_streamlit_skill_is_read_at_a_release_and_checked_against_the_pin():
     """The Streamlit team's skill tracks `develop`, ahead of every pinned app: read unguarded,
-    it has agents write calls the app's Streamlit lacks, which fail only at runtime."""
-    recipe_path = BRIEFS.parents[1] / "_shared" / "streamlit-upstream-skill.md"
-    recipe = " ".join(recipe_path.read_text(encoding="utf-8").split())
-    assert "releases/latest" in recipe
-    assert "Never the `develop` branch" in recipe
+    it has agents write calls the app's Streamlit lacks, which fail only at runtime. It is read
+    from a pinned copy cut at a release tag, never fetched while working: the Claude plugin
+    directory forbids a plugin that pulls behavioral instructions from outside it at run time."""
+    shared = BRIEFS.parents[1] / "_shared"
+    recipe = " ".join((shared / "streamlit-upstream-skill.md").read_text(encoding="utf-8").split())
+    assert "upstream-streamlit-skill/" in recipe
+    assert "Never fetch the skill" in recipe
+    vendored = shared / "upstream-streamlit-skill"
+    assert (vendored / "SKILL.md").is_file() and (vendored / "LICENSE").is_file()
+    assert "Release tag:" in (vendored / "VENDORED.md").read_text(encoding="utf-8")
+    for path in (BRIEFS.parents[1]).rglob("*.md"):
+        if vendored not in path.parents:
+            assert "releases/latest" not in path.read_text(encoding="utf-8"), path
     assert "inspect.signature" in recipe  # works on every pin; `streamlit docs <cmd>` needs 1.59
     assert "StreamSnow wins these conflicts" in recipe
     for role in ("page-builder", "perf-reviewer", "viz-critic", "streamlit-reviewer"):

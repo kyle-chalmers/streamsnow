@@ -81,8 +81,9 @@ packages = ["streamsnow"]
 
 [tool.ruff]
 # Fixture apps are consumer code (bare `from branding import …` is correct there); lint them
-# with the governance checks, not with the package's import rules.
-extend-exclude = ["tests/fixtures"]
+# with the governance checks, not with the package's import rules. The vendored Streamlit skill
+# is a verbatim upstream copy: formatting its code blocks would change it.
+extend-exclude = ["tests/fixtures", "skills/_shared/upstream-streamlit-skill"]
 target-version = "py311"
 line-length = 100
 

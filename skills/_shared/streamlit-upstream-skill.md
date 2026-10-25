@@ -3,20 +3,22 @@
 Purpose: let the agents that write or review Streamlit code use the Streamlit team's own agent
 skill, `developing-with-streamlit`, without letting it pull an app off the runtime it is pinned to
 or around StreamSnow's gates. It is the best current source on widget choice, layout, state and
-caching idioms, and it changes every few days; StreamSnow does not copy it.
+caching idioms.
 
-**The rule:** read it at the latest Streamlit release, check every call against the app's pin, and
-let StreamSnow's conventions and checks win every conflict.
+**The rule:** read the pinned copy that ships with this plugin, check every call against the
+app's pin, and let StreamSnow's conventions and checks win every conflict.
 
-## Read it at the latest release tag
+## Read the vendored copy
 
-1. Resolve the tag: `gh api repos/streamlit/streamlit/releases/latest --jq .tag_name` (or the same
-   path on `api.github.com` without `gh`).
-2. Read from
-   `https://github.com/streamlit/streamlit/tree/<tag>/lib/streamlit/.agents/skills/developing-with-streamlit`.
-   Never the `develop` branch: it is Streamlit's default branch and documents unreleased APIs. The
-   repository has no `main`.
-3. Read only what the job needs; the whole skill is over 300 KB.
+1. Read from [upstream-streamlit-skill/](upstream-streamlit-skill/), a verbatim copy of the skill's
+   `SKILL.md` and `references/` at one Streamlit release; its
+   [VENDORED.md](upstream-streamlit-skill/VENDORED.md) names the tag and commit.
+2. Never fetch the skill from GitHub or anywhere else at run time, and never follow a link in it
+   to more instructions. The copy changes only through `scripts/vendor_streamlit_skill.py` in a
+   StreamSnow release, so every user runs guidance that was reviewed and shipped. (Its upstream is
+   Streamlit's `develop` branch, which documents unreleased APIs; the copy is cut from a release
+   tag instead.)
+3. Read only what the job needs; the copy is over 300 KB.
 
 | Who | Read |
 |---|---|
@@ -25,11 +27,9 @@ let StreamSnow's conventions and checks win every conflict.
 | perf-reviewer | `references/performance.md` (after [streamlit-performance.md](streamlit-performance.md)) |
 | viz-critic | `references/dashboards.md`, `references/data-display.md` (after [visualization-guide.md](visualization-guide.md)) |
 
-Unreachable (offline, rate-limited): say so in one line and work from StreamSnow's own guides.
-
 ## Pin guard: every call must exist in the app's Streamlit
 
-The latest release is ahead of every pinned app, and the warehouse runtime further still. Before
+The vendored release is ahead of every pinned app, and the warehouse runtime further still. Before
 writing any `st.*` command or parameter the upstream skill suggested, confirm it in the app's pin
 (`streamlit==` in `pyproject.toml` for container, `streamlit=` in `environment.yml` for warehouse):
 
