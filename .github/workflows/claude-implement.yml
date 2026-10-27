@@ -7,19 +7,27 @@ name: claude-implement
 # discuss issues; they cannot start this workflow. The maintainer stays the merge gate: the PR
 # is opened by the Claude GitHub App, so CI runs on it and the maintainer can approve it.
 #
+# claude-autopilot also calls this workflow directly (workflow_call), for issues the
+# repository owner filed that triage marked complete, and for one retry of a failed run.
+# A label applied by a workflow cannot start another workflow, hence the second entry point.
+#
 # To retry a run, remove `status:agent-working` / `status:blocked` and apply `ready-for-agent`
 # again, or comment `@claude <what to change>` on the PR (claude.yml).
 on:
   issues:
     types: [labeled]
-
-concurrency:
-  group: claude-implement-${{ github.event.issue.number }}
-  cancel-in-progress: false
+  workflow_call:
+    inputs:
+      issue:
+        type: number
+        required: true
 
 jobs:
   implement:
-    if: github.event.label.name == 'ready-for-agent' && github.event.issue.state == 'open'
+    if: inputs.issue || (github.event.label.name == 'ready-for-agent' && github.event.issue.state == 'open')
+    concurrency:
+      group: claude-implement-${{ inputs.issue || github.event.issue.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -29,6 +37,7 @@ jobs:
       id-token: write # exchanged for the Claude GitHub App token
       actions: read
     env:
+      ISSUE: ${{ inputs.issue || github.event.issue.number }}
       HAS_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
     steps:
       - name: Skip (no CLAUDE_CODE_OAUTH_TOKEN secret)
@@ -41,7 +50,7 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
-            const issue_number = context.payload.issue.number;
+            const issue_number = Number(process.env.ISSUE);
             for (const name of ['ready-for-agent', 'status:triaged', 'status:needs-maintainer', 'status:blocked']) {
               await github.rest.issues.removeLabel({ owner, repo, issue_number, name }).catch(() => {});
             }
@@ -69,8 +78,10 @@ jobs:
           additional_permissions: |
             actions: read
           prompt: |
-            Implement issue #${{ github.event.issue.number }} in ${{ github.repository }} and open
-            a pull request. The maintainer approved this issue for implementation by labeling it.
+            Implement issue #${{ env.ISSUE }} in ${{ github.repository }} and open
+            a pull request. The maintainer approved this issue for implementation: by labeling it
+            `ready-for-agent`, or, via claude-autopilot, by filing it and having triage mark it
+            complete.
 
             Read .claude/CLAUDE.md first and follow it exactly: it holds the commands, the ground rules and
             the things you must never change.
@@ -81,8 +92,8 @@ jobs:
             skip tests.
 
             1. Read the issue and all comments:
-               `gh issue view ${{ github.event.issue.number }} --repo ${{ github.repository }} --comments`
-            2. Create a branch: `git switch -c agent/issue-${{ github.event.issue.number }}`
+               `gh issue view ${{ env.ISSUE }} --repo ${{ github.repository }} --comments`
+            2. Create a branch: `git switch -c agent/issue-${{ env.ISSUE }}`
             3. Make the smallest change that fully resolves the issue, following the existing code's
                style. Add or update fixture tests under tests/. Add one line under `## [Unreleased]`
                in CHANGELOG.md in the section that fits (Added / Changed / Fixed / Deprecated).
@@ -91,7 +102,7 @@ jobs:
             5. Commit with a conventional-commit message (`fix(area): ...`, `feat(area): ...`,
                `docs: ...`) and push the branch.
             6. Open a ready (not draft) PR with `gh pr create --base main`. The title is the commit
-               subject. Fill in .github/pull_request_template.md: `Closes #${{ github.event.issue.number }}`,
+               subject. Fill in .github/pull_request_template.md: `Closes #${{ env.ISSUE }}`,
                the checks you ran, and under "AI assistance" say it was implemented by Claude Code
                via claude-implement and still needs maintainer review.
 
@@ -114,10 +125,11 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
-            const issue_number = context.payload.issue.number;
+            const issue_number = Number(process.env.ISSUE);
             await github.rest.issues.removeLabel({ owner, repo, issue_number, name: 'status:agent-working' }).catch(() => {});
             await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['status:blocked'] });
             const url = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
             await github.rest.issues.createComment({ owner, repo, issue_number,
-              body: `The implementation run failed before opening a PR ([logs](${url})). ` +
-                    'Apply `ready-for-agent` again to retry once the cause is fixed.' });
+              // The marker lets claude-autopilot tell a failed run from other status:blocked issues.
+              body: `<!-- claude-implement:failed -->\nThe implementation run failed before opening a PR ([logs](${url})). ` +
+                    'claude-autopilot retries once; after that, apply `ready-for-agent` again once the cause is fixed.' });
