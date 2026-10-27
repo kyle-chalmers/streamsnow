@@ -15,10 +15,15 @@ jobs:
     # Skip PRs opened by the maintainer accounts and by bots; review everyone else.
     # claude-code-action refuses bot actors, and Dependabot runs get no repo secrets,
     # so a bot PR (dependency bumps) only ever showed this check as failed.
+    # The exception is claude-implement's own PRs (branch agent/issue-N, opened and fixed
+    # by the Claude GitHub App): the maintainer merges those, so they get a review first.
+    # Dependabot PRs are reviewed by claude-autopilot instead.
     if: |
-      github.event.pull_request.user.login != 'kyle-chalmers' &&
-      github.event.pull_request.user.login != 'kylechalmers-labs' &&
-      github.event.pull_request.user.type != 'Bot'
+      (startsWith(github.event.pull_request.head.ref, 'agent/issue-') &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event.pull_request.user.login != 'kyle-chalmers' &&
+       github.event.pull_request.user.login != 'kylechalmers-labs' &&
+       github.event.pull_request.user.type != 'Bot')
 
     runs-on: ubuntu-latest
     permissions:
@@ -38,6 +43,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Only reachable for agent/issue-N branches (see `if` above).
+          allowed_bots: 'claude'
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'

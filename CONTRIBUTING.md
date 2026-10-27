@@ -94,13 +94,24 @@ automation does the rest:
    - Possible duplicates are labeled and linked, never closed automatically.
 2. **Approval (maintainer).** The maintainer labels a triaged issue `ready-for-agent`, asks
    a question, or closes it with a reason. Only people with triage access can apply labels,
-   so this label is the gate.
+   so this label is the gate. Issues the maintainer filed are the one exception: once triage
+   marks them `status:triaged`, the daily `claude-autopilot` run starts the implementation
+   itself.
 3. **Implementation (agent).** `claude-implement` picks up `ready-for-agent` issues
    (`status:agent-working`), writes the change and its tests following [.claude/CLAUDE.md](.claude/CLAUDE.md),
    runs every check, and opens a PR that closes the issue. If the issue is ambiguous or
-   needs a breaking change, it stops and asks on the issue instead.
-4. **Review and merge (maintainer).** CI and the Claude Code Review workflow run on the PR. The maintainer
-   asks for changes with `@claude ...` comments, or merges.
+   needs a breaking change, it stops and asks on the issue instead. A run that fails is
+   retried once by `claude-autopilot`.
+4. **Review and merge (maintainer).** CI and the Claude Code Review workflow run on the PR.
+   If CI fails, `claude-autopilot` makes one attempt to fix it on the PR branch. The
+   maintainer asks for changes with `@claude ...` comments, or merges.
+
+Dependency updates follow a shorter path. `claude-autopilot` squash-merges Dependabot PRs
+that change only `uv.lock` once every check is green on a head up to date with `main`, after
+Claude reviews any major version bump against the code that uses it. Updates that change
+`pyproject.toml` or workflows, updates whose CI fails, and anything the review is unsure
+about are labeled
+`status:needs-maintainer` and wait for the maintainer.
 
 Want to implement something yourself? Comment on a `status:triaged` issue (or one labeled
 `help wanted` / `good first issue`) so no agent picks it up while you work on it.
