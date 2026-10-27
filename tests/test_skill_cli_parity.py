@@ -1,15 +1,20 @@
-"""Every `streamsnow <verb>` a skill or doc cites must exist in the CLI.
+"""Every `streamsnow <verb>` a skill or doc cites must exist in the CLI, and the reverse.
 
 A SKILL.md that names a renamed verb silently tells Claude to run a command
 that does not exist, and the user meets a confusing failure mid-workflow. The
 production fleet this plugin came from kept a `check_skill_tool_parity.py`
 pre-commit hook for exactly that; this is the plugin's version, against the
 Typer app (and the argparse subparsers behind the passthrough groups).
+
+The reverse direction catches a verb or check that ships with no mention in the
+README, the docs or a skill: Claude never learns to run it, and the plugin falls
+behind the CLI without any test failing.
 """
 
 from __future__ import annotations
 
 import ast
+import json
 import re
 from pathlib import Path
 
@@ -102,3 +107,37 @@ def test_scan_actually_sees_verbs():
     text = (REPO_ROOT / "skills" / "build-app" / "SKILL.md").read_text(encoding="utf-8")
     seen = {m.group(1) for m in _CALL_RE.finditer(text)}
     assert {"doctor", "validate-app"} <= seen
+
+
+def _surface_commands() -> list[str]:
+    """The pinned command keys (`doctor`, `check security`), minus the root entry."""
+    snapshot = REPO_ROOT / "tests" / "fixtures" / "cli_surface.json"
+    return [k for k in json.loads(snapshot.read_text(encoding="utf-8"))["commands"] if k]
+
+
+def _uncited(commands: list[str], files: list[Path]) -> list[str]:
+    cited: set[str] = set()
+    for path in files:
+        for m in _CALL_RE.finditer(path.read_text(encoding="utf-8")):
+            cited.add(m.group(1))
+            if m.group(2):
+                cited.add(f"{m.group(1)} {m.group(2)}")
+    return sorted(c for c in commands if c not in cited)
+
+
+def test_every_surface_command_is_cited_somewhere():
+    missing = _uncited(_surface_commands(), _scan_files())
+    assert not missing, (
+        "these commands are in the CLI but no skill or doc cites them as "
+        f"`streamsnow <verb>`: {missing}"
+    )
+
+
+def test_uncited_reports_an_undocumented_command(tmp_path: Path):
+    """Guard the reverse scan: a command nobody cites is named, a cited one is not."""
+    doc = tmp_path / "doc.md"
+    doc.write_text("Run `streamsnow check security .` first.\n", encoding="utf-8")
+    assert _uncited(["check security", "check new-thing", "brand-new"], [doc]) == [
+        "brand-new",
+        "check new-thing",
+    ]
