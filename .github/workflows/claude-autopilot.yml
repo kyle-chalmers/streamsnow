@@ -45,7 +45,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write # update a Dependabot branch from main
-      actions: write # dispatch ci on that branch
+      actions: write # approve the CI runs held on that update
       issues: write
       pull-requests: write
       checks: read
@@ -135,8 +135,9 @@ jobs:
               if (cmp.behind_by > 0) {
                 // CI ran against an older main, so the merged tree would be untested. Dependabot
                 // refuses `@dependabot rebase` from github-actions[bot] ("only users with push
-                // access"), so update the branch here. A push made with GITHUB_TOKEN starts no
-                // workflow, so ci is dispatched on the branch; the next run sees its checks on the
+                // access"), so update the branch here. GitHub holds the pull_request runs that
+                // a GITHUB_TOKEN push starts as "action_required", and the PR's required checks
+                // come from those runs, so approve them; the next run sees their checks on the
                 // new head. One PR per run: each update costs a full CI run, and merging one PR
                 // puts the others behind again anyway.
                 if (dependabot || updated) continue;
@@ -146,17 +147,37 @@ jobs:
                   await github.rest.pulls.updateBranch({ owner, repo, pull_number: pr.number,
                     expected_head_sha: pr.head.sha });
                 } catch (e) { core.info(`#${pr.number} update failed: ${e.message}`); continue; }
-                // The update is asynchronous; wait for the new head before starting CI on it.
+                // The update and the runs it starts appear asynchronously; wait for both.
+                const wait = () => new Promise(res => setTimeout(res, 5000));
                 let head = pr.head.sha;
                 for (let t = 0; t < 12 && head === pr.head.sha; t++) {
-                  await new Promise(res => setTimeout(res, 5000));
+                  await wait();
                   head = (await github.rest.pulls.get({ owner, repo, pull_number: pr.number })).data.head.sha;
                 }
                 if (head === pr.head.sha) { core.info(`#${pr.number} head did not move; next run retries.`); continue; }
-                await github.rest.actions.createWorkflowDispatch({ owner, repo, workflow_id: 'ci.yml', ref: pr.head.ref });
-                await say(pr.number, `${marker}\nBrought this branch up to date with main and started CI on it ` +
-                  `([run](${run})). The next claude-autopilot run merges it if every check passes.`);
                 updated = true;
+                let held = [];
+                for (let t = 0; t < 12 && !held.some(w => w.name === 'ci'); t++) {
+                  await wait();
+                  held = (await github.rest.actions.listWorkflowRunsForRepo({ owner, repo, head_sha: head,
+                    event: 'pull_request', per_page: 20 })).data.workflow_runs
+                    .filter(w => w.conclusion === 'action_required');
+                }
+                const approved = [];
+                for (const w of held) {
+                  try {
+                    await github.rest.actions.approveWorkflowRun({ owner, repo, run_id: w.id });
+                    approved.push(w.name);
+                  } catch (e) { core.info(`approving run ${w.id} failed: ${e.status} ${e.message}`); }
+                }
+                if (!approved.includes('ci')) {
+                  await handOff(pr.number, marker, 'Brought this branch up to date with main, but could not ' +
+                    `start CI on it ([run](${run})). Approve the waiting \`ci\` run and merge, or close this ` +
+                    'PR so Dependabot opens a fresh one.');
+                  continue;
+                }
+                await say(pr.number, `${marker}\nBrought this branch up to date with main and approved CI on it ` +
+                  `([run](${run})). The next claude-autopilot run merges it if every check passes.`);
                 continue;
               }
               if (dependabot) continue;
