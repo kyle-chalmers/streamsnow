@@ -44,7 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
+      contents: write # update a Dependabot branch from main
+      actions: write # dispatch ci on that branch
       issues: write
       pull-requests: write
       checks: read
@@ -87,7 +88,7 @@ jobs:
             const mainSha = (await github.rest.repos.getBranch({ owner, repo, branch: 'main' })).data.commit.sha;
             const prs = (await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 }))
               .sort((a, b) => a.number - b.number);
-            let dependabot = '';
+            let dependabot = '', updated = false;
             const fix = [];
 
             for (const pr of prs) {
@@ -132,9 +133,30 @@ jobs:
               const { data: cmp } = await github.rest.repos.compareCommitsWithBasehead(
                 { owner, repo, basehead: `${mainSha}...${pr.head.sha}` });
               if (cmp.behind_by > 0) {
-                // CI ran against an older main; ask for a rebase so the merged tree is the tested one.
-                const marker = `<!-- autopilot:rebase ${pr.head.sha} -->`;
-                if (!await marked(pr.number, marker)) await say(pr.number, `@dependabot rebase\n\n${marker}`);
+                // CI ran against an older main, so the merged tree would be untested. Dependabot
+                // refuses `@dependabot rebase` from github-actions[bot] ("only users with push
+                // access"), so update the branch here. A push made with GITHUB_TOKEN starts no
+                // workflow, so ci is dispatched on the branch; the next run sees its checks on the
+                // new head. One PR per run: each update costs a full CI run, and merging one PR
+                // puts the others behind again anyway.
+                if (dependabot || updated) continue;
+                const marker = `<!-- autopilot:update ${pr.head.sha} -->`;
+                if (await marked(pr.number, marker)) continue;
+                try {
+                  await github.rest.pulls.updateBranch({ owner, repo, pull_number: pr.number,
+                    expected_head_sha: pr.head.sha });
+                } catch (e) { core.info(`#${pr.number} update failed: ${e.message}`); continue; }
+                // The update is asynchronous; wait for the new head before starting CI on it.
+                let head = pr.head.sha;
+                for (let t = 0; t < 12 && head === pr.head.sha; t++) {
+                  await new Promise(res => setTimeout(res, 5000));
+                  head = (await github.rest.pulls.get({ owner, repo, pull_number: pr.number })).data.head.sha;
+                }
+                if (head === pr.head.sha) { core.info(`#${pr.number} head did not move; next run retries.`); continue; }
+                await github.rest.actions.createWorkflowDispatch({ owner, repo, workflow_id: 'ci.yml', ref: pr.head.ref });
+                await say(pr.number, `${marker}\nBrought this branch up to date with main and started CI on it ` +
+                  `([run](${run})). The next claude-autopilot run merges it if every check passes.`);
+                updated = true;
                 continue;
               }
               if (dependabot) continue;
