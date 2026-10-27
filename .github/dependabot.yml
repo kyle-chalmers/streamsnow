@@ -1,6 +1,8 @@
-# Weekly, grouped dependency updates. Nothing auto-merges: the maintainer merges after CI
-# and the Claude Code Review workflow pass. Major bumps get their own PR so a breaking upstream release is
-# never hidden inside a group.
+# Weekly, grouped dependency updates. Major bumps get their own PR so a breaking upstream
+# release is never hidden inside a group. claude-autopilot (.github/workflows) squash-merges
+# uv.lock-only updates once CI is green on a head up to date with main, after a Claude
+# review of any major bump. Updates that touch pyproject.toml or workflows wait for the
+# maintainer.
 version: 2
 updates:
   - package-ecosystem: "uv"
