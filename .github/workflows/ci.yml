@@ -4,9 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # claude-autopilot dispatches ci on a Dependabot branch it brought up to date with main:
-  # that push used GITHUB_TOKEN, which starts no workflow on its own.
-  workflow_dispatch:
 
 permissions:
   contents: read
