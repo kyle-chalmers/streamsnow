@@ -37,6 +37,8 @@ dependencies = [
 dev = [
     "ruff>=0.15",
     "pytest>=8",
+    # CI runs the suite with -n auto; the tests use tmp_path and share no state.
+    "pytest-xdist>=3.6",
     "pre-commit>=4",
     # On every OS in dev, so the psutil branches of preview_app run in all CI rows.
     "psutil>=5.9",
