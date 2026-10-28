@@ -34,6 +34,15 @@ def _create(tmp_path: Path, *extra: str):
     return _cli("ci-key", "create", "--config", str(EXAMPLE), "--dir", str(tmp_path / "ci"), *extra)
 
 
+def _flat(output: str) -> str:
+    """Collapse the CLI's line wrapping so a phrase can be asserted wherever it breaks.
+
+    The error text is wrapped at the terminal width, and the tmp path it embeds is longer
+    under pytest-xdist (``popen-gwN``) and on Windows, which moves the break mid-phrase.
+    """
+    return " ".join(output.split())
+
+
 def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
@@ -141,7 +150,7 @@ def test_existing_directory_is_never_repermissioned(tmp_path):
     res = _create(tmp_path)
     assert res.exit_code == 0, res.output
     assert _mode(d) == 0o755
-    assert "readable by other users" in res.output
+    assert "readable by other users" in _flat(res.output)
     assert _mode(d / "secrets") == 0o700  # created by the command, so locked down
 
 
@@ -149,7 +158,7 @@ def test_refuses_a_directory_inside_a_git_repo(tmp_path):
     (tmp_path / ".git").mkdir()
     res = _create(tmp_path)
     assert res.exit_code == 2
-    assert "inside a git repository" in res.output
+    assert "inside a git repository" in _flat(res.output)
     assert not (tmp_path / "ci").exists()
 
 

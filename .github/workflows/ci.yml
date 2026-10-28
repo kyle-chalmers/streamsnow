@@ -41,8 +41,9 @@ jobs:
 
       - name: Pytest
         # -rs lists every skip with its reason, so a platform skip is visible
-        # rather than read as a pass.
-        run: uv run pytest -q -rs
+        # rather than read as a pass. -n auto spreads the suite over the runner's cores
+        # (pytest-xdist); pytest was over 95% of each row's wall time.
+        run: uv run pytest -q -rs -n auto
 
   privacy-gate:
     # Pre-publish gate: fail if any proprietary/internal term or secret leaks
