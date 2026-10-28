@@ -89,7 +89,7 @@ def test_output_never_contains_a_secret_value(tmp_path):
     )
     assert p8_body not in res.output
     assert ACCOUNT not in res.output
-    assert "PRIVATE KEY-----" not in res.output
+    assert "PRIVATE KEY-----" not in _flat(res.output)
 
 
 def test_fingerprint_matches_snowflakes_rsa_public_key_fp(tmp_path):
@@ -113,12 +113,12 @@ def test_rerun_reuses_the_key_and_keeps_secret_files(tmp_path):
     assert p8.read_bytes() == before
     fp = [ln for ln in first.output.splitlines() if "fingerprint" in ln]
     assert fp and fp == [ln for ln in second.output.splitlines() if "fingerprint" in ln]
-    assert "Reused key pair" in second.output
+    assert "Reused key pair" in _flat(second.output)
     # A differing existing secret is reported by name, never rewritten or echoed.
     assert (tmp_path / "ci" / "secrets" / "SNOWFLAKE_ACCOUNT").read_text(
         encoding="utf-8"
     ) == ACCOUNT
-    assert "secrets/SNOWFLAKE_ACCOUNT differs" in second.output
+    assert "secrets/SNOWFLAKE_ACCOUNT differs" in _flat(second.output)
     assert "other-acct" not in second.output
 
 
@@ -131,14 +131,14 @@ def test_mismatched_public_key_is_refused(tmp_path):
     )
     res = _create(tmp_path / "a")
     assert res.exit_code == 2
-    assert "does not match" in res.output
+    assert "does not match" in _flat(res.output)
 
 
 def test_missing_openssl_exits_2(tmp_path, monkeypatch):
     monkeypatch.setattr(ci_key.shutil, "which", lambda _name: None)
     res = _create(tmp_path)
     assert res.exit_code == 2
-    assert "openssl is not on PATH" in res.output
+    assert "openssl is not on PATH" in _flat(res.output)
     assert not (tmp_path / "ci").exists()
 
 
@@ -186,7 +186,7 @@ def test_rerun_with_matching_files_says_all_match(tmp_path):
     _create(tmp_path)
     second = _create(tmp_path)
     assert second.exit_code == 0, second.output
-    assert "Kept existing secrets/ (all match this config)" in second.output
+    assert "Kept existing secrets/ (all match this config)" in _flat(second.output)
     assert "differs" not in second.output
 
 
@@ -196,15 +196,15 @@ def test_rerun_flags_a_file_with_non_breaking_spaces(tmp_path):
     role = tmp_path / "ci" / "secrets" / "SNOWFLAKE_ROLE"
     role.write_text(" STREAMSNOW_DEPLOY_ROLE", encoding="utf-8")
     second = _create(tmp_path)
-    assert "secrets/SNOWFLAKE_ROLE differs" in second.output
-    assert "all match this config" not in second.output
+    assert "secrets/SNOWFLAKE_ROLE differs" in _flat(second.output)
+    assert "all match this config" not in _flat(second.output)
 
 
 def test_rerun_with_a_differing_file_does_not_claim_a_match(tmp_path):
     _create(tmp_path)
     second = _create(tmp_path, "--account", "other-acct")
-    assert "all match this config" not in second.output
-    assert "secrets/SNOWFLAKE_ACCOUNT differs" in second.output
+    assert "all match this config" not in _flat(second.output)
+    assert "secrets/SNOWFLAKE_ACCOUNT differs" in _flat(second.output)
 
 
 def test_falls_back_to_a_private_copy_when_symlinks_are_refused(tmp_path, monkeypatch):
@@ -223,7 +223,7 @@ def test_falls_back_to_a_private_copy_when_symlinks_are_refused(tmp_path, monkey
     assert copy.read_bytes() == p8.read_bytes()
     if _POSIX:
         assert _mode(copy) == 0o600
-    assert "not a symlink" in res.output
+    assert "not a symlink" in _flat(res.output)
 
     assert _create(tmp_path).exit_code == 0  # a re-run keeps the copy
 
