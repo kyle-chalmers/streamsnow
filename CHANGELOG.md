@@ -8,6 +8,11 @@ entry.
 
 ## [Unreleased]
 
+### Added
+
+- **The README links the setup video and the Snowflake Developer Guide** under the demo, so a
+  reader can watch the full walkthrough on YouTube or follow it step by step on snowflake.com.
+
 ## [0.16.3] - 2026-10-24
 
 ### Changed
