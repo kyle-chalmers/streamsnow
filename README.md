@@ -38,6 +38,12 @@
   <sub>One real run from a screen recording, sped up: the <code>/build-app</code> spec questions and first checkpoint, subagents building and reviewing, the local preview, the CI deploy after the merge, and the live app in Snowsight. Also available as an <a href="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/v0.15.0/docs/images/demo.mp4">MP4</a>.</sub>
 </p>
 
+<p align="center">
+  StreamSnow Setup Video: <a href="https://www.youtube.com/watch?v=73jOT3-TW8Y">https://www.youtube.com/watch?v=73jOT3-TW8Y</a>
+  <br>
+  Snowflake Developer Guide: <a href="https://www.snowflake.com/en/developers/guides/build-governed-streamlit-apps-with-claude-code-and-streamsnow/">Build Governed Streamlit in Snowflake Apps with Claude Code and StreamSnow</a>
+</p>
+
 > **Quick start.** Check the [prerequisites](#prerequisites), then open your coding agent
 > (Claude Code, Codex, Cursor, Gemini CLI and others) in the folder for your Snowflake apps
 > and say:
