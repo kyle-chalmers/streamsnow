@@ -4,9 +4,9 @@
 a `"//"` key inside it live here, because the Claude plugin directory warns on any key a hooks
 file does not document.
 
-- **SessionStart** (`session_start.sh`) prints a one-line skill pointer. It is written one plain
-  command per line, because the directory's validator refuses a hook script it cannot read
-  command by command.
+- **SessionStart** (`session_start.py`) prints a one-line skill pointer. It is Python like the
+  others, so it runs on native Windows without bash, and because the directory's validator holds
+  for review a hook shell script it cannot follow into the programs it runs.
 - **PreToolUse** (`deploy_safety.py`) pauses destructive Streamlit and SQL commands.
 - **PreToolUse** (`secret_guard.py`) denies Claude's tools access to the CI key directory
   (`~/.streamsnow-ci`). Unlike the others it is not repo-gated, and it denies rather than asks.
@@ -17,7 +17,7 @@ All but the key guard are repo-gated (on `streamsnow.config.yaml`) and fail open
 stdlib-only with no network. Each declares an explicit timeout, so a hung hook can never stall
 a session.
 
-The Python hooks launch through `uv run --no-project --no-config --frozen --offline
+All four hooks launch through `uv run --no-project --no-config --frozen --offline
 --no-python-downloads --quiet ...; exit 0`. `--frozen` does nothing beside `--no-project`, but
 the Claude plugin directory requires it on every `uv run`. That one string parses in sh, Git
 Bash and PowerShell (Claude Code's hook shells), needs no `python3` on PATH (Windows often has

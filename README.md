@@ -33,7 +33,7 @@
 </p>
 
 <p align="center">
-  <img alt="The StreamSnow title card (idea, governed app, Snowflake), then a screen recording of a real StreamSnow run, sped up, with a bar naming each stage. In Claude, /build-app asks the spec questions and stops at Checkpoint 1 for approval, subagents build and review a sales dashboard, the dashboard runs in a local preview, the deploy job for the merged pull request passes in GitHub Actions, and the app opens live in Snowsight." src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/main/docs/images/demo.gif" width="900">
+  <img alt="The StreamSnow title card (idea, governed app, Snowflake), then a screen recording of a real StreamSnow run, sped up, with a bar naming each stage. In Claude, /build-app asks the spec questions and stops at Checkpoint 1 for approval, subagents build and review a sales dashboard, the dashboard runs in a local preview, the deploy job for the merged pull request passes in GitHub Actions, and the app opens live in Snowsight." src="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/v0.16.3/docs/images/demo.gif" width="900">
   <br>
   <sub>One real run from a screen recording, sped up: the <code>/build-app</code> spec questions and first checkpoint, subagents building and reviewing, the local preview, the CI deploy after the merge, and the live app in Snowsight. Also available as an <a href="https://raw.githubusercontent.com/kyle-chalmers/streamsnow/v0.15.0/docs/images/demo.mp4">MP4</a>.</sub>
 </p>
@@ -561,7 +561,7 @@ which denies rather than asks, and denies even if it hits an error on a call tha
 |---|---|---|
 | PreToolUse (Bash, PowerShell) | `hooks/deploy_safety.py` | Pauses before destructive Streamlit/SQL commands (`snow streamlit deploy/drop`, `CREATE OR REPLACE / DROP / ALTER STREAMLIT`, stage `REMOVE`, destructive SQL incl. `-f` files / stdin); `/ship-app` is the sanctioned deploy path |
 | PreToolUse (shell, file and search tools) | `hooks/secret_guard.py` | Denies any tool call that names the CI key directory (`~/.streamsnow-ci`) or key file, apart from `streamsnow ci-key ...` and `streamsnow deploy-setup ...`. Covers the shell (Bash, PowerShell), file and search tools. Not repo-gated, because the key is sensitive in any repo. See [What Claude can and can't see](#what-claude-can-and-cant-see) |
-| SessionStart | `hooks/session_start.sh` | One line inside a StreamSnow repo (plugin version, skills, which guards are active, and a nudge when this clone has no pre-commit hook); a one-line `/onboard` nudge in a repo that has Streamlit apps or the plugin enabled but no config; silence everywhere else |
+| SessionStart | `hooks/session_start.py` | One line inside a StreamSnow repo (plugin version, skills, which guards are active, and a nudge when this clone has no pre-commit hook); a one-line `/onboard` nudge in a repo that has Streamlit apps or the plugin enabled but no config; silence everywhere else |
 | Stop | `hooks/review_gate_stop.py` | Warn-only nudge (a `systemMessage`, never a turn continuation) when a substantive app change ends with no review covering it, pointing at `/review-app <slug> --auto`. Off-switches: `REVIEW_GATE_OFF=1`, `apps/<slug>/.review/SKIP`, or `review_gate: {enabled: false}` in config |
 
 All hooks except the key guard are repo-gated on `streamsnow.config.yaml` (zero cost in unrelated repos; the

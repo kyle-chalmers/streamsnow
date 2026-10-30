@@ -29,7 +29,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOKS = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-PYTHON_HOOK_EVENTS = ("PreToolUse", "Stop")
+PYTHON_HOOK_EVENTS = ("SessionStart", "PreToolUse", "Stop")
 # Every (event, index) whose command launches a Python hook: PreToolUse has two
 # (deploy_safety, secret_guard), and each must survive every shell.
 PYTHON_HOOKS = [
@@ -123,7 +123,7 @@ def _env_without_uv() -> dict[str, str]:
 
 
 def test_every_python_hook_uses_the_cross_shell_launcher() -> None:
-    assert len(PYTHON_HOOKS) >= 3
+    assert len(PYTHON_HOOKS) >= 4
     for event, index in PYTHON_HOOKS:
         command = _command(event, index)
         assert command.startswith("uv run --no-project "), command

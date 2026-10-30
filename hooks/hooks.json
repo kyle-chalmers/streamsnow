@@ -5,8 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.sh\"",
-            "timeout": 5
+            "command": "uv run --no-project --no-config --frozen --offline --no-python-downloads --quiet \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\"; exit 0",
+            "timeout": 10
           }
         ]
       }

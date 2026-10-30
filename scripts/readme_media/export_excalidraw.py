@@ -39,7 +39,7 @@ Usage (dev tool, not part of the package)::
 Each ``<name>.excalidraw`` is written to ``<name>.png`` beside it (or into
 ``--out-dir``). Chromium: ``$STREAMSNOW_CHROMIUM``, a preinstalled Playwright
 browser, or the one from ``playwright install chromium``. With Pillow available
-(``--with pillow``), a PNG over ``--max-kb`` is re-saved as a 256-colour palette
+(``--with pillow``), a PNG over ``--max-kb`` is re-saved as a 32-colour palette
 image, which these flat-colour diagrams survive without visible change.
 """
 
@@ -139,7 +139,12 @@ def font_css(family: str) -> str:
 
 
 def shrink(png: bytes, max_kb: int) -> bytes:
-    """Re-save as a 256-colour palette PNG when over budget (needs Pillow)."""
+    """Re-save as a 32-colour palette PNG when over budget (needs Pillow).
+
+    32 colours, not 256: the Claude plugin directory holds for review any image carrying more
+    than 256 KiB of printable bytes, and palette indices under 32 are never printable. The
+    diagrams use a handful of colours, so nothing visible changes.
+    """
     if len(png) <= max_kb * 1024:
         return png
     try:
@@ -151,7 +156,7 @@ def shrink(png: bytes, max_kb: int) -> bytes:
     parser.feed(png)
     img = parser.close().convert("RGB")
     buf = io.BytesIO()
-    img.quantize(colors=256, method=Image.Quantize.MEDIANCUT).save(buf, "PNG", optimize=True)
+    img.quantize(colors=32, method=Image.Quantize.MEDIANCUT).save(buf, "PNG", optimize=True)
     smaller = buf.getvalue()
     return smaller if len(smaller) < len(png) else png
 
@@ -218,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--font", default="Space Grotesk", help="Google Fonts family for text")
     parser.add_argument("--lib-dir", type=Path, help="local @excalidraw/utils package dir")
     parser.add_argument("--out-dir", type=Path, help="write PNGs here instead of beside the JSON")
-    parser.add_argument("--max-kb", type=int, default=500, help="palette-shrink PNGs above this")
+    parser.add_argument("--max-kb", type=int, default=200, help="palette-shrink PNGs above this")
     args = parser.parse_args(argv)
     missing = [p for p in args.files if not p.is_file()]
     if missing:

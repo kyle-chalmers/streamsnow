@@ -8,6 +8,14 @@ entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **The SessionStart hook is Python** (`hooks/session_start.py`), launched through `uv run` like
+  the other three hooks, with the same output. It now runs on native Windows without bash, and
+  the Claude plugin directory no longer holds every version over a hook shell script it could
+  not follow. The README's demo GIF moved out of the repo for the same reason: the README shows
+  the copy in the `v0.16.3` tag, and `docs/images/demo.gif` is gitignored.
+
 ### Added
 
 - **The README links the setup video and the Snowflake Developer Guide** under the demo, so a

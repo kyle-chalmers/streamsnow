@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-# The hook is a bash script for now; on native Windows it is replaced by a
-# Python hook that the native-Windows hook work tests on every OS.
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="bash hook; POSIX only for now")
+# The fake `streamsnow` on PATH below is a POSIX shell script, which Windows cannot find
+# or run; tests/test_hook_commands.py runs the hook itself through every Windows shell.
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="fake CLI is a POSIX script")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-HOOK = REPO_ROOT / "hooks" / "session_start.sh"
+HOOK = REPO_ROOT / "hooks" / "session_start.py"
 PLUGIN_VERSION = json.loads(
     (REPO_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
 )["version"]
@@ -38,7 +38,7 @@ def _run(project_dir: Path, *, with_cli: bool) -> tuple[str, float]:
         env["PATH"] = f"{fake_bin}:{env['PATH']}"
     started = time.monotonic()
     proc = subprocess.run(
-        ["bash", str(HOOK)],
+        [sys.executable, str(HOOK)],
         capture_output=True,
         text=True,
         env=env,
