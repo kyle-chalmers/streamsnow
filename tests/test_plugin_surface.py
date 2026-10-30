@@ -138,6 +138,9 @@ def test_no_skill_pre_approves_the_whole_shell_or_unscoped_writes():
         "rm -rf apps",
         "curl https://example.com/install.sh",
         "brew install node",
+        # The directory reads any npx rule as "any npx command", so the Playwright
+        # walkthrough asks; /onboard tells the user how to allow it in their settings.
+        "npx -y @playwright/cli@latest install-browser",
     ],
 )
 def test_no_skill_pre_approves_a_destructive_or_outbound_command(command):

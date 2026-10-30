@@ -2,7 +2,7 @@
 name: sql-review
 description: Prove an app's numbers against live Snowflake and leave a record a person signs. Builds or repairs the app's sql_review/ page files, checks objects, grants and DDL drift, runs every section as aggregates, has reviewer agents judge the logic, drops findings the evidence does not support, and writes the committed review log. Use when the user says "review the SQL", "are these numbers right", "trace the data", "audit the lineage", before a release or deploy, or from /review-app --sql. It spends warehouse credits, so run it when asked, not on your own initiative.
 argument-hint: "<slug> [--page NN] [--offline] [--optimize] [--no-screen] [--role ROLE] [--warehouse WH] [--connection NAME]"
-allowed-tools: ["Bash(streamsnow *)", "Bash(snow connection list *)", "Bash(snow connection test *)", "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)", "Bash(git add *)", "Bash(git commit *)", "Bash(npx -y @playwright/cli@*)", "Read", "Edit(apps/**)", "Edit(.streamsnow/sql-review/**)", "Glob", "Grep", "Task"]
+allowed-tools: ["Bash(streamsnow *)", "Bash(snow connection list *)", "Bash(snow connection test *)", "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)", "Bash(git add *)", "Bash(git commit *)", "Read", "Edit(apps/**)", "Edit(.streamsnow/sql-review/**)", "Glob", "Grep", "Task"]
 ---
 
 # /sql-review

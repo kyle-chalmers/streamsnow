@@ -2,7 +2,7 @@
 name: review-app
 description: Review an app the way a senior reviewer would — parallel reviewers across SQL, data, UI, runtime, and docs — then optionally apply the fixes. Use when the user says "review this app", "audit my dashboard", "fix the findings", "auto-fix until clean", or after validation passes. Flags — --fix applies findings as atomic commits, --auto loops review→fix until clean, --sql runs /sql-review (the page files, then the live SQL review and its signed log).
 argument-hint: "<slug> [--fix | --auto | --sql]"
-allowed-tools: ["Bash(streamsnow *)", "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)", "Bash(git add *)", "Bash(git commit *)", "Bash(snow connection list *)", "Bash(npx -y @playwright/cli@*)", "Read", "Edit(apps/**)", "Glob", "Grep", "Task"]
+allowed-tools: ["Bash(streamsnow *)", "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)", "Bash(git add *)", "Bash(git commit *)", "Bash(snow connection list *)", "Read", "Edit(apps/**)", "Glob", "Grep", "Task"]
 ---
 
 # /review-app
