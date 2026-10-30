@@ -52,6 +52,7 @@ def _clone_nudge(root: Path) -> str:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=3,
         check=False,
     )
