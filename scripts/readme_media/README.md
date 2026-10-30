@@ -81,7 +81,8 @@ What each script does:
   Excalidraw's own exporter (`@excalidraw/utils`) in headless Chromium at 2x, in the
   diagrams' Space Grotesk face. It downloads the library from jsDelivr; where that is
   blocked, `npm install @excalidraw/utils@0.1.5` somewhere and pass `--lib-dir` to its
-  folder. A PNG over `--max-kb` (default 500) is re-saved as a palette image.
+  folder. A PNG over `--max-kb` (default 200) is re-saved as a 32-colour palette image, which
+  keeps it under the Claude plugin directory's 256 KiB printable-bytes limit for images.
   The diagrams use the logo's palette on the deep navy `#07182A` canvas: Snowflake blue
   `#29B5E8` for the main steps and arrows; its tints `#BFE6F6`, `#9CCFE6` and `#5CC8EE` for
   secondary boxes and labels; navy `#11567F` and the surface shades `#0B1E33`, `#0D2238`,
