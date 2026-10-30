@@ -2,7 +2,7 @@
 name: migrate-app
 description: Port an external Streamlit app into the repo in two reviewable steps — lift-and-shift into apps/<slug>/, then conform to repo conventions until validation passes. Use when the user says "migrate a streamlit app", "port this dashboard into the repo", "bring an external app in", or "modernize this dashboard".
 argument-hint: "<path-or-repo> [<slug>]"
-allowed-tools: [Bash, Read, Write, Edit, Glob, Grep]
+allowed-tools: ["Bash(streamsnow *)", "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)", "Bash(git add *)", "Bash(git commit *)", "Bash(pre-commit run *)", "Read", "Edit(apps/**)", "Edit(README.md)", "Glob", "Grep"]
 disable-model-invocation: true
 ---
 

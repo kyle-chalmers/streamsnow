@@ -10,6 +10,13 @@ entry.
 
 ### Changed
 
+- **Skills pre-approve only the commands they run and the paths they write.** Each skill's
+  `allowed-tools` now lists its own commands (`streamsnow` and the `git` and `gh` steps it
+  takes) and scopes file writes to the paths it owns, such as `apps/**`, instead of all of
+  `Bash` and unscoped `Write`/`Edit`. Anything else, such as `snow sql`, the Playwright
+  walkthrough's `npx` calls, installs with `brew`, or deleting a branch, now asks first, so
+  expect a few more permission prompts. To skip the walkthrough's prompts, allow
+  `Bash(npx -y @playwright/cli@*)` in your Claude Code settings, as `/onboard` explains.
 - **The SessionStart hook is Python** (`hooks/session_start.py`), launched through `uv run` like
   the other three hooks, with the same output. It now runs on native Windows without bash, and
   the Claude plugin directory no longer holds every version over a hook shell script it could
