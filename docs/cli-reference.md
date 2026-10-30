@@ -176,7 +176,7 @@ history, `not-ancestor` after a rebase or amend) and `commits_since_review` (`[{
 oldest first, for commits that touched the app after that head; empty unless the status is
 `ancestor`, so check the status before reading an empty list as "none").
 
-The default `/review-app` pass stamps its report with `--expect-baseline`, and `--auto` stamps once
+The default `/review-app` run stamps its report with `--expect-baseline`, and `--auto` stamps once
 at the end of its loop. A stamp means the code was reviewed, not that it is clean: it is written
 even when critical findings are open.
 

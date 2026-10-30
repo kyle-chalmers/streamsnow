@@ -600,7 +600,7 @@ def _account_from_connection(name: str) -> str:
     if rows is None:
         raise ConfigError(
             f"--connection {name}: could not read `snow connection list` (snow missing or "
-            "broken); pass --account instead or answer the wizard's prompt."
+            "broken); use --account instead or answer the wizard's prompt."
         )
     row = next((r for r in rows if (r.get("connection_name") or r.get("name")) == name), None)
     if row is None:
@@ -612,14 +612,14 @@ def _account_from_connection(name: str) -> str:
     account = params.get("account")
     if not isinstance(account, str) or not account.strip():
         raise ConfigError(
-            f"--connection {name}: that snow connection names no account; pass --account instead."
+            f"--connection {name}: that snow connection names no account; use --account instead."
         )
     try:
         return normalize_account(account)
     except ConfigError:
         raise ConfigError(
             f"--connection {name}: its account is not a valid account identifier; "
-            "pass --account instead."
+            "use --account instead."
         ) from None
 
 

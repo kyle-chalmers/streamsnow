@@ -24,13 +24,13 @@ fails a ship. Run it on request and before a release or deploy.
 3. **Connection:** `streamsnow doctor`. None → stop after step 2 and name the enabler
    (`streamsnow configure`, then `snow connection add`); never invent results. The live commands
    run as `snowflake.roles.ci_role` (the deployed app's role) with secondary roles off; if the
-   user does not hold it, ask which role to use and pass `--role`. The commands also use
-   `objects.default_warehouse`; if that role cannot use it, pass `--warehouse` with one it can.
+   user does not hold it, ask which role to use and add `--role`. The commands also use
+   `objects.default_warehouse`; if that role cannot use it, add `--warehouse` with one it can.
 
 ## Facts (JSON only)
 
 4. `streamsnow sql-review probe <slug>`: objects exist, direct grants, DDL drift, every section
-   compiles with its columns. Keep the `run_id` it prints; pass `--run <run_id>` from here on.
+   compiles with its columns. Keep the `run_id` it prints; add `--run <run_id>` from here on.
 5. `streamsnow sql-review run <slug> --run <run_id>` (`--page NN` for one page): rows, totals,
    an order-insensitive hash and timing per section, computed in Snowflake.
 6. Read these outputs, never result rows. Do not run sections yourself, and never call `snow sql`

@@ -85,4 +85,4 @@ What the review learned belongs in the index, so the next review starts from it:
   object, or the role cannot see it. The detail names the role; check its grants before calling
   it missing.
 - **`USE ROLE` fails** → you do not hold the app's `ci_role`; ask which role to review with and
-  pass `--role`. Say in the report that the review ran under a different role.
+  add `--role`. Say in the report that the review ran under a different role.

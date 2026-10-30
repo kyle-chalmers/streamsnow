@@ -620,7 +620,7 @@ def load_app_data(repo: Path, cfg: Config, apps_dir: Path | None = None) -> AppD
     Why repo-wide: one app's view may read another app's dynamic table, so the
     deploy order, the one-owner rule and an unknown app-data name are only
     decidable across all apps, and the deploy job applies all of them in one
-    pass before any app is replaced.
+    run before any app is replaced.
     """
     target = tuple(cfg.governance.app_data.split("."))
     policy = SchemaPolicy.from_governance(cfg.governance)
