@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-30
+
 ### Changed
 
 - **Skills pre-approve only the commands they run and the paths they write.** Each skill's
