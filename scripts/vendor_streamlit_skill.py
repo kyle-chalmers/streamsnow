@@ -36,8 +36,13 @@ def _get(url: str) -> bytes:
         return resp.read()
 
 
+# Reference pages that never apply to a Streamlit-in-Snowflake app (Snowsight serves it; there is
+# no ASGI server to configure), left out so their examples carry no secrets-shaped text.
+_SKIP = {"references/server-asgi.md"}
+
+
 def _wanted(rel: str) -> bool:
-    return rel == "SKILL.md" or rel.startswith("references/")
+    return (rel == "SKILL.md" or rel.startswith("references/")) and rel not in _SKIP
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,8 +83,9 @@ checks win every conflict with it.
 - Source: [{REPO}](https://github.com/{REPO}), `{SKILL_PATH}`
 - Release tag: `{tag}` (commit `{commit}`)
 - Copied verbatim: `SKILL.md` and `references/` ({len(files)} files)
-- Left out: `assets/templates/`, which StreamSnow never uses. Links in `SKILL.md` that point
-  there do not resolve in this copy.
+- Left out: `assets/templates/`, which StreamSnow never uses, and `references/server-asgi.md`,
+  which does not apply to a Streamlit-in-Snowflake app. Links in `SKILL.md` that point to them do
+  not resolve in this copy.
 - License: Apache License 2.0 ([LICENSE](LICENSE)). Streamlit's source files carry
   "Copyright (c) Streamlit Inc. (2018-2022) Snowflake Inc. (2022-...)". Streamlit's
   [NOTICES]({raw}/NOTICES) file lists third-party software bundled in the Streamlit product,

@@ -4,7 +4,7 @@ Migrating an external Streamlit app is a two-step flow: lift-and-shift the
 source into ``apps/<slug>/``, then conform it to StreamSnow conventions. Both
 steps need *detection* that must not depend on an LLM's mood: whether the
 source is migratable at all, what would block a commit, how its dependencies
-translate, and which conventions the conform pass still owes. This CLI is that
+translate, and which conventions the conform step still owes. This CLI is that
 detection layer — the skill invokes it via subprocess and reasons over the
 JSON.
 

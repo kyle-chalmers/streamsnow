@@ -88,7 +88,7 @@ the script does, and the reference for releasing entirely by hand.
 
 Only after the privacy gate passes and you've decided to open it:
 ```bash
-GH_TOKEN="$GH_TOKEN" gh repo edit kyle-chalmers/streamsnow --visibility public --accept-visibility-change-consequences
+gh repo edit kyle-chalmers/streamsnow --visibility public --accept-visibility-change-consequences
 ```
 
 ## Claude Code plugin marketplace

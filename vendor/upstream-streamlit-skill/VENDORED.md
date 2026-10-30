@@ -7,9 +7,10 @@ checks win every conflict with it.
 
 - Source: [streamlit/streamlit](https://github.com/streamlit/streamlit), `lib/streamlit/.agents/skills/developing-with-streamlit`
 - Release tag: `1.66.1` (commit `ca6718b7d3d788c31c97d1bc9144fd8388168f57`)
-- Copied verbatim: `SKILL.md` and `references/` (29 files)
-- Left out: `assets/templates/`, which StreamSnow never uses. Links in `SKILL.md` that point
-  there do not resolve in this copy.
+- Copied verbatim: `SKILL.md` and `references/` (28 files)
+- Left out: `assets/templates/`, which StreamSnow never uses, and `references/server-asgi.md`,
+  which does not apply to a Streamlit-in-Snowflake app. Links in `SKILL.md` that point to them do
+  not resolve in this copy.
 - License: Apache License 2.0 ([LICENSE](LICENSE)). Streamlit's source files carry
   "Copyright (c) Streamlit Inc. (2018-2022) Snowflake Inc. (2022-...)". Streamlit's
   [NOTICES](https://raw.githubusercontent.com/streamlit/streamlit/ca6718b7d3d788c31c97d1bc9144fd8388168f57/NOTICES) file lists third-party software bundled in the Streamlit product,
