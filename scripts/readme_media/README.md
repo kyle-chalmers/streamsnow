@@ -10,7 +10,7 @@ hand-authored logo), so rerun them when the CLI output or a skill's output chang
 | `logo-light.svg`, `logo-dark.svg` | hand-authored, no script | the SVGs themselves |
 | `social-preview.png` (1280x640) | `render_social.py` | `social_preview.html` |
 | `demo-terminal.svg` | `render_terminal.py` | the real offline CLI flow |
-| `demo.gif` | cut by hand from a screen recording (see [Record the full Claude Code to Snowflake demo](#record-the-full-claude-code-to-snowflake-demo)) | a real run, recorded end to end; the README's MP4 link points at the copy in the `v0.15.0` tag, because the Claude plugin directory holds any video file in the plugin folder for review |
+| `demo.gif` (not committed) | cut by hand from a screen recording (see [Record the full Claude Code to Snowflake demo](#record-the-full-claude-code-to-snowflake-demo)) | a real run, recorded end to end. The README shows the copy in the `v0.16.3` tag and links the MP4 in the `v0.15.0` tag: the Claude plugin directory holds every version for review while the plugin folder carries a video, or a GIF whose embedded text it cannot inspect |
 | `skills-flow.png`, `repos-flow.png`, `secrets-flow.png` | `export_excalidraw.py` | the `.excalidraw` file next to each PNG |
 | `.claude-plugin/icon.png` (1024x1024, not in `docs/images/`) | `rsvg-convert -w 1024 -h 1024 scripts/readme_media/icon.svg -o .claude-plugin/icon.png` | `icon.svg`, the logo's mark on a square canvas. The Claude plugin directory took it as the listing icon on first save, so a new render changes only the repo copy |
 
@@ -125,5 +125,6 @@ ffmpeg -i demo.mov -vf "fps=10,scale=960:-1:flags=lanczos,split[a][b];[a]palette
 
 Keep the result under 5 MB (lower the fps to 8, the width to 800, or `max_colors` to 128
 if it is larger) and check every frame for account names, hostnames, emails and table
-names before committing. Writing it to `docs/images/demo.gif` replaces the rendered GIF;
-update the README's alt text to describe the recording.
+names before publishing it. `docs/images/demo.gif` is gitignored: attach the new GIF to a GitHub
+Release, point the README's `<img>` at that release's URL, and update its alt text to describe
+the recording.
