@@ -11,6 +11,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = REPO_ROOT / "skills"
 COMMANDS_DIR = REPO_ROOT / "commands"
@@ -91,6 +93,64 @@ def test_every_skill_declares_argument_hint_and_allowed_tools():
         assert re.search(r"^allowed-tools: \[.+\]", text, re.M), skill
         has_flag = bool(re.search(r"^disable-model-invocation: true$", text, re.M))
         assert has_flag == (skill in HUMAN_ONLY_SKILLS), skill
+
+
+def _allowed_tools(skill: str) -> list[str]:
+    text = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+    return json.loads(re.search(r"^allowed-tools: (\[.+\])$", text, re.M).group(1))
+
+
+def _bash_rule_matches(rule: str, command: str) -> bool:
+    """Claude Code's Bash(...) rule: `*` matches anything, the rest is literal."""
+    inner = rule[len("Bash(") : -1]
+    return re.fullmatch(".*".join(map(re.escape, inner.split("*"))), command) is not None
+
+
+def test_no_skill_pre_approves_the_whole_shell_or_unscoped_writes():
+    """The Claude plugin directory holds every release whose skills pre-approve
+    all of `Bash` or unscoped `Write`/`Edit` for review, so updates stop
+    publishing on their own. Each skill pre-approves only the commands it runs
+    and the paths it writes; anything else asks. A `Write(path)` rule never
+    matches in Claude Code (file writes are checked against `Edit(path)`), so a
+    scoped write is spelled `Edit(path)`."""
+    for skill in sorted(EXPECTED_SKILLS):
+        tools = _allowed_tools(skill)
+        for banned in ("Bash", "Bash(*)", "Write", "Edit", "Edit(**)", "Edit(*)"):
+            assert banned not in tools, (skill, banned)
+        assert not [t for t in tools if t.startswith("Write(")], skill
+        for rule in tools:
+            if rule.startswith("Edit("):
+                assert not rule.startswith(("Edit(/", "Edit(~", "Edit(..")), (skill, rule)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "snow sql -q 'DROP TABLE ACME.SALES.ORDERS'",
+        "snow streamlit deploy --replace",
+        "git push origin main",
+        "git push --force",
+        "git reset --hard origin/main",
+        "git branch -D ship/sales-trend",
+        "git push origin --delete ship/sales-trend",
+        "gh issue create --title x",
+        "gh pr merge 12 --admin",
+        "rm -rf apps",
+        "curl https://example.com/install.sh",
+        "brew install node",
+        # The directory reads any npx rule as "any npx command", so the Playwright
+        # walkthrough asks; /onboard tells the user how to allow it in their settings.
+        "npx -y @playwright/cli@latest install-browser",
+    ],
+)
+def test_no_skill_pre_approves_a_destructive_or_outbound_command(command):
+    hits = [
+        (skill, rule)
+        for skill in sorted(EXPECTED_SKILLS)
+        for rule in _allowed_tools(skill)
+        if rule.startswith("Bash(") and _bash_rule_matches(rule, command)
+    ]
+    assert not hits, (command, hits)
 
 
 def test_no_alias_commands_ship_with_the_plugin():

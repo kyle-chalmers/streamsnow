@@ -2,7 +2,7 @@
 name: ship-app
 description: Stage, commit, push, and open a PR for one app, gated on a passing validation, then watch CI to a terminal state. Use when the user says "ship it", "open a PR", "deploy <slug>", or after preview and review look good.
 argument-hint: "<slug>"
-allowed-tools: [Bash, Read]
+allowed-tools: ["Bash(streamsnow *)", "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)", "Bash(git add apps/*)", "Bash(git add README.md)", "Bash(git commit *)", "Bash(git switch -c ship/*)", "Bash(git switch main)", "Bash(git branch --show-current)", "Bash(git fetch *)", "Bash(git rev-list *)", "Bash(git rev-parse *)", "Bash(git ls-remote *)", "Bash(git rebase origin/main)", "Bash(git rebase --continue)", "Bash(git rebase --abort)", "Bash(git pull --ff-only)", "Bash(git push -u origin HEAD)", "Bash(git push --force-with-lease)", "Bash(gh pr list *)", "Bash(gh pr view *)", "Bash(gh pr create *)", "Bash(gh pr checks *)", "Bash(gh run view *)", "Bash(gh run watch *)", "Read"]
 disable-model-invocation: true
 ---
 
