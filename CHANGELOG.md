@@ -8,6 +8,14 @@ entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **Fewer false alarms for the Claude plugin directory's credential check.** Prose and CLI
+  messages say "use `--account`" or "add `--role`" instead of "pass `--account`", which the
+  directory's scanner reads as the `pass` password manager, and the vendored Streamlit skill
+  drops `references/server-asgi.md`, which never applies to a Streamlit-in-Snowflake app. No
+  behavior changes.
+
 ## [0.17.0] - 2026-10-30
 
 ### Changed
@@ -609,7 +617,7 @@ Most entries below come from a first end-to-end run of the plugin (onboard throu
   `.streamsnow/overlays/audit-lineage.md` to `sql-review.md`. Codex users re-run
   `streamsnow agent-skills install`, which removes an unedited `audit-lineage` copy. The live
   review covers the SQL listed in `sql_review/index.yaml`; SQL written inline in page code is
-  no longer traced live (the static `/review-app` pass still reads it).
+  no longer traced live (the static `/review-app` review still reads it).
 
 ### Added
 

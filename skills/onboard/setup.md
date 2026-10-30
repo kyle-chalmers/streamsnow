@@ -167,7 +167,7 @@ apps will live; default `<app_database>.STREAMSNOW_REPORTING`), and the deploy s
 see. Everything else (project name, roles, warehouse, schema names, container objects) is written
 as a sensible default with an inline comment saying when to change it; the file is the editing
 surface. Don't make the user answer those questions cold: investigate, explain each setting, ask
-each one with your proposal as the recommended option, then pass the confirmed answers as flags.
+each one with your proposal as the recommended option, then give the confirmed answers as flags.
 `streamsnow configure` and `init` may open a Snowflake sign-in window for that live check
 (read-only, and the wait is capped); `streamsnow doctor --live` re-checks the sources later.
 
@@ -267,7 +267,7 @@ read-only SQL tool accepts.
 | What schemas hold | `SELECT table_schema, COUNT(*) FROM <db>.INFORMATION_SCHEMA.TABLES WHERE table_schema <> 'INFORMATION_SCHEMA' GROUP BY 1` | (already a SELECT) |
 | Deploy source | `SHOW GIT REPOSITORIES IN ACCOUNT ->> SELECT "database_name", "schema_name", "name" FROM $1` | No equivalent: `stage-copy` is the default either way |
 
-Account: with a `snow` connection, pass `--connection <name>`; the CLI reads the account and
+Account: with a `snow` connection, use `--connection <name>`; the CLI reads the account and
 never prints it. With only an MCP server,
 `SELECT CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME()` returns a usable
 identifier, but it then appears on screen: ask before running it, or let the user type it.
@@ -317,7 +317,7 @@ These are SHOW and SELECT-over-SHOW (or `INFORMATION_SCHEMA`) only. **Never run 
 never switch roles to get more visibility. A probe that errors (no privilege, no source can see
 it) or returns nothing to choose from is not a failure: that question falls back to asking the
 user plainly, with no proposal, and you say why. With no usable source at all, ask each question and
-pass `--account` with the account identifier the user gives.
+use `--account` with the account identifier the user gives.
 
 ### 2c · Propose, confirm, run
 
@@ -381,7 +381,7 @@ who wants no review of the defaults. `--connection` reads the account from that
 connection and makes it `snowflake.connection_name`; use `--account <account-identifier>` only when there is
 no `snow` connection (MCP-only or nothing at all). Local preview still needs a `snow` connection
 later, which step 3 covers. If `--connection` exits 2 (the connection names no account, or `snow`
-cannot list connections), ask for the account identifier and pass `--account` instead. To change answers
+cannot list connections), ask for the account identifier and use `--account` instead. To change answers
 later, run `streamsnow configure` (interactive, prefilled from the current file) or
 `streamsnow init --no-starter-app --reconfigure` with the changed flags; answer flags on an
 existing config without `--reconfigure` exit 2 rather than being ignored. When the deploy source
@@ -395,7 +395,7 @@ to the repository the probe found.
 - **Not in Claude Code?** After `init`, `streamsnow agent-skills install --agent codex` copies these
   skills into the repo's `.agents/skills/`, where every teammate's Codex finds them; commit it.
 - `streamsnow init` without the flag also scaffolds an `example-dashboard` starter app. That is
-  the CLI-only path; with Claude the real app comes from `/build-app`, so pass the flag.
+  the CLI-only path; with Claude the real app comes from `/build-app`, so add the flag.
 - The first deploy needs one-time Snowflake objects that an admin creates: see §2d.
 
 ## 2d · Snowflake admin setup (once per account)

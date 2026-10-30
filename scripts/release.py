@@ -670,7 +670,7 @@ def _gate_commits(root: Path, run: Run, deny: Path | None) -> Result:
 
 def _gate_links(root: Path, run: Run, online: bool) -> Result:
     if not online:
-        return Result("docs links", "WARN", "skipped; pass --online before tagging")
+        return Result("docs links", "WARN", "skipped; rerun with --online before tagging")
     proc = _exec(run, [sys.executable, DOCS_LINKS, "--online"], root)
     if proc.returncode != 0:
         return Result("docs links", "FAIL", _err(proc))
