@@ -47,3 +47,7 @@ streamsnow.config.local.yaml
 # Local plans (working artifacts, not source)
 .planning/
 .playwright-cli/
+
+# README media built locally; the published copies live in release tags (see scripts/readme_media/README.md)
+docs/images/demo.gif
+docs/images/demo.mp4

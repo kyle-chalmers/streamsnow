@@ -136,7 +136,7 @@ only when every gate below is true. Track the work in the `1.0.0` milestone.
   expected to move, because from 1.0.0 the deprecation policy applies to every rename or
   removal.
 - Native Windows is finished or explicitly documented as out of scope: the session hook
-  (`hooks/session_start.sh`) runs without bash or WSL, and no Windows test is skipped
+  (`hooks/session_start.py`) runs without bash or WSL, and no Windows test is skipped
   without a written reason.
 - `tests/fixtures/cli_surface.json` matches the surface you intend to support for 1.x.
 
