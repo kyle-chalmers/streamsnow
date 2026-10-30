@@ -17,6 +17,11 @@ entry.
   walkthrough's `npx` calls, installs with `brew`, or deleting a branch, now asks first, so
   expect a few more permission prompts. To skip the walkthrough's prompts, allow
   `Bash(npx -y @playwright/cli@*)` in your Claude Code settings, as `/onboard` explains.
+- **The SessionStart hook is Python** (`hooks/session_start.py`), launched through `uv run` like
+  the other three hooks, with the same output. It now runs on native Windows without bash, and
+  the Claude plugin directory no longer holds every version over a hook shell script it could
+  not follow. The README's demo GIF moved out of the repo for the same reason: the README shows
+  the copy in the `v0.16.3` tag, and `docs/images/demo.gif` is gitignored.
 
 ### Added
 

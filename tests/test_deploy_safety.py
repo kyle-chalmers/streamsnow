@@ -241,5 +241,5 @@ def test_hooks_json_registers_the_guard_with_a_timeout():
 
 def test_session_start_announces_the_guard():
     # jobwright's lesson: an invisible safety net reads as no safety net.
-    text = (REPO_ROOT / "hooks" / "session_start.sh").read_text(encoding="utf-8")
+    text = (REPO_ROOT / "hooks" / "session_start.py").read_text(encoding="utf-8")
     assert "guard is ACTIVE" in text
