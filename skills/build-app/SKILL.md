@@ -2,7 +2,7 @@
 name: build-app
 description: The front door for building a Streamlit-in-Snowflake app from idea to opened PR, or resuming one mid-build. Orchestrates spec, data discovery, page design, scaffold, a parallel page build and review by subagents, and ship, with human checkpoints between them. Start here for any new app, to document an existing one, to add a page, or to act on feedback about a live app. Use when the user says "build an app", "new dashboard", "add a page", "spec this out", "pick up where we left off", "here's feedback on <app>", "the numbers look wrong" or "polish this dashboard".
 argument-hint: "[<idea>] | --spec | <slug> --feedback \"<feedback>\""
-allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Task, Agent]
+allowed-tools: ["Bash(streamsnow *)", "Bash(git status *)", "Bash(git diff *)", "Bash(git log *)", "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(pre-commit run *)", "Bash(ruff check *)", "Bash(ruff format *)", "Bash(uv venv --python 3.11)", "Bash(npx -y @playwright/cli@*)", "Read", "Edit(apps/**)", "Edit(README.md)", "Glob", "Grep", "AskUserQuestion", "Task", "Agent"]
 ---
 
 # /build-app

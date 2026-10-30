@@ -2,7 +2,7 @@
 name: preview-app
 description: Run an app locally against live Snowflake so the user can see it in the browser, wiring up secrets.toml first if missing. Use when the user says "preview my app", "run my app", "let me see it in the browser", or after /build-app scaffolds an app.
 argument-hint: "<slug>"
-allowed-tools: [Bash, Read, Write, Edit]
+allowed-tools: ["Bash(streamsnow *)", "Bash(snow connection list *)", "Bash(snow connection test *)", "Bash(uv pip install -e apps/*)", "Bash(npx -y @playwright/cli@*)", "Read", "Edit(apps/*/.streamlit/secrets.toml)", "Edit(apps/*/.review/**)"]
 ---
 
 # /preview-app

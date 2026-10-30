@@ -2,7 +2,7 @@
 name: onboard
 description: Get this machine, this repo and its Snowflake account ready for StreamSnow. Detects what is already done and does only what is missing, so it is safe to re-run to ask "am I set up?". Use when the user says "set me up", "onboard", "I just cloned this repo", "is my machine ready", "add StreamSnow to this repo", or "set up Snowflake for StreamSnow", and when /build-app finds the machine or repo isn't ready.
 argument-hint: "(none: detects what this machine and repo need)"
-allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion]
+allowed-tools: ["Bash(streamsnow *)", "Bash(snow --version)", "Bash(snow connection list *)", "Bash(snow connection test *)", "Bash(snow connection add *)", "Bash(snow connection set-default *)", "Bash(uv tool install snowflake-cli)", "Bash(uv tool install streamsnow)", "Bash(uv tool install pre-commit)", "Bash(uv python install 3.11)", "Bash(uv venv --python 3.11)", "Bash(pre-commit install)", "Bash(git check-ignore *)", "Bash(gh repo view *)", "Bash(claude mcp list)", "Bash(mkdir -p .internal)", "Bash(npx -y @playwright/cli@*)", "Read", "Edit(streamsnow.config.yaml)", "Edit(.gitignore)", "Edit(MIGRATION.md)", "Edit(AGENTS.streamsnow.md)", "Edit(.internal/**)", "Edit(apps/*/.streamlit/secrets.toml)", "Glob", "Grep", "AskUserQuestion"]
 ---
 
 # /onboard

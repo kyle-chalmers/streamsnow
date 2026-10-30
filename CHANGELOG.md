@@ -8,6 +8,15 @@ entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **Skills pre-approve only the commands they run and the paths they write.** Each skill's
+  `allowed-tools` now lists its own commands (`streamsnow`, the `git` and `gh` steps it takes,
+  the pinned Playwright CLI) and scopes file writes to the paths it owns, such as `apps/**`,
+  instead of all of `Bash` and unscoped `Write`/`Edit`. Anything else, such as `snow sql`,
+  installs with `brew`, or deleting a branch, now asks first, so expect a few more permission
+  prompts.
+
 ### Added
 
 - **The README links the setup video and the Snowflake Developer Guide** under the demo, so a
