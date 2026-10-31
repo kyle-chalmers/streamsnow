@@ -8,6 +8,8 @@ entry.
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-31
+
 ### Changed
 
 - **Fewer false alarms for the Claude plugin directory's credential check.** Prose and CLI
