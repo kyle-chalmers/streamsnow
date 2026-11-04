@@ -441,11 +441,67 @@ def test_pin_floor_minor_bump_moves_the_upper_bound(tmp_path, capsys):
         assert "streamsnow>=0.5.0,<0.6" in (root / rel).read_text(encoding="utf-8"), rel
 
 
-def test_pin_floor_refuses_from_one_dot_oh(tmp_path, capsys):
+def test_pin_floor_crossing_one_dot_oh_caps_at_the_next_major(tmp_path, capsys):
     root = make_repo(tmp_path, unreleased=ADDED)
-    code, _, out = _prepare(capsys, root, "1.0.0", "--pin-floor")
-    assert code == 2 and "1.0" in out
-    assert 'version = "0.4.2"' in (root / "pyproject.toml").read_text(encoding="utf-8")
+    code, payload, _ = _prepare(capsys, root, "1.0.0")
+    assert code == 0, payload
+    for rel in PIN_FILES:
+        text = (root / rel).read_text(encoding="utf-8")
+        assert "streamsnow>=1.0.0,<2" in text, rel
+        assert "streamsnow>=0.4.1,<0.5" not in text, rel
+    assert statuses(payload)["pin floor"] == "PASS"
+    history = (root / "docs/deploying.md").read_text(encoding="utf-8")
+    assert history.endswith("and 1.0 to `streamsnow>=1.0.0,<2`.\n")
+
+
+def _one_x_repo(tmp_path, version="1.0.0"):
+    """A repo already on 1.x: pins capped at the next major, history ending at 1.0."""
+    root = make_repo(tmp_path, version=version, unreleased=ADDED)
+    for rel in PIN_FILES:
+        (root / rel).write_text("run: uv tool install 'streamsnow>=1.0.0,<2'\n", encoding="utf-8")
+    (root / "docs/deploying.md").write_text(
+        "0.9 moves the pin to `streamsnow>=0.9,<0.10`, and 1.0 to `streamsnow>=1.0.0,<2`.\n",
+        encoding="utf-8",
+    )
+    _git(root, "commit", "-qam", "chore: acme on 1.x")
+    return root
+
+
+@pytest.mark.parametrize(
+    ("version", "excluded"),
+    [("1.0.1", False), ("1.4.0", False), ("1.99.99", False), ("2.0.0", True), ("3.1.0", True)],
+)
+def test_pin_excludes_reads_a_major_cap(tmp_path, version, excluded):
+    root = _one_x_repo(tmp_path)
+    assert release.pin_excludes(root, version) is excluded
+
+
+def test_a_one_x_minor_inside_the_pin_leaves_it_alone(tmp_path, capsys):
+    root = _one_x_repo(tmp_path)
+    code, payload, _ = _prepare(capsys, root, "1.1.0")
+    assert code == 0, payload
+    assert "streamsnow>=1.0.0,<2" in (root / "README.md").read_text(encoding="utf-8")
+    assert "pin floor" not in statuses(payload)
+
+
+def test_one_x_pin_floor_raises_the_floor_and_keeps_the_major_cap(tmp_path, capsys):
+    root = _one_x_repo(tmp_path)
+    code, payload, _ = _prepare(capsys, root, "1.2.0", "--pin-floor")
+    assert code == 0, payload
+    for rel in PIN_FILES:
+        text = (root / rel).read_text(encoding="utf-8")
+        assert "streamsnow>=1.2.0,<2" in text, rel
+        assert "streamsnow>=1.0.0,<2" not in text, rel
+    history = (root / "docs/deploying.md").read_text(encoding="utf-8")
+    assert history.endswith("1.0 to `streamsnow>=1.0.0,<2`, and 1.2 to `streamsnow>=1.2.0,<2`.\n")
+
+
+def test_a_major_release_moves_the_cap_without_a_flag(tmp_path, capsys):
+    root = _one_x_repo(tmp_path)
+    code, payload, _ = _prepare(capsys, root, "2.0.0")
+    assert code == 0, payload
+    assert "streamsnow>=2.0.0,<3" in (root / "README.md").read_text(encoding="utf-8")
+    assert statuses(payload)["pin floor"] == "PASS"
 
 
 def test_pin_floor_fails_loudly_when_a_file_lacks_the_pin(tmp_path, capsys):
