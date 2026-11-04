@@ -8,6 +8,13 @@ entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **Windows support is stated plainly for 1.x.** [Getting started](docs/getting-started.md)
+  says WSL is the supported route on Windows and native Windows setup is out of scope; the CLI,
+  preview and hooks are still tested on native Windows in CI. The page no longer calls the
+  SessionStart hook a bash script, since it has been Python since 0.17.
+
 ## [0.17.1] - 2026-10-31
 
 ### Changed
