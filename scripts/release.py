@@ -98,7 +98,8 @@ _VERSION_PATTERNS = {
     INIT_PY: re.compile(r'^(\s+__version__ = ")([^"]+)(")$', re.M),
 }
 _LOCK_VERSION = re.compile(r'^name = "streamsnow"\nversion = "([^"]+)"$', re.M)
-_PIN = re.compile(r"streamsnow>=(\d+\.\d+(?:\.\d+)?),<(\d+)\.(\d+)(?![\d.])")
+# Before 1.0 the cap is the next minor (`<0.18`); from 1.0 it is the next major (`<2`).
+_PIN = re.compile(r"streamsnow>=(\d+\.\d+(?:\.\d+)?),<(\d+)(?:\.(\d+))?(?![\d.])")
 # The last entry of docs/deploying.md's pin history: `and 0.12 to\n`streamsnow>=...`.`
 _PIN_HISTORY_LAST = re.compile(r"and (\d+\.\d+) to(\s+)(`streamsnow>=[^`]+`)\.")
 _DATED = r"^## \[{v}\] - \d{{4}}-\d{{2}}-\d{{2}}$"
@@ -470,21 +471,20 @@ def _git_clean(run: Run, root: Path) -> tuple[bool, str]:
     return (not dirty, f"{len(dirty)} uncommitted path(s)" if dirty else "clean")
 
 
+def pin_for(version: str) -> str:
+    """The pin a release writes: capped at the next minor in 0.x, the next major from 1.0."""
+    major, minor, _ = parse_semver(version)
+    cap = f"{major + 1}" if major >= 1 else f"{major}.{minor + 1}"
+    return f"streamsnow>={version},<{cap}"
+
+
 def plan_pin_floor(root: Path, version: str) -> dict[str, str]:
     """New text for every pin file. Raises ToolError, before anything is written, on drift."""
-    major, minor, _ = parse_semver(version)
-    if major >= 1:
-        raise ToolError(
-            "--pin-floor only knows the 0.x pin shape `<0.(B+1)`; from 1.0 the cap should "
-            "follow the major version, so set the pin by hand"
-        )
     m = _PIN.search(_read(root, PIN_SOURCE))
     if not m:
-        raise ToolError(f"{PIN_SOURCE}: no `streamsnow>=A.B[.C],<A.B` pin found")
-    if int(m.group(2)) >= 1:
-        raise ToolError(f"{PIN_SOURCE}: the current pin is past 1.0; set the pin by hand")
+        raise ToolError(f"{PIN_SOURCE}: no `streamsnow>=A.B[.C],<A.B` or `<N` pin found")
     current = m.group(0)
-    new = f"streamsnow>={version},<{major}.{minor + 1}"
+    new = pin_for(version)
     exact = re.compile(re.escape(current) + r"(?![\d.])")
     planned: dict[str, str] = {}
     for rel in PIN_FILES:
@@ -520,13 +520,17 @@ def append_pin_history(text: str, version: str, new_pin: str) -> str | None:
 def pin_excludes(root: Path, version: str) -> bool:
     """True when the generated workflows' current pin cannot install ``version``.
 
-    Every 0.x minor release crosses the pin's cap (`<0.13` excludes 0.13.0), and a
-    release whose workflows cannot install it ships red CI to every repo that updates.
+    Every 0.x minor release crosses the pin's cap (`<0.13` excludes 0.13.0), and from 1.0
+    only a major release does (`<2` excludes 2.0.0). A release whose workflows cannot
+    install it ships red CI to every repo that updates.
     """
     m = _PIN.search(_read(root, PIN_SOURCE))
     if not m:
         return False
-    return parse_semver(version)[:2] >= (int(m.group(2)), int(m.group(3)))
+    major, minor, _ = parse_semver(version)
+    if m.group(3) is None:
+        return major >= int(m.group(2))
+    return (major, minor) >= (int(m.group(2)), int(m.group(3)))
 
 
 def _checklist(run: Run, root: Path, version: str, new_pin: str | None) -> list[str]:
