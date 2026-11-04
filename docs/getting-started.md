@@ -30,9 +30,11 @@ Snowflake pages for every fact below are collected in
 **On Windows**, run StreamSnow inside [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
 (Windows Subsystem for Linux, Microsoft's built-in Linux layer): run `wsl --install` in an
 administrator PowerShell, restart, and do everything below inside the Ubuntu app it adds. The
-CLI, local preview and the safety guards run on native Windows since 0.7.7, but the plugin's
-SessionStart hook is still a bash script and `/onboard` sends native Windows to WSL, so WSL is
-the supported route for now.
+CLI, local preview and the plugin's hooks are plain Python and are tested on native Windows in
+CI. The guided setup (`/onboard`) and the first-run install steps (Homebrew, system libraries
+for the preview browser) are written for macOS, Linux and WSL, and `/onboard` sends native
+Windows to WSL. Through 1.x, WSL is the supported route on Windows: native Windows is out of
+scope for setup, and a later minor release can lift that without breaking anything.
 
 Install uv with `brew install uv` (macOS) or see [astral.sh/uv](https://docs.astral.sh/uv/);
 `uv tool install snowflake-cli` and `uv tool install pre-commit` cover the other
